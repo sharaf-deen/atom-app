@@ -1,0 +1,50 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ===== THEME TOKENS (Noir/Blanc) ===== */
+:root {
+  /* noir/blanc neutre */
+  --bg: 0 0% 100%;         /* white */
+  --fg: 0 0% 7%;           /* near-black */
+  --muted: 0 0% 45%;       /* grey text */
+  --border: 0 0% 90%;      /* light border */
+  --ring: 0 0% 15%;        /* dark ring */
+  --card: 0 0% 100%;
+  --cardfg: 0 0% 7%;
+}
+
+html, body { margin: 0; padding: 0; }
+body {
+  background-color: hsl(var(--bg));
+  color: hsl(var(--fg));
+}
+
+/* Typo lissée */
+* { box-sizing: border-box; }
+::selection { background: rgba(0,0,0,.08); }
+
+/* Liens et actions */
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+/* Focus visibles et harmonisés */
+:where(button, [role="button"], a, input, select, textarea) {
+  outline: none;
+}
+:where(button, [role="button"], a, input, select, textarea):focus-visible {
+  box-shadow: var(--focus-shadow, 0 0 0 2px hsl(var(--bg)), 0 0 0 4px hsl(var(--ring)));
+}
+
+/* Comportements hover génériques (cards, items) */
+.hoverable {
+  transition: transform .16s soft, box-shadow .16s soft, background-color .16s soft, color .16s soft, opacity .16s soft;
+}
+.hoverable:hover { box-shadow: 0 1px 2px rgba(0,0,0,0.06), 0 8px 24px rgba(0,0,0,0.08); }
+.hoverable:active { transform: translateY(1px); }
+
+/* Scrollbar minimal */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb { background: rgba(0,0,0,.2); border-radius: 999px; }
