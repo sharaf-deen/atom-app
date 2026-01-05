@@ -16,20 +16,20 @@ type MenuByRole = Record<Role, MenuItem[]>
 
 const MENU_BY_ROLE: MenuByRole = {
   member: [
-    { label: 'Store', href: '/store', icon: 'bag' },
+    // { label: 'Store', href: '/store', icon: 'bag' },
     { label: 'Notifications', href: '/notifications', icon: 'bell' },
     { label: 'My Profile', href: '/profile', icon: 'id' },
     { label: 'Packages & Promos', href: '/packages-and-promos', icon: 'gift' },
     { label: 'Contact Admin', href: '/contact', icon: 'user-cog' },
   ],
   assistant_coach: [
-    { label: 'Store', href: '/store', icon: 'bag' },
+    // { label: 'Store', href: '/store', icon: 'bag' },
     { label: 'Notifications', href: '/notifications', icon: 'bell' },
     { label: 'My Profile', href: '/profile', icon: 'id' },
     { label: 'Packages & Promos', href: '/packages-and-promos', icon: 'gift' },
   ],
   coach: [
-    { label: 'Store', href: '/store', icon: 'bag' },
+    // { label: 'Store', href: '/store', icon: 'bag' },
     { label: 'Notifications', href: '/notifications', icon: 'bell' },
     { label: 'My Profile', href: '/profile', icon: 'id' },
     { label: 'Packages & Promos', href: '/packages-and-promos', icon: 'gift' },
@@ -48,7 +48,7 @@ const MENU_BY_ROLE: MenuByRole = {
     { label: 'Scan', href: '/scan', icon: 'scan' },
     { label: 'Members', href: '/members', icon: 'users' },
     { label: 'Coaches', href: '/coaches', icon: 'user-cog' },
-    { label: 'Store', href: '/store', icon: 'bag' },
+    // { label: 'Store', href: '/store', icon: 'bag' },
     { label: 'Expenses', href: '/expenses', icon: 'wallet' },
   ],
   super_admin: [
@@ -59,7 +59,7 @@ const MENU_BY_ROLE: MenuByRole = {
     { label: 'Scan', href: '/scan', icon: 'scan' },
     { label: 'Members', href: '/members', icon: 'users' },
     { label: 'Coaches', href: '/coaches', icon: 'user-cog' },
-    { label: 'Store', href: '/store', icon: 'bag' },
+    // { label: 'Store', href: '/store', icon: 'bag' },
     { label: 'Expenses', href: '/expenses', icon: 'wallet' },
   ],
 }
@@ -77,21 +77,14 @@ export default async function AppNav() {
         {/* Brand */}
         <Link href="/" className="group flex items-center gap-2" aria-label="ATOM Jiu-Jitsu">
           <Image
-            src="/LogoAtomBlack.svg"
+            src="/atom4app.png"
             alt="ATOM Jiu-Jitsu"
             width={112}
             height={28}
             priority
             className="h-7 w-auto transition-opacity group-hover:opacity-90 dark:hidden"
           />
-          <Image
-            src="/LogoAtomWhite.svg"
-            alt="ATOM Jiu-Jitsu"
-            width={112}
-            height={28}
-            priority
-            className="hidden h-7 w-auto transition-opacity group-hover:opacity-90 dark:block"
-          />
+
           <span className="sr-only">ATOM Jiu-Jitsu</span>
         </Link>
 

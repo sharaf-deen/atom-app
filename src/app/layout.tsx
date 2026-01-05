@@ -4,7 +4,8 @@ import './globals.css'
 import { Poppins } from 'next/font/google'
 import AppNav from '@/components/AppNav'
 import ThemeProvider from '@/components/ThemeProvider'
-import { Toaster } from 'sonner' // ✅ toasts
+import { Toaster } from 'sonner'
+import BackButtonHandler from '@/components/BackButtonHandler'
 
 const poppins = Poppins({
   subsets: ['latin'],
@@ -22,10 +23,11 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="en" suppressHydrationWarning>
       <body className={poppins.className}>
         <ThemeProvider>
-          <AppNav />
-          {children}
-          {/* ✅ Toaster global pour les notifications (Archiver/Désarchiver, etc.) */}
-          <Toaster position="top-right" richColors expand />
+          <BackButtonHandler>
+            <AppNav />
+            {children}
+            <Toaster position="top-right" richColors expand />
+          </BackButtonHandler>
         </ThemeProvider>
       </body>
     </html>

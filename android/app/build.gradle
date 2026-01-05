@@ -24,7 +24,7 @@ android {
     signingConfigs {
         release {
             // ⚠️ Chemin KEYSOTRE avec doubles backslashes
-            storeFile file("C:\\Users\\pc\\KeyStores\\atom-release.keystore")
+            storeFile file("C:\\Users\\chara\\KeyStores\\atom-release.keystore")
             storePassword "MacBookPro94!"
             keyAlias "atomrelease"
             keyPassword "MacBookPro94!"
