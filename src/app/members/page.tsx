@@ -36,7 +36,6 @@ export default async function MembersPage() {
         subtitle="Search and manage your member base"
       />
       <Section>
-        {/* Search & list (staff sees Actions) */}
         <MembersSearch isStaff />
       </Section>
     </main>
