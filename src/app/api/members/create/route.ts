@@ -31,20 +31,21 @@ export async function POST(req: Request) {
   try {
     const supa = createSupabaseServerActionClient()
 
-    // 1) Auth de l’acteur : uniquement staff
+    // 1) Auth de l’acteur (staff uniquement)
     const { data: authData, error: authErr } = await supa.auth.getUser()
     if (authErr) {
       return noStore(
         NextResponse.json(
           { ok: false, error: `AUTH_ERROR: ${authErr.message}` },
-          { status: 401 }
-        )
+          { status: 401 },
+        ),
       )
     }
+
     const actor = authData.user
     if (!actor) {
       return noStore(
-        NextResponse.json({ ok: false, error: 'NOT_AUTHENTICATED' }, { status: 401 })
+        NextResponse.json({ ok: false, error: 'NOT_AUTHENTICATED' }, { status: 401 }),
       )
     }
 
@@ -53,52 +54,57 @@ export async function POST(req: Request) {
       .select('role')
       .eq('user_id', actor.id)
       .maybeSingle<{ role: Role | null }>()
+
     if (meErr) {
       return noStore(
         NextResponse.json(
           { ok: false, error: `ACTOR_PROFILE_ERROR: ${meErr.message}` },
-          { status: 500 }
-        )
+          { status: 500 },
+        ),
       )
     }
 
     const role = (me?.role ?? 'member') as Role
     if (!can(role)) {
       return noStore(
-        NextResponse.json({ ok: false, error: 'FORBIDDEN' }, { status: 403 })
+        NextResponse.json({ ok: false, error: 'FORBIDDEN' }, { status: 403 }),
       )
     }
 
-    // 2) Payload (camelCase + snake_case)
+    // 2) Récupération & normalisation du payload
     const body = (await req.json()) as Body
+
     const email = String(body.email || '').trim().toLowerCase()
-    const first_name = (String(body.first_name ?? body.firstName ?? '').trim() || null) as
-      | string
-      | null
-    const last_name = (String(body.last_name ?? body.lastName ?? '').trim() || null) as
-      | string
-      | null
+    const first_name = (String(body.first_name ?? body.firstName ?? '').trim() ||
+      null) as string | null
+    const last_name = (String(body.last_name ?? body.lastName ?? '').trim() ||
+      null) as string | null
     const phone = (String(body.phone ?? '').trim() || null) as string | null
 
     if (!email) {
       return noStore(
-        NextResponse.json({ ok: false, error: 'MISSING_EMAIL' }, { status: 400 })
+        NextResponse.json({ ok: false, error: 'MISSING_EMAIL' }, { status: 400 }),
       )
     }
 
     // 3) Client admin (Service Role)
     const url = process.env.NEXT_PUBLIC_SUPABASE_URL
     const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY
+
     if (!url || !serviceKey) {
       return noStore(
-        NextResponse.json({ ok: false, error: 'SERVER_MISCONFIGURED' }, { status: 500 })
+        NextResponse.json(
+          { ok: false, error: 'SERVER_MISCONFIGURED' },
+          { status: 500 },
+        ),
       )
     }
+
     const admin = createClient(url, serviceKey, {
       auth: { autoRefreshToken: false, persistSession: false },
     })
 
-    // 4) Si un profil existe déjà dans public.profiles avec cet email
+    // 4) Si un profile existe déjà pour cet email → on met juste à jour les infos
     {
       const { data: existing } = await admin
         .from('profiles')
@@ -126,44 +132,42 @@ export async function POST(req: Request) {
             ok: true,
             user_id: existing.user_id,
             updated: Object.keys(patch),
-            message: 'Existing member updated (no new invite sent).',
-          })
+          }),
         )
       }
     }
 
-    // 5) URL de l’app + redirection spécifique pour compléter l’invite
-    const appUrl =
+    // 5) URL de redirection pour compléter l’invitation
+    const APP_URL =
       process.env.NEXT_PUBLIC_APP_URL ||
       process.env.NEXT_PUBLIC_SITE_URL ||
       'http://localhost:3000'
 
-    const redirectTo = `${appUrl.replace(/\/$/, '')}/auth/complete-invite`
+    const redirectTo = `${APP_URL.replace(/\/$/, '')}/auth/complete-invite`
 
+    // 6) Tentative d’inviter l’utilisateur (email + lien)
     let userId: string | null = null
 
-    // 6) On tente d’inviter l’utilisateur (envoi de l’email avec lien)
-    const { data: invited, error: inviteErr } = await admin.auth.admin.inviteUserByEmail(
-      email,
-      {
+    const { data: invited, error: inviteErr } =
+      await admin.auth.admin.inviteUserByEmail(email, {
         redirectTo,
         data: { first_name, last_name, phone, role: 'member' },
-      }
-    )
+      })
 
     if (!inviteErr && invited?.user?.id) {
       // Cas normal : nouvel utilisateur créé dans auth.users
       userId = invited.user.id
     } else {
-      // Cas où un utilisateur existe déjà côté Auth → on le récupère via listUsers + filtre email
+      // Cas où l’utilisateur existe déjà dans Auth → on le cherche par email
       const { data: usersData, error: listErr } = await admin.auth.admin.listUsers({
         page: 1,
-        perPage: 100,
+        perPage: 1000,
       })
 
-      const existingAuth = usersData?.users?.find(
-        (u) => u.email?.toLowerCase() === email
-      )
+      const existingAuth =
+        usersData?.users?.find(
+          (u: any) => u.email && u.email.toLowerCase() === email,
+        ) ?? null
 
       if (listErr || !existingAuth?.id) {
         return noStore(
@@ -173,8 +177,8 @@ export async function POST(req: Request) {
               error: 'CREATE_USER_FAILED',
               details: inviteErr?.message ?? listErr?.message ?? 'unknown',
             },
-            { status: 500 }
-          )
+            { status: 500 },
+          ),
         )
       }
 
@@ -192,15 +196,15 @@ export async function POST(req: Request) {
         role: 'member',
         qr_code: `atom:${userId}`,
       },
-      { onConflict: 'user_id' }
+      { onConflict: 'user_id' },
     )
 
     if (profErr) {
       return noStore(
         NextResponse.json(
           { ok: false, error: `PROFILE_INSERT_FAILED: ${profErr.message}` },
-          { status: 500 }
-        )
+          { status: 500 },
+        ),
       )
     }
 
@@ -210,15 +214,15 @@ export async function POST(req: Request) {
         user_id: userId,
         user: { id: userId, email, first_name, last_name, phone },
         message: 'Member invited and profile saved.',
-      })
+      }),
     )
   } catch (e: any) {
     console.error('members/create error:', e)
     return noStore(
       NextResponse.json(
         { ok: false, error: 'SERVER_ERROR', details: e?.message || String(e) },
-        { status: 500 }
-      )
+        { status: 500 },
+      ),
     )
   }
 }

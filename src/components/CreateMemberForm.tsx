@@ -28,13 +28,12 @@ export default function CreateMemberForm() {
     setSuccess('')
     setCreatedId(null)
 
-    // normalisation: trim & email en lower-case
     const payload = {
       email: (form.email || '').trim().toLowerCase(),
       first_name: (form.first_name || '').trim() || undefined,
       last_name: (form.last_name || '').trim() || undefined,
       phone: (form.phone || '').trim() || undefined,
-      // aliases camelCase — au cas où le handler accepte ce format
+      // aliases camelCase (au cas où on les supporte côté API)
       firstName: (form.first_name || '').trim() || undefined,
       lastName: (form.last_name || '').trim() || undefined,
     }
@@ -45,11 +44,14 @@ export default function CreateMemberForm() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       })
-      const j = await r.json().catch(() => ({}))
+
+      const j = await r.json().catch(() => ({} as any))
+
       if (!r.ok || !j?.ok) {
         setErr(j?.details || j?.error || 'Failed to create member')
         return
       }
+
       const id: string = j.user?.id || j.id || j.user_id
       setCreatedId(id || null)
       setSuccess('Member created. An invite email was sent.')
@@ -70,20 +72,26 @@ export default function CreateMemberForm() {
   return (
     <div className="rounded-xl border bg-white p-4">
       <h3 className="text-lg font-semibold">Create new member</h3>
-      <p className="text-sm text-gray-500 mt-1">
+      <p className="mt-1 text-sm text-gray-500">
         An invite email will be sent so the member can set their password.
       </p>
 
       {!!err && (
-        <div className="mt-3 text-sm rounded border border-red-300 bg-red-50 text-red-700 px-3 py-2">
+        <div className="mt-3 rounded border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-700">
           {err}
         </div>
       )}
+
       {!!success && (
-        <div className="mt-3 text-sm rounded border border-green-300 bg-green-50 text-green-800 px-3 py-2">
+        <div className="mt-3 rounded border border-green-300 bg-green-50 px-3 py-2 text-sm text-green-800">
           {success}{' '}
           {createdId && (
-            <a className="underline" href={`/members/${createdId}`} target="_self" rel="noreferrer">
+            <a
+              className="underline"
+              href={`/members/${createdId}`}
+              target="_self"
+              rel="noreferrer"
+            >
               View member
             </a>
           )}
@@ -98,7 +106,7 @@ export default function CreateMemberForm() {
             required
             value={form.email}
             onChange={(e) => update('email', e.target.value)}
-            className="px-3 py-2 border rounded"
+            className="rounded border px-3 py-2"
             placeholder="name@example.com"
             disabled={busy}
           />
@@ -110,7 +118,7 @@ export default function CreateMemberForm() {
             type="tel"
             value={form.phone ?? ''}
             onChange={(e) => update('phone', e.target.value)}
-            className="px-3 py-2 border rounded"
+            className="rounded border px-3 py-2"
             placeholder="+201…"
             disabled={busy}
           />
@@ -121,7 +129,7 @@ export default function CreateMemberForm() {
           <input
             value={form.first_name ?? ''}
             onChange={(e) => update('first_name', e.target.value)}
-            className="px-3 py-2 border rounded"
+            className="rounded border px-3 py-2"
             placeholder="Ahmed"
             disabled={busy}
           />
@@ -132,25 +140,30 @@ export default function CreateMemberForm() {
           <input
             value={form.last_name ?? ''}
             onChange={(e) => update('last_name', e.target.value)}
-            className="px-3 py-2 border rounded"
+            className="rounded border px-3 py-2"
             placeholder="Mohamed"
             disabled={busy}
           />
         </label>
 
-        <div className="sm:col-span-2 flex gap-2 mt-2">
+        <div className="mt-2 flex gap-2 sm:col-span-2">
           <button
             type="submit"
             disabled={busy || !form.email}
-            className={`px-3 py-2 rounded border ${busy || !form.email ? 'bg-gray-200 text-gray-500' : 'bg-black text-white hover:opacity-90'}`}
+            className={`rounded border px-3 py-2 ${
+              busy || !form.email
+                ? 'bg-gray-200 text-gray-500'
+                : 'bg-black text-white hover:opacity-90'
+            }`}
           >
             {busy ? 'Creating…' : 'Create member'}
           </button>
+
           <button
             type="button"
             onClick={resetForm}
             disabled={busy}
-            className="px-3 py-2 rounded border hover:bg-gray-50"
+            className="rounded border px-3 py-2 hover:bg-gray-50"
           >
             Reset
           </button>
