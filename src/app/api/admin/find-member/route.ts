@@ -3,6 +3,7 @@ export const runtime = 'nodejs';
 
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { requireAdmin } from '@/lib/apiAuth'
 
 /**
  * POST /api/admin/find-member
@@ -11,6 +12,9 @@ import { createClient } from '@supabase/supabase-js';
  * Utilise SERVICE_ROLE pour bypass RLS côté admin.
  */
 export async function POST(req: NextRequest) {
+  const gate = await requireAdmin()
+  if (!gate.ok) return gate.res
+
   try {
     const { email } = await req.json();
     if (!email || typeof email !== 'string') {
@@ -58,5 +62,8 @@ export async function POST(req: NextRequest) {
  * Hint pour tests rapides.
  */
 export async function GET() {
+  const gate = await requireAdmin()
+  if (!gate.ok) return gate.res
+
   return NextResponse.json({ ok: true, hint: 'POST { email }' });
 }

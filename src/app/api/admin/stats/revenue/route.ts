@@ -5,6 +5,7 @@ export const revalidate = 0              // pas d'ISR
 
 import { NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
+import { requireAdmin } from '@/lib/apiAuth'
 
 type Plan = '1m' | '3m' | '6m' | '12m' | 'sessions'
 
@@ -26,6 +27,9 @@ function addDays(dateOnly: string, days: number) {
 }
 
 export async function GET(req: Request) {
+  const gate = await requireAdmin()
+  if (!gate.ok) return noStore(gate.res)
+
   try {
     const url = process.env.NEXT_PUBLIC_SUPABASE_URL!
     const service = process.env.SUPABASE_SERVICE_ROLE_KEY!

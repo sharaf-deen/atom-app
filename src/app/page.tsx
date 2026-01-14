@@ -240,9 +240,6 @@ export default async function HomePage() {
                 <h1 className="text-2xl font-semibold tracking-tight">
                   Welcome, {displayName}
                 </h1>
-                <p className="mt-1 text-sm text-[hsl(var(--muted))]">
-                  Choose a section to get started.
-                </p>
               </div>
 
               <div className="flex flex-col items-end gap-2">

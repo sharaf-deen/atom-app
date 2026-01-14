@@ -1,6 +1,7 @@
 // src/app/api/store/products/update/route.ts
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
+import { requireAdmin } from '@/lib/apiAuth'
 
 type Category = 'kimono' | 'rashguard' | 'short' | 'belt'
 const CATEGORIES: readonly Category[] = ['kimono', 'rashguard', 'short', 'belt'] as const
@@ -19,6 +20,9 @@ export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
 export async function PATCH(req: NextRequest) {
+  const gate = await requireAdmin()
+  if (!gate.ok) return gate.res
+
   try {
     const body = await req.json().catch(() => ({}))
     const id = String(body?.id || '').trim()

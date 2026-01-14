@@ -7,6 +7,7 @@ import { NextResponse } from 'next/server'
 import type { Role } from '@/lib/session'
 import { createSupabaseServerActionClient } from '@/lib/supabaseServer'
 import { createClient } from '@supabase/supabase-js'
+import { getAppUrl } from '@/lib/appUrl'
 
 type Body =
   | {
@@ -138,13 +139,7 @@ export async function POST(req: Request) {
     }
 
     // 5) URL de redirection pour compléter l’invitation
-    const APP_URL =
-      process.env.NEXT_PUBLIC_APP_URL ||
-      process.env.NEXT_PUBLIC_SITE_URL ||
-      'http://localhost:3000'
-
-    const redirectTo = `${APP_URL.replace(/\/$/, '')}/auth/complete-invite`
-
+    const redirectTo = `${getAppUrl()}/auth/complete-invite`
     // 6) Tentative d’inviter l’utilisateur (email + lien)
     let userId: string | null = null
 

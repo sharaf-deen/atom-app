@@ -3,6 +3,7 @@ export const runtime = 'nodejs';
 
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { requireAdmin } from '@/lib/apiAuth'
 
 /**
  * GET /api/admin/audit
@@ -10,6 +11,9 @@ import { createClient } from '@supabase/supabase-js';
  * (Utilise la SERVICE_ROLE, donc accessible seulement côté serveur)
  */
 export async function GET() {
+  const gate = await requireAdmin()
+  if (!gate.ok) return gate.res
+
   try {
     const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
     const service = process.env.SUPABASE_SERVICE_ROLE_KEY!;

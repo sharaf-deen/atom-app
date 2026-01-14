@@ -1,8 +1,12 @@
 export const runtime = 'nodejs';
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { requireAdmin } from '@/lib/apiAuth'
 
 export async function POST(req: NextRequest) {
+  const gate = await requireAdmin()
+  if (!gate.ok) return gate.res
+
   const { q, role, limit = 50 } = await req.json().catch(() => ({}));
   const admin = createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,

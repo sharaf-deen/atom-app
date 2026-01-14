@@ -3,6 +3,7 @@ export const runtime = 'nodejs';
 
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
+import { requireAdmin } from '@/lib/apiAuth'
 
 type Action = 'renew' | 'pause' | 'resume' | 'add_dropin';
 type Plan = 'monthly' | 'quarterly' | 'yearly';
@@ -57,6 +58,9 @@ async function createPayment(
 }
 
 export async function GET() {
+  const gate = await requireAdmin()
+  if (!gate.ok) return gate.res
+
   return NextResponse.json({
     ok: true,
     hint:
@@ -65,6 +69,9 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
+  const gate = await requireAdmin()
+  if (!gate.ok) return gate.res
+
   try {
     const {
       user_id,

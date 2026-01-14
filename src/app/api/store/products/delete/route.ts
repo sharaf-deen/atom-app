@@ -1,6 +1,7 @@
 // src/app/api/store/products/delete/route.ts
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
+import { requireAdmin } from '@/lib/apiAuth'
 
 function createSupabaseForAPI() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL
@@ -16,6 +17,9 @@ export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
 export async function DELETE(req: NextRequest) {
+  const gate = await requireAdmin()
+  if (!gate.ok) return gate.res
+
   try {
     const { searchParams } = new URL(req.url)
     const id = (searchParams.get('id') || '').trim()

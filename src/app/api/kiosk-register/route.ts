@@ -1,5 +1,9 @@
-import { NextResponse } from 'next/server';
+export const runtime = 'nodejs';
+
+import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { requireStaff } from '@/lib/apiAuth'
+import { getAppUrl } from '@/lib/appUrl'
 
 const admin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -7,8 +11,11 @@ const admin = createClient(
   { auth: { autoRefreshToken: false, persistSession: false } }
 );
 
-export async function POST(req: Request) {
+export async function POST(req: NextRequest) {
   try {
+    const gate = await requireStaff()
+    if (!gate.ok) return gate.res
+
     const { first_name, last_name, email, phone } = await req.json();
 
     if (!email || !/^\S+@\S+\.\S+$/.test(email)) {
@@ -20,7 +27,7 @@ export async function POST(req: Request) {
       email.toLowerCase(),
       {
         data: { first_name, last_name, phone, role: 'member' },
-        redirectTo: `${process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000'}/welcome`,
+        redirectTo: `${getAppUrl()}/auth/complete-invite`,
       }
     );
     if (inviteErr) {
