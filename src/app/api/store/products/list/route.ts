@@ -1,6 +1,7 @@
 // src/app/api/store/products/list/route.ts
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
+import { requireStaff } from '@/lib/apiAuth'
 
 type Category = 'kimono' | 'rashguard' | 'short' | 'belt'
 
@@ -32,6 +33,9 @@ export const dynamic = 'force-dynamic' // pour éviter le cache en prod si néce
 export const revalidate = 0
 
 export async function GET(req: NextRequest) {
+  const gate = await requireStaff()
+  if (!gate.ok) return gate.res
+
   try {
     const supabase = createSupabaseForAPI()
 

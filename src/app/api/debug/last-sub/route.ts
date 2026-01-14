@@ -2,8 +2,12 @@ export const runtime = 'nodejs';
 
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { requireAdmin } from '@/lib/apiAuth';
 
 export async function GET(req: NextRequest) {
+  const gate = await requireAdmin();
+  if (!gate.ok) return gate.res;
+
   try {
     const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
     const service = process.env.SUPABASE_SERVICE_ROLE_KEY!;
