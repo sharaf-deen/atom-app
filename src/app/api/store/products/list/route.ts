@@ -3,30 +3,20 @@ export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@supabase/supabase-js'
 import { requireUser } from '@/lib/apiAuth'
+import { createSupabaseRSC } from '@/lib/supabaseServer'
 
-type Category = 'kimono' | 'rashguard' | 'short' | 'belt'
 type Role = 'member' | 'assistant_coach' | 'coach' | 'reception' | 'admin' | 'super_admin'
-
-function createSupabaseForAPI() {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL
-  const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
-  if (!url) throw new Error('Missing NEXT_PUBLIC_SUPABASE_URL')
-  if (!anon) throw new Error('Missing NEXT_PUBLIC_SUPABASE_ANON_KEY')
-
-  // ✅ On utilise ANON côté serveur ici : RLS fera le job (lecture autorisée seulement si auth cookie)
-  return createClient(url, anon, {
-    auth: { persistSession: false, autoRefreshToken: false },
-  })
-}
+type Category = 'kimono' | 'rashguard' | 'short' | 'belt'
 
 export async function GET(req: NextRequest) {
   const gate = await requireUser()
   if (!gate.ok) return gate.res
 
   try {
-    const supabase = createSupabaseForAPI()
+    // ✅ IMPORTANT: client server avec cookies => rôle = authenticated
+    const supabase = createSupabaseRSC()
+
     const { searchParams } = new URL(req.url)
 
     const pageRaw = Number(searchParams.get('page') || 1)
@@ -37,26 +27,26 @@ export async function GET(req: NextRequest) {
     const end = start + limit - 1
 
     const category = (searchParams.get('category') || '') as Category | ''
-    const active = searchParams.get('active') // '1' | '0' | null
     const wantAll = searchParams.get('all') === '1'
+    const active = searchParams.get('active') // '1' | '0' | null
 
-    // ✅ Seul super_admin peut demander all=1
     const role = (gate.user.role as Role) || 'member'
     const isSuperAdmin = role === 'super_admin'
+
+    // ✅ all=1 ou active=0 : super_admin uniquement
     const all = wantAll && isSuperAdmin
 
     let q = supabase
       .from('store_products')
       .select(
-        'id, category, name, color, size, price_cents, currency, inventory_qty, is_active, created_at',
+        'id,category,name,color,size,price_cents,currency,inventory_qty,is_active,created_at,updated_at',
         { count: 'exact' }
       )
       .order('created_at', { ascending: false })
 
-    // Par défaut on ne montre que les actifs (super_admin peut demander all=1)
+    // Par défaut: produits actifs seulement
     if (!all) q = q.eq('is_active', true)
 
-    // Filtre actif/inactif (autorisé seulement si super_admin)
     if (active === '1') q = q.eq('is_active', true)
     if (active === '0') {
       if (!isSuperAdmin) {
@@ -71,7 +61,10 @@ export async function GET(req: NextRequest) {
 
     const { data, count, error } = await q
     if (error) {
-      return NextResponse.json({ ok: false, error: error.message }, { status: 500 })
+      return NextResponse.json(
+        { ok: false, error: error.message },
+        { status: 500, headers: { 'Cache-Control': 'no-store' } }
+      )
     }
 
     return NextResponse.json(
