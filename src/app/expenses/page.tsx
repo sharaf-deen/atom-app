@@ -7,23 +7,22 @@ import { getSessionUser } from '@/lib/session'
 import ExpensesPageClient from '@/components/ExpensesPageClient'
 import AccessDeniedPage from '@/components/AccessDeniedPage'
 
-function canAccess(role?: string | null) {
-  return role === 'reception' || role === 'admin' || role === 'super_admin'
+function isAdmin(role?: string | null) {
+  return role === 'admin' || role === 'super_admin'
 }
 
 export default async function ExpensesPage() {
   const user = await getSessionUser()
-
   if (!user) redirect('/login?next=/expenses')
 
-  if (!canAccess(user.role)) {
+  if (!isAdmin(user.role)) {
     return (
       <AccessDeniedPage
         title="Expenses"
         subtitle="Access restricted."
         signedInAs={user.email}
-        message="Only Reception / Admin / Super Admin can access expenses."
-        allowed="reception, admin, super_admin"
+        message="Only Admin / Super Admin can access expenses."
+        allowed="admin, super_admin"
         nextPath="/expenses"
         actions={[{ href: '/admin', label: 'Go to Admin' }]}
         showBackHome

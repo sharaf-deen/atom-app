@@ -2,18 +2,18 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { createSupabaseBrowserClient } from '@/lib/supabaseBrowser'
-import { startOfMonth, endOfMonth, startOfWeek, endOfWeek, format, subDays } from 'date-fns'
+import { endOfMonth, format, startOfMonth, subDays } from 'date-fns'
 import { Card, CardContent } from '@/components/ui/Card'
 import Button from '@/components/ui/Button'
 import Input from '@/components/ui/Input'
 import Select from '@/components/ui/Select'
 
-type Period = 'month' | 'week' | 'custom'
+type RangePreset = 'today' | '7d' | 'month' | 'custom'
 
 type Expense = {
   id: string
   date: string
-  category_key: string | null
+  category_key: string | null // FK to expense_categories.key
   description: string | null
   amount: number
 }
@@ -26,14 +26,16 @@ type ExpenseCategory = {
   is_active: boolean
 }
 
-const HISTORY_PAGE_SIZE = 5
-
 function toDateOnly(d: Date) {
   return format(d, 'yyyy-MM-dd')
 }
 
 function formatEGP(n: number) {
-  return new Intl.NumberFormat('en-EG', { style: 'currency', currency: 'EGP' }).format(n)
+  return new Intl.NumberFormat('en-EG', {
+    style: 'currency',
+    currency: 'EGP',
+    maximumFractionDigits: 2,
+  }).format(n)
 }
 
 export default function ExpensesPageClient({ userRole }: { userRole: string }) {
@@ -43,16 +45,12 @@ export default function ExpensesPageClient({ userRole }: { userRole: string }) {
   const [categories, setCategories] = useState<ExpenseCategory[]>([])
   const [loading, setLoading] = useState(true)
   const [loadingCats, setLoadingCats] = useState(true)
-  const [msg, setMsg] = useState<string>('')
 
   // Filters
-  const [period, setPeriod] = useState<Period>('month')
+  const [preset, setPreset] = useState<RangePreset>('month')
   const [from, setFrom] = useState<string>(() => toDateOnly(startOfMonth(new Date())))
   const [to, setTo] = useState<string>(() => toDateOnly(endOfMonth(new Date())))
   const [categoryFilter, setCategoryFilter] = useState<string>('all')
-
-  // History pagination
-  const [histPage, setHistPage] = useState(1)
 
   // Add form
   const [newExpense, setNewExpense] = useState({
@@ -62,8 +60,7 @@ export default function ExpensesPageClient({ userRole }: { userRole: string }) {
     amount: '',
   })
 
-  const canAdd = ['reception', 'admin', 'super_admin'].includes(userRole)
-  const canDelete = ['admin', 'super_admin'].includes(userRole)
+  const canAdd = userRole === 'admin' || userRole === 'super_admin'
 
   async function loadCategories() {
     setLoadingCats(true)
@@ -71,6 +68,7 @@ export default function ExpensesPageClient({ userRole }: { userRole: string }) {
       .from('expense_categories')
       .select('key,label,group_name,sort_order,is_active')
       .eq('is_active', true)
+      .order('group_name', { ascending: true })
       .order('sort_order', { ascending: true })
       .order('label', { ascending: true })
 
@@ -85,8 +83,6 @@ export default function ExpensesPageClient({ userRole }: { userRole: string }) {
 
   async function loadExpenses(rangeFrom?: string, rangeTo?: string) {
     setLoading(true)
-    setMsg('Loading…')
-
     let query = supabase
       .from('expenses')
       .select('id,date,category_key,description,amount')
@@ -99,49 +95,59 @@ export default function ExpensesPageClient({ userRole }: { userRole: string }) {
     if (error) {
       console.error(error)
       setExpenses([])
-      setMsg(`❌ ${error.message}`)
     } else {
       setExpenses((data || []) as Expense[])
-      setMsg('')
     }
     setLoading(false)
   }
 
-  // Period auto-range
-  useEffect(() => {
+  function applyPreset(p: RangePreset) {
     const today = new Date()
-    if (period === 'month') {
+    if (p === 'today') {
+      const t = toDateOnly(today)
+      setFrom(t)
+      setTo(t)
+      setPreset('today')
+      return
+    }
+    if (p === '7d') {
+      const t = toDateOnly(today)
+      const f = toDateOnly(subDays(today, 6))
+      setFrom(f)
+      setTo(t)
+      setPreset('7d')
+      return
+    }
+    if (p === 'month') {
       setFrom(toDateOnly(startOfMonth(today)))
       setTo(toDateOnly(endOfMonth(today)))
-    } else if (period === 'week') {
-      // Egypt week: Saturday->Friday
-      setFrom(toDateOnly(startOfWeek(today, { weekStartsOn: 6 })))
-      setTo(toDateOnly(endOfWeek(today, { weekStartsOn: 6 })))
+      setPreset('month')
+      return
     }
-  }, [period])
+    setPreset('custom')
+  }
 
-  // Initial
-  useEffect(() => {
-    loadCategories()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  function clearFilters() {
+    setCategoryFilter('all')
+    applyPreset('month')
+  }
 
-  useEffect(() => {
-    loadExpenses(from, to)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [from, to])
-
-  // Reset pagination when filters change
-  useEffect(() => {
-    setHistPage(1)
-  }, [from, to, categoryFilter])
+  async function reloadAll() {
+    await Promise.all([loadCategories(), loadExpenses(from, to)])
+  }
 
   async function addExpense(e: React.FormEvent) {
     e.preventDefault()
 
     const amt = parseFloat(newExpense.amount)
-    if (Number.isNaN(amt)) return alert('Invalid amount')
-    if (!newExpense.category_key) return alert('Please choose a product/category')
+    if (Number.isNaN(amt)) {
+      alert('Invalid amount')
+      return
+    }
+    if (!newExpense.category_key) {
+      alert('Please choose a product')
+      return
+    }
 
     const { error } = await supabase.from('expenses').insert([
       {
@@ -152,19 +158,25 @@ export default function ExpensesPageClient({ userRole }: { userRole: string }) {
       },
     ])
 
-    if (error) return alert(error.message)
+    if (error) {
+      alert(error.message)
+      return
+    }
 
     setNewExpense({ date: '', category_key: '', description: '', amount: '' })
     await loadExpenses(from, to)
   }
 
-  async function deleteExpense(id: string) {
-    if (!canDelete) return
-    if (!confirm('Delete this expense?')) return
-    const { error } = await supabase.from('expenses').delete().eq('id', id)
-    if (error) return alert(error.message)
-    await loadExpenses(from, to)
-  }
+  // Initial loads
+  useEffect(() => {
+    loadCategories()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  useEffect(() => {
+    loadExpenses(from, to)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [from, to])
 
   const labelByKey = useMemo(() => {
     const m = new Map<string, string>()
@@ -172,26 +184,39 @@ export default function ExpensesPageClient({ userRole }: { userRole: string }) {
     return m
   }, [categories])
 
-  const categoryOptions = useMemo(() => ['all', ...categories.map((c) => c.key)], [categories])
+  const groupByKey = useMemo(() => {
+    const m = new Map<string, string>()
+    categories.forEach((c) => m.set(c.key, c.group_name))
+    return m
+  }, [categories])
+
+  const categoriesByGroup = useMemo(() => {
+    const acc = new Map<string, ExpenseCategory[]>()
+    categories.forEach((c) => {
+      const g = c.group_name || 'Other'
+      acc.set(g, [...(acc.get(g) || []), c])
+    })
+    return Array.from(acc.entries())
+  }, [categories])
 
   const filteredExpenses = useMemo(() => {
     if (categoryFilter === 'all') return expenses
     return expenses.filter((e) => (e.category_key || '') === categoryFilter)
   }, [expenses, categoryFilter])
 
-  const total = useMemo(() => filteredExpenses.reduce((sum, e) => sum + Number(e.amount || 0), 0), [filteredExpenses])
-
-  const totalPages = Math.max(1, Math.ceil(filteredExpenses.length / HISTORY_PAGE_SIZE))
-  const pageItems = useMemo(() => {
-    const start = (histPage - 1) * HISTORY_PAGE_SIZE
-    return filteredExpenses.slice(start, start + HISTORY_PAGE_SIZE)
-  }, [filteredExpenses, histPage])
+  const total = useMemo(() => {
+    return filteredExpenses.reduce(
+      (sum, e) => sum + (typeof e.amount === 'number' ? e.amount : Number(e.amount || 0)),
+      0
+    )
+  }, [filteredExpenses])
 
   const totalsByCategorySorted = useMemo(() => {
     const acc = new Map<string, number>()
     filteredExpenses.forEach((e) => {
       const key = e.category_key || 'other'
-      acc.set(key, (acc.get(key) || 0) + Number(e.amount || 0))
+      const amount = typeof e.amount === 'number' ? e.amount : Number(e.amount || 0)
+      acc.set(key, (acc.get(key) || 0) + amount)
     })
 
     const entries = Array.from(acc.entries())
@@ -203,60 +228,26 @@ export default function ExpensesPageClient({ userRole }: { userRole: string }) {
     return entries
   }, [filteredExpenses, categories])
 
-  function setToday() {
-    const t = new Date()
-    setPeriod('custom')
-    setFrom(toDateOnly(t))
-    setTo(toDateOnly(t))
-  }
-  function setLast7() {
-    const t = new Date()
-    setPeriod('custom')
-    setFrom(toDateOnly(subDays(t, 6)))
-    setTo(toDateOnly(t))
-  }
-  function setThisMonth() {
-    setPeriod('month')
-  }
-  function clearFilters() {
-    setPeriod('month')
-    setCategoryFilter('all')
-  }
-  async function reloadAll() {
-    await loadCategories()
-    await loadExpenses(from, to)
-  }
+  const rangeLabel = useMemo(() => {
+    if (preset === 'today') return 'Today'
+    if (preset === '7d') return 'Last 7 days'
+    if (preset === 'month') return 'This month'
+    return 'Custom'
+  }, [preset])
 
   return (
     <div className="space-y-6">
-      {/* Top summary */}
-      <Card>
-        <CardContent>
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <div className="text-sm text-[hsl(var(--muted))]">Total (current filters)</div>
-              <div className="mt-1 text-2xl font-semibold">{formatEGP(total)}</div>
-              <div className="mt-1 text-xs text-[hsl(var(--muted))]">
-                Period: <span className="font-medium">{from}</span> → <span className="font-medium">{to}</span>
-              </div>
-            </div>
-
-            <div className="flex flex-wrap gap-2">
-              <Button variant="outline" onClick={setToday}>Today</Button>
-              <Button variant="outline" onClick={setLast7}>Last 7 days</Button>
-              <Button variant="outline" onClick={setThisMonth}>This month</Button>
-              <Button variant="ghost" onClick={clearFilters}>Clear filters</Button>
-              <Button variant="ghost" onClick={reloadAll}>Reload</Button>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Add form */}
+      {/* Add form (admins only) */}
       {canAdd && (
         <Card>
           <CardContent>
-            <h2 className="text-lg font-semibold">Add expense</h2>
+            <div className="flex items-center justify-between gap-3">
+              <h2 className="text-lg font-semibold">Add expense</h2>
+              <Button type="button" variant="outline" size="sm" onClick={reloadAll} disabled={loading || loadingCats}>
+                Reload
+              </Button>
+            </div>
+
             <form onSubmit={addExpense} className="mt-3 grid gap-3">
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <Input
@@ -274,10 +265,14 @@ export default function ExpensesPageClient({ userRole }: { userRole: string }) {
                   label="Product"
                 >
                   <option value="">Select a product…</option>
-                  {categories.map((c) => (
-                    <option key={c.key} value={c.key}>
-                      {c.label}
-                    </option>
+                  {categoriesByGroup.map(([group, items]) => (
+                    <optgroup key={group} label={group}>
+                      {items.map((c) => (
+                        <option key={c.key} value={c.key}>
+                          {c.label}
+                        </option>
+                      ))}
+                    </optgroup>
                   ))}
                 </Select>
 
@@ -294,128 +289,162 @@ export default function ExpensesPageClient({ userRole }: { userRole: string }) {
 
               <Input
                 type="text"
-                placeholder="Note / vendor / details…"
+                placeholder="Description"
                 value={newExpense.description}
                 onChange={(e) => setNewExpense({ ...newExpense, description: e.target.value })}
-                label="Note"
+                label="Description"
               />
 
               <div className="flex justify-end">
-                <Button type="submit" className="w-full sm:w-auto">Add</Button>
+                <Button type="submit" className="w-full sm:w-auto">Add Expense</Button>
               </div>
             </form>
           </CardContent>
         </Card>
       )}
 
-      {/* Filters (classic) */}
+      {/* Filters + Summary */}
       <Card>
         <CardContent>
-          <div className="flex items-center justify-between gap-2">
-            <h2 className="text-lg font-semibold">Filters</h2>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h2 className="text-lg font-semibold">Filters</h2>
+              <div className="mt-1 text-sm text-[hsl(var(--muted))]">
+                {rangeLabel}: <span className="font-medium">{from}</span> → <span className="font-medium">{to}</span>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <Button type="button" variant={preset === 'today' ? 'solid' : 'outline'} size="sm" onClick={() => applyPreset('today')}>
+                Today
+              </Button>
+              <Button type="button" variant={preset === '7d' ? 'solid' : 'outline'} size="sm" onClick={() => applyPreset('7d')}>
+                7d
+              </Button>
+              <Button type="button" variant={preset === 'month' ? 'solid' : 'outline'} size="sm" onClick={() => applyPreset('month')}>
+                Month
+              </Button>
+              <Button type="button" variant={preset === 'custom' ? 'solid' : 'outline'} size="sm" onClick={() => applyPreset('custom')}>
+                Custom
+              </Button>
+              <Button type="button" variant="ghost" size="sm" onClick={clearFilters}>
+                Clear filters
+              </Button>
+            </div>
           </div>
 
-          <div className="mt-3 grid grid-cols-1 sm:grid-cols-4 gap-3">
-            <Select value={period} onChange={(e) => setPeriod(e.target.value as Period)} label="Period">
-              <option value="month">Current Month</option>
-              <option value="week">Current Week</option>
-              <option value="custom">Custom Range</option>
-            </Select>
-
-            <Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} disabled={period !== 'custom'} label="From" />
-            <Input type="date" value={to} onChange={(e) => setTo(e.target.value)} disabled={period !== 'custom'} label="To" />
-
-            <Select value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)} disabled={loadingCats} label="Product">
-              {categoryOptions.map((key) => (
-                <option key={key} value={key}>
-                  {key === 'all' ? 'All products' : labelByKey.get(key) || key}
-                </option>
+          <div className="mt-4 grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <Input
+              type="date"
+              value={from}
+              onChange={(e) => {
+                setFrom(e.target.value)
+                setPreset('custom')
+              }}
+              disabled={preset !== 'custom'}
+              label="From"
+            />
+            <Input
+              type="date"
+              value={to}
+              onChange={(e) => {
+                setTo(e.target.value)
+                setPreset('custom')
+              }}
+              disabled={preset !== 'custom'}
+              label="To"
+            />
+            <Select
+              value={categoryFilter}
+              onChange={(e) => setCategoryFilter(e.target.value)}
+              disabled={loadingCats}
+              label="Product"
+            >
+              <option value="all">All products</option>
+              {categoriesByGroup.map(([group, items]) => (
+                <optgroup key={group} label={group}>
+                  {items.map((c) => (
+                    <option key={c.key} value={c.key}>
+                      {c.label}
+                    </option>
+                  ))}
+                </optgroup>
               ))}
             </Select>
+          </div>
+
+          <div className="mt-4 grid gap-3 sm:grid-cols-3">
+            <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4 shadow-soft">
+              <div className="text-xs text-[hsl(var(--muted))]">Total</div>
+              <div className="mt-1 text-lg font-semibold">{formatEGP(total)}</div>
+            </div>
+            <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4 shadow-soft">
+              <div className="text-xs text-[hsl(var(--muted))]">Entries</div>
+              <div className="mt-1 text-lg font-semibold">{filteredExpenses.length}</div>
+            </div>
+            <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4 shadow-soft">
+              <div className="text-xs text-[hsl(var(--muted))]">Filter</div>
+              <div className="mt-1 text-sm font-semibold truncate">
+                {categoryFilter === 'all'
+                  ? 'All products'
+                  : labelByKey.get(categoryFilter) || categoryFilter}
+              </div>
+              {categoryFilter !== 'all' && (
+                <div className="mt-1 text-xs text-[hsl(var(--muted))] truncate">
+                  {groupByKey.get(categoryFilter) || ''}
+                </div>
+              )}
+            </div>
           </div>
         </CardContent>
       </Card>
 
-      {/* History (cards) */}
+      {/* History */}
       <Card>
         <CardContent>
-          <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center justify-between gap-3">
             <h2 className="text-lg font-semibold">History</h2>
-            <div className="text-sm text-[hsl(var(--muted))]">
-              Page <span className="font-medium">{histPage}</span> / <span className="font-medium">{totalPages}</span>
-            </div>
+            <Button type="button" variant="outline" size="sm" onClick={() => loadExpenses(from, to)} disabled={loading}>
+              Reload
+            </Button>
           </div>
-
-          {msg && <p className="mt-2 text-sm">{msg}</p>}
 
           {loading ? (
             <p className="mt-3 text-sm text-[hsl(var(--muted))]">Loading…</p>
           ) : (
-            <div className="mt-3 space-y-3">
-              {pageItems.map((ex) => {
-                const productLabel = ex.category_key ? (labelByKey.get(ex.category_key) || ex.category_key) : '—'
+            <div className="mt-3 grid gap-2">
+              {filteredExpenses.map((ex) => {
+                const product = ex.category_key ? labelByKey.get(ex.category_key) || ex.category_key : '—'
+                const group = ex.category_key ? groupByKey.get(ex.category_key) : null
                 return (
-                  <div key={ex.id} className="rounded-2xl border border-[hsl(var(--border))] bg-white p-4 shadow-soft">
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <div className="text-xs uppercase tracking-wide text-[hsl(var(--muted))]">Product</div>
-                        <div className="text-lg font-semibold truncate">{productLabel}</div>
-                        <div className="mt-1 text-sm text-[hsl(var(--muted))]">{ex.description || '—'}</div>
+                  <div
+                    key={ex.id}
+                    className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4 shadow-soft flex items-start justify-between gap-4"
+                  >
+                    <div className="min-w-0">
+                      <div className="text-xs text-[hsl(var(--muted))]">
+                        {ex.date ? format(new Date(ex.date), 'yyyy-MM-dd') : '—'}
+                        {group ? <span className="mx-2">•</span> : null}
+                        {group ? group : null}
                       </div>
+                      <div className="mt-1 text-base font-semibold truncate">{product}</div>
+                      {ex.description ? (
+                        <div className="mt-1 text-sm text-[hsl(var(--muted))] break-words">{ex.description}</div>
+                      ) : (
+                        <div className="mt-1 text-sm text-[hsl(var(--muted))]">—</div>
+                      )}
+                    </div>
 
-                      <div className="text-right shrink-0">
-                        <div className="text-xs uppercase tracking-wide text-[hsl(var(--muted))]">Amount</div>
-                        <div className="text-lg font-semibold">{formatEGP(Number(ex.amount || 0))}</div>
-                        <div className="mt-1 text-xs text-[hsl(var(--muted))]">
-                          {ex.date ? format(new Date(ex.date), 'yyyy-MM-dd') : '—'}
-                        </div>
-
-                        {canDelete && (
-                          <div className="mt-2">
-                            <Button variant="ghost" size="sm" onClick={() => deleteExpense(ex.id)}>
-                              Delete
-                            </Button>
-                          </div>
-                        )}
-                      </div>
+                    <div className="text-right shrink-0">
+                      <div className="text-base font-semibold">{formatEGP(Number(ex.amount || 0))}</div>
                     </div>
                   </div>
                 )
               })}
 
               {filteredExpenses.length === 0 && (
-                <div className="text-sm text-center text-[hsl(var(--muted))] py-6">
+                <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4 text-center text-sm text-[hsl(var(--muted))]">
                   No expenses for the selected period/filter.
-                </div>
-              )}
-
-              {/* Pagination controls */}
-              {filteredExpenses.length > 0 && (
-                <div className="flex flex-wrap items-center justify-between gap-2 pt-2">
-                  <div className="text-sm text-[hsl(var(--muted))]">
-                    Showing {(histPage - 1) * HISTORY_PAGE_SIZE + 1}–{Math.min(histPage * HISTORY_PAGE_SIZE, filteredExpenses.length)} of{' '}
-                    <span className="font-medium">{filteredExpenses.length}</span>
-                  </div>
-
-                  <div className="flex gap-2">
-                    <Button variant="outline" size="sm" onClick={() => setHistPage(1)} disabled={histPage <= 1}>
-                      First
-                    </Button>
-                    <Button variant="outline" size="sm" onClick={() => setHistPage((p) => Math.max(1, p - 1))} disabled={histPage <= 1}>
-                      Prev
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setHistPage((p) => Math.min(totalPages, p + 1))}
-                      disabled={histPage >= totalPages}
-                    >
-                      Next
-                    </Button>
-                    <Button variant="outline" size="sm" onClick={() => setHistPage(totalPages)} disabled={histPage >= totalPages}>
-                      Last
-                    </Button>
-                  </div>
                 </div>
               )}
             </div>
@@ -423,7 +452,7 @@ export default function ExpensesPageClient({ userRole }: { userRole: string }) {
         </CardContent>
       </Card>
 
-      {/* Mini report (respects filters) */}
+      {/* Mini report: total by product — suit les filtres */}
       {!loading && (
         <Card>
           <CardContent>
@@ -431,11 +460,13 @@ export default function ExpensesPageClient({ userRole }: { userRole: string }) {
             <ul className="space-y-1">
               {totalsByCategorySorted.map(([key, amt]) => (
                 <li key={key} className="flex justify-between text-sm">
-                  <span>{labelByKey.get(key) || key}</span>
+                  <span className="truncate pr-3">{labelByKey.get(key) || key}</span>
                   <span className="font-medium">{formatEGP(amt)}</span>
                 </li>
               ))}
-              {totalsByCategorySorted.length === 0 && <li className="text-sm text-[hsl(var(--muted))]">No data.</li>}
+              {totalsByCategorySorted.length === 0 && (
+                <li className="text-sm text-[hsl(var(--muted))]">No data.</li>
+              )}
             </ul>
           </CardContent>
         </Card>
