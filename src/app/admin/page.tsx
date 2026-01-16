@@ -35,11 +35,12 @@ export default async function AdminPage() {
     return (
       <AccessDeniedPage
         title="Admin"
-        subtitle="Forbidden."
+        subtitle="Access restricted."
         signedInAs={me.email}
         message="Only Admin / Super Admin can access the admin dashboard."
         allowed="admin, super_admin"
         nextPath="/admin"
+        actions={[{ href: '/members', label: 'Go to Members' }]}
         showBackHome
       />
     )
@@ -49,7 +50,6 @@ export default async function AdminPage() {
   const today = todayDateOnly()
   const tomorrow = tomorrowDateOnly(today)
 
-  // --- KPI queries (unchanged) ---
   const { count: activeTimeCount } = await supa
     .from('subscriptions')
     .select('id', { count: 'exact', head: true })
@@ -91,7 +91,6 @@ export default async function AdminPage() {
     }
   }
 
-  // Store KPIs
   const { count: readyCount } = await supa.from('store_orders').select('id', { count: 'exact', head: true }).eq('status', 'ready')
   const { count: pendingCount } = await supa.from('store_orders').select('id', { count: 'exact', head: true }).eq('status', 'pending')
   const { count: confirmedCount } = await supa.from('store_orders').select('id', { count: 'exact', head: true }).eq('status', 'confirmed')
@@ -107,44 +106,34 @@ export default async function AdminPage() {
     <main>
       <PageHeader title="Admin" subtitle="Overview and operations" />
 
-      {/* KPI Cards (Membership) */}
       <Section>
         <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-4">
-          <Card hover>
-            <CardContent>
-              <div className="text-sm text-[hsl(var(--muted))]">Active (subscriptions)</div>
-              <div className="mt-1 text-2xl font-semibold">{activeTimeCount ?? 0}</div>
-              <div className="mt-1 text-xs text-[hsl(var(--muted))]">end date ≥ today</div>
-            </CardContent>
-          </Card>
+          <Card hover><CardContent>
+            <div className="text-sm text-[hsl(var(--muted))]">Active (subscriptions)</div>
+            <div className="mt-1 text-2xl font-semibold">{activeTimeCount ?? 0}</div>
+            <div className="mt-1 text-xs text-[hsl(var(--muted))]">end date ≥ today</div>
+          </CardContent></Card>
 
-          <Card hover>
-            <CardContent>
-              <div className="text-sm text-[hsl(var(--muted))]">Active (sessions)</div>
-              <div className="mt-1 text-2xl font-semibold">{activeSessionsCount ?? 0}</div>
-              <div className="mt-1 text-xs text-[hsl(var(--muted))]">end date ≥ today</div>
-            </CardContent>
-          </Card>
+          <Card hover><CardContent>
+            <div className="text-sm text-[hsl(var(--muted))]">Active (sessions)</div>
+            <div className="mt-1 text-2xl font-semibold">{activeSessionsCount ?? 0}</div>
+            <div className="mt-1 text-xs text-[hsl(var(--muted))]">end date ≥ today</div>
+          </CardContent></Card>
 
-          <Card hover>
-            <CardContent>
-              <div className="text-sm text-[hsl(var(--muted))]">Expired (all)</div>
-              <div className="mt-1 text-2xl font-semibold">{expiredCount ?? 0}</div>
-              <div className="mt-1 text-xs text-[hsl(var(--muted))]">status = expired</div>
-            </CardContent>
-          </Card>
+          <Card hover><CardContent>
+            <div className="text-sm text-[hsl(var(--muted))]">Expired (all)</div>
+            <div className="mt-1 text-2xl font-semibold">{expiredCount ?? 0}</div>
+            <div className="mt-1 text-xs text-[hsl(var(--muted))]">status = expired</div>
+          </CardContent></Card>
 
-          <Card hover>
-            <CardContent>
-              <div className="text-sm text-[hsl(var(--muted))]">Attendance today</div>
-              <div className="mt-1 text-2xl font-semibold">{attendanceToday ?? 0}</div>
-              <div className="mt-1 text-xs text-[hsl(var(--muted))]">date = {today}</div>
-            </CardContent>
-          </Card>
+          <Card hover><CardContent>
+            <div className="text-sm text-[hsl(var(--muted))]">Attendance today</div>
+            <div className="mt-1 text-2xl font-semibold">{attendanceToday ?? 0}</div>
+            <div className="mt-1 text-xs text-[hsl(var(--muted))]">date = {today}</div>
+          </CardContent></Card>
         </div>
       </Section>
 
-      {/* Breakdown Active by plan */}
       <Section>
         <h2 className="text-lg font-semibold mb-3">Active subscriptions (by plan)</h2>
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
@@ -152,27 +141,15 @@ export default async function AdminPage() {
             <Card key={p}>
               <CardContent>
                 <div className="text-sm text-[hsl(var(--muted))]">
-                  {p === 'sessions'
-                    ? 'Per sessions'
-                    : p === '1m'
-                    ? '1 month'
-                    : p === '3m'
-                    ? '3 months'
-                    : p === '6m'
-                    ? '6 months'
-                    : '12 months'}
+                  {p === 'sessions' ? 'Per sessions' : p === '1m' ? '1 month' : p === '3m' ? '3 months' : p === '6m' ? '6 months' : '12 months'}
                 </div>
                 <div className="mt-1 text-xl font-semibold">{byPlan[p] ?? 0}</div>
               </CardContent>
             </Card>
           ))}
         </div>
-        <div className="mt-3 text-xs text-[hsl(var(--muted))]">
-          * Calculated on subscriptions with status = active & end_date ≥ today.
-        </div>
       </Section>
 
-      {/* Store KPIs */}
       <Section>
         <h2 className="text-lg font-semibold mb-3">Store</h2>
         <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-6">
@@ -185,10 +162,9 @@ export default async function AdminPage() {
         </div>
       </Section>
 
-      {/* Exports + Revenue */}
       <Section className="space-y-4">
         <div className="flex flex-wrap gap-2">
-          <Button asChild href="/admin/members" variant="outline">Members</Button>
+          <Button asChild href="/members" variant="outline">Members</Button>
           <Button asChild href="/admin/categories" variant="outline">Expense Categories</Button>
           <Button asChild href="/expenses" variant="outline">Expenses</Button>
           <Button asChild href="/store/admin" variant="outline">Store Admin</Button>

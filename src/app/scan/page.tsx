@@ -1,13 +1,14 @@
-// src/app/scan/page.tsx
+// app/scan/page.tsx
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
 import { redirect } from 'next/navigation'
-import { getSessionUser, type Role } from '@/lib/session'
+import { getSessionUser } from '@/lib/session'
+import KioskScanner from '@/components/KioskScanner'
+import type { Role } from '@/lib/session'
 import PageHeader from '@/components/layout/PageHeader'
 import Section from '@/components/layout/Section'
-import AccessDeniedCard from '@/components/AccessDeniedCard'
-import KioskScanner from '@/components/KioskScanner'
+import AccessDeniedPage from '@/components/AccessDeniedPage'
 
 function canAccess(role: Role) {
   return role === 'reception' || role === 'admin' || role === 'super_admin'
@@ -15,21 +16,21 @@ function canAccess(role: Role) {
 
 export default async function ScanPage() {
   const user = await getSessionUser()
-  if (!user) redirect(`/login?next=${encodeURIComponent('/scan')}`)
+
+  if (!user) redirect('/login?next=/scan')
 
   if (!canAccess(user.role)) {
     return (
-      <main>
-        <PageHeader title="Scan" subtitle="Access restricted" />
-        <Section className="max-w-3xl">
-          <AccessDeniedCard
-            title="Forbidden"
-            message="Only Reception / Admin / Super Admin can access the scanner."
-            nextPath="/scan"
-            showBackHome
-          />
-        </Section>
-      </main>
+      <AccessDeniedPage
+        title="Scan — Check-in & Validity"
+        subtitle="Access restricted."
+        signedInAs={user.email}
+        message="Only Reception / Admin / Super Admin can access the scanner."
+        allowed="reception, admin, super_admin"
+        nextPath="/scan"
+        actions={[{ href: '/members', label: 'Go to Members' }]}
+        showBackHome
+      />
     )
   }
 
