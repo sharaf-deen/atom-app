@@ -4,30 +4,32 @@ export const revalidate = 0
 
 import { redirect } from 'next/navigation'
 import { getSessionUser } from '@/lib/session'
+import ExpensesPageClient from '@/components/ExpensesPageClient'
 import PageHeader from '@/components/layout/PageHeader'
 import Section from '@/components/layout/Section'
-import ExpensesPageClient from '@/components/ExpensesPageClient'
 import AccessDeniedCard from '@/components/AccessDeniedCard'
 
-function isAdmin(role?: string | null) {
-  return role === 'admin' || role === 'super_admin'
+function canAccess(role?: string | null) {
+  return role === 'reception' || role === 'admin' || role === 'super_admin'
 }
 
 export default async function ExpensesPage() {
   const me = await getSessionUser()
+
   if (!me) redirect('/login?next=/expenses')
 
-  if (!isAdmin(me.role)) {
+  if (!canAccess(me.role)) {
     return (
       <main>
-        <PageHeader title="Expenses" subtitle="Access restricted" />
+        <PageHeader title="Expenses" subtitle="Forbidden." />
         <Section className="max-w-2xl">
           <AccessDeniedCard
             signedInAs={me.email}
-            nextPath="/expenses"
             title="Forbidden"
-            message="You don’t have permission to access the expenses page."
-            allowed="Admin, Super Admin"
+            message="Only Reception / Admin / Super Admin can access expenses."
+            allowed="reception, admin, super_admin"
+            nextPath="/expenses"
+            showBackHome
           />
         </Section>
       </main>
@@ -36,8 +38,8 @@ export default async function ExpensesPage() {
 
   return (
     <main>
-      <PageHeader title="Atom Expenses" subtitle="Track and manage expenses" />
-      <Section className="max-w-3xl mx-auto space-y-6">
+      <PageHeader title="Expenses" subtitle="Track & review expenses" />
+      <Section className="max-w-3xl space-y-6">
         <ExpensesPageClient userRole={me.role} />
       </Section>
     </main>

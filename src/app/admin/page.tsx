@@ -2,15 +2,17 @@
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
+import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { createSupabaseRSC } from '@/lib/supabaseServer'
 import { getSessionUser } from '@/lib/session'
 import PageHeader from '@/components/layout/PageHeader'
 import Section from '@/components/layout/Section'
 import { Card, CardContent } from '@/components/ui/Card'
+import Button from '@/components/ui/Button'
 import AdminExports from '@/components/AdminExports'
 import AdminRevenue from '@/components/AdminRevenue'
-import AccessDeniedCard from '@/components/AccessDeniedCard'
+import AccessDeniedPage from '@/components/AccessDeniedPage'
 
 type Plan = '1m' | '3m' | '6m' | '12m' | 'sessions'
 
@@ -26,27 +28,20 @@ function tomorrowDateOnly(d: string) {
 
 export default async function AdminPage() {
   const me = await getSessionUser()
-  if (!me) redirect(`/login?next=${encodeURIComponent('/admin')}`)
 
-  // Reception : pas d'accès au dashboard admin, mais accès Members
-  if (me.role === 'reception') {
-    redirect('/members')
-  }
+  if (!me) redirect('/login?next=/admin')
 
-  // Admin dashboard : admin / super_admin only
   if (!['admin', 'super_admin'].includes(me.role)) {
     return (
-      <main>
-        <PageHeader title="Admin" subtitle="Access restricted" />
-        <Section>
-          <AccessDeniedCard
-            title="Forbidden"
-            message="Only Admin / Super Admin can access this dashboard."
-            nextPath="/admin"
-            showBackHome
-          />
-        </Section>
-      </main>
+      <AccessDeniedPage
+        title="Admin"
+        subtitle="Forbidden."
+        signedInAs={me.email}
+        message="Only Admin / Super Admin can access the admin dashboard."
+        allowed="admin, super_admin"
+        nextPath="/admin"
+        showBackHome
+      />
     )
   }
 
@@ -80,14 +75,14 @@ export default async function AdminPage() {
     .eq('valid', true)
     .eq('date', today)
 
-  const { data: activeRows } = await supa
+  const { data: activeRows } = (await supa
     .from('subscriptions')
     .select('plan, status, end_date')
     .eq('status', 'active')
     .gte('end_date', today)
-    .limit(5000) as {
-      data: Array<{ plan: Plan; status: string | null; end_date: string | null }> | null
-    }
+    .limit(5000)) as {
+    data: Array<{ plan: Plan; status: string | null; end_date: string | null }> | null
+  }
 
   const byPlan: Record<Plan, number> = { '1m': 0, '3m': 0, '6m': 0, '12m': 0, sessions: 0 }
   for (const r of activeRows ?? []) {
@@ -157,7 +152,15 @@ export default async function AdminPage() {
             <Card key={p}>
               <CardContent>
                 <div className="text-sm text-[hsl(var(--muted))]">
-                  {p === 'sessions' ? 'Per sessions' : p === '1m' ? '1 month' : p === '3m' ? '3 months' : p === '6m' ? '6 months' : '12 months'}
+                  {p === 'sessions'
+                    ? 'Per sessions'
+                    : p === '1m'
+                    ? '1 month'
+                    : p === '3m'
+                    ? '3 months'
+                    : p === '6m'
+                    ? '6 months'
+                    : '12 months'}
                 </div>
                 <div className="mt-1 text-xl font-semibold">{byPlan[p] ?? 0}</div>
               </CardContent>
@@ -178,12 +181,30 @@ export default async function AdminPage() {
           <Card><CardContent><div className="text-sm text-[hsl(var(--muted))]">Confirmed</div><div className="mt-1 text-2xl font-semibold">{confirmedCount ?? 0}</div></CardContent></Card>
           <Card><CardContent><div className="text-sm text-[hsl(var(--muted))]">Delivered</div><div className="mt-1 text-2xl font-semibold">{deliveredCount ?? 0}</div></CardContent></Card>
           <Card><CardContent><div className="text-sm text-[hsl(var(--muted))]">Canceled</div><div className="mt-1 text-2xl font-semibold">{canceledCount ?? 0}</div></CardContent></Card>
-          <Card><CardContent><div className="text-sm text-[hsl(var(--muted))]">Orders today</div><div className="mt-1 text-2xl font-semibold">{storeTodayCount ?? 0}</div><div className="mt-1 text-xs text-[hsl(var(--muted))]">{today}</div></CardContent></Card>
+          <Card><CardContent><div className="text-sm text-[hsl(var(--muted))]">Orders today</div><div className="mt-1 text-2xl font-semibold">{storeTodayCount ?? 0}</div></CardContent></Card>
         </div>
       </Section>
 
-      <Section><AdminRevenue /></Section>
-      <Section><AdminExports /></Section>
+      {/* Exports + Revenue */}
+      <Section className="space-y-4">
+        <div className="flex flex-wrap gap-2">
+          <Button asChild href="/admin/members" variant="outline">Members</Button>
+          <Button asChild href="/admin/categories" variant="outline">Expense Categories</Button>
+          <Button asChild href="/expenses" variant="outline">Expenses</Button>
+          <Button asChild href="/store/admin" variant="outline">Store Admin</Button>
+        </div>
+
+        <div className="grid gap-4 lg:grid-cols-2">
+          <AdminRevenue />
+          <AdminExports />
+        </div>
+      </Section>
+
+      <Section>
+        <div className="text-xs text-[hsl(var(--muted))]">
+          <Link href="/" className="underline">Back to home</Link>
+        </div>
+      </Section>
     </main>
   )
 }
