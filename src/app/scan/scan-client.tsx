@@ -3,9 +3,15 @@
 import { useEffect, useRef, useState } from 'react'
 import { Html5QrcodeScanner } from 'html5-qrcode'
 
+type Status = { kind: 'neutral' | 'ok' | 'bad' | 'info'; text: string }
+
 export default function ScanClient() {
-  const [msg, setMsg] = useState('Point the camera at a member QR…')
+  const [status, setStatus] = useState<Status>({
+    kind: 'neutral',
+    text: 'Point the camera at a member QR…',
+  })
   const [busy, setBusy] = useState(false)
+
   const containerRef = useRef<HTMLDivElement>(null)
   const lastCodeRef = useRef<string>('')
   const lastTimeRef = useRef<number>(0)
@@ -13,10 +19,13 @@ export default function ScanClient() {
   useEffect(() => {
     if (!containerRef.current) return
 
-    // IMPORTANT: l'id DOIT matcher le 1er argument du scanner
     const elementId = 'qr-reader'
 
-    const scanner = new Html5QrcodeScanner(elementId, { fps: 10, qrbox: 250 }, /* verbose */ false)
+    const scanner = new Html5QrcodeScanner(
+      elementId,
+      { fps: 10, qrbox: 250 },
+      /* verbose */ false
+    )
 
     const onScanSuccess = async (decodedText: string) => {
       // anti-double scan: 2s
@@ -26,7 +35,8 @@ export default function ScanClient() {
       lastTimeRef.current = now
 
       setBusy(true)
-      setMsg('Checking validity…')
+      setStatus({ kind: 'info', text: 'Checking validity…' })
+
       try {
         const res = await fetch('/api/scan', {
           method: 'POST',
@@ -37,17 +47,16 @@ export default function ScanClient() {
         const json = await res.json().catch(() => ({} as any))
 
         if (res.ok && json?.ok) {
-          setMsg(`✅ ${json?.message || 'Access granted.'}`)
+          setStatus({ kind: 'ok', text: json?.message || 'Access granted.' })
         } else {
-          // keep it consistent with the rest of the app
-          const m =
+          const msg =
             json?.message ||
             json?.error ||
             (res.status === 401 ? 'Not authenticated.' : 'Access restricted.')
-          setMsg(`❌ ${m}`)
+          setStatus({ kind: 'bad', text: msg })
         }
       } catch {
-        setMsg('❌ Error verifying QR.')
+        setStatus({ kind: 'bad', text: 'Error verifying QR.' })
       } finally {
         setBusy(false)
       }
@@ -64,13 +73,13 @@ export default function ScanClient() {
     }
   }, [])
 
-  const variant = msg.startsWith('✅') ? 'ok' : msg.startsWith('❌') ? 'bad' : 'neutral'
-
   const boxClass =
-    variant === 'ok'
+    status.kind === 'ok'
       ? 'bg-emerald-50 border-emerald-300 text-emerald-900'
-      : variant === 'bad'
+      : status.kind === 'bad'
       ? 'bg-rose-50 border-rose-300 text-rose-900'
+      : status.kind === 'info'
+      ? 'bg-amber-50 border-amber-300 text-amber-900'
       : 'bg-[hsl(var(--card))] border-[hsl(var(--border))] text-[hsl(var(--text))]'
 
   return (
@@ -84,7 +93,8 @@ export default function ScanClient() {
       <div className={`rounded-2xl border p-3 shadow-soft ${boxClass}`}>
         <div className="text-sm">
           {busy ? <span className="mr-2 text-[hsl(var(--muted))]">Working…</span> : null}
-          {msg}
+          {status.kind === 'ok' ? '✅ ' : status.kind === 'bad' ? '❌ ' : ''}
+          {status.text}
         </div>
       </div>
 
