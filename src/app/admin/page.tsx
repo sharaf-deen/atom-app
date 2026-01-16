@@ -31,13 +31,14 @@ export default async function AdminPage() {
     redirect('/login?next=/admin')
   }
 
-  // ✅ reception => Members
+  // Reception -> Members
   if (me.role === 'reception') {
     redirect('/admin/members')
   }
 
-  // ✅ admin only dashboard
+  // Admin dashboard only
   if (!['admin', 'super_admin'].includes(me.role)) {
+    const logoutNext = '/admin'
     return (
       <main>
         <PageHeader title="Admin" subtitle="Access restricted" />
@@ -59,6 +60,13 @@ export default async function AdminPage() {
               </Link>
               <Link href="/profile" className="border rounded-lg px-4 py-2 text-sm hover:bg-gray-50">
                 My profile
+              </Link>
+
+              <Link
+                href={`/logout?next=${encodeURIComponent(logoutNext)}`}
+                className="border rounded-lg px-4 py-2 text-sm hover:bg-gray-50"
+              >
+                Switch account
               </Link>
             </div>
           </div>
@@ -96,27 +104,6 @@ export default async function AdminPage() {
     .eq('valid', true)
     .eq('date', today)
 
-  const { data: activeRows } = (await supa
-    .from('subscriptions')
-    .select('plan, status, end_date')
-    .eq('status', 'active')
-    .gte('end_date', today)
-    .limit(5000)) as {
-    data: Array<{ plan: Plan; status: string | null; end_date: string | null }> | null
-  }
-
-  const byPlan: Record<Plan, number> = { '1m': 0, '3m': 0, '6m': 0, '12m': 0, sessions: 0 }
-  for (const r of activeRows ?? []) {
-    if (r.plan && (['1m', '3m', '6m', '12m', 'sessions'] as Plan[]).includes(r.plan)) {
-      byPlan[r.plan] = (byPlan[r.plan] ?? 0) + 1
-    }
-  }
-
-  const { count: readyCount } = await supa.from('store_orders').select('id', { count: 'exact', head: true }).eq('status', 'ready')
-  const { count: pendingCount } = await supa.from('store_orders').select('id', { count: 'exact', head: true }).eq('status', 'pending')
-  const { count: confirmedCount } = await supa.from('store_orders').select('id', { count: 'exact', head: true }).eq('status', 'confirmed')
-  const { count: deliveredCount } = await supa.from('store_orders').select('id', { count: 'exact', head: true }).eq('status', 'delivered')
-  const { count: canceledCount } = await supa.from('store_orders').select('id', { count: 'exact', head: true }).eq('status', 'canceled')
   const { count: storeTodayCount } = await supa
     .from('store_orders')
     .select('id', { count: 'exact', head: true })
@@ -157,10 +144,14 @@ export default async function AdminPage() {
             <CardContent>
               <div className="text-sm text-[hsl(var(--muted))]">Attendance today</div>
               <div className="mt-1 text-2xl font-semibold">{attendanceToday ?? 0}</div>
-              <div className="mt-1 text-xs text-[hsl(var(--muted))]">date = {today}</div>
+              <div className="mt-1 text-xs text-[hsl(var(--muted))]">today</div>
             </CardContent>
           </Card>
         </div>
+      </Section>
+
+      <Section>
+        <div className="text-sm text-gray-600">Store orders today: {storeTodayCount ?? 0}</div>
       </Section>
 
       <Section>

@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
+import { useSearchParams } from 'next/navigation'
 import { createSupabaseBrowserClient } from '@/lib/supabaseBrowser'
 
 type Role = 'member' | 'assistant_coach' | 'coach' | 'reception' | 'admin' | 'super_admin'
@@ -16,8 +17,21 @@ type Member = {
 
 const OPS: Role[] = ['reception', 'admin', 'super_admin']
 
+function sanitizeNext(next: string | null) {
+  if (!next) return '/'
+  const n = next.trim()
+  if (!n.startsWith('/')) return '/'
+  if (n.startsWith('//')) return '/'
+  if (n.includes('://')) return '/'
+  if (n.includes('\\')) return '/'
+  return n || '/'
+}
+
 export default function MembersPage() {
   const supabase = useMemo(() => createSupabaseBrowserClient(), [])
+  const searchParams = useSearchParams()
+  const nextAfterLogout = useMemo(() => sanitizeNext(searchParams.get('next')), [searchParams])
+
   const [meRole, setMeRole] = useState<Role | null>(null)
   const [meEmail, setMeEmail] = useState<string>('')
   const [loadingMe, setLoadingMe] = useState(true)
@@ -91,6 +105,7 @@ export default function MembersPage() {
   }
 
   if (!canView) {
+    const logoutNext = nextAfterLogout || '/admin/members'
     return (
       <main className="p-6 max-w-2xl">
         <h1 className="text-2xl font-bold">Members</h1>
@@ -116,6 +131,12 @@ export default function MembersPage() {
             <Link href="/profile" className="border rounded-lg px-4 py-2 text-sm hover:bg-gray-50">
               My profile
             </Link>
+            <Link
+              href={`/logout?next=${encodeURIComponent(logoutNext)}`}
+              className="border rounded-lg px-4 py-2 text-sm hover:bg-gray-50"
+            >
+              Switch account
+            </Link>
           </div>
         </div>
       </main>
@@ -128,13 +149,13 @@ export default function MembersPage() {
 
       <div className="flex gap-2 flex-wrap items-center">
         <input
-          className="border px-3 py-2"
+          className="border px-3 py-2 rounded-lg"
           placeholder="Search name, email, phone"
           value={q}
           onChange={(e) => setQ(e.target.value)}
         />
 
-        <select className="border px-3 py-2" value={role} onChange={(e) => setRole(e.target.value)}>
+        <select className="border px-3 py-2 rounded-lg" value={role} onChange={(e) => setRole(e.target.value)}>
           <option value="">All roles</option>
           <option value="member">Member</option>
           <option value="assistant_coach">Assistant Coach</option>
@@ -144,7 +165,7 @@ export default function MembersPage() {
           <option value="super_admin">Super Admin</option>
         </select>
 
-        <button onClick={fetchMembers} className="border px-4 py-2 rounded">
+        <button onClick={fetchMembers} className="border px-4 py-2 rounded-lg hover:bg-gray-50">
           Search
         </button>
 
