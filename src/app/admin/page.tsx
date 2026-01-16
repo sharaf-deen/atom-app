@@ -31,7 +31,7 @@ export default async function AdminPage() {
     redirect('/login?next=/admin')
   }
 
-  // ✅ réception => va sur Members directement
+  // ✅ reception => Members
   if (me.role === 'reception') {
     redirect('/admin/members')
   }
@@ -40,11 +40,28 @@ export default async function AdminPage() {
   if (!['admin', 'super_admin'].includes(me.role)) {
     return (
       <main>
-        <PageHeader title="Admin" subtitle="Forbidden." />
-        <div className="p-6">
-          <Link href="/" className="underline">
-            Back to home
-          </Link>
+        <PageHeader title="Admin" subtitle="Access restricted" />
+        <div className="p-6 max-w-2xl">
+          <div className="rounded-2xl border bg-white p-5 space-y-2">
+            <div className="text-sm text-gray-600">
+              You’re signed in as <span className="font-medium">{me.email}</span>.
+            </div>
+
+            <div className="text-base font-semibold">You don’t have permission to access Admin.</div>
+
+            <div className="text-sm text-gray-600">
+              If you believe this is a mistake, please contact an administrator to request access.
+            </div>
+
+            <div className="flex gap-2 flex-wrap pt-2">
+              <Link href="/" className="border rounded-lg px-4 py-2 text-sm hover:bg-gray-50">
+                Back to home
+              </Link>
+              <Link href="/profile" className="border rounded-lg px-4 py-2 text-sm hover:bg-gray-50">
+                My profile
+              </Link>
+            </div>
+          </div>
         </div>
       </main>
     )
@@ -143,42 +160,6 @@ export default async function AdminPage() {
               <div className="mt-1 text-xs text-[hsl(var(--muted))]">date = {today}</div>
             </CardContent>
           </Card>
-        </div>
-      </Section>
-
-      <Section>
-        <h2 className="text-lg font-semibold mb-3">Active subscriptions (by plan)</h2>
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-          {(['1m', '3m', '6m', '12m', 'sessions'] as Plan[]).map((p) => (
-            <Card key={p}>
-              <CardContent>
-                <div className="text-sm text-[hsl(var(--muted))]">
-                  {p === 'sessions'
-                    ? 'Per sessions'
-                    : p === '1m'
-                    ? '1 month'
-                    : p === '3m'
-                    ? '3 months'
-                    : p === '6m'
-                    ? '6 months'
-                    : '12 months'}
-                </div>
-                <div className="mt-1 text-xl font-semibold">{byPlan[p] ?? 0}</div>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
-      </Section>
-
-      <Section>
-        <h2 className="text-lg font-semibold mb-3">Store</h2>
-        <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-6">
-          <Card><CardContent><div className="text-sm text-[hsl(var(--muted))]">Ready</div><div className="mt-1 text-2xl font-semibold">{readyCount ?? 0}</div></CardContent></Card>
-          <Card><CardContent><div className="text-sm text-[hsl(var(--muted))]">Pending</div><div className="mt-1 text-2xl font-semibold">{pendingCount ?? 0}</div></CardContent></Card>
-          <Card><CardContent><div className="text-sm text-[hsl(var(--muted))]">Confirmed</div><div className="mt-1 text-2xl font-semibold">{confirmedCount ?? 0}</div></CardContent></Card>
-          <Card><CardContent><div className="text-sm text-[hsl(var(--muted))]">Delivered</div><div className="mt-1 text-2xl font-semibold">{deliveredCount ?? 0}</div></CardContent></Card>
-          <Card><CardContent><div className="text-sm text-[hsl(var(--muted))]">Canceled</div><div className="mt-1 text-2xl font-semibold">{canceledCount ?? 0}</div></CardContent></Card>
-          <Card><CardContent><div className="text-sm text-[hsl(var(--muted))]">Orders today</div><div className="mt-1 text-2xl font-semibold">{storeTodayCount ?? 0}</div><div className="mt-1 text-xs text-[hsl(var(--muted))]">{today}</div></CardContent></Card>
         </div>
       </Section>
 

@@ -19,6 +19,7 @@ const OPS: Role[] = ['reception', 'admin', 'super_admin']
 export default function MembersPage() {
   const supabase = useMemo(() => createSupabaseBrowserClient(), [])
   const [meRole, setMeRole] = useState<Role | null>(null)
+  const [meEmail, setMeEmail] = useState<string>('')
   const [loadingMe, setLoadingMe] = useState(true)
 
   const [q, setQ] = useState('')
@@ -38,6 +39,8 @@ export default function MembersPage() {
         window.location.replace('/login?next=/admin/members')
         return
       }
+
+      setMeEmail(u.email ?? '')
 
       const { data: prof } = await supabase
         .from('profiles')
@@ -89,11 +92,31 @@ export default function MembersPage() {
 
   if (!canView) {
     return (
-      <main className="p-6">
+      <main className="p-6 max-w-2xl">
         <h1 className="text-2xl font-bold">Members</h1>
-        <p>Access denied.</p>
-        <div className="mt-4">
-          <Link href="/" className="underline">Back to home</Link>
+
+        <div className="mt-4 rounded-2xl border bg-white p-5 space-y-2">
+          <div className="text-sm text-gray-600">
+            You’re signed in as <span className="font-medium">{meEmail || 'unknown'}</span>.
+          </div>
+
+          <div className="text-base font-semibold">Access restricted</div>
+
+          <div className="text-sm text-gray-600">
+            This page is limited to <span className="font-medium">Reception</span> and{' '}
+            <span className="font-medium">Admins</span>.
+            <br />
+            If you need access, please contact an administrator.
+          </div>
+
+          <div className="flex gap-2 flex-wrap pt-2">
+            <Link href="/" className="border rounded-lg px-4 py-2 text-sm hover:bg-gray-50">
+              Back to home
+            </Link>
+            <Link href="/profile" className="border rounded-lg px-4 py-2 text-sm hover:bg-gray-50">
+              My profile
+            </Link>
+          </div>
         </div>
       </main>
     )
