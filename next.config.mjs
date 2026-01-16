@@ -4,7 +4,7 @@ const SUPABASE_HOST = SUPABASE_URL ? new URL(SUPABASE_URL).host : undefined
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   experimental: {
-    serverActions: { bodySizeLimit: '2mb' },
+    serverActions: true,
   },
   eslint: { ignoreDuringBuilds: true },
   typescript: { ignoreBuildErrors: false },
