@@ -9,14 +9,13 @@ import { getSessionUser } from '@/lib/session'
 import PageHeader from '@/components/layout/PageHeader'
 import Section from '@/components/layout/Section'
 import { Card, CardContent } from '@/components/ui/Card'
-import Button from '@/components/ui/Button'
 import AdminExports from '@/components/AdminExports'
 import AdminRevenue from '@/components/AdminRevenue'
 
 type Plan = '1m' | '3m' | '6m' | '12m' | 'sessions'
 
 function todayDateOnly() {
-  return new Date().toISOString().slice(0, 10) // YYYY-MM-DD (UTC)
+  return new Date().toISOString().slice(0, 10)
 }
 function tomorrowDateOnly(d: string) {
   const [y, m, day] = d.split('-').map(Number)
@@ -28,12 +27,16 @@ function tomorrowDateOnly(d: string) {
 export default async function AdminPage() {
   const me = await getSessionUser()
 
-  // ✅ si pas connecté => redirige vers login (avec next=/admin)
   if (!me) {
     redirect('/login?next=/admin')
   }
 
-  // ✅ si connecté mais pas admin => forbidden
+  // ✅ réception => va sur Members directement
+  if (me.role === 'reception') {
+    redirect('/admin/members')
+  }
+
+  // ✅ admin only dashboard
   if (!['admin', 'super_admin'].includes(me.role)) {
     return (
       <main>
@@ -51,7 +54,6 @@ export default async function AdminPage() {
   const today = todayDateOnly()
   const tomorrow = tomorrowDateOnly(today)
 
-  // --- KPI queries (unchanged) ---
   const { count: activeTimeCount } = await supa
     .from('subscriptions')
     .select('id', { count: 'exact', head: true })
@@ -93,7 +95,6 @@ export default async function AdminPage() {
     }
   }
 
-  // Store KPIs
   const { count: readyCount } = await supa.from('store_orders').select('id', { count: 'exact', head: true }).eq('status', 'ready')
   const { count: pendingCount } = await supa.from('store_orders').select('id', { count: 'exact', head: true }).eq('status', 'pending')
   const { count: confirmedCount } = await supa.from('store_orders').select('id', { count: 'exact', head: true }).eq('status', 'confirmed')
@@ -109,7 +110,6 @@ export default async function AdminPage() {
     <main>
       <PageHeader title="Admin" subtitle="Overview and operations" />
 
-      {/* KPI Cards (Membership) */}
       <Section>
         <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-4">
           <Card hover>
@@ -146,7 +146,6 @@ export default async function AdminPage() {
         </div>
       </Section>
 
-      {/* Breakdown Active by plan */}
       <Section>
         <h2 className="text-lg font-semibold mb-3">Active subscriptions (by plan)</h2>
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
@@ -169,66 +168,24 @@ export default async function AdminPage() {
             </Card>
           ))}
         </div>
-        <div className="mt-3 text-xs text-[hsl(var(--muted))]">
-          * Calculated on subscriptions with status = active & end_date ≥ today.
-        </div>
       </Section>
 
-      {/* Store KPIs */}
       <Section>
         <h2 className="text-lg font-semibold mb-3">Store</h2>
         <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-6">
-          <Card>
-            <CardContent>
-              <div className="text-sm text-[hsl(var(--muted))]">Ready</div>
-              <div className="mt-1 text-2xl font-semibold">{readyCount ?? 0}</div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardContent>
-              <div className="text-sm text-[hsl(var(--muted))]">Pending</div>
-              <div className="mt-1 text-2xl font-semibold">{pendingCount ?? 0}</div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardContent>
-              <div className="text-sm text-[hsl(var(--muted))]">Confirmed</div>
-              <div className="mt-1 text-2xl font-semibold">{confirmedCount ?? 0}</div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardContent>
-              <div className="text-sm text-[hsl(var(--muted))]">Delivered</div>
-              <div className="mt-1 text-2xl font-semibold">{deliveredCount ?? 0}</div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardContent>
-              <div className="text-sm text-[hsl(var(--muted))]">Canceled</div>
-              <div className="mt-1 text-2xl font-semibold">{canceledCount ?? 0}</div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardContent>
-              <div className="text-sm text-[hsl(var(--muted))]">Orders today</div>
-              <div className="mt-1 text-2xl font-semibold">{storeTodayCount ?? 0}</div>
-              <div className="mt-1 text-xs text-[hsl(var(--muted))]">{today}</div>
-            </CardContent>
-          </Card>
+          <Card><CardContent><div className="text-sm text-[hsl(var(--muted))]">Ready</div><div className="mt-1 text-2xl font-semibold">{readyCount ?? 0}</div></CardContent></Card>
+          <Card><CardContent><div className="text-sm text-[hsl(var(--muted))]">Pending</div><div className="mt-1 text-2xl font-semibold">{pendingCount ?? 0}</div></CardContent></Card>
+          <Card><CardContent><div className="text-sm text-[hsl(var(--muted))]">Confirmed</div><div className="mt-1 text-2xl font-semibold">{confirmedCount ?? 0}</div></CardContent></Card>
+          <Card><CardContent><div className="text-sm text-[hsl(var(--muted))]">Delivered</div><div className="mt-1 text-2xl font-semibold">{deliveredCount ?? 0}</div></CardContent></Card>
+          <Card><CardContent><div className="text-sm text-[hsl(var(--muted))]">Canceled</div><div className="mt-1 text-2xl font-semibold">{canceledCount ?? 0}</div></CardContent></Card>
+          <Card><CardContent><div className="text-sm text-[hsl(var(--muted))]">Orders today</div><div className="mt-1 text-2xl font-semibold">{storeTodayCount ?? 0}</div><div className="mt-1 text-xs text-[hsl(var(--muted))]">{today}</div></CardContent></Card>
         </div>
       </Section>
 
-      {/* Revenue dashboard */}
       <Section>
         <AdminRevenue />
       </Section>
 
-      {/* Exports (CSV) */}
       <Section>
         <AdminExports />
       </Section>

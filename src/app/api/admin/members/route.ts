@@ -4,15 +4,23 @@ export const revalidate = 0
 
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
-import { requireAdmin } from '@/lib/apiAuth'
+import { requireUser } from '@/lib/apiAuth'
+
+type Role = 'member' | 'assistant_coach' | 'coach' | 'reception' | 'admin' | 'super_admin'
+const OPS: Role[] = ['reception', 'admin', 'super_admin']
 
 export async function POST(req: NextRequest) {
-  const gate = await requireAdmin()
+  const gate = await requireUser()
   if (!gate.ok) return gate.res
+
+  if (!OPS.includes(gate.user.role as Role)) {
+    return NextResponse.json({ ok: false, error: 'FORBIDDEN' }, { status: 403 })
+  }
 
   const body = await req.json().catch(() => ({} as any))
   const q = typeof body.q === 'string' ? body.q : ''
   const role = typeof body.role === 'string' ? body.role : null
+
   const limitRaw = Number(body.limit ?? 50)
   const limit = Number.isFinite(limitRaw) ? Math.min(200, Math.max(1, Math.floor(limitRaw))) : 50
 
