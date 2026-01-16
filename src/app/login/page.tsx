@@ -9,7 +9,6 @@ function sanitizeNext(next: string | null) {
   if (!next) return '/'
   const n = next.trim()
 
-  // Only allow internal paths
   if (!n.startsWith('/')) return '/'
   if (n.startsWith('//')) return '/'
   if (n.includes('://')) return '/'
@@ -20,26 +19,26 @@ function sanitizeNext(next: string | null) {
 
 export default function LoginPage() {
   const searchParams = useSearchParams()
-
-  const nextUrl = useMemo(() => {
-    return sanitizeNext(searchParams.get('next'))
-  }, [searchParams])
+  const nextUrl = useMemo(() => sanitizeNext(searchParams.get('next')), [searchParams])
 
   const supabase = useMemo(() => createSupabaseBrowserClient(), [])
 
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+
   const [busy, setBusy] = useState(false)
+  const [status, setStatus] = useState<string>('') // info banner
   const [err, setErr] = useState<string>('')
 
-  // Si déjà connecté, redirige directement vers next (ou /)
+  // If already logged in -> redirect
   useEffect(() => {
     let mounted = true
     ;(async () => {
       const { data } = await supabase.auth.getSession()
       if (!mounted) return
       if (data.session) {
-        window.location.replace(nextUrl) // hard redirect pour que SSR/middleware voient la session
+        setStatus('You are already signed in. Redirecting…')
+        window.location.replace(nextUrl)
       }
     })()
     return () => {
@@ -50,16 +49,22 @@ export default function LoginPage() {
   async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
     setErr('')
+    setStatus('')
     setBusy(true)
 
     try {
+      setStatus('Signing in…')
+
       const { data, error } = await supabase.auth.signInWithPassword({ email, password })
       if (error) {
         setErr(error.message)
+        setStatus('')
         return
       }
 
-      // Sync cookies côté serveur (RSC/middleware)
+      setStatus('Syncing session…')
+
+      // Sync cookies server-side so middleware/RSC see the session
       const r = await fetch('/auth', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -69,13 +74,15 @@ export default function LoginPage() {
       if (!r.ok) {
         const j = await r.json().catch(() => ({}))
         setErr(j?.error ?? 'Server sync failed')
+        setStatus('')
         return
       }
 
-      // Redirect final vers next (ou /)
+      setStatus('Signed in. Redirecting…')
       window.location.replace(nextUrl)
     } catch {
       setErr('Network error')
+      setStatus('')
     } finally {
       setBusy(false)
     }
@@ -83,50 +90,67 @@ export default function LoginPage() {
 
   return (
     <main className="p-6 max-w-md mx-auto">
-      <h1 className="text-xl font-semibold mb-1">Login</h1>
-      <p className="text-sm text-gray-600 mb-4">
-        {nextUrl !== '/' ? `Continue to: ${nextUrl}` : 'Sign in to continue.'}
-      </p>
+      <div className="mb-4">
+        <h1 className="text-xl font-semibold">Login</h1>
+        <p className="text-sm text-gray-600">
+          {nextUrl !== '/' ? `Continue to: ${nextUrl}` : 'Sign in to continue.'}
+        </p>
+      </div>
 
-      <form onSubmit={onSubmit} className="grid gap-3 border rounded-xl p-4 bg-white">
+      {(!!status || !!err) && (
+        <div
+          className={`mb-3 rounded-xl border px-4 py-3 text-sm ${
+            err ? 'border-red-300 bg-red-50 text-red-700' : 'border-gray-200 bg-gray-50 text-gray-700'
+          }`}
+        >
+          {err || status}
+        </div>
+      )}
+
+      <form onSubmit={onSubmit} className="grid gap-3 border rounded-2xl p-5 bg-white shadow-sm">
         <label className="grid gap-1">
-          <span className="text-sm">Email</span>
+          <span className="text-sm font-medium">Email</span>
           <input
             type="email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            className="px-3 py-2 border rounded"
+            className="px-3 py-2 border rounded-lg"
             autoComplete="email"
             required
+            disabled={busy}
           />
         </label>
 
         <label className="grid gap-1">
-          <span className="text-sm">Password</span>
+          <span className="text-sm font-medium">Password</span>
           <input
             type="password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            className="px-3 py-2 border rounded"
+            className="px-3 py-2 border rounded-lg"
             autoComplete="current-password"
             required
             minLength={8}
+            disabled={busy}
           />
         </label>
 
-        <button disabled={busy} className="px-4 py-2 border rounded hover:bg-gray-50">
-          {busy ? 'Signing in…' : 'Sign in'}
+        <button
+          disabled={busy}
+          className={`mt-1 w-full rounded-lg px-4 py-2 text-sm font-medium ${
+            busy ? 'bg-gray-200 text-gray-500' : 'bg-black text-white hover:opacity-90'
+          }`}
+        >
+          {busy ? 'Please wait…' : 'Sign in'}
         </button>
 
-        {!!err && <div className="text-sm text-red-600">{err}</div>}
+        <div className="text-xs text-gray-500 space-y-1 pt-1">
+          <p>If you were invited, use the link from your email first to set your password.</p>
+          <p>
+            Forgot your password? <a className="underline" href="/reset">Reset here</a>
+          </p>
+        </div>
       </form>
-
-      <div className="mt-3 text-xs text-gray-500 space-y-1">
-        <p>If you were invited, use the link from your email first to set your password.</p>
-        <p>
-          Forgot your password? <a className="underline" href="/reset">Reset here</a>
-        </p>
-      </div>
     </main>
   )
 }
