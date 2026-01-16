@@ -3,10 +3,13 @@
 import { useEffect, useMemo, useState } from 'react'
 import { createSupabaseBrowserClient } from '@/lib/supabaseBrowser'
 import { endOfMonth, format, startOfMonth, subDays } from 'date-fns'
+import { toast } from 'sonner'
+
 import { Card, CardContent } from '@/components/ui/Card'
 import Button from '@/components/ui/Button'
 import Input from '@/components/ui/Input'
 import Select from '@/components/ui/Select'
+import InlineAlert from '@/components/ui/InlineAlert'
 
 type RangePreset = 'today' | '7d' | 'month' | 'custom'
 
@@ -46,6 +49,12 @@ export default function ExpensesPageClient({ userRole }: { userRole: string }) {
   const [loading, setLoading] = useState(true)
   const [loadingCats, setLoadingCats] = useState(true)
 
+  // QoL status (global)
+  const [status, setStatus] = useState<{ kind: '' | 'success' | 'error' | 'info'; msg: string }>({
+    kind: '',
+    msg: '',
+  })
+
   // Filters
   const [preset, setPreset] = useState<RangePreset>('month')
   const [from, setFrom] = useState<string>(() => toDateOnly(startOfMonth(new Date())))
@@ -59,6 +68,7 @@ export default function ExpensesPageClient({ userRole }: { userRole: string }) {
     description: '',
     amount: '',
   })
+  const [saving, setSaving] = useState(false)
 
   const canAdd = userRole === 'admin' || userRole === 'super_admin'
 
@@ -75,6 +85,7 @@ export default function ExpensesPageClient({ userRole }: { userRole: string }) {
     if (error) {
       console.error(error)
       setCategories([])
+      setStatus({ kind: 'error', msg: error.message || 'Failed to load categories.' })
     } else {
       setCategories((data || []) as ExpenseCategory[])
     }
@@ -95,6 +106,7 @@ export default function ExpensesPageClient({ userRole }: { userRole: string }) {
     if (error) {
       console.error(error)
       setExpenses([])
+      setStatus({ kind: 'error', msg: error.message || 'Failed to load expenses.' })
     } else {
       setExpenses((data || []) as Expense[])
     }
@@ -133,38 +145,61 @@ export default function ExpensesPageClient({ userRole }: { userRole: string }) {
   }
 
   async function reloadAll() {
-    await Promise.all([loadCategories(), loadExpenses(from, to)])
+    setStatus({ kind: 'info', msg: 'Reloading…' })
+    try {
+      await Promise.all([loadCategories(), loadExpenses(from, to)])
+      setStatus({ kind: '', msg: '' })
+    } catch (e: any) {
+      setStatus({ kind: 'error', msg: String(e?.message || e) })
+    }
   }
 
   async function addExpense(e: React.FormEvent) {
     e.preventDefault()
+    setStatus({ kind: '', msg: '' })
 
     const amt = parseFloat(newExpense.amount)
     if (Number.isNaN(amt)) {
-      alert('Invalid amount')
+      setStatus({ kind: 'error', msg: 'Invalid amount.' })
+      toast.error('Invalid amount')
       return
     }
     if (!newExpense.category_key) {
-      alert('Please choose a product')
+      setStatus({ kind: 'error', msg: 'Please choose a product.' })
+      toast.error('Please choose a product')
       return
     }
 
-    const { error } = await supabase.from('expenses').insert([
-      {
-        date: newExpense.date || new Date().toISOString().slice(0, 10),
-        category_key: newExpense.category_key,
-        description: newExpense.description.trim() || null,
-        amount: amt,
-      },
-    ])
+    setSaving(true)
+    setStatus({ kind: 'info', msg: 'Saving…' })
+
+    const payload = {
+      date: newExpense.date || new Date().toISOString().slice(0, 10),
+      category_key: newExpense.category_key,
+      description: newExpense.description.trim() || null,
+      amount: amt,
+    }
+
+    const { error } = await supabase.from('expenses').insert([payload])
 
     if (error) {
-      alert(error.message)
+      setSaving(false)
+      setStatus({ kind: 'error', msg: error.message || 'Save failed.' })
+      toast.error('Save failed')
       return
     }
 
     setNewExpense({ date: '', category_key: '', description: '', amount: '' })
     await loadExpenses(from, to)
+
+    setSaving(false)
+    setStatus({ kind: 'success', msg: 'Expense added.' })
+    toast.success('Expense added')
+
+    // Option: effacer le message success après 2s
+    setTimeout(() => {
+      setStatus((s) => (s.kind === 'success' ? { kind: '', msg: '' } : s))
+    }, 2000)
   }
 
   // Initial loads
@@ -206,7 +241,7 @@ export default function ExpensesPageClient({ userRole }: { userRole: string }) {
 
   const total = useMemo(() => {
     return filteredExpenses.reduce(
-      (sum, e) => sum + (typeof e.amount === 'number' ? e.amount : Number(e.amount || 0)),
+      (sum, e) => sum + (typeof e.amount === 'number' ? e.amount : Number((e as any).amount || 0)),
       0
     )
   }, [filteredExpenses])
@@ -215,7 +250,7 @@ export default function ExpensesPageClient({ userRole }: { userRole: string }) {
     const acc = new Map<string, number>()
     filteredExpenses.forEach((e) => {
       const key = e.category_key || 'other'
-      const amount = typeof e.amount === 'number' ? e.amount : Number(e.amount || 0)
+      const amount = typeof e.amount === 'number' ? e.amount : Number((e as any).amount || 0)
       acc.set(key, (acc.get(key) || 0) + amount)
     })
 
@@ -237,13 +272,30 @@ export default function ExpensesPageClient({ userRole }: { userRole: string }) {
 
   return (
     <div className="space-y-6">
+      {/* Global status */}
+      {status.msg ? (
+        <InlineAlert
+          variant={
+            status.kind === 'error'
+              ? 'error'
+              : status.kind === 'success'
+              ? 'success'
+              : status.kind === 'info'
+              ? 'info'
+              : 'info'
+          }
+        >
+          {status.msg}
+        </InlineAlert>
+      ) : null}
+
       {/* Add form (admins only) */}
       {canAdd && (
         <Card>
           <CardContent>
             <div className="flex items-center justify-between gap-3">
               <h2 className="text-lg font-semibold">Add expense</h2>
-              <Button type="button" variant="outline" size="sm" onClick={reloadAll} disabled={loading || loadingCats}>
+              <Button type="button" variant="outline" size="sm" onClick={reloadAll} disabled={loading || loadingCats || saving}>
                 Reload
               </Button>
             </div>
@@ -255,12 +307,13 @@ export default function ExpensesPageClient({ userRole }: { userRole: string }) {
                   value={newExpense.date}
                   onChange={(e) => setNewExpense({ ...newExpense, date: e.target.value })}
                   label="Date"
+                  disabled={saving}
                 />
 
                 <Select
                   value={newExpense.category_key}
                   onChange={(e) => setNewExpense({ ...newExpense, category_key: e.target.value })}
-                  disabled={loadingCats}
+                  disabled={loadingCats || saving}
                   required
                   label="Product"
                 >
@@ -284,6 +337,7 @@ export default function ExpensesPageClient({ userRole }: { userRole: string }) {
                   onChange={(e) => setNewExpense({ ...newExpense, amount: e.target.value })}
                   required
                   label="Amount (EGP)"
+                  disabled={saving}
                 />
               </div>
 
@@ -293,10 +347,13 @@ export default function ExpensesPageClient({ userRole }: { userRole: string }) {
                 value={newExpense.description}
                 onChange={(e) => setNewExpense({ ...newExpense, description: e.target.value })}
                 label="Description"
+                disabled={saving}
               />
 
               <div className="flex justify-end">
-                <Button type="submit" className="w-full sm:w-auto">Add Expense</Button>
+                <Button type="submit" className="w-full sm:w-auto" disabled={saving}>
+                  {saving ? 'Saving…' : 'Add Expense'}
+                </Button>
               </div>
             </form>
           </CardContent>
@@ -354,12 +411,7 @@ export default function ExpensesPageClient({ userRole }: { userRole: string }) {
               disabled={preset !== 'custom'}
               label="To"
             />
-            <Select
-              value={categoryFilter}
-              onChange={(e) => setCategoryFilter(e.target.value)}
-              disabled={loadingCats}
-              label="Product"
-            >
+            <Select value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)} disabled={loadingCats} label="Product">
               <option value="all">All products</option>
               {categoriesByGroup.map(([group, items]) => (
                 <optgroup key={group} label={group}>
@@ -385,14 +437,10 @@ export default function ExpensesPageClient({ userRole }: { userRole: string }) {
             <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4 shadow-soft">
               <div className="text-xs text-[hsl(var(--muted))]">Filter</div>
               <div className="mt-1 text-sm font-semibold truncate">
-                {categoryFilter === 'all'
-                  ? 'All products'
-                  : labelByKey.get(categoryFilter) || categoryFilter}
+                {categoryFilter === 'all' ? 'All products' : labelByKey.get(categoryFilter) || categoryFilter}
               </div>
               {categoryFilter !== 'all' && (
-                <div className="mt-1 text-xs text-[hsl(var(--muted))] truncate">
-                  {groupByKey.get(categoryFilter) || ''}
-                </div>
+                <div className="mt-1 text-xs text-[hsl(var(--muted))] truncate">{groupByKey.get(categoryFilter) || ''}</div>
               )}
             </div>
           </div>
@@ -464,9 +512,7 @@ export default function ExpensesPageClient({ userRole }: { userRole: string }) {
                   <span className="font-medium">{formatEGP(amt)}</span>
                 </li>
               ))}
-              {totalsByCategorySorted.length === 0 && (
-                <li className="text-sm text-[hsl(var(--muted))]">No data.</li>
-              )}
+              {totalsByCategorySorted.length === 0 && <li className="text-sm text-[hsl(var(--muted))]">No data.</li>}
             </ul>
           </CardContent>
         </Card>
