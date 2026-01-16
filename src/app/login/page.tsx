@@ -1,58 +1,65 @@
+// src/app/login/page.tsx
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { createSupabaseBrowserClient } from '@/lib/supabaseBrowser'
 
-function safeNext(input: string | null): string {
-  if (!input) return '/'
-  const v = input.trim()
-  // accepte uniquement un chemin relatif (sécurité)
-  if (v.startsWith('/') && !v.startsWith('//')) return v
-  return '/'
+function sanitizeNext(next: string | null) {
+  if (!next) return '/'
+  const n = next.trim()
+
+  // Only allow internal paths
+  if (!n.startsWith('/')) return '/'
+  if (n.startsWith('//')) return '/'
+  if (n.includes('://')) return '/'
+  if (n.includes('\\')) return '/'
+
+  return n || '/'
 }
 
 export default function LoginPage() {
-  const supabase = createSupabaseBrowserClient()
-  const sp = useSearchParams()
+  const searchParams = useSearchParams()
 
-  const next = useMemo(() => safeNext(sp.get('next') || sp.get('redirectedFrom')), [sp])
+  const nextUrl = useMemo(() => {
+    return sanitizeNext(searchParams.get('next'))
+  }, [searchParams])
+
+  const supabase = useMemo(() => createSupabaseBrowserClient(), [])
 
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [busy, setBusy] = useState(false)
-  const [err, setErr] = useState('')
-  const [info, setInfo] = useState('')
+  const [err, setErr] = useState<string>('')
 
-  // Si déjà connecté, redirige direct
+  // Si déjà connecté, redirige directement vers next (ou /)
   useEffect(() => {
     let mounted = true
     ;(async () => {
       const { data } = await supabase.auth.getSession()
       if (!mounted) return
-      if (data.session) window.location.replace(next || '/')
+      if (data.session) {
+        window.location.replace(nextUrl) // hard redirect pour que SSR/middleware voient la session
+      }
     })()
-    return () => { mounted = false }
-  }, [supabase, next])
+    return () => {
+      mounted = false
+    }
+  }, [supabase, nextUrl])
 
   async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
     setErr('')
-    setInfo('')
     setBusy(true)
 
     try {
       const { data, error } = await supabase.auth.signInWithPassword({ email, password })
       if (error) {
-        // message plus friendly
-        setErr(error.message.toLowerCase().includes('invalid')
-          ? 'Incorrect email or password.'
-          : error.message
-        )
+        setErr(error.message)
         return
       }
 
-      // ✅ Sync cookies serveur
+      // Sync cookies côté serveur (RSC/middleware)
       const r = await fetch('/auth', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -65,34 +72,8 @@ export default function LoginPage() {
         return
       }
 
-      // ✅ redirect propre
-      window.location.replace(next || '/')
-    } catch {
-      setErr('Network error')
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  async function sendResetLink() {
-    setErr('')
-    setInfo('')
-    if (!email.trim()) {
-      setErr('Enter your email first.')
-      return
-    }
-
-    setBusy(true)
-    try {
-      const origin = typeof window !== 'undefined' ? window.location.origin : ''
-      const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
-        redirectTo: `${origin}/reset`,
-      })
-      if (error) {
-        setErr(error.message)
-        return
-      }
-      setInfo('✅ Reset link sent. Check your email.')
+      // Redirect final vers next (ou /)
+      window.location.replace(nextUrl)
     } catch {
       setErr('Network error')
     } finally {
@@ -101,18 +82,15 @@ export default function LoginPage() {
   }
 
   return (
-    <main className="p-6 max-w-md mx-auto space-y-4">
-      <h1 className="text-2xl font-bold">Login</h1>
-
-      {next !== '/' && (
-        <div className="text-sm rounded-xl border bg-white p-3">
-          Please sign in to continue.
-        </div>
-      )}
+    <main className="p-6 max-w-md mx-auto">
+      <h1 className="text-xl font-semibold mb-1">Login</h1>
+      <p className="text-sm text-gray-600 mb-4">
+        {nextUrl !== '/' ? `Continue to: ${nextUrl}` : 'Sign in to continue.'}
+      </p>
 
       <form onSubmit={onSubmit} className="grid gap-3 border rounded-xl p-4 bg-white">
         <label className="grid gap-1">
-          <span className="text-sm font-medium">Email</span>
+          <span className="text-sm">Email</span>
           <input
             type="email"
             value={email}
@@ -124,7 +102,7 @@ export default function LoginPage() {
         </label>
 
         <label className="grid gap-1">
-          <span className="text-sm font-medium">Password</span>
+          <span className="text-sm">Password</span>
           <input
             type="password"
             value={password}
@@ -136,29 +114,19 @@ export default function LoginPage() {
           />
         </label>
 
-        <button
-          disabled={busy}
-          className={`px-4 py-2 border rounded ${busy ? 'opacity-60' : 'hover:bg-gray-50'}`}
-        >
+        <button disabled={busy} className="px-4 py-2 border rounded hover:bg-gray-50">
           {busy ? 'Signing in…' : 'Sign in'}
         </button>
 
-        <button
-          type="button"
-          onClick={sendResetLink}
-          disabled={busy}
-          className={`px-4 py-2 border rounded ${busy ? 'opacity-60' : 'hover:bg-gray-50'}`}
-        >
-          {busy ? 'Please wait…' : 'Forgot password? Send reset link'}
-        </button>
-
         {!!err && <div className="text-sm text-red-600">{err}</div>}
-        {!!info && <div className="text-sm text-green-700">{info}</div>}
       </form>
 
-      <p className="text-xs text-gray-500">
-        If you were invited, use the link from your email first to set your password.
-      </p>
+      <div className="mt-3 text-xs text-gray-500 space-y-1">
+        <p>If you were invited, use the link from your email first to set your password.</p>
+        <p>
+          Forgot your password? <a className="underline" href="/reset">Reset here</a>
+        </p>
+      </div>
     </main>
   )
 }
