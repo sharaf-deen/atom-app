@@ -15,6 +15,12 @@ function sanitizeNext(next: string | null) {
   return n || '/'
 }
 
+function loginUrl(nextUrl: string) {
+  return nextUrl && nextUrl !== '/'
+    ? `/login?next=${encodeURIComponent(nextUrl)}`
+    : '/login'
+}
+
 export default function SetPasswordPage() {
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -27,15 +33,18 @@ export default function SetPasswordPage() {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
+  const [checking, setChecking] = useState(true)
 
-  // Si pas de session (ex: page ouverte sans passer par l'invite), renvoyer vers login
+  // Require a session to set password (invite flow)
   useEffect(() => {
     ;(async () => {
+      setChecking(true)
       const { data } = await supabase.auth.getSession()
       if (!data.session) {
-        const dest = nextUrl && nextUrl !== '/' ? `/login?next=${encodeURIComponent(nextUrl)}` : '/login'
-        router.replace(dest)
+        router.replace(loginUrl(nextUrl))
+        return
       }
+      setChecking(false)
     })()
   }, [supabase, router, nextUrl])
 
@@ -63,7 +72,7 @@ export default function SetPasswordPage() {
       return
     }
 
-    // Optionnel: resync cookies server (safe)
+    // Resync cookies server side (safe)
     const { data: sess } = await supabase.auth.getSession()
     if (sess.session) {
       await fetch('/auth', {
@@ -76,70 +85,94 @@ export default function SetPasswordPage() {
     setBusy(false)
     setSuccess('Password set successfully. Redirecting…')
 
-    // ✅ Go to next directly (no need to login again)
     setTimeout(() => {
       window.location.replace(nextUrl || '/')
     }, 900)
   }
 
+  if (checking) {
+    return (
+      <main className="flex min-h-[70vh] items-center justify-center px-4">
+        <div className="w-full max-w-md rounded-2xl border bg-white p-6 shadow-sm text-sm text-gray-600">
+          Checking session…
+        </div>
+      </main>
+    )
+  }
+
   return (
-    <main className="flex min-h-[60vh] items-center justify-center">
-      <form
-        onSubmit={onSubmit}
-        className="w-full max-w-md rounded-2xl border bg-white p-6 shadow-soft space-y-4"
-      >
+    <main className="flex min-h-[70vh] items-center justify-center px-4">
+      <div className="w-full max-w-md rounded-2xl border bg-white p-6 shadow-sm">
         <h1 className="text-xl font-semibold">Set your password</h1>
-        <p className="text-sm text-gray-500">
-          Choose a password for your Atom Jiu-Jitsu account.
+        <p className="text-sm text-gray-500 mt-1">
+          Choose a password for your Atom account.
         </p>
 
-        {error && (
-          <div className="rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-700">
-            {error}
+        <form onSubmit={onSubmit} className="mt-5 space-y-3">
+          {error && (
+            <div className="rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-700">
+              {error}
+            </div>
+          )}
+          {success && (
+            <div className="rounded-lg border border-green-300 bg-green-50 px-3 py-2 text-sm text-green-700">
+              {success}
+            </div>
+          )}
+
+          <div className="space-y-1">
+            <label className="text-sm font-medium">New password</label>
+            <input
+              type="password"
+              className="w-full rounded-lg border px-3 py-2 text-sm"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              disabled={busy}
+              minLength={8}
+              required
+              autoComplete="new-password"
+            />
           </div>
-        )}
-        {success && (
-          <div className="rounded-lg border border-green-300 bg-green-50 px-3 py-2 text-sm text-green-700">
-            {success}
+
+          <div className="space-y-1">
+            <label className="text-sm font-medium">Confirm password</label>
+            <input
+              type="password"
+              className="w-full rounded-lg border px-3 py-2 text-sm"
+              value={confirm}
+              onChange={(e) => setConfirm(e.target.value)}
+              disabled={busy}
+              minLength={8}
+              required
+              autoComplete="new-password"
+            />
           </div>
-        )}
 
-        <div className="space-y-1">
-          <label className="text-sm font-medium">New password</label>
-          <input
-            type="password"
-            className="w-full rounded-lg border px-3 py-2 text-sm"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
+          <button
+            type="submit"
             disabled={busy}
-            minLength={8}
-            required
-          />
-        </div>
+            className={`w-full rounded-lg px-3 py-2 text-sm font-medium ${
+              busy ? 'bg-gray-200 text-gray-500' : 'bg-black text-white hover:opacity-90'
+            }`}
+          >
+            {busy ? 'Saving…' : 'Save password'}
+          </button>
 
-        <div className="space-y-1">
-          <label className="text-sm font-medium">Confirm password</label>
-          <input
-            type="password"
-            className="w-full rounded-lg border px-3 py-2 text-sm"
-            value={confirm}
-            onChange={(e) => setConfirm(e.target.value)}
+          <button
+            type="button"
+            onClick={() => router.replace(loginUrl(nextUrl))}
+            className="w-full rounded-lg border px-3 py-2 text-sm hover:bg-gray-50"
             disabled={busy}
-            minLength={8}
-            required
-          />
-        </div>
+          >
+            Back to login
+          </button>
 
-        <button
-          type="submit"
-          disabled={busy}
-          className={`w-full rounded-lg px-3 py-2 text-sm font-medium ${
-            busy ? 'bg-gray-200 text-gray-500' : 'bg-black text-white hover:opacity-90'
-          }`}
-        >
-          {busy ? 'Saving…' : 'Save password'}
-        </button>
-      </form>
+          <p className="text-xs text-gray-500 pt-1">
+            After saving, you’ll be redirected to{' '}
+            <span className="font-medium">{nextUrl || '/'}</span>.
+          </p>
+        </form>
+      </div>
     </main>
   )
 }
