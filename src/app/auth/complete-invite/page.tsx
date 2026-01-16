@@ -1,149 +1,109 @@
+// src/app/auth/complete-invite/page.tsx
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { createSupabaseBrowserClient } from '@/lib/supabaseBrowser'
 
-function getURLParams(href: string) {
-  const u = new URL(href)
-  const q = u.searchParams
-  const h = new URLSearchParams(u.hash.replace(/^#/, ''))
-  const get = (k: string) => q.get(k) ?? h.get(k)
-
+function parseHash(hash: string) {
+  const params = new URLSearchParams(hash.startsWith('#') ? hash.slice(1) : hash)
   return {
-    code: get('code'),
-    type: get('type'), // invite | recovery | magiclink...
-    token_hash: get('token_hash') ?? get('token'),
-    access_token: h.get('access_token'),
-    refresh_token: h.get('refresh_token'),
-    error: get('error'),
-    error_description: get('error_description'),
-    next: q.get('next') ?? q.get('redirect_to') ?? q.get('redirectedFrom'),
+    access_token: params.get('access_token'),
+    refresh_token: params.get('refresh_token'),
+    error: params.get('error'),
+    error_description: params.get('error_description'),
+    type: params.get('type'),
   }
 }
 
-function safeNext(input: string | null): string {
-  if (!input) return '/'
-  const v = input.trim()
-  if (v.startsWith('/') && !v.startsWith('//')) return v
-  // si c'est une url complète de ton domaine, on récupère son pathname
-  try {
-    const u = new URL(v)
-    if (typeof window !== 'undefined' && u.origin === window.location.origin) {
-      return `${u.pathname}${u.search}`
-    }
-  } catch {}
-  return '/'
+function sanitizeNext(next: string | null) {
+  if (!next) return '/'
+  const n = next.trim()
+  if (!n.startsWith('/')) return '/'
+  if (n.startsWith('//')) return '/'
+  if (n.includes('://')) return '/'
+  if (n.includes('\\')) return '/'
+  return n || '/'
 }
 
 export default function CompleteInvitePage() {
   const router = useRouter()
-  const sp = useSearchParams()
-  const next = useMemo(() => safeNext(sp.get('next') || sp.get('redirect_to')), [sp])
+  const searchParams = useSearchParams()
+  const supabase = useMemo(() => createSupabaseBrowserClient(), [])
 
-  const [stage, setStage] = useState<'working' | 'error'>('working')
-  const [msg, setMsg] = useState('Activating your account…')
+  const nextUrl = useMemo(() => sanitizeNext(searchParams.get('next')), [searchParams])
+  const [error, setError] = useState<string | null>(null)
 
-  async function run() {
-    setStage('working')
-    setMsg('Activating your account…')
+  useEffect(() => {
+    async function run() {
+      const { access_token, refresh_token, error, error_description } = parseHash(window.location.hash)
 
-    const supabase = createSupabaseBrowserClient()
-
-    try {
-      const p = getURLParams(window.location.href)
-
-      if (p.error || p.error_description) {
-        throw new Error(p.error_description || p.error || 'Invalid or expired link.')
+      if (error || error_description) {
+        setError(error_description || error || 'Invalid or expired link.')
+        return
       }
 
-      // 1) tokens dans le hash
-      if (p.access_token && p.refresh_token) {
-        const { error } = await supabase.auth.setSession({
-          access_token: p.access_token,
-          refresh_token: p.refresh_token,
-        })
-        if (error) throw error
-      }
-      // 2) OTP / email token flow (type=invite + token(_hash))
-      else if (p.type && p.token_hash) {
-        const { error } = await supabase.auth.verifyOtp({
-          type: p.type as any,
-          token_hash: p.token_hash,
-        } as any)
-        if (error) throw error
-      }
-      // 3) PKCE code flow
-      else if (p.code) {
-        const { error } = await supabase.auth.exchangeCodeForSession(p.code)
-        if (error) throw error
-      }
-      // 4) dernier recours: session déjà là ?
-      else {
-        const { data: { session } } = await supabase.auth.getSession()
-        if (!session) throw new Error('Invalid or expired link.')
+      if (!access_token || !refresh_token) {
+        setError('Invalid or expired link.')
+        return
       }
 
-      setMsg('Finalizing…')
+      // 1) Set session in the browser
+      const { data, error: setErr } = await supabase.auth.setSession({
+        access_token,
+        refresh_token,
+      })
+      if (setErr) {
+        setError(setErr.message)
+        return
+      }
 
-      const { data: { session } } = await supabase.auth.getSession()
-      if (!session) throw new Error('Session missing after activation.')
-
-      // ✅ Sync cookies serveur
+      // 2) Sync cookies on the server (RSC/middleware)
       const r = await fetch('/auth', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ event: 'SIGNED_IN', session }),
+        body: JSON.stringify({ event: 'SIGNED_IN', session: data.session }),
       })
+
       if (!r.ok) {
         const j = await r.json().catch(() => ({}))
-        throw new Error(j?.error ?? 'Server sync failed.')
+        setError(j?.error ?? 'Server auth sync failed')
+        return
       }
 
-      // Nettoie l'URL (enlève tokens/hash)
-      window.history.replaceState({}, '', '/auth/complete-invite')
+      // 3) Clean hash from URL (optional, avoids leaking tokens in history)
+      try {
+        const clean = window.location.pathname + window.location.search
+        window.history.replaceState({}, document.title, clean)
+      } catch {}
 
-      // ✅ ensuite: choisir un mot de passe
-      router.replace(`/auth/set-password?next=${encodeURIComponent(next || '/')}`)
-    } catch (e: any) {
-      setStage('error')
-      setMsg(e?.message || 'Invalid or expired link.')
+      // 4) Go set password, preserving next
+      const dest =
+        nextUrl && nextUrl !== '/'
+          ? `/auth/set-password?next=${encodeURIComponent(nextUrl)}`
+          : '/auth/set-password'
+
+      router.replace(dest)
     }
-  }
 
-  useEffect(() => { run() }, []) // eslint-disable-line
+    run()
+  }, [router, supabase, nextUrl])
 
-  if (stage === 'error') {
+  if (error) {
     return (
-      <main className="flex min-h-[60vh] items-center justify-center p-6">
-        <div className="w-full max-w-md rounded-2xl border bg-white p-6 shadow-soft space-y-3 text-center">
-          <h1 className="text-lg font-semibold text-red-700">Link error</h1>
-          <p className="text-sm text-gray-700">{msg}</p>
-
-          <div className="flex gap-2 justify-center pt-2">
-            <button
-              onClick={run}
-              className="rounded-lg border px-4 py-2 text-sm hover:bg-gray-50"
-            >
-              Retry
-            </button>
-            <button
-              onClick={() => router.replace('/login')}
-              className="rounded-lg bg-black px-4 py-2 text-sm text-white hover:opacity-90"
-            >
-              Go to login
-            </button>
-          </div>
+      <main className="flex min-h-[60vh] items-center justify-center">
+        <div className="rounded-2xl border border-red-300 bg-red-50 px-6 py-4 text-sm text-red-700 max-w-md text-center">
+          <p className="font-semibold mb-1">Link error</p>
+          <p>{error}</p>
         </div>
       </main>
     )
   }
 
   return (
-    <main className="flex min-h-[60vh] items-center justify-center p-6">
-      <div className="w-full max-w-md rounded-2xl border bg-white p-6 shadow-soft text-center">
-        <div className="mx-auto mb-3 h-6 w-6 animate-spin rounded-full border-2 border-gray-300 border-t-black" />
-        <p className="text-sm text-gray-700">{msg}</p>
+    <main className="flex min-h-[60vh] items-center justify-center">
+      <div className="rounded-2xl border bg-white px-6 py-4 shadow-sm text-sm text-gray-600">
+        Activating your account…
       </div>
     </main>
   )
