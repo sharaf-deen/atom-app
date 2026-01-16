@@ -3,6 +3,7 @@ export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
 import Link from 'next/link'
+import { redirect } from 'next/navigation'
 import { createSupabaseRSC } from '@/lib/supabaseServer'
 import { getSessionUser } from '@/lib/session'
 import PageHeader from '@/components/layout/PageHeader'
@@ -26,10 +27,22 @@ function tomorrowDateOnly(d: string) {
 
 export default async function AdminPage() {
   const me = await getSessionUser()
-  if (!me || !['admin', 'super_admin'].includes(me.role)) {
+
+  // ✅ si pas connecté => redirige vers login (avec next=/admin)
+  if (!me) {
+    redirect('/login?next=/admin')
+  }
+
+  // ✅ si connecté mais pas admin => forbidden
+  if (!['admin', 'super_admin'].includes(me.role)) {
     return (
       <main>
         <PageHeader title="Admin" subtitle="Forbidden." />
+        <div className="p-6">
+          <Link href="/" className="underline">
+            Back to home
+          </Link>
+        </div>
       </main>
     )
   }
@@ -64,16 +77,16 @@ export default async function AdminPage() {
     .eq('valid', true)
     .eq('date', today)
 
-  const { data: activeRows } = await supa
+  const { data: activeRows } = (await supa
     .from('subscriptions')
     .select('plan, status, end_date')
     .eq('status', 'active')
     .gte('end_date', today)
-    .limit(5000) as {
-      data: Array<{ plan: Plan; status: string | null; end_date: string | null }> | null
-    }
+    .limit(5000)) as {
+    data: Array<{ plan: Plan; status: string | null; end_date: string | null }> | null
+  }
 
-  const byPlan: Record<Plan, number> = { '1m': 0, '3m': 0, '6m': 0, '12m': 0, 'sessions': 0 }
+  const byPlan: Record<Plan, number> = { '1m': 0, '3m': 0, '6m': 0, '12m': 0, sessions: 0 }
   for (const r of activeRows ?? []) {
     if (r.plan && (['1m', '3m', '6m', '12m', 'sessions'] as Plan[]).includes(r.plan)) {
       byPlan[r.plan] = (byPlan[r.plan] ?? 0) + 1
@@ -81,16 +94,11 @@ export default async function AdminPage() {
   }
 
   // Store KPIs
-  const { count: readyCount } = await supa
-    .from('store_orders').select('id', { count: 'exact', head: true }).eq('status', 'ready')
-  const { count: pendingCount } = await supa
-    .from('store_orders').select('id', { count: 'exact', head: true }).eq('status', 'pending')
-  const { count: confirmedCount } = await supa
-    .from('store_orders').select('id', { count: 'exact', head: true }).eq('status', 'confirmed')
-  const { count: deliveredCount } = await supa
-    .from('store_orders').select('id', { count: 'exact', head: true }).eq('status', 'delivered')
-  const { count: canceledCount } = await supa
-    .from('store_orders').select('id', { count: 'exact', head: true }).eq('status', 'canceled')
+  const { count: readyCount } = await supa.from('store_orders').select('id', { count: 'exact', head: true }).eq('status', 'ready')
+  const { count: pendingCount } = await supa.from('store_orders').select('id', { count: 'exact', head: true }).eq('status', 'pending')
+  const { count: confirmedCount } = await supa.from('store_orders').select('id', { count: 'exact', head: true }).eq('status', 'confirmed')
+  const { count: deliveredCount } = await supa.from('store_orders').select('id', { count: 'exact', head: true }).eq('status', 'delivered')
+  const { count: canceledCount } = await supa.from('store_orders').select('id', { count: 'exact', head: true }).eq('status', 'canceled')
   const { count: storeTodayCount } = await supa
     .from('store_orders')
     .select('id', { count: 'exact', head: true })
@@ -99,10 +107,7 @@ export default async function AdminPage() {
 
   return (
     <main>
-      <PageHeader
-        title="Admin"
-        subtitle="Overview and operations"
-      />
+      <PageHeader title="Admin" subtitle="Overview and operations" />
 
       {/* KPI Cards (Membership) */}
       <Section>
@@ -173,36 +178,48 @@ export default async function AdminPage() {
       <Section>
         <h2 className="text-lg font-semibold mb-3">Store</h2>
         <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-6">
-          <Card><CardContent>
-            <div className="text-sm text-[hsl(var(--muted))]">Ready</div>
-            <div className="mt-1 text-2xl font-semibold">{readyCount ?? 0}</div>
-          </CardContent></Card>
+          <Card>
+            <CardContent>
+              <div className="text-sm text-[hsl(var(--muted))]">Ready</div>
+              <div className="mt-1 text-2xl font-semibold">{readyCount ?? 0}</div>
+            </CardContent>
+          </Card>
 
-          <Card><CardContent>
-            <div className="text-sm text-[hsl(var(--muted))]">Pending</div>
-            <div className="mt-1 text-2xl font-semibold">{pendingCount ?? 0}</div>
-          </CardContent></Card>
+          <Card>
+            <CardContent>
+              <div className="text-sm text-[hsl(var(--muted))]">Pending</div>
+              <div className="mt-1 text-2xl font-semibold">{pendingCount ?? 0}</div>
+            </CardContent>
+          </Card>
 
-          <Card><CardContent>
-            <div className="text-sm text-[hsl(var(--muted))]">Confirmed</div>
-            <div className="mt-1 text-2xl font-semibold">{confirmedCount ?? 0}</div>
-          </CardContent></Card>
+          <Card>
+            <CardContent>
+              <div className="text-sm text-[hsl(var(--muted))]">Confirmed</div>
+              <div className="mt-1 text-2xl font-semibold">{confirmedCount ?? 0}</div>
+            </CardContent>
+          </Card>
 
-          <Card><CardContent>
-            <div className="text-sm text-[hsl(var(--muted))]">Delivered</div>
-            <div className="mt-1 text-2xl font-semibold">{deliveredCount ?? 0}</div>
-          </CardContent></Card>
+          <Card>
+            <CardContent>
+              <div className="text-sm text-[hsl(var(--muted))]">Delivered</div>
+              <div className="mt-1 text-2xl font-semibold">{deliveredCount ?? 0}</div>
+            </CardContent>
+          </Card>
 
-          <Card><CardContent>
-            <div className="text-sm text-[hsl(var(--muted))]">Canceled</div>
-            <div className="mt-1 text-2xl font-semibold">{canceledCount ?? 0}</div>
-          </CardContent></Card>
+          <Card>
+            <CardContent>
+              <div className="text-sm text-[hsl(var(--muted))]">Canceled</div>
+              <div className="mt-1 text-2xl font-semibold">{canceledCount ?? 0}</div>
+            </CardContent>
+          </Card>
 
-          <Card><CardContent>
-            <div className="text-sm text-[hsl(var(--muted))]">Orders today</div>
-            <div className="mt-1 text-2xl font-semibold">{storeTodayCount ?? 0}</div>
-            <div className="mt-1 text-xs text-[hsl(var(--muted))]">{today}</div>
-          </CardContent></Card>
+          <Card>
+            <CardContent>
+              <div className="text-sm text-[hsl(var(--muted))]">Orders today</div>
+              <div className="mt-1 text-2xl font-semibold">{storeTodayCount ?? 0}</div>
+              <div className="mt-1 text-xs text-[hsl(var(--muted))]">{today}</div>
+            </CardContent>
+          </Card>
         </div>
       </Section>
 
