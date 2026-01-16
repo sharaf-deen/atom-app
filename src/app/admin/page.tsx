@@ -2,7 +2,6 @@
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
-import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { createSupabaseRSC } from '@/lib/supabaseServer'
 import { getSessionUser } from '@/lib/session'
@@ -11,11 +10,12 @@ import Section from '@/components/layout/Section'
 import { Card, CardContent } from '@/components/ui/Card'
 import AdminExports from '@/components/AdminExports'
 import AdminRevenue from '@/components/AdminRevenue'
+import AccessDeniedCard from '@/components/AccessDeniedCard'
 
 type Plan = '1m' | '3m' | '6m' | '12m' | 'sessions'
 
 function todayDateOnly() {
-  return new Date().toISOString().slice(0, 10)
+  return new Date().toISOString().slice(0, 10) // YYYY-MM-DD (UTC)
 }
 function tomorrowDateOnly(d: string) {
   const [y, m, day] = d.split('-').map(Number)
@@ -26,51 +26,26 @@ function tomorrowDateOnly(d: string) {
 
 export default async function AdminPage() {
   const me = await getSessionUser()
+  if (!me) redirect(`/login?next=${encodeURIComponent('/admin')}`)
 
-  if (!me) {
-    redirect('/login?next=/admin')
-  }
-
-  // Reception -> Members
+  // Reception : pas d'accès au dashboard admin, mais accès Members
   if (me.role === 'reception') {
-    redirect('/admin/members')
+    redirect('/members')
   }
 
-  // Admin dashboard only
+  // Admin dashboard : admin / super_admin only
   if (!['admin', 'super_admin'].includes(me.role)) {
-    const logoutNext = '/admin'
     return (
       <main>
         <PageHeader title="Admin" subtitle="Access restricted" />
-        <div className="p-6 max-w-2xl">
-          <div className="rounded-2xl border bg-white p-5 space-y-2">
-            <div className="text-sm text-gray-600">
-              You’re signed in as <span className="font-medium">{me.email}</span>.
-            </div>
-
-            <div className="text-base font-semibold">You don’t have permission to access Admin.</div>
-
-            <div className="text-sm text-gray-600">
-              If you believe this is a mistake, please contact an administrator to request access.
-            </div>
-
-            <div className="flex gap-2 flex-wrap pt-2">
-              <Link href="/" className="border rounded-lg px-4 py-2 text-sm hover:bg-gray-50">
-                Back to home
-              </Link>
-              <Link href="/profile" className="border rounded-lg px-4 py-2 text-sm hover:bg-gray-50">
-                My profile
-              </Link>
-
-              <Link
-                href={`/logout?next=${encodeURIComponent(logoutNext)}`}
-                className="border rounded-lg px-4 py-2 text-sm hover:bg-gray-50"
-              >
-                Switch account
-              </Link>
-            </div>
-          </div>
-        </div>
+        <Section>
+          <AccessDeniedCard
+            title="Forbidden"
+            message="Only Admin / Super Admin can access this dashboard."
+            nextPath="/admin"
+            showBackHome
+          />
+        </Section>
       </main>
     )
   }
@@ -79,6 +54,7 @@ export default async function AdminPage() {
   const today = todayDateOnly()
   const tomorrow = tomorrowDateOnly(today)
 
+  // --- KPI queries (unchanged) ---
   const { count: activeTimeCount } = await supa
     .from('subscriptions')
     .select('id', { count: 'exact', head: true })
@@ -104,6 +80,28 @@ export default async function AdminPage() {
     .eq('valid', true)
     .eq('date', today)
 
+  const { data: activeRows } = await supa
+    .from('subscriptions')
+    .select('plan, status, end_date')
+    .eq('status', 'active')
+    .gte('end_date', today)
+    .limit(5000) as {
+      data: Array<{ plan: Plan; status: string | null; end_date: string | null }> | null
+    }
+
+  const byPlan: Record<Plan, number> = { '1m': 0, '3m': 0, '6m': 0, '12m': 0, sessions: 0 }
+  for (const r of activeRows ?? []) {
+    if (r.plan && (['1m', '3m', '6m', '12m', 'sessions'] as Plan[]).includes(r.plan)) {
+      byPlan[r.plan] = (byPlan[r.plan] ?? 0) + 1
+    }
+  }
+
+  // Store KPIs
+  const { count: readyCount } = await supa.from('store_orders').select('id', { count: 'exact', head: true }).eq('status', 'ready')
+  const { count: pendingCount } = await supa.from('store_orders').select('id', { count: 'exact', head: true }).eq('status', 'pending')
+  const { count: confirmedCount } = await supa.from('store_orders').select('id', { count: 'exact', head: true }).eq('status', 'confirmed')
+  const { count: deliveredCount } = await supa.from('store_orders').select('id', { count: 'exact', head: true }).eq('status', 'delivered')
+  const { count: canceledCount } = await supa.from('store_orders').select('id', { count: 'exact', head: true }).eq('status', 'canceled')
   const { count: storeTodayCount } = await supa
     .from('store_orders')
     .select('id', { count: 'exact', head: true })
@@ -114,6 +112,7 @@ export default async function AdminPage() {
     <main>
       <PageHeader title="Admin" subtitle="Overview and operations" />
 
+      {/* KPI Cards (Membership) */}
       <Section>
         <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-4">
           <Card hover>
@@ -144,23 +143,47 @@ export default async function AdminPage() {
             <CardContent>
               <div className="text-sm text-[hsl(var(--muted))]">Attendance today</div>
               <div className="mt-1 text-2xl font-semibold">{attendanceToday ?? 0}</div>
-              <div className="mt-1 text-xs text-[hsl(var(--muted))]">today</div>
+              <div className="mt-1 text-xs text-[hsl(var(--muted))]">date = {today}</div>
             </CardContent>
           </Card>
         </div>
       </Section>
 
+      {/* Breakdown Active by plan */}
       <Section>
-        <div className="text-sm text-gray-600">Store orders today: {storeTodayCount ?? 0}</div>
+        <h2 className="text-lg font-semibold mb-3">Active subscriptions (by plan)</h2>
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+          {(['1m', '3m', '6m', '12m', 'sessions'] as Plan[]).map((p) => (
+            <Card key={p}>
+              <CardContent>
+                <div className="text-sm text-[hsl(var(--muted))]">
+                  {p === 'sessions' ? 'Per sessions' : p === '1m' ? '1 month' : p === '3m' ? '3 months' : p === '6m' ? '6 months' : '12 months'}
+                </div>
+                <div className="mt-1 text-xl font-semibold">{byPlan[p] ?? 0}</div>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+        <div className="mt-3 text-xs text-[hsl(var(--muted))]">
+          * Calculated on subscriptions with status = active & end_date ≥ today.
+        </div>
       </Section>
 
+      {/* Store KPIs */}
       <Section>
-        <AdminRevenue />
+        <h2 className="text-lg font-semibold mb-3">Store</h2>
+        <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-6">
+          <Card><CardContent><div className="text-sm text-[hsl(var(--muted))]">Ready</div><div className="mt-1 text-2xl font-semibold">{readyCount ?? 0}</div></CardContent></Card>
+          <Card><CardContent><div className="text-sm text-[hsl(var(--muted))]">Pending</div><div className="mt-1 text-2xl font-semibold">{pendingCount ?? 0}</div></CardContent></Card>
+          <Card><CardContent><div className="text-sm text-[hsl(var(--muted))]">Confirmed</div><div className="mt-1 text-2xl font-semibold">{confirmedCount ?? 0}</div></CardContent></Card>
+          <Card><CardContent><div className="text-sm text-[hsl(var(--muted))]">Delivered</div><div className="mt-1 text-2xl font-semibold">{deliveredCount ?? 0}</div></CardContent></Card>
+          <Card><CardContent><div className="text-sm text-[hsl(var(--muted))]">Canceled</div><div className="mt-1 text-2xl font-semibold">{canceledCount ?? 0}</div></CardContent></Card>
+          <Card><CardContent><div className="text-sm text-[hsl(var(--muted))]">Orders today</div><div className="mt-1 text-2xl font-semibold">{storeTodayCount ?? 0}</div><div className="mt-1 text-xs text-[hsl(var(--muted))]">{today}</div></CardContent></Card>
+        </div>
       </Section>
 
-      <Section>
-        <AdminExports />
-      </Section>
+      <Section><AdminRevenue /></Section>
+      <Section><AdminExports /></Section>
     </main>
   )
 }

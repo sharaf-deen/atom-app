@@ -1,46 +1,41 @@
 'use client'
 
-import { useEffect, useMemo } from 'react'
+import { useEffect } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
-import { createBrowserClient } from '@supabase/ssr'
+import { createSupabaseBrowserClient } from '@/lib/supabaseBrowser'
 
-function sanitizeNext(next: string | null) {
-  if (!next) return '/'
-  const n = next.trim()
-  if (!n.startsWith('/')) return '/'
-  if (n.startsWith('//')) return '/'
-  if (n.includes('://')) return '/'
-  if (n.includes('\\')) return '/'
-  return n || '/'
+function safeNext(nextPath: string | null) {
+  if (!nextPath) return '/'
+  if (nextPath.startsWith('/') && !nextPath.startsWith('//')) return nextPath
+  return '/'
 }
 
 export default function LogoutPage() {
   const router = useRouter()
-  const searchParams = useSearchParams()
-
-  const nextUrl = useMemo(() => sanitizeNext(searchParams.get('next')), [searchParams])
+  const sp = useSearchParams()
 
   useEffect(() => {
     ;(async () => {
-      const supabase = createBrowserClient(
-        process.env.NEXT_PUBLIC_SUPABASE_URL!,
-        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-      )
+      const next = safeNext(sp.get('next'))
+      const supabase = createSupabaseBrowserClient()
 
-      // Clear browser session
+      // 1) Clear browser session
       await supabase.auth.signOut({ scope: 'local' })
 
-      // Clear SSR cookies
-      await fetch('/api/auth/signout', { method: 'POST' })
+      // 2) Clear SSR cookies via /auth sync
+      try {
+        await fetch('/auth', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ event: 'SIGNED_OUT' }),
+        })
+      } catch {}
 
-      // Redirect to login, preserving next
-      const dest =
-        nextUrl && nextUrl !== '/' ? `/login?next=${encodeURIComponent(nextUrl)}` : '/login'
-
-      router.replace(dest)
+      router.replace(`/login?next=${encodeURIComponent(next)}`)
       router.refresh()
     })()
-  }, [router, nextUrl])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   return (
     <main className="max-w-sm mx-auto p-6">

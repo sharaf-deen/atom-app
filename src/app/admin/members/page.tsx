@@ -4,8 +4,10 @@ import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { useSearchParams } from 'next/navigation'
 import { createSupabaseBrowserClient } from '@/lib/supabaseBrowser'
+import AccessDeniedCard from '@/components/AccessDeniedCard'
 
 type Role = 'member' | 'assistant_coach' | 'coach' | 'reception' | 'admin' | 'super_admin'
+
 type Member = {
   user_id: string
   email: string
@@ -17,35 +19,38 @@ type Member = {
 
 const OPS: Role[] = ['reception', 'admin', 'super_admin']
 
-function sanitizeNext(next: string | null) {
-  if (!next) return '/'
-  const n = next.trim()
-  if (!n.startsWith('/')) return '/'
-  if (n.startsWith('//')) return '/'
-  if (n.includes('://')) return '/'
-  if (n.includes('\\')) return '/'
-  return n || '/'
+function safeNext(nextPath: string | null) {
+  if (!nextPath) return '/'
+  if (nextPath.startsWith('/') && !nextPath.startsWith('//')) return nextPath
+  return '/'
 }
 
-export default function MembersPage() {
+export default function AdminMembersPage() {
   const supabase = useMemo(() => createSupabaseBrowserClient(), [])
   const searchParams = useSearchParams()
-  const nextAfterLogout = useMemo(() => sanitizeNext(searchParams.get('next')), [searchParams])
+  const nextPath = useMemo(() => safeNext(searchParams.get('next')), [searchParams])
 
   const [meRole, setMeRole] = useState<Role | null>(null)
   const [meEmail, setMeEmail] = useState<string>('')
-  const [loadingMe, setLoadingMe] = useState(true)
+  const [checking, setChecking] = useState(true)
 
   const [q, setQ] = useState('')
   const [role, setRole] = useState<string>('')
+
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(10)
+
   const [rows, setRows] = useState<Member[]>([])
-  const [msg, setMsg] = useState('')
+  const [total, setTotal] = useState<number>(0)
+  const [msg, setMsg] = useState<string>('')
 
   const canView = meRole ? OPS.includes(meRole) : false
 
+  // Load session + role
   useEffect(() => {
     ;(async () => {
-      setLoadingMe(true)
+      setChecking(true)
+
       const { data } = await supabase.auth.getSession()
       const u = data.session?.user
 
@@ -56,96 +61,120 @@ export default function MembersPage() {
 
       setMeEmail(u.email ?? '')
 
-      const { data: prof } = await supabase
+      const { data: prof, error } = await supabase
         .from('profiles')
         .select('role')
         .eq('user_id', u.id)
         .maybeSingle()
 
-      setMeRole((prof?.role ?? 'member') as Role)
-      setLoadingMe(false)
+      if (error) {
+        // fallback: treat as member
+        setMeRole('member')
+      } else {
+        setMeRole((prof?.role ?? 'member') as Role)
+      }
+
+      setChecking(false)
     })()
   }, [supabase])
 
-  const fetchMembers = async () => {
-    setMsg('Loading...')
+  async function fetchMembers(opts?: { resetPage?: boolean }) {
+    const targetPage = opts?.resetPage ? 1 : page
+
+    setMsg('Loading…')
     try {
       const res = await fetch('/api/admin/members', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ q, role: role || undefined, limit: 100 }),
+        body: JSON.stringify({
+          q: q || undefined,
+          role: role || undefined,
+          page: targetPage,
+          pageSize,
+        }),
       })
 
       const json = await res.json().catch(() => ({}))
       if (!res.ok || !json.ok) {
         setRows([])
+        setTotal(0)
         setMsg(`❌ ${json?.error || 'Request failed'}`)
         return
       }
 
       setRows(json.members ?? [])
+      setTotal(Number(json.total ?? 0))
       setMsg('')
+      if (opts?.resetPage) setPage(1)
     } catch {
+      setRows([])
+      setTotal(0)
       setMsg('❌ Network error')
     }
   }
 
+  // Initial fetch after role check
   useEffect(() => {
-    if (!loadingMe && canView) fetchMembers()
+    if (!checking && canView) {
+      fetchMembers({ resetPage: true })
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loadingMe, canView])
+  }, [checking, canView])
 
-  if (loadingMe) {
+  // Refetch on page/pageSize changes
+  useEffect(() => {
+    if (!checking && canView) fetchMembers()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [page, pageSize])
+
+  if (checking) {
     return (
       <main className="p-6">
-        <h1 className="text-2xl font-bold">Members</h1>
-        <p className="text-sm text-gray-600">Loading…</p>
+        <div className="text-sm text-gray-600">Checking session…</div>
       </main>
     )
   }
 
   if (!canView) {
-    const logoutNext = nextAfterLogout || '/admin/members'
     return (
-      <main className="p-6 max-w-2xl">
-        <h1 className="text-2xl font-bold">Members</h1>
-
-        <div className="mt-4 rounded-2xl border bg-white p-5 space-y-2">
-          <div className="text-sm text-gray-600">
-            You’re signed in as <span className="font-medium">{meEmail || 'unknown'}</span>.
-          </div>
-
-          <div className="text-base font-semibold">Access restricted</div>
-
-          <div className="text-sm text-gray-600">
-            This page is limited to <span className="font-medium">Reception</span> and{' '}
-            <span className="font-medium">Admins</span>.
-            <br />
-            If you need access, please contact an administrator.
-          </div>
-
-          <div className="flex gap-2 flex-wrap pt-2">
-            <Link href="/" className="border rounded-lg px-4 py-2 text-sm hover:bg-gray-50">
-              Back to home
-            </Link>
-            <Link href="/profile" className="border rounded-lg px-4 py-2 text-sm hover:bg-gray-50">
-              My profile
-            </Link>
-            <Link
-              href={`/logout?next=${encodeURIComponent(logoutNext)}`}
-              className="border rounded-lg px-4 py-2 text-sm hover:bg-gray-50"
-            >
-              Switch account
-            </Link>
+      <main className="p-6">
+        <h1 className="text-2xl font-bold">Admin · Members</h1>
+        <div className="mt-4 max-w-2xl">
+          <AccessDeniedCard
+            title="Forbidden"
+            message="Only Reception / Admin / Super Admin can access this page."
+            nextPath="/admin/members"
+            showBackHome
+          />
+          <div className="mt-3 text-sm text-[hsl(var(--muted))]">
+            Signed in as: <span className="font-medium">{meEmail || 'unknown'}</span>
           </div>
         </div>
       </main>
     )
   }
 
+  const totalPages = Math.max(1, Math.ceil((total || 0) / pageSize))
+
   return (
-    <main className="p-6 space-y-3">
-      <h1 className="text-2xl font-bold">Members</h1>
+    <main className="p-6 space-y-4">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div>
+          <h1 className="text-2xl font-bold">Admin · Members</h1>
+          <p className="text-sm text-[hsl(var(--muted))]">
+            Signed in as <span className="font-medium">{meEmail}</span>
+          </p>
+        </div>
+
+        <div className="flex gap-2">
+          <Link href="/admin" className="border px-4 py-2 rounded-lg hover:bg-gray-50">
+            ← Admin
+          </Link>
+          <Link href="/members" className="border px-4 py-2 rounded-lg hover:bg-gray-50">
+            Members (public)
+          </Link>
+        </div>
+      </div>
 
       <div className="flex gap-2 flex-wrap items-center">
         <input
@@ -165,41 +194,61 @@ export default function MembersPage() {
           <option value="super_admin">Super Admin</option>
         </select>
 
-        <button onClick={fetchMembers} className="border px-4 py-2 rounded-lg hover:bg-gray-50">
+        <button
+          onClick={() => fetchMembers({ resetPage: true })}
+          className="border px-4 py-2 rounded-lg hover:bg-gray-50"
+        >
           Search
         </button>
 
-        <Link href="/admin" className="underline ml-auto">
-          ← Admin
-        </Link>
+        <div className="ml-auto flex gap-2 items-center">
+          <span className="text-sm text-[hsl(var(--muted))]">Rows:</span>
+          <select
+            className="border px-3 py-2 rounded-lg"
+            value={pageSize}
+            onChange={(e) => setPageSize(Number(e.target.value))}
+          >
+            <option value={5}>5</option>
+            <option value={10}>10</option>
+            <option value={20}>20</option>
+            <option value={50}>50</option>
+          </select>
+        </div>
       </div>
 
-      {msg && <p>{msg}</p>}
+      {msg && <p className="text-sm">{msg}</p>}
 
-      <div className="overflow-auto">
-        <table className="min-w-full text-sm border">
-          <thead className="bg-gray-50">
+      <div className="overflow-auto border rounded-xl">
+        <table className="min-w-full text-sm">
+          <thead className="bg-gray-50 text-gray-600">
             <tr>
-              <th className="border px-2 py-1 text-left">Name</th>
-              <th className="border px-2 py-1 text-left">Email</th>
-              <th className="border px-2 py-1 text-left">Phone</th>
-              <th className="border px-2 py-1">Role</th>
+              <th className="border-b px-3 py-2 text-left">Name</th>
+              <th className="border-b px-3 py-2 text-left">Email</th>
+              <th className="border-b px-3 py-2 text-left">Phone</th>
+              <th className="border-b px-3 py-2 text-center">Role</th>
+              <th className="border-b px-3 py-2 text-left">Profile</th>
             </tr>
           </thead>
           <tbody>
             {rows.map((m) => (
-              <tr key={m.user_id}>
-                <td className="border px-2 py-1">
-                  {(m.first_name ?? '') + ' ' + (m.last_name ?? '')}
+              <tr key={m.user_id} className="hover:bg-gray-50">
+                <td className="border-b px-3 py-2">
+                  {`${m.first_name ?? ''} ${m.last_name ?? ''}`.trim() || '—'}
                 </td>
-                <td className="border px-2 py-1">{m.email}</td>
-                <td className="border px-2 py-1">{m.phone ?? ''}</td>
-                <td className="border px-2 py-1 text-center">{m.role ?? 'member'}</td>
+                <td className="border-b px-3 py-2">{m.email}</td>
+                <td className="border-b px-3 py-2">{m.phone ?? '—'}</td>
+                <td className="border-b px-3 py-2 text-center">{m.role ?? 'member'}</td>
+                <td className="border-b px-3 py-2">
+                  <Link className="underline" href={`/members/${m.user_id}`}>
+                    Open
+                  </Link>
+                </td>
               </tr>
             ))}
-            {rows.length === 0 && (
+
+            {rows.length === 0 && !msg && (
               <tr>
-                <td className="px-2 py-4 text-center text-gray-500" colSpan={4}>
+                <td className="px-3 py-6 text-center text-gray-500" colSpan={5}>
                   No members found
                 </td>
               </tr>
@@ -207,6 +256,52 @@ export default function MembersPage() {
           </tbody>
         </table>
       </div>
+
+      {/* Pagination */}
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div className="text-sm text-[hsl(var(--muted))]">
+          Total: <span className="font-medium">{total}</span> · Page{' '}
+          <span className="font-medium">
+            {page}/{totalPages}
+          </span>
+        </div>
+
+        <div className="flex gap-2">
+          <button
+            className="border px-4 py-2 rounded-lg hover:bg-gray-50 disabled:opacity-50"
+            onClick={() => setPage(1)}
+            disabled={page <= 1}
+          >
+            First
+          </button>
+          <button
+            className="border px-4 py-2 rounded-lg hover:bg-gray-50 disabled:opacity-50"
+            onClick={() => setPage((p) => Math.max(1, p - 1))}
+            disabled={page <= 1}
+          >
+            Prev
+          </button>
+          <button
+            className="border px-4 py-2 rounded-lg hover:bg-gray-50 disabled:opacity-50"
+            onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+            disabled={page >= totalPages}
+          >
+            Next
+          </button>
+          <button
+            className="border px-4 py-2 rounded-lg hover:bg-gray-50 disabled:opacity-50"
+            onClick={() => setPage(totalPages)}
+            disabled={page >= totalPages}
+          >
+            Last
+          </button>
+        </div>
+      </div>
+
+      {/* Small note */}
+      <p className="text-xs text-[hsl(var(--muted))]">
+        This page uses <code>/api/admin/members</code> (POST) with your current session.
+      </p>
     </main>
   )
 }
