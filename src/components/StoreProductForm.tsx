@@ -2,10 +2,12 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { toast } from 'sonner'
 import { parsePriceToCents, toPriceString } from '@/lib/money'
 import Button from '@/components/ui/Button'
 import Input from '@/components/ui/Input'
 import Select from '@/components/ui/Select'
+import InlineAlert from '@/components/ui/InlineAlert'
 
 type Category = 'kimono' | 'rashguard' | 'short' | 'belt'
 
@@ -96,12 +98,16 @@ export default function StoreProductForm({
       const j = await r.json().catch(() => ({}))
       if (!r.ok || !j?.ok) {
         setStatus({ kind: 'error', msg: j?.details || j?.error || 'Save failed' })
+        toast.error('Save failed')
         return
       }
+
       setStatus({ kind: 'success', msg: 'Saved' })
+      toast.success('Saved')
       onSaved?.()
     } catch (e: any) {
       setStatus({ kind: 'error', msg: String(e?.message || e) })
+      toast.error('Save failed')
     } finally {
       setBusy(false)
     }
@@ -135,18 +141,8 @@ export default function StoreProductForm({
       </div>
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-        <Input
-          label="Color"
-          value={color}
-          onChange={(e) => setColor(e.target.value)}
-          disabled={busy}
-        />
-        <Input
-          label="Size"
-          value={size}
-          onChange={(e) => setSize(e.target.value)}
-          disabled={busy}
-        />
+        <Input label="Color" value={color} onChange={(e) => setColor(e.target.value)} disabled={busy} />
+        <Input label="Size" value={size} onChange={(e) => setSize(e.target.value)} disabled={busy} />
         <Input
           label="Price *"
           type="number"
@@ -191,22 +187,12 @@ export default function StoreProductForm({
         </label>
       </div>
 
-      {/* Status */}
       {status.msg && (
-        <div
-          className={
-            'text-sm rounded-2xl px-3 py-2 ' +
-            (status.kind === 'error'
-              ? 'border border-red-300 bg-red-50 text-red-700'
-              : 'border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-[hsl(var(--muted))]')
-          }
-          role={status.kind === 'error' ? 'alert' : 'status'}
-        >
+        <InlineAlert variant={status.kind === 'error' ? 'error' : 'success'}>
           {status.msg}
-        </div>
+        </InlineAlert>
       )}
 
-      {/* Actions */}
       <div className="flex flex-wrap items-center gap-2">
         <Button type="submit" disabled={busy || !name.trim()}>
           {busy ? 'Saving…' : product?.id ? 'Update' : 'Create'}
