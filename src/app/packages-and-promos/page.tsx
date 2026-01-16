@@ -91,17 +91,16 @@ function appliesToText(p: Promo) {
 }
 
 export default async function PackagesAndPromosPage() {
-  // Visible à tout utilisateur connecté (quel que soit le rôle)
   const user = await getSessionUser()
   if (!user) {
-    redirect('/')
+    redirect('/login?next=/packages-and-promos')
   }
+
   const role = user.role as Role
   const canCreate = role === 'admin' || role === 'super_admin'   // New promo
   const canManageEditDelete = role === 'super_admin'             // Edit/Delete
   const canSeePast = role === 'admin' || role === 'super_admin'  // Past visibility
 
-  // Lecture DB (RSC)
   const supabase = createSupabaseRSC()
   const { data: promos, error } = await supabase
     .from('promotions')
@@ -112,15 +111,12 @@ export default async function PackagesAndPromosPage() {
   const list: Promo[] = promos ?? []
   const today = new Date().toISOString().slice(0, 10)
 
-  /** ---------- Segmentation temporelle (sans “upcoming”) ---------- */
-  // Current: (start null ou ≤ today) ET (end null ou ≥ today)
   const current = list.filter(
     (p) =>
       (!p.start_date || p.start_date <= today) &&
       (!p.end_date || p.end_date >= today)
   )
 
-  // Past: end_date < today (visible seulement admin/super_admin)
   const past = list.filter((p) => !!p.end_date && p.end_date < today)
 
   return (
@@ -142,14 +138,12 @@ export default async function PackagesAndPromosPage() {
         </Section>
       )}
 
-      {/* Tarifs */}
       <Section className="space-y-6">
         <CardContent>
           <h2 className="text-xl font-semibold">Prices List</h2>
         </CardContent>
 
         <div className="grid gap-6 md:grid-cols-3">
-          {/* Memberships */}
           <Card hover>
             <CardContent>
               <h3 className="text-lg font-semibold mb-3">Adults &amp; Kids</h3>
@@ -164,7 +158,6 @@ export default async function PackagesAndPromosPage() {
             </CardContent>
           </Card>
 
-          {/* Drop In */}
           <Card hover>
             <CardContent>
               <h3 className="text-lg font-semibold mb-3">Drop In</h3>
@@ -186,7 +179,6 @@ export default async function PackagesAndPromosPage() {
             </CardContent>
           </Card>
 
-          {/* Private Training */}
           <Card hover>
             <CardContent>
               <h3 className="text-lg font-semibold mb-3">Private Training</h3>
@@ -203,7 +195,6 @@ export default async function PackagesAndPromosPage() {
         </div>
       </Section>
 
-      {/* Current */}
       <Section className="space-y-4">
         <h2 className="text-xl font-semibold">Current Promotions</h2>
         {current.length === 0 ? (
@@ -256,7 +247,6 @@ export default async function PackagesAndPromosPage() {
         )}
       </Section>
 
-      {/* Past — visible seulement pour admin & super_admin */}
       {canSeePast && (
         <Section className="space-y-4">
           <h2 className="text-xl font-semibold">Past Promotions</h2>

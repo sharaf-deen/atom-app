@@ -9,14 +9,33 @@ import PageHeader from '@/components/layout/PageHeader'
 import Section from '@/components/layout/Section'
 import { Card, CardContent } from '@/components/ui/Card'
 import Button from '@/components/ui/Button'
+import AccessDeniedPage from '@/components/AccessDeniedPage'
 import { createPromo } from '@/app/packages-and-promos/actions'
 
 type Role = 'member' | 'assistant_coach' | 'coach' | 'reception' | 'admin' | 'super_admin'
 
 export default async function NewPromoPage() {
   const user = await getSessionUser()
-  if (!user || (user.role as Role) !== 'super_admin') {
-    redirect('/packages-and-promos')
+  const nextPath = '/packages-and-promos/new'
+
+  if (!user) {
+    redirect(`/login?next=${encodeURIComponent(nextPath)}`)
+  }
+
+  if ((user.role as Role) !== 'super_admin') {
+    return (
+      <AccessDeniedPage
+        title="New Promotion"
+        subtitle="Access restricted."
+        signedInAs={user.email}
+        message="Only Super Admin can create promotions."
+        allowed="super_admin"
+        nextPath={nextPath}
+        actions={[{ href: '/packages-and-promos', label: 'Back to Packages & Promos' }]}
+        showBackHome
+        showProfile
+      />
+    )
   }
 
   return (
@@ -51,7 +70,9 @@ export default async function NewPromoPage() {
                   </select>
                 </div>
                 <div className="grid gap-1.5">
-                  <label htmlFor="discount_value" className="text-sm font-medium">Discount value <span className="text-red-600">*</span></label>
+                  <label htmlFor="discount_value" className="text-sm font-medium">
+                    Discount value <span className="text-red-600">*</span>
+                  </label>
                   <input id="discount_value" name="discount_value" type="number" min={1} step="1" required className="w-full rounded-lg border px-3 py-2" placeholder="e.g. 10" />
                 </div>
               </div>

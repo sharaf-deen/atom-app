@@ -6,7 +6,7 @@ import Link from 'next/link'
 import { notFound, redirect } from 'next/navigation'
 import PageHeader from '@/components/layout/PageHeader'
 import Section from '@/components/layout/Section'
-import AccessDeniedCard from '@/components/AccessDeniedCard'
+import AccessDeniedPage from '@/components/AccessDeniedPage'
 import { createSupabaseRSC } from '@/lib/supabaseServer'
 import { getSessionUser, type Role } from '@/lib/session'
 import QrImage from '@/components/QrImage'
@@ -35,38 +35,46 @@ function daysLeft(endDate?: string | null) {
 }
 function humanPlan(p?: Plan | null) {
   switch (p) {
-    case '1m': return '1 month'
-    case '3m': return '3 months'
-    case '6m': return '6 months'
-    case '12m': return '12 months'
-    case 'sessions': return 'Per sessions'
-    default: return '—'
+    case '1m':
+      return '1 month'
+    case '3m':
+      return '3 months'
+    case '6m':
+      return '6 months'
+    case '12m':
+      return '12 months'
+    case 'sessions':
+      return 'Per sessions'
+    default:
+      return '—'
   }
 }
 
 export default async function MemberDetailPage({ params }: { params: { id: string } }) {
   const me = await getSessionUser()
+  const nextPath = `/members/${params.id}`
+
   if (!me) {
-    redirect(`/login?next=${encodeURIComponent(`/members/${params.id}`)}`)
+    redirect(`/login?next=${encodeURIComponent(nextPath)}`)
   }
 
   const STAFF: Role[] = ['reception', 'admin', 'super_admin']
   const isStaff = STAFF.includes(me.role)
   const isSelf = me.id === params.id
 
+  // Staff can view anyone. Non-staff can only view self.
   if (!isStaff && !isSelf) {
     return (
-      <main>
-        <PageHeader title="Member" subtitle="Access restricted" />
-        <Section>
-          <AccessDeniedCard
-            title="Forbidden"
-            message="You don’t have permission to view this member."
-            nextPath={`/members/${params.id}`}
-            showBackHome
-          />
-        </Section>
-      </main>
+      <AccessDeniedPage
+        title="Member"
+        subtitle="Access restricted."
+        signedInAs={me.email}
+        message="Only Reception / Admin / Super Admin can view other members."
+        allowed="reception, admin, super_admin"
+        nextPath={nextPath}
+        showBackHome
+        showProfile
+      />
     )
   }
 
@@ -95,19 +103,19 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
     .eq('member_id', profile.user_id)
     .order('paid_at', { ascending: false })
     .limit(500) as {
-      data: Array<{
-        id: string
-        subscription_type: 'time' | 'sessions' | null
-        plan: Plan | null
-        status: 'active' | 'expired' | 'canceled' | 'paused' | null
-        start_date: string | null
-        end_date: string | null
-        sessions_total: number | null
-        sessions_used: number | null
-        amount: number | null
-        paid_at: string | null
-      }> | null
-    }
+    data: Array<{
+      id: string
+      subscription_type: 'time' | 'sessions' | null
+      plan: Plan | null
+      status: 'active' | 'expired' | 'canceled' | 'paused' | null
+      start_date: string | null
+      end_date: string | null
+      sessions_total: number | null
+      sessions_used: number | null
+      amount: number | null
+      paid_at: string | null
+    }> | null
+  }
 
   const today = todayDateOnlyUTC()
   const from = addDays(today, -30)
@@ -119,8 +127,8 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
     .lte('date', today)
     .order('date', { ascending: false })
     .limit(1000) as {
-      data: Array<{ id: string; date: string; valid: boolean | null; from_sessions: boolean | null; subscription_id: string | null }> | null
-    }
+    data: Array<{ id: string; date: string; valid: boolean | null; from_sessions: boolean | null; subscription_id: string | null }> | null
+  }
 
   const subPlanById = new Map<string, Plan | null>((subs ?? []).map((s) => [s.id, s.plan]))
 
@@ -144,7 +152,10 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
         subtitle="Profile, QR, subscriptions and attendance"
         right={
           isStaff ? (
-            <Link href="/members" className="px-4 py-2 rounded-2xl border border-[hsl(var(--border))] bg-white hover:bg-[hsl(var(--bg))]/80 shadow-soft text-sm">
+            <Link
+              href="/members"
+              className="px-4 py-2 rounded-2xl border border-[hsl(var(--border))] bg-white hover:bg-[hsl(var(--bg))]/80 shadow-soft text-sm"
+            >
               Back to list
             </Link>
           ) : null
@@ -195,10 +206,11 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
               {alerts.map((a, i) => (
                 <li
                   key={i}
-                  className={`text-sm px-3 py-2 rounded-2xl border
-                  ${a.kind === 'time'
+                  className={`text-sm px-3 py-2 rounded-2xl border ${
+                    a.kind === 'time'
                       ? 'bg-amber-50 border-amber-300 text-amber-900'
-                      : 'bg-rose-50 border-rose-300 text-rose-900'}`}
+                      : 'bg-rose-50 border-rose-300 text-rose-900'
+                  }`}
                 >
                   {a.text}
                 </li>
@@ -272,8 +284,13 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
                         <td className="px-3 py-2">
                           <div className="flex flex-wrap gap-1">
                             {isTime && typeof dleft === 'number' && dleft >= 0 && (
-                              <span className={`text-[11px] px-2 py-0.5 rounded-2xl border
-                                ${soon ? 'bg-amber-50 border-amber-300 text-amber-900' : 'bg-emerald-50 border-emerald-300 text-emerald-900'}`}>
+                              <span
+                                className={`text-[11px] px-2 py-0.5 rounded-2xl border ${
+                                  soon
+                                    ? 'bg-amber-50 border-amber-300 text-amber-900'
+                                    : 'bg-emerald-50 border-emerald-300 text-emerald-900'
+                                }`}
+                              >
                                 {dleft} day(s) left
                               </span>
                             )}
@@ -283,8 +300,13 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
                               </span>
                             )}
                             {s.subscription_type === 'sessions' && (
-                              <span className={`text-[11px] px-2 py-0.5 rounded-2xl border
-                                ${(remaining <= 2) ? 'bg-amber-50 border-amber-300 text-amber-900' : 'bg-emerald-50 border-emerald-300 text-emerald-900'}`}>
+                              <span
+                                className={`text-[11px] px-2 py-0.5 rounded-2xl border ${
+                                  remaining <= 2
+                                    ? 'bg-amber-50 border-amber-300 text-amber-900'
+                                    : 'bg-emerald-50 border-emerald-300 text-emerald-900'
+                                }`}
+                              >
                                 {remaining} left
                               </span>
                             )}
@@ -320,8 +342,11 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
                     <tr key={a.id} className="border-t border-[hsl(var(--border))]">
                       <td className="px-3 py-2">{fmtDate(a.date)}</td>
                       <td className="px-3 py-2">
-                        <span className={`text-[11px] px-2 py-0.5 rounded-2xl border
-                          ${a.valid ? 'bg-emerald-50 border-emerald-300 text-emerald-900' : 'bg-rose-50 border-rose-300 text-rose-900'}`}>
+                        <span
+                          className={`text-[11px] px-2 py-0.5 rounded-2xl border ${
+                            a.valid ? 'bg-emerald-50 border-emerald-300 text-emerald-900' : 'bg-rose-50 border-rose-300 text-rose-900'
+                          }`}
+                        >
                           {a.valid ? 'valid' : 'invalid'}
                         </span>
                       </td>

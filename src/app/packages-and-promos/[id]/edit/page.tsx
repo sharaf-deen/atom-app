@@ -10,6 +10,7 @@ import PageHeader from '@/components/layout/PageHeader'
 import Section from '@/components/layout/Section'
 import { Card, CardContent } from '@/components/ui/Card'
 import Button from '@/components/ui/Button'
+import AccessDeniedPage from '@/components/AccessDeniedPage'
 import { updatePromo } from '@/app/packages-and-promos/actions'
 import DeletePromoButton from '@/components/promos/DeletePromoButton'
 
@@ -36,8 +37,26 @@ function parseDate(d: string | null) {
 
 export default async function EditPromoPage({ params }: { params: { id: string } }) {
   const user = await getSessionUser()
-  if (!user || (user.role as Role) !== 'super_admin') {
-    redirect('/packages-and-promos')
+  const nextPath = `/packages-and-promos/${params.id}/edit`
+
+  if (!user) {
+    redirect(`/login?next=${encodeURIComponent(nextPath)}`)
+  }
+
+  if ((user.role as Role) !== 'super_admin') {
+    return (
+      <AccessDeniedPage
+        title="Edit Promotion"
+        subtitle="Access restricted."
+        signedInAs={user.email}
+        message="Only Super Admin can edit or delete promotions."
+        allowed="super_admin"
+        nextPath={nextPath}
+        actions={[{ href: '/packages-and-promos', label: 'Back to Packages & Promos' }]}
+        showBackHome
+        showProfile
+      />
+    )
   }
 
   const supabase = createSupabaseRSC()
@@ -92,8 +111,19 @@ export default async function EditPromoPage({ params }: { params: { id: string }
                   </select>
                 </div>
                 <div className="grid gap-1.5">
-                  <label htmlFor="discount_value" className="text-sm font-medium">Discount value <span className="text-red-600">*</span></label>
-                  <input id="discount_value" name="discount_value" type="number" min={1} step="1" required defaultValue={Number(promo.discount_value ?? 0)} className="w-full rounded-lg border px-3 py-2" />
+                  <label htmlFor="discount_value" className="text-sm font-medium">
+                    Discount value <span className="text-red-600">*</span>
+                  </label>
+                  <input
+                    id="discount_value"
+                    name="discount_value"
+                    type="number"
+                    min={1}
+                    step="1"
+                    required
+                    defaultValue={Number(promo.discount_value ?? 0)}
+                    className="w-full rounded-lg border px-3 py-2"
+                  />
                 </div>
               </div>
 
