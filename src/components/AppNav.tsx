@@ -16,20 +16,20 @@ type MenuByRole = Record<Role, MenuItem[]>
 
 const MENU_BY_ROLE: MenuByRole = {
   member: [
-    // { label: 'Store', href: '/store', icon: 'bag' },
+    { label: 'Store', href: '/store', icon: 'bag' },
     { label: 'Notifications', href: '/notifications', icon: 'bell' },
     { label: 'My Profile', href: '/profile', icon: 'id' },
     { label: 'Packages & Promos', href: '/packages-and-promos', icon: 'gift' },
     { label: 'Contact Admin', href: '/contact', icon: 'user-cog' },
   ],
   assistant_coach: [
-    // { label: 'Store', href: '/store', icon: 'bag' },
+    { label: 'Store', href: '/store', icon: 'bag' },
     { label: 'Notifications', href: '/notifications', icon: 'bell' },
     { label: 'My Profile', href: '/profile', icon: 'id' },
     { label: 'Packages & Promos', href: '/packages-and-promos', icon: 'gift' },
   ],
   coach: [
-    // { label: 'Store', href: '/store', icon: 'bag' },
+    { label: 'Store', href: '/store', icon: 'bag' },
     { label: 'Notifications', href: '/notifications', icon: 'bell' },
     { label: 'My Profile', href: '/profile', icon: 'id' },
     { label: 'Packages & Promos', href: '/packages-and-promos', icon: 'gift' },
@@ -48,10 +48,11 @@ const MENU_BY_ROLE: MenuByRole = {
     { label: 'Scan', href: '/scan', icon: 'scan' },
     { label: 'Members', href: '/members', icon: 'users' },
     { label: 'Coaches', href: '/coaches', icon: 'user-cog' },
-    // { label: 'Store', href: '/store', icon: 'bag' },
+    { label: 'Store', href: '/store', icon: 'bag' },
     { label: 'Expenses', href: '/expenses', icon: 'wallet' },
   ],
   super_admin: [
+    { label: 'Home', href: '/', icon: 'dashboard' },
     { label: 'Dashboard', href: '/admin', icon: 'dashboard' },
     { label: 'Notifications', href: '/notifications', icon: 'bell' },
     { label: 'Packages & Promos', href: '/packages-and-promos', icon: 'gift' },
@@ -59,7 +60,7 @@ const MENU_BY_ROLE: MenuByRole = {
     { label: 'Scan', href: '/scan', icon: 'scan' },
     { label: 'Members', href: '/members', icon: 'users' },
     { label: 'Coaches', href: '/coaches', icon: 'user-cog' },
-    // { label: 'Store', href: '/store', icon: 'bag' },
+    { label: 'Store', href: '/store', icon: 'bag' },
     { label: 'Expenses', href: '/expenses', icon: 'wallet' },
   ],
 }
