@@ -21,6 +21,31 @@ function todayLocalDateStr() {
   return `${y}-${m}-${day}` // YYYY-MM-DD (local)
 }
 
+function isISODateOnly(s?: string | null) {
+  return !!s && /^\d{4}-\d{2}-\d{2}$/.test(s)
+}
+
+function addDays(dateOnly: string, days: number) {
+  const [y, m, d] = dateOnly.split('-').map(Number)
+  const dt = new Date(Date.UTC(y, m - 1, d))
+  dt.setUTCDate(dt.getUTCDate() + days)
+  return dt.toISOString().slice(0, 10)
+}
+
+// addMonths "safe": clamp to last day of target month if needed (handles 31st)
+function addMonthsSafe(dateOnly: string, months: number) {
+  const [y, m, d] = dateOnly.split('-').map(Number)
+  const base = new Date(Date.UTC(y, m - 1, d))
+  const targetMonth = base.getUTCMonth() + months
+  const tmp = new Date(Date.UTC(y, m - 1, 1))
+  tmp.setUTCMonth(targetMonth + 1, 0) // last day of target month
+  const lastDay = tmp.getUTCDate()
+  const clampedDay = Math.min(d, lastDay)
+  const out = new Date(Date.UTC(y, m - 1, clampedDay))
+  out.setUTCMonth(targetMonth)
+  return out.toISOString().slice(0, 10)
+}
+
 function humanPlan(p: Plan) {
   switch (p) {
     case '1m':
@@ -106,14 +131,33 @@ export default function SubscribeDialog({
   const amountNum = Number(amount)
   const amountOk = amount !== '' && Number.isFinite(amountNum) && amountNum >= 0
 
+  const dateOk = isISODateOnly(startDate)
+  const sessionsOk = Number.isFinite(sessions) && sessions >= 1 && sessions <= 10
+
+  const previewEnd = useMemo(() => {
+    if (plan === 'sessions') {
+      const sd = dateOk ? startDate : todayLocalDateStr()
+      return addDays(sd, 45)
+    }
+    if (!dateOk) return null
+    const months = plan === '1m' ? 1 : plan === '3m' ? 3 : plan === '6m' ? 6 : 12
+    return addMonthsSafe(startDate, months)
+  }, [plan, startDate, dateOk])
+
   const canSubmit =
     !busy &&
     amountOk &&
-    (isTimePlan ? /^\d{4}-\d{2}-\d{2}$/.test(startDate) : sessions >= 1 && sessions <= 10)
+    (isTimePlan ? dateOk : sessionsOk)
+
+  function explainServerError(j: any) {
+    const base = j?.details || j?.error || 'Failed to create subscription'
+    const hint = j?.hint ? ` (${String(j.hint)})` : ''
+    return String(base) + hint
+  }
 
   async function submit() {
     if (!canSubmit) {
-      setStatus({ kind: 'error', msg: 'Please check fields (plan, date/sessions, amount).' })
+      setStatus({ kind: 'error', msg: 'Please check fields (plan, start date / sessions, amount).' })
       toast.error('Please check fields')
       return
     }
@@ -128,7 +172,11 @@ export default function SubscribeDialog({
         amount: amountNum,
       }
       if (isTimePlan) body.start_date = startDate
-      else body.sessions_total = sessions
+      else {
+        body.sessions_total = Math.floor(sessions)
+        // optionnel : on envoie aussi start_date pour sessions (utile pour preview identique côté serveur)
+        body.start_date = dateOk ? startDate : todayLocalDateStr()
+      }
 
       const r = await fetch('/api/subscriptions/create', {
         method: 'POST',
@@ -139,27 +187,27 @@ export default function SubscribeDialog({
       const j = await r.json().catch(() => ({}))
 
       if (!r.ok || !j?.ok) {
-        const message = j?.details || j?.error || 'Failed to create subscription'
+        const message = explainServerError(j)
         setStatus({ kind: 'error', msg: message })
         toast.error('Save failed')
         return
       }
 
+      const end = j?.end_date || previewEnd
       const msg =
         plan === 'sessions'
-          ? `Subscription created: ${humanPlan(plan)} (${sessions} sessions).`
-          : `Subscription created: ${humanPlan(plan)} starting ${startDate}.`
+          ? `Subscription created: ${humanPlan(plan)} (${sessions} sessions) · Ends ${end || '—'}.`
+          : `Subscription created: ${humanPlan(plan)} · ${startDate} → ${end || '—'}.`
 
       setStatus({ kind: 'success', msg })
       toast.success('Subscription created')
 
       onCreated?.(j)
 
-      // Ferme vite + refresh
       setTimeout(() => {
         setOpen(false)
         router.refresh()
-      }, 700)
+      }, 650)
     } catch (e: any) {
       const message = String(e?.message || e)
       setStatus({ kind: 'error', msg: message })
@@ -177,14 +225,12 @@ export default function SubscribeDialog({
 
       {open && (
         <>
-          {/* Overlay */}
           <div
             className="fixed inset-0 z-[100] bg-black/60"
             onClick={() => !busy && setOpen(false)}
             aria-hidden="true"
           />
 
-          {/* Modal */}
           <div className="fixed inset-0 z-[101] flex items-center justify-center p-4">
             <Card className="w-[92vw] max-w-md">
               <CardContent>
@@ -201,7 +247,6 @@ export default function SubscribeDialog({
                   Member: <b className="text-[hsl(var(--fg))]">{fullName}</b>
                 </div>
 
-                {/* Status (plus visible + cohérent) */}
                 {status.msg ? (
                   <div className="mt-3">
                     <InlineAlert
@@ -243,7 +288,7 @@ export default function SubscribeDialog({
                         disabled={busy || status.kind === 'success'}
                       />
                       <p className="text-xs text-[hsl(var(--muted))] -mt-2">
-                        Payment date will be set to today automatically.
+                        End date preview: <span className="font-medium">{previewEnd ?? '—'}</span>
                       </p>
                     </>
                   )}
@@ -263,16 +308,16 @@ export default function SubscribeDialog({
                         disabled={busy || status.kind === 'success'}
                       />
                       <p className="text-xs text-[hsl(var(--muted))] -mt-2">
-                        Validity: 45 days from start date.
+                        Validity preview (45 days): <span className="font-medium">{previewEnd ?? '—'}</span>
                       </p>
                     </>
                   )}
 
                   <Input
-                    label="Amount"
+                    label="Amount (EGP)"
                     type="number"
                     min={0}
-                    step="0.01"
+                    step="1"
                     value={amount}
                     onChange={(e) => setAmount(e.target.value)}
                     disabled={busy || status.kind === 'success'}
@@ -291,7 +336,6 @@ export default function SubscribeDialog({
             </Card>
           </div>
 
-          {/* a11y */}
           <div role="dialog" aria-modal="true" aria-label="Create subscription" className="sr-only" />
         </>
       )}
