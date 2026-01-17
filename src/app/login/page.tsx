@@ -1,9 +1,10 @@
 // src/app/login/page.tsx
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { Suspense, useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { createSupabaseBrowserClient } from '@/lib/supabaseBrowser'
+import InlineAlert from '@/components/ui/InlineAlert'
 
 function sanitizeNext(next: string | null) {
   if (!next) return '/'
@@ -17,7 +18,7 @@ function sanitizeNext(next: string | null) {
   return n || '/'
 }
 
-export default function LoginPage() {
+function LoginInner() {
   const searchParams = useSearchParams()
   const nextUrl = useMemo(() => sanitizeNext(searchParams.get('next')), [searchParams])
 
@@ -57,7 +58,7 @@ export default function LoginPage() {
 
       const { data, error } = await supabase.auth.signInWithPassword({ email, password })
       if (error) {
-        setErr(error.message)
+        setErr(error.message || 'Invalid email or password.')
         setStatus('')
         return
       }
@@ -89,32 +90,31 @@ export default function LoginPage() {
   }
 
   return (
-    <main className="p-6 max-w-md mx-auto">
+    <main className="max-w-md mx-auto p-6">
       <div className="mb-4">
-        <h1 className="text-xl font-semibold">Login</h1>
-        <p className="text-sm text-gray-600">
+        <h1 className="text-2xl font-semibold tracking-tight">Login</h1>
+        <p className="mt-1 text-sm text-[hsl(var(--muted))]">
           {nextUrl !== '/' ? `Continue to: ${nextUrl}` : 'Sign in to continue.'}
         </p>
       </div>
 
       {(!!status || !!err) && (
-        <div
-          className={`mb-3 rounded-xl border px-4 py-3 text-sm ${
-            err ? 'border-red-300 bg-red-50 text-red-700' : 'border-gray-200 bg-gray-50 text-gray-700'
-          }`}
-        >
-          {err || status}
+        <div className="mb-3">
+          <InlineAlert variant={err ? 'error' : 'info'}>{err || status}</InlineAlert>
         </div>
       )}
 
-      <form onSubmit={onSubmit} className="grid gap-3 border rounded-2xl p-5 bg-white shadow-sm">
+      <form
+        onSubmit={onSubmit}
+        className="grid gap-3 rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-5 shadow-soft"
+      >
         <label className="grid gap-1">
           <span className="text-sm font-medium">Email</span>
           <input
             type="email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            className="px-3 py-2 border rounded-lg"
+            className="px-3 py-2 rounded-xl border border-[hsl(var(--border))] bg-white"
             autoComplete="email"
             required
             disabled={busy}
@@ -127,7 +127,7 @@ export default function LoginPage() {
             type="password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            className="px-3 py-2 border rounded-lg"
+            className="px-3 py-2 rounded-xl border border-[hsl(var(--border))] bg-white"
             autoComplete="current-password"
             required
             minLength={8}
@@ -137,20 +137,32 @@ export default function LoginPage() {
 
         <button
           disabled={busy}
-          className={`mt-1 w-full rounded-lg px-4 py-2 text-sm font-medium ${
+          className={`mt-1 w-full rounded-xl px-4 py-2 text-sm font-medium ${
             busy ? 'bg-gray-200 text-gray-500' : 'bg-black text-white hover:opacity-90'
           }`}
         >
           {busy ? 'Please wait…' : 'Sign in'}
         </button>
 
-        <div className="text-xs text-gray-500 space-y-1 pt-1">
+        <div className="text-xs text-[hsl(var(--muted))] space-y-1 pt-1">
           <p>If you were invited, use the link from your email first to set your password.</p>
           <p>
-            Forgot your password? <a className="underline" href="/reset">Reset here</a>
+            Forgot your password?{' '}
+            <a className="underline" href="/reset">
+              Reset here
+            </a>
           </p>
         </div>
       </form>
     </main>
+  )
+}
+
+export default function LoginPage() {
+  // Important for Next.js: useSearchParams inside Suspense
+  return (
+    <Suspense fallback={<main className="max-w-md mx-auto p-6" />}>
+      <LoginInner />
+    </Suspense>
   )
 }
