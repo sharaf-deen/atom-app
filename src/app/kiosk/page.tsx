@@ -1,32 +1,31 @@
-// src/app/members/page.tsx
+// src/app/kiosk/page.tsx
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
 import { redirect } from 'next/navigation'
+import { getSessionUser } from '@/lib/session'
 import PageHeader from '@/components/layout/PageHeader'
 import Section from '@/components/layout/Section'
-import { getSessionUser, type Role } from '@/lib/session'
-import MembersSearch from '@/components/MembersSearch'
+import CreateMemberForm from '@/components/CreateMemberForm'
 import AccessDeniedPage from '@/components/AccessDeniedPage'
 
-const STAFF: Role[] = ['reception', 'admin', 'super_admin']
-
-export default async function MembersPage() {
+export default async function KioskPage() {
   const me = await getSessionUser()
 
-  if (!me) redirect('/login?next=/members')
+  if (!me) redirect('/login?next=/kiosk')
 
-  const isStaff = STAFF.includes(me.role)
+  const isStaff = ['reception', 'admin', 'super_admin'].includes(me.role)
 
   if (!isStaff) {
     return (
       <AccessDeniedPage
-        title="Members"
+        title="Kiosk"
         subtitle="Access restricted."
         signedInAs={me.email}
-        message="Only Reception / Admin / Super Admin can access the members list."
+        message="Only Reception / Admin / Super Admin can access the kiosk."
         allowed="reception, admin, super_admin"
-        nextPath="/members"
+        nextPath="/kiosk"
+        actions={[{ href: '/members', label: 'Go to Members' }]}
         showBackHome
       />
     )
@@ -34,9 +33,9 @@ export default async function MembersPage() {
 
   return (
     <main>
-      <PageHeader title="Members" subtitle="Search and manage your member base" />
-      <Section>
-        <MembersSearch isStaff />
+      <PageHeader title="Kiosk" subtitle="Create members quickly at the front desk." />
+      <Section className="max-w-2xl space-y-6">
+        <CreateMemberForm />
       </Section>
     </main>
   )
