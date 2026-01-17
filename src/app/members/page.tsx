@@ -5,9 +5,9 @@ export const revalidate = 0
 import { redirect } from 'next/navigation'
 import PageHeader from '@/components/layout/PageHeader'
 import Section from '@/components/layout/Section'
-import { getSessionUser, type Role } from '@/lib/session'
 import MembersSearch from '@/components/MembersSearch'
 import AccessDeniedPage from '@/components/AccessDeniedPage'
+import { getSessionUser, type Role } from '@/lib/session'
 
 const STAFF: Role[] = ['reception', 'admin', 'super_admin']
 
@@ -16,9 +16,9 @@ export default async function MembersPage() {
 
   if (!me) redirect('/login?next=/members')
 
-  const isStaff = STAFF.includes(me.role)
+  const allowed = STAFF.includes(me.role)
 
-  if (!isStaff) {
+  if (!allowed) {
     return (
       <AccessDeniedPage
         title="Members"
@@ -27,6 +27,7 @@ export default async function MembersPage() {
         message="Only Reception / Admin / Super Admin can access the members list."
         allowed="reception, admin, super_admin"
         nextPath="/members"
+        actions={[{ href: '/admin', label: 'Go to Admin' }]}
         showBackHome
       />
     )
