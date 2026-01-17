@@ -2,8 +2,11 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
+import { toast } from 'sonner'
 import type { OrderStatus, PaymentMethod } from '@/lib/order'
 import { ORDER_STATUSES } from '@/lib/order'
+import InlineAlert from '@/components/ui/InlineAlert'
+import Button from '@/components/ui/Button'
 
 type Mode = 'mine' | 'admin'
 
@@ -41,21 +44,28 @@ function fmtMoney(cents: number, currency = 'EGP') {
   return `${(n / 100).toFixed(2)} ${currency}`
 }
 
+function shortId(id: string) {
+  return (id || '').slice(0, 8)
+}
+
 export default function StoreOrdersList({ mode = 'mine' }: { mode?: Mode }) {
+  const isAdmin = mode === 'admin'
+
   const [items, setItems] = useState<OrderRow[]>([])
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState<string>('')
   const [msg, setMsg] = useState<string>('')
 
+  const [savingId, setSavingId] = useState<string | null>(null)
   const [editing, setEditing] = useState<Record<string, OrderStatus>>({})
+
+  const [statusFilter, setStatusFilter] = useState<OrderStatus | ''>('')
 
   const [page, setPage] = useState(1)
   const [total, setTotal] = useState(0)
   const totalPages = useMemo(() => Math.max(1, Math.ceil(Number(total || 0) / PER_PAGE)), [total])
 
-  const isAdmin = mode === 'admin'
-
-  async function load(p = page) {
+  async function load(p = 1) {
     setLoading(true)
     setErr('')
     setMsg('')
@@ -64,41 +74,51 @@ export default function StoreOrdersList({ mode = 'mine' }: { mode?: Mode }) {
       params.set('page', String(p))
       params.set('limit', String(PER_PAGE))
       if (isAdmin) params.set('view', 'all')
+      if (statusFilter) params.set('status', statusFilter)
 
       const r = await fetch(`/api/store/orders/list?${params.toString()}`, { cache: 'no-store' })
       const j = await r.json().catch(() => ({}))
+
       if (!r.ok || !j?.ok) {
         setErr(j?.details || j?.error || 'Failed to load orders')
-        setItems([])
-        setTotal(0)
-        setPage(1)
         return
       }
+
       setItems(Array.isArray(j.items) ? (j.items as OrderRow[]) : [])
       setTotal(Number(j.total || 0))
       setPage(Number(j.page || p))
     } catch (e: any) {
       setErr(String(e?.message || e))
-      setItems([])
-      setTotal(0)
-      setPage(1)
     } finally {
       setLoading(false)
     }
   }
 
-  // Recharger quand le mode change
-  useEffect(() => { load(1) }, [mode]) // important: dépendre de "mode", pas d’un bool dérivé
+  // Reload on mode/filter change
+  useEffect(() => {
+    load(1)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode, statusFilter])
 
-  function setRowStatus(id: string, s: OrderStatus) {
-    setEditing((m) => ({ ...m, [id]: s }))
+  function setRowStatus(id: string, next: OrderStatus, original: OrderStatus) {
+    setEditing((m) => {
+      // If same as original, remove from editing map -> disables Update
+      if (next === original) {
+        const { [id]: _, ...rest } = m
+        return rest
+      }
+      return { ...m, [id]: next }
+    })
   }
 
   async function saveStatus(id: string) {
     const next = editing[id]
     if (!next) return
-    setMsg('')
+
+    setSavingId(id)
     setErr('')
+    setMsg('')
+
     try {
       const r = await fetch('/api/store/orders/update-status', {
         method: 'PATCH',
@@ -106,23 +126,34 @@ export default function StoreOrdersList({ mode = 'mine' }: { mode?: Mode }) {
         body: JSON.stringify({ order_id: id, status: next }),
       })
       const j = await r.json().catch(() => ({}))
+
       if (!r.ok || !j?.ok) {
-        setErr(j?.details || j?.error || 'Update failed')
+        const m = j?.details || j?.error || 'Update failed'
+        setErr(m)
+        toast.error('Update failed')
         return
       }
-      setMsg(`Order ${id.slice(0, 8)} → ${next}`)
+
+      setMsg(`Order ${shortId(id)} → ${next}`)
+      toast.success('Order updated')
+
       setEditing((m) => {
         const { [id]: _, ...rest } = m
         return rest
       })
+
       await load(page)
     } catch (e: any) {
       setErr(String(e?.message || e))
+      toast.error('Network error')
+    } finally {
+      setSavingId(null)
     }
   }
 
   const columns = useMemo(() => {
     const base = [
+      'Order',
       'Date',
       ...(isAdmin ? ['Customer'] as const : []),
       'Items',
@@ -137,59 +168,88 @@ export default function StoreOrdersList({ mode = 'mine' }: { mode?: Mode }) {
 
   return (
     <div>
-      <div className="flex flex-wrap items-center gap-2 mb-2">
-        <button
-          onClick={() => load(page)}
-          className="text-sm px-2 py-1 rounded border hover:bg-gray-50"
-          disabled={loading}
-        >
+      <div className="flex flex-wrap items-center gap-2 mb-3">
+        <Button variant="outline" onClick={() => load(page)} disabled={loading}>
           {loading ? 'Loading…' : 'Refresh'}
-        </button>
-        {msg && <span className="text-xs text-green-700">{msg}</span>}
-        {err && <span className="text-xs text-red-600">{err}</span>}
-        <div className="ml-auto text-xs text-gray-600">
+        </Button>
+
+        {isAdmin && (
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-[hsl(var(--muted))]">Status</span>
+            <select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter((e.target.value || '') as any)}
+              className="px-2 py-1 border rounded bg-white text-sm"
+              disabled={loading}
+            >
+              <option value="">All</option>
+              {ORDER_STATUSES.map((s) => (
+                <option key={s} value={s}>
+                  {s}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+
+        <div className="ml-auto text-xs text-[hsl(var(--muted))]">
           Page <strong>{page}</strong> / {totalPages} · Total {total} · {PER_PAGE}/page
         </div>
       </div>
 
+      {err ? (
+        <div className="mb-3">
+          <InlineAlert variant="error">{err}</InlineAlert>
+        </div>
+      ) : null}
+
+      {msg ? (
+        <div className="mb-3">
+          <InlineAlert variant="success">{msg}</InlineAlert>
+        </div>
+      ) : null}
+
       <div className="overflow-x-auto">
-        <table className="min-w-[980px] w-full border rounded-lg bg-white">
+        <table className="min-w-[1040px] w-full border rounded-lg bg-white">
           <thead>
             <tr className="text-left text-xs text-gray-500">
               {columns.map((c) => (
-                <th key={c} className="px-3 py-2 border-b">{c}</th>
+                <th key={c} className="px-3 py-2 border-b">
+                  {c}
+                </th>
               ))}
             </tr>
           </thead>
+
           <tbody>
             {items.map((o) => {
               const current = editing[o.id] ?? o.status
               const orderItems: OrderItemRow[] = Array.isArray((o as any).items) ? (o as any).items : []
               const currency = orderItems?.[0]?.currency || 'EGP'
-              const buyer = (o.customer_name || o.customer_email || o.user_id || '—')
+              const buyer = o.customer_name || o.customer_email || o.user_id || '—'
+              const isSaving = savingId === o.id
+
               return (
                 <tr key={o.id} className="text-sm align-top">
+                  <td className="px-3 py-2 border-b whitespace-nowrap">
+                    <span className="font-medium">{shortId(o.id)}</span>
+                  </td>
+
                   <td className="px-3 py-2 border-b whitespace-nowrap">
                     {new Date(o.created_at).toLocaleString()}
                   </td>
 
-                  {isAdmin && (
-                    <td className="px-3 py-2 border-b">
-                      {buyer}
-                    </td>
-                  )}
+                  {isAdmin && <td className="px-3 py-2 border-b">{buyer}</td>}
 
-                  {/* Items */}
                   <td className="px-3 py-2 border-b">
                     {orderItems.length > 0 ? (
                       <ul className="space-y-1">
                         {orderItems.map((it) => (
                           <li key={it.id} className="text-xs leading-5">
-                            <div className="font-medium">
-                              {it.name || 'Item'}
-                            </div>
+                            <div className="font-medium">{it.name || 'Item'}</div>
                             <div className="text-gray-600">
-                              Qty: <strong>{it.qty}</strong> · Unit: {fmtMoney(it.unit_price_cents, it.currency || currency)}
+                              Qty: <strong>{it.qty}</strong> · Unit:{' '}
+                              {fmtMoney(it.unit_price_cents, it.currency || currency)}
                             </div>
                           </li>
                         ))}
@@ -199,20 +259,24 @@ export default function StoreOrdersList({ mode = 'mine' }: { mode?: Mode }) {
                     )}
                   </td>
 
-                  {/* Total */}
-                  <td className="px-3 py-2 border-b">{fmtMoney(o.total_cents, currency)}</td>
+                  <td className="px-3 py-2 border-b whitespace-nowrap">
+                    {fmtMoney(o.total_cents, currency)}
+                  </td>
 
-                  <td className="px-3 py-2 border-b">{o.preferred_payment || 'cash'}</td>
+                  <td className="px-3 py-2 border-b whitespace-nowrap">{o.preferred_payment || 'cash'}</td>
 
                   <td className="px-3 py-2 border-b">
                     {isAdmin ? (
                       <select
                         value={current}
-                        onChange={(e) => setRowStatus(o.id, e.target.value as OrderStatus)}
+                        onChange={(e) => setRowStatus(o.id, e.target.value as OrderStatus, o.status)}
                         className="px-2 py-1 border rounded"
+                        disabled={isSaving}
                       >
                         {ORDER_STATUSES.map((s) => (
-                          <option key={s} value={s}>{s}</option>
+                          <option key={s} value={s}>
+                            {s}
+                          </option>
                         ))}
                       </select>
                     ) : (
@@ -223,15 +287,13 @@ export default function StoreOrdersList({ mode = 'mine' }: { mode?: Mode }) {
                   <td className="px-3 py-2 border-b">{o.note || '—'}</td>
 
                   {isAdmin && (
-                    <td className="px-3 py-2 border-b">
-                      <button
+                    <td className="px-3 py-2 border-b whitespace-nowrap">
+                      <Button
                         onClick={() => saveStatus(o.id)}
-                        disabled={!editing[o.id]}
-                        className="px-3 py-1.5 rounded border bg-black text-white disabled:opacity-50"
-                        title="Save status"
+                        disabled={!editing[o.id] || isSaving}
                       >
-                        Update
-                      </button>
+                        {isSaving ? 'Updating…' : 'Update'}
+                      </Button>
                     </td>
                   )}
                 </tr>
@@ -245,26 +307,34 @@ export default function StoreOrdersList({ mode = 'mine' }: { mode?: Mode }) {
                 </td>
               </tr>
             )}
+
+            {loading && items.length === 0 && (
+              <tr>
+                <td className="px-3 py-4 text-sm text-gray-500" colSpan={columns.length}>
+                  Loading…
+                </td>
+              </tr>
+            )}
           </tbody>
         </table>
       </div>
 
-      {/* Pagination */}
       <div className="mt-3 flex items-center justify-center gap-2">
-        <button
+        <Button
+          variant="outline"
           onClick={() => load(Math.max(1, page - 1))}
           disabled={page <= 1 || loading}
-          className="px-2 py-1 rounded border bg-white hover:bg-gray-50 disabled:opacity-50"
         >
           Prev
-        </button>
-        <button
+        </Button>
+
+        <Button
+          variant="outline"
           onClick={() => load(Math.min(totalPages, page + 1))}
           disabled={page >= totalPages || loading}
-          className="px-2 py-1 rounded border bg-white hover:bg-gray-50 disabled:opacity-50"
         >
           Next
-        </button>
+        </Button>
       </div>
     </div>
   )
