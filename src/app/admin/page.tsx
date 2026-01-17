@@ -12,17 +12,17 @@ import { Card, CardContent } from '@/components/ui/Card'
 import Button from '@/components/ui/Button'
 import AdminExports from '@/components/AdminExports'
 import AdminRevenue from '@/components/AdminRevenue'
-import AccessDeniedPage from '@/components/AccessDeniedPage'
+import Forbidden from '@/components/Forbidden'
 
 type Plan = '1m' | '3m' | '6m' | '12m' | 'sessions'
 
 function todayDateOnly() {
   return new Date().toISOString().slice(0, 10) // YYYY-MM-DD (UTC)
 }
-function tomorrowDateOnly(d: string) {
-  const [y, m, day] = d.split('-').map(Number)
-  const dt = new Date(Date.UTC(y, m - 1, day))
-  dt.setUTCDate(dt.getUTCDate() + 1)
+function addDaysUTC(dateOnly: string, days: number) {
+  const [y, m, d] = dateOnly.split('-').map(Number)
+  const dt = new Date(Date.UTC(y, m - 1, d))
+  dt.setUTCDate(dt.getUTCDate() + days)
   return dt.toISOString().slice(0, 10)
 }
 
@@ -31,10 +31,11 @@ export default async function AdminPage() {
 
   if (!me) redirect('/login?next=/admin')
 
-  if (!['admin', 'super_admin'].includes(me.role)) {
+  const allowed = me.role === 'admin' || me.role === 'super_admin'
+  if (!allowed) {
     return (
-      <AccessDeniedPage
-        title="Admin"
+      <Forbidden
+        pageTitle="Admin"
         subtitle="Access restricted."
         signedInAs={me.email}
         message="Only Admin / Super Admin can access the admin dashboard."
@@ -48,7 +49,7 @@ export default async function AdminPage() {
 
   const supa = createSupabaseRSC()
   const today = todayDateOnly()
-  const tomorrow = tomorrowDateOnly(today)
+  const tomorrow = addDaysUTC(today, 1)
 
   const { count: activeTimeCount } = await supa
     .from('subscriptions')
@@ -104,33 +105,54 @@ export default async function AdminPage() {
 
   return (
     <main>
-      <PageHeader title="Admin" subtitle="Overview and operations" />
+      <PageHeader
+        title="Admin"
+        subtitle="Overview and operations"
+        right={
+          <div className="flex items-center gap-2">
+            <Button asChild variant="outline" href="/admin">
+              Reload
+            </Button>
+            <Button asChild variant="outline" href="/members">
+              Members
+            </Button>
+          </div>
+        }
+      />
 
       <Section>
         <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-4">
-          <Card hover><CardContent>
-            <div className="text-sm text-[hsl(var(--muted))]">Active (subscriptions)</div>
-            <div className="mt-1 text-2xl font-semibold">{activeTimeCount ?? 0}</div>
-            <div className="mt-1 text-xs text-[hsl(var(--muted))]">end date ≥ today</div>
-          </CardContent></Card>
+          <Card hover>
+            <CardContent>
+              <div className="text-sm text-[hsl(var(--muted))]">Active (subscriptions)</div>
+              <div className="mt-1 text-2xl font-semibold">{activeTimeCount ?? 0}</div>
+              <div className="mt-1 text-xs text-[hsl(var(--muted))]">end date ≥ today</div>
+            </CardContent>
+          </Card>
 
-          <Card hover><CardContent>
-            <div className="text-sm text-[hsl(var(--muted))]">Active (sessions)</div>
-            <div className="mt-1 text-2xl font-semibold">{activeSessionsCount ?? 0}</div>
-            <div className="mt-1 text-xs text-[hsl(var(--muted))]">end date ≥ today</div>
-          </CardContent></Card>
+          <Card hover>
+            <CardContent>
+              <div className="text-sm text-[hsl(var(--muted))]">Active (sessions)</div>
+              <div className="mt-1 text-2xl font-semibold">{activeSessionsCount ?? 0}</div>
+              <div className="mt-1 text-xs text-[hsl(var(--muted))]">end date ≥ today</div>
+            </CardContent>
+          </Card>
 
-          <Card hover><CardContent>
-            <div className="text-sm text-[hsl(var(--muted))]">Expired (all)</div>
-            <div className="mt-1 text-2xl font-semibold">{expiredCount ?? 0}</div>
-            <div className="mt-1 text-xs text-[hsl(var(--muted))]">status = expired</div>
-          </CardContent></Card>
+          <Card hover>
+            <CardContent>
+              <div className="text-sm text-[hsl(var(--muted))]">Expired (all)</div>
+              <div className="mt-1 text-2xl font-semibold">{expiredCount ?? 0}</div>
+              <div className="mt-1 text-xs text-[hsl(var(--muted))]">status = expired</div>
+            </CardContent>
+          </Card>
 
-          <Card hover><CardContent>
-            <div className="text-sm text-[hsl(var(--muted))]">Attendance today</div>
-            <div className="mt-1 text-2xl font-semibold">{attendanceToday ?? 0}</div>
-            <div className="mt-1 text-xs text-[hsl(var(--muted))]">date = {today}</div>
-          </CardContent></Card>
+          <Card hover>
+            <CardContent>
+              <div className="text-sm text-[hsl(var(--muted))]">Attendance today</div>
+              <div className="mt-1 text-2xl font-semibold">{attendanceToday ?? 0}</div>
+              <div className="mt-1 text-xs text-[hsl(var(--muted))]">date = {today}</div>
+            </CardContent>
+          </Card>
         </div>
       </Section>
 

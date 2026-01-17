@@ -1,12 +1,11 @@
-import PageHeader from '@/components/layout/PageHeader'
-import Section from '@/components/layout/Section'
-import AccessDeniedCard from '@/components/AccessDeniedCard'
+// src/components/AccessDeniedPage.tsx
+import Forbidden from '@/components/Forbidden'
 
 type Action = { href: string; label: string }
 
 export default function AccessDeniedPage({
   title,
-  subtitle = 'Forbidden.',
+  subtitle = 'Access restricted.',
   signedInAs,
   message,
   allowed,
@@ -26,20 +25,16 @@ export default function AccessDeniedPage({
   showProfile?: boolean
 }) {
   return (
-    <main>
-      <PageHeader title={title} subtitle={subtitle} />
-      <Section className="max-w-2xl">
-        <AccessDeniedCard
-          signedInAs={signedInAs}
-          title="Forbidden"
-          message={message}
-          allowed={allowed}
-          nextPath={nextPath}
-          actions={actions}
-          showBackHome={showBackHome}
-          showProfile={showProfile}
-        />
-      </Section>
-    </main>
+    <Forbidden
+      pageTitle={title}
+      subtitle={subtitle}
+      signedInAs={signedInAs}
+      message={message}
+      allowed={allowed}
+      nextPath={nextPath}
+      actions={actions}
+      showBackHome={showBackHome}
+      showProfile={showProfile}
+    />
   )
 }
