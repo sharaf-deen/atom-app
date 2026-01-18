@@ -1,38 +1,64 @@
 // src/app/api/store/products/delete/route.ts
-import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@supabase/supabase-js'
-
-function createSupabaseForAPI() {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL
-  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY
-  const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
-  if (!url) throw new Error('Missing NEXT_PUBLIC_SUPABASE_URL')
-  const key = serviceKey || anon
-  if (!key) throw new Error('Missing SUPABASE keys')
-  return createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } })
-}
-
+export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
+import { NextRequest, NextResponse } from 'next/server'
+import { createSupabaseServerActionClient } from '@/lib/supabaseServer'
+
+function noStore(res: NextResponse) {
+  res.headers.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate')
+  return res
+}
+
 export async function DELETE(req: NextRequest) {
   try {
-    const { searchParams } = new URL(req.url)
-    const id = (searchParams.get('id') || '').trim()
-    if (!id) {
-      return NextResponse.json({ ok: false, error: 'Missing id' }, { status: 400 })
+    const supa = createSupabaseServerActionClient()
+
+    // 1) Auth
+    const { data: auth, error: authErr } = await supa.auth.getUser()
+    if (authErr) {
+      return noStore(
+        NextResponse.json({ ok: false, error: 'AUTH_ERROR', details: authErr.message }, { status: 401 })
+      )
+    }
+    const user = auth.user
+    if (!user) {
+      return noStore(NextResponse.json({ ok: false, error: 'NOT_AUTHENTICATED' }, { status: 401 }))
     }
 
-    const supabase = createSupabaseForAPI()
+    // 2) Role check
+    const { data: me, error: meErr } = await supa
+      .from('profiles')
+      .select('role')
+      .eq('user_id', user.id)
+      .maybeSingle<{ role: string | null }>()
+    if (meErr) {
+      return noStore(
+        NextResponse.json({ ok: false, error: 'PROFILE_ERROR', details: meErr.message }, { status: 500 })
+      )
+    }
+    if (me?.role !== 'super_admin') {
+      return noStore(NextResponse.json({ ok: false, error: 'FORBIDDEN' }, { status: 403 }))
+    }
 
-    const { error } = await supabase.from('store_products').delete().eq('id', id)
+    // 3) Param
+    const url = new URL(req.url)
+    const id = (url.searchParams.get('id') || '').trim()
+    if (!id) return noStore(NextResponse.json({ ok: false, error: 'MISSING_ID' }, { status: 400 }))
 
+    // 4) Delete
+    const { error } = await supa.from('store_products').delete().eq('id', id)
     if (error) {
-      return NextResponse.json({ ok: false, error: error.message }, { status: 500 })
+      return noStore(
+        NextResponse.json({ ok: false, error: 'DELETE_FAILED', details: error.message }, { status: 500 })
+      )
     }
 
-    return NextResponse.json({ ok: true, id })
+    return noStore(NextResponse.json({ ok: true }))
   } catch (e: any) {
-    return NextResponse.json({ ok: false, error: String(e?.message || e) }, { status: 500 })
+    return noStore(
+      NextResponse.json({ ok: false, error: 'SERVER_ERROR', details: e?.message ?? String(e) }, { status: 500 })
+    )
   }
 }

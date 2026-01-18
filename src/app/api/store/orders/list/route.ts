@@ -1,242 +1,166 @@
-// src/app/api/store/orders/list/route.ts
+// src/app/api/store/products/list/route.ts
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
-import { NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import { createSupabaseRSC } from '@/lib/supabaseServer'
-import { ORDER_STATUSES } from '@/lib/order'
+
+type Category = 'kimono' | 'rashguard' | 'short' | 'belt'
 
 function noStore(res: NextResponse) {
   res.headers.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate')
   return res
 }
 
-type OrderRow = {
-  id: string
-  created_by: string | null
-  user_id: string | null
-  owner_uid: string | null
-  member_id: string | null
-  status: string
-  total_cents: number
-  discount_pct: number | null
-  preferred_payment: string | null
-  note: string | null
-  created_at: string
+function clampInt(v: unknown, def: number, min: number, max: number) {
+  const n = Number(v)
+  if (!Number.isFinite(n)) return def
+  return Math.min(max, Math.max(min, Math.floor(n)))
 }
 
-type ItemRow = {
-  id: string
-  order_id: string
-  product_id: string
-  qty: number
-  unit_price_cents: number
-  final_price_cents: number
-  currency: string | null
-  name: string | null
-  owner_uid?: string | null
-}
-
-export async function GET(req: Request) {
-  const t0 = Date.now()
-  const url = new URL(req.url)
-  const debug = url.searchParams.get('debug') === '1'
-
+export async function GET(req: NextRequest) {
   try {
     const supa = createSupabaseRSC()
 
-    // --- Auth
-    const a0 = Date.now()
+    // 1) Auth
     const { data: auth, error: authErr } = await supa.auth.getUser()
-    const authMs = Date.now() - a0
-
     if (authErr) {
       return noStore(
-        NextResponse.json({ ok: false, error: 'AUTH_ERROR', details: authErr.message, __debug: { authMs } }, { status: 401 })
+        NextResponse.json(
+          { ok: false, error: 'AUTH_ERROR', details: authErr.message },
+          { status: 401 }
+        )
       )
     }
     const user = auth.user
     if (!user) {
-      return noStore(NextResponse.json({ ok: false, error: 'NOT_AUTHENTICATED', __debug: { authMs } }, { status: 401 }))
+      return noStore(
+        NextResponse.json({ ok: false, error: 'NOT_AUTHENTICATED' }, { status: 401 })
+      )
     }
 
-    // --- Role
-    const r0 = Date.now()
+    // 2) Role
     const { data: me, error: meErr } = await supa
       .from('profiles')
       .select('role')
       .eq('user_id', user.id)
       .maybeSingle<{ role: string | null }>()
-    const roleMs = Date.now() - r0
 
     if (meErr) {
       return noStore(
-        NextResponse.json({ ok: false, error: 'PROFILE_ERROR', details: meErr.message, __debug: { authMs, roleMs } }, { status: 500 })
+        NextResponse.json(
+          { ok: false, error: 'PROFILE_ERROR', details: meErr.message },
+          { status: 500 }
+        )
       )
     }
 
-    const isSuperAdmin = (me?.role ?? '') === 'super_admin'
-
-    // --- Params
-    const page = Math.max(1, Number(url.searchParams.get('page') || 1))
-    const limit = Math.min(100, Math.max(1, Number(url.searchParams.get('limit') || 20)))
-    const view = (url.searchParams.get('view') || '').toLowerCase()
-    const statusParam = (url.searchParams.get('status') || '').toLowerCase()
-
-    const wantsAll = view === 'all'
-    const canViewAll = isSuperAdmin && wantsAll
-
-    if (wantsAll && !isSuperAdmin) {
+    const role = (me?.role ?? 'member') as string
+    const allowedRoles = new Set([
+      'member',
+      'reception',
+      'coach',
+      'assistant_coach',
+      'admin',
+      'super_admin',
+    ])
+    if (!allowedRoles.has(role)) {
       return noStore(NextResponse.json({ ok: false, error: 'FORBIDDEN' }, { status: 403 }))
     }
 
-    const statusFilter =
-      statusParam && (ORDER_STATUSES as readonly string[]).includes(statusParam) ? statusParam : null
+    const isSuperAdmin = role === 'super_admin'
 
+    // 3) Params
+    const url = new URL(req.url)
+    const page = clampInt(url.searchParams.get('page'), 1, 1, 9999)
+    const limit = clampInt(url.searchParams.get('limit'), 10, 1, 100)
     const from = (page - 1) * limit
     const to = from + limit - 1
 
-    // --- COUNT (head:true)
-    let countQuery = supa.from('store_orders').select('id', { count: 'exact', head: true })
+    const category = (url.searchParams.get('category') || '').trim() as Category | ''
+    const all = url.searchParams.get('all') === '1'
+    const active = (url.searchParams.get('active') || '').trim() // '1' | '0' | ''
+    const qRaw = (url.searchParams.get('q') || '').trim()
 
-    if (!canViewAll) countQuery = countQuery.eq('owner_uid', user.id)
-    if (statusFilter) countQuery = countQuery.eq('status', statusFilter)
+    // 4) Base queries
+    const selectCols =
+      'id, category, name, color, size, price_cents, currency, inventory_qty, is_active, created_at'
 
-    const { count, error: countErr } = await countQuery
-    if (countErr) {
-      return noStore(NextResponse.json({ ok: false, error: 'COUNT_FAILED', details: countErr.message }, { status: 500 }))
-    }
-
-    // --- ORDERS page
-    const o0 = Date.now()
-    let ordersQuery = supa
-      .from('store_orders')
-      .select('id,created_by,user_id,owner_uid,member_id,status,total_cents,discount_pct,preferred_payment,note,created_at')
+    let dataQuery = supa
+      .from('store_products')
+      .select(selectCols)
       .order('created_at', { ascending: false })
       .range(from, to)
 
-    if (!canViewAll) ordersQuery = ordersQuery.eq('owner_uid', user.id)
-    if (statusFilter) ordersQuery = ordersQuery.eq('status', statusFilter)
+    let countQuery = supa.from('store_products').select('id', { count: 'exact', head: true })
 
-    const { data: ordersRaw, error: ordersErr } = await ordersQuery
-    const ordersMs = Date.now() - o0
+    // 5) Visibility rules
+    const shouldShowAll = isSuperAdmin && all
+    if (!shouldShowAll) {
+      dataQuery = dataQuery.eq('is_active', true)
+      countQuery = countQuery.eq('is_active', true)
+    } else {
+      if (active === '1') {
+        dataQuery = dataQuery.eq('is_active', true)
+        countQuery = countQuery.eq('is_active', true)
+      }
+      if (active === '0') {
+        dataQuery = dataQuery.eq('is_active', false)
+        countQuery = countQuery.eq('is_active', false)
+      }
+    }
 
-    if (ordersErr) {
+    // 6) Filters
+    if (category) {
+      dataQuery = dataQuery.eq('category', category)
+      countQuery = countQuery.eq('category', category)
+    }
+
+    if (qRaw) {
+      const like = `%${qRaw}%`
+      dataQuery = dataQuery.or(`name.ilike.${like},color.ilike.${like},size.ilike.${like}`)
+      countQuery = countQuery.or(`name.ilike.${like},color.ilike.${like},size.ilike.${like}`)
+    }
+
+    // 7) Execute
+    const [{ data, error: dataErr }, { count, error: countErr }] = await Promise.all([
+      dataQuery,
+      countQuery,
+    ])
+
+    if (dataErr) {
       return noStore(
-        NextResponse.json({ ok: false, error: 'QUERY_ORDERS_FAILED', details: ordersErr.message }, { status: 500 })
+        NextResponse.json(
+          { ok: false, error: 'QUERY_FAILED', details: dataErr.message },
+          { status: 500 }
+        )
+      )
+    }
+    if (countErr) {
+      return noStore(
+        NextResponse.json(
+          { ok: false, error: 'COUNT_FAILED', details: countErr.message },
+          { status: 500 }
+        )
       )
     }
 
-    const rows: OrderRow[] = Array.isArray(ordersRaw) ? (ordersRaw as OrderRow[]) : []
-    const orderIds = rows.map((r) => r.id)
-
-    // --- ITEMS for these orders
-    let items: ItemRow[] = []
-    let itemsMs = 0
-    if (orderIds.length) {
-      const i0 = Date.now()
-
-      let itemsQuery = supa
-        .from('store_order_items')
-        .select('id,order_id,product_id,qty,unit_price_cents,final_price_cents,currency,name,owner_uid')
-        .in('order_id', orderIds)
-
-      // Important:
-      // - mine view: restrict to my owner_uid for perf + RLS
-      // - all view (super_admin): do NOT eq owner_uid = user.id, otherwise you lose other clients items
-      if (!canViewAll) {
-        itemsQuery = itemsQuery.eq('owner_uid', user.id)
-      } else {
-        // perf helper: restrict to owners seen in current page (still "all")
-        const owners = Array.from(new Set(rows.map((r) => r.owner_uid).filter(Boolean))) as string[]
-        if (owners.length) itemsQuery = itemsQuery.in('owner_uid', owners)
-      }
-
-      const { data: itemsData, error: itemsErr } = await itemsQuery
-
-      itemsMs = Date.now() - i0
-
-      if (itemsErr) {
-        return noStore(
-          NextResponse.json(
-            { ok: false, error: 'QUERY_ITEMS_FAILED', details: itemsErr.message, __debug: { ordersMs } },
-            { status: 500 }
-          )
-        )
-      }
-      items = Array.isArray(itemsData) ? (itemsData as ItemRow[]) : []
-    }
-
-    // --- Enrich customer (created_by or user_id)
-    const uids = new Set<string>()
-    for (const o of rows) {
-      if (o.created_by) uids.add(o.created_by)
-      else if (o.user_id) uids.add(o.user_id)
-    }
-
-    const p0 = Date.now()
-    let profileMap: Record<string, { email: string | null; first_name: string | null; last_name: string | null }> = {}
-
-    if (uids.size) {
-      const { data: profs } = await supa
-        .from('profiles')
-        .select('user_id,email,first_name,last_name')
-        .in('user_id', Array.from(uids))
-        .limit(uids.size)
-
-      if (profs) {
-        profileMap = Object.fromEntries(
-          profs.map((p) => [p.user_id, { email: p.email, first_name: p.first_name, last_name: p.last_name }])
-        )
-      }
-    }
-    const profilesMs = Date.now() - p0
-
-    // --- assemble
-    const itemsByOrder = new Map<string, ItemRow[]>()
-    for (const it of items) {
-      const arr = itemsByOrder.get(it.order_id) || []
-      arr.push(it)
-      itemsByOrder.set(it.order_id, arr)
-    }
-
-    const out = rows.map((o) => {
-      const k = o.created_by || o.user_id || ''
-      const p = profileMap[k]
-      const full = ((p?.first_name ?? '') + ' ' + (p?.last_name ?? '')).trim() || null
-      return {
-        ...o,
-        items: itemsByOrder.get(o.id) ?? [],
-        customer_email: p?.email ?? null,
-        customer_name: full,
-      }
-    })
-
-    const totalTimeMs = Date.now() - t0
-    const payload: any = {
-      ok: true,
-      page,
-      pageSize: limit,
-      total: count ?? out.length,
-      items: out,
-    }
-    if (debug) {
-      payload.__debug = {
-        totalTimeMs,
-        authMs,
-        roleMs,
-        ordersMs,
-        itemsMs,
-        profilesMs,
-        counts: { orders: rows.length, items: items.length, uids: uids.size },
-        view: wantsAll ? 'all' : 'mine',
-        statusFilter,
-      }
-    }
-
-    return noStore(NextResponse.json(payload))
+    return noStore(
+      NextResponse.json({
+        ok: true,
+        items: Array.isArray(data) ? data : [],
+        total: Number(count ?? 0),
+        page,
+        pageSize: limit,
+      })
+    )
   } catch (e: any) {
-    return noStore(NextResponse.json({ ok: false, error: 'SERVER_ERROR', details: e?.message || String(e) }, { status: 500 }))
+    return noStore(
+      NextResponse.json(
+        { ok: false, error: 'SERVER_ERROR', details: e?.message ?? String(e) },
+        { status: 500 }
+      )
+    )
   }
 }

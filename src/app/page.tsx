@@ -107,6 +107,12 @@ const MENU_BY_ROLE: GroupedMenuByRole = {
         { label: 'Packages & Promos', href: '/packages-and-promos', icon: Gift },
       ],
     },
+    {
+      title: 'Store',
+      items: [
+        { label: 'Store', href: '/store', icon: ShoppingBag },
+      ],
+    },
   ],
   admin: [
     {
@@ -165,7 +171,7 @@ const MENU_BY_ROLE: GroupedMenuByRole = {
     {
       title: 'Store & Finance',
       items: [
-        { label: 'Store', href: '/store', icon: ShoppingBag },
+        { label: 'Store', href: '/store/admin', icon: ShoppingBag },
         { label: 'Expenses', href: '/expenses', icon: Wallet },
       ],
     },

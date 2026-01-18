@@ -47,6 +47,7 @@ export default function StoreCatalog({
 
   // Filtres
   const [cat, setCat] = useState<'all' | Category>('all')
+  // Pour super_admin: 'all' doit vraiment renvoyer active+inactive
   const [active, setActive] = useState<'all' | '1' | '0'>('all')
   const [q, setQ] = useState('')
   const [qApplied, setQApplied] = useState('')
@@ -76,12 +77,18 @@ export default function StoreCatalog({
       params.set('page', String(p))
       params.set('limit', String(PER_PAGE))
 
-      if (canManage) params.set('all', '1')
+      // ✅ IMPORTANT:
+      // - si canManage (super_admin), on envoie TOUJOURS active=all|1|0
+      // - si pas canManage, on ne met rien => API default active=1
+      if (canManage) params.set('active', active)
+
       if (cat !== 'all') params.set('category', cat)
-      if (canManage && active !== 'all') params.set('active', active)
       if (qApplied.trim()) params.set('q', qApplied.trim())
 
-      const r = await fetch(`/api/store/products/list?${params.toString()}`, { cache: 'no-store' })
+      const r = await fetch(`/api/store/products/list?${params.toString()}`, {
+        cache: 'no-store',
+        credentials: 'include',
+      })
       const j = await r.json().catch(() => ({}))
       if (!r.ok || !j?.ok) {
         const msg = j?.error || j?.details || 'Failed to load products'
@@ -186,6 +193,7 @@ export default function StoreCatalog({
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
+        credentials: 'include',
       })
       const j = await r.json().catch(() => ({}))
       if (!r.ok || !j?.ok) {
@@ -214,7 +222,10 @@ export default function StoreCatalog({
     setBusy(true)
     setStatus({ kind: '', msg: '' })
     try {
-      const r = await fetch(`/api/store/products/delete?id=${encodeURIComponent(id)}`, { method: 'DELETE' })
+      const r = await fetch(`/api/store/products/delete?id=${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+        credentials: 'include',
+      })
       const j = await r.json().catch(() => ({}))
       if (!r.ok || !j?.ok) {
         const msg = j?.hint || j?.details || j?.error || 'Delete failed'
@@ -226,7 +237,6 @@ export default function StoreCatalog({
       flash('success', 'Product deleted.')
       toast.success('Product deleted')
 
-      // Si on supprime le dernier item de la page, recule d'une page
       const isLastOnPage = items.length === 1 && page > 1
       await load(isLastOnPage ? page - 1 : page)
     } catch (e: any) {
@@ -246,6 +256,7 @@ export default function StoreCatalog({
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id, is_active: nextActive }),
+        credentials: 'include',
       })
       const j = await r.json().catch(() => ({}))
       if (!r.ok || !j?.ok) {
