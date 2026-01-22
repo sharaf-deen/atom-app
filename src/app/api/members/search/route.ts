@@ -1,6 +1,6 @@
 // src/app/api/members/search/route.ts
 import { NextResponse } from 'next/server'
-import { createSupabaseServerActionClient } from '@/lib/supabaseServer'
+import { createSupabaseRSC } from '@/lib/supabaseServer'
 
 type Role = 'member' | 'assistant_coach' | 'coach' | 'reception' | 'admin' | 'super_admin'
 type MemberRow = {
@@ -12,6 +12,7 @@ type MemberRow = {
   role: Role | null
   created_at: string | null
   member_id: string | null
+  is_active?: boolean | null
 }
 
 function normalizeQ(raw: string | null): string {
@@ -37,7 +38,8 @@ export async function GET(req: Request) {
   const to = from + limit - 1
 
   try {
-    const supabase = createSupabaseServerActionClient()
+    const supabase = createSupabaseRSC()
+    const today = new Date().toISOString().slice(0, 10) // 'YYYY-MM-DD'
 
     // ⚠️ Filtre RÔLE: on force 'member'
     let qb = supabase
@@ -53,9 +55,9 @@ export async function GET(req: Request) {
         created_at,
         member_id
       `,
-        { count: 'exact', head: false }
+        { count: 'exact', head: false },
       )
-      .eq('role', 'member')                // ⬅️ ICI: on limite aux membres
+      .eq('role', 'member')
       .order('created_at', { ascending: false })
       .range(from, to)
 
@@ -69,7 +71,7 @@ export async function GET(req: Request) {
       ]
 
       if (qDigits.length >= 4) {
-        // Utilise la colonne normalisée si tu l'as créée (voir notes ci-dessous)
+        // Utilise la colonne normalisée si tu l'as créée
         ors.push(`phone_digits.ilike.%${qDigits}%`)
       }
 
@@ -96,6 +98,29 @@ export async function GET(req: Request) {
         created_at: r.created_at ?? null,
         member_id: r.member_id ?? null,
       })) ?? []
+
+    // Compute active flag for the returned items only (fast)
+    const ids = items.map((i) => i.user_id).filter(Boolean)
+    if (ids.length > 0) {
+      const { data: subs, error: subsError } = await supabase
+        .from('subscriptions')
+        .select('member_id, end_date, status')
+        .eq('status', 'active')
+        .gte('end_date', today)
+        .in('member_id', ids)
+
+      if (!subsError) {
+        const activeSet = new Set<string>()
+        for (const s of subs ?? []) {
+          const mid = (s as any)?.member_id as string | null
+          if (mid) activeSet.add(mid)
+        }
+        for (const it of items) it.is_active = activeSet.has(it.user_id)
+      } else {
+        console.error('Error fetching subscriptions (search active flag):', subsError)
+        for (const it of items) it.is_active = null
+      }
+    }
 
     return NextResponse.json({ ok: true, items, page, limit, total: count ?? null })
   } catch (e: any) {

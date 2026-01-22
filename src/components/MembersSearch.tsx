@@ -25,6 +25,7 @@ type MemberRow = {
   role: Role | null
   created_at: string | null
   member_id: string | null
+  is_active?: boolean | null
 }
 
 type MembersStats = {
@@ -48,6 +49,33 @@ function fmtDate(d?: string | null) {
     month: 'short',
     day: '2-digit',
   })
+}
+
+function StatusBadge({ active }: { active?: boolean | null }) {
+  const isTrue = active === true
+  const isFalse = active === false
+
+  if (!isTrue && !isFalse) {
+    return (
+      <span className="inline-flex items-center rounded-full border border-[hsl(var(--border))] bg-[hsl(var(--bg))] px-2 py-0.5 text-[11px] font-medium text-[hsl(var(--muted))]">
+        Unknown
+      </span>
+    )
+  }
+
+  if (isTrue) {
+    return (
+      <span className="inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700">
+        Active
+      </span>
+    )
+  }
+
+  return (
+    <span className="inline-flex items-center rounded-full border border-rose-200 bg-rose-50 px-2 py-0.5 text-[11px] font-semibold text-rose-700">
+      Inactive
+    </span>
+  )
 }
 
 function listLabel(kind: ListKind) {
@@ -425,7 +453,10 @@ export default function MembersSearch({ isStaff = false }: { isStaff?: boolean }
                     return (
                       <tr key={m.user_id} className="odd:bg-[hsl(var(--card))] even:bg-[hsl(var(--bg))]">
                         <td className="border-t border-[hsl(var(--border))] px-4 py-3">
+                          <div className="flex items-center justify-between gap-2">
                           <div className="font-medium">{name}</div>
+                          <StatusBadge active={m.is_active} />
+                        </div>
                         </td>
                         <td className="border-t border-[hsl(var(--border))] px-4 py-3">
                           <code className="text-xs">{m.member_id?.trim() || '—'}</code>
@@ -472,7 +503,10 @@ export default function MembersSearch({ isStaff = false }: { isStaff?: boolean }
                   >
                     <div className="mb-2">
                       <div className="text-sm text-[hsl(var(--muted))]">Name</div>
+                      <div className="flex items-center justify-between gap-2">
                       <div className="font-medium">{name}</div>
+                      <StatusBadge active={m.is_active} />
+                    </div>
                     </div>
 
                     <div className="mb-2">
