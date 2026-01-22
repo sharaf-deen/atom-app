@@ -29,6 +29,18 @@ function todayIsoDate(): string {
   return new Date().toISOString().slice(0, 10)
 }
 
+function diffDays(dateOnlyA: string, dateOnlyB: string): number {
+  // Returns (A - B) in full days for YYYY-MM-DD strings (UTC midnight)
+  const a = String(dateOnlyA || '').trim()
+  const b = String(dateOnlyB || '').trim()
+  const ma = a.match(/^(\d{4})-(\d{2})-(\d{2})$/)
+  const mb = b.match(/^(\d{4})-(\d{2})-(\d{2})$/)
+  if (!ma || !mb) return 0
+  const utcA = Date.UTC(Number(ma[1]), Number(ma[2]) - 1, Number(ma[3]))
+  const utcB = Date.UTC(Number(mb[1]), Number(mb[2]) - 1, Number(mb[3]))
+  return Math.round((utcA - utcB) / 86400000)
+}
+
 const STAFF_CAN_SCAN = ['reception', 'admin', 'super_admin', 'coach', 'assistant_coach'] as const
 const STAFF_ALWAYS_VALID = ['reception', 'admin', 'super_admin', 'coach', 'assistant_coach'] as const
 type Role = (typeof STAFF_CAN_SCAN)[number] | 'member'
@@ -114,6 +126,10 @@ export async function POST(req: Request) {
         valid: true,
         member_id,
         subscription_id: null,
+        days_remaining: null,
+        expires_on: null,
+        expired_days: null,
+        expired_on: null,
         message: 'OK: STAFF ACCESS',
       })
     }
@@ -150,6 +166,10 @@ export async function POST(req: Request) {
     let valid = !!chosen
     let subscription_id: string | null = chosen?.id ?? null
 
+    // compute date-based info for UI (recomputed after any session consumption)
+    const expires_on: string | null = (chosen?.end_date ?? null) as any
+    let days_remaining: number | null = null
+
     // 8) Consommer 1 séance si pack de sessions (avant l’insert attendance)
     if (valid && useSessions && chosen) {
       const nextUsed = Number(chosen.sessions_used || 0) + 1
@@ -165,6 +185,29 @@ export async function POST(req: Request) {
       if (incErr || !urow?.id) {
         valid = false
         subscription_id = null
+      }
+    }
+
+    // Final days_remaining (based on final validity)
+    days_remaining = valid && expires_on ? Math.max(0, diffDays(expires_on, today)) : null
+
+    // If invalid, best-effort: find the most recent subscription end_date to compute "expired since"
+    let expired_on: string | null = null
+    let expired_days: number | null = null
+    if (!valid) {
+      const { data: lastSub, error: lastErr } = await admin
+        .from('subscriptions')
+        .select('end_date')
+        .eq('member_id', member_id)
+        .not('end_date', 'is', null)
+        .order('end_date', { ascending: false })
+        .limit(1)
+        .maybeSingle<{ end_date: string | null }>()
+      if (!lastErr) {
+        expired_on = lastSub?.end_date ?? null
+        if (expired_on && expired_on < today) {
+          expired_days = Math.max(0, diffDays(today, expired_on))
+        }
       }
     }
 
@@ -184,6 +227,10 @@ export async function POST(req: Request) {
       valid,
       member_id,
       subscription_id,
+      days_remaining,
+      expires_on,
+      expired_days,
+      expired_on,
       message: valid ? 'OK: subscription valid' : 'No active subscription for today',
     })
   } catch (e: any) {

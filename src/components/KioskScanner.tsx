@@ -2,6 +2,7 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { Scanner } from '@yudiel/react-qr-scanner'
 import { Card, CardContent } from '@/components/ui/Card'
 import Button from '@/components/ui/Button'
@@ -13,6 +14,10 @@ type ScanResponse = {
   message?: string
   member_id?: string
   subscription_id?: string | null
+  days_remaining?: number | null
+  expires_on?: string | null
+  expired_days?: number | null
+  expired_on?: string | null
 }
 
 type Detected = { rawValue: string }
@@ -47,6 +52,7 @@ type KioskScannerProps = {
 }
 
 export default function KioskScanner({ size = 'sm', ratio = '1:1', className }: KioskScannerProps) {
+  const router = useRouter()
   const [paused, setPaused] = useState(false)
   const [status, setStatus] = useState<Status>('idle')
   const [msg, setMsg] = useState<string>('Ready')
@@ -73,6 +79,8 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className }: 
     const raw = codes[0]?.rawValue ?? ''
     if (!raw) return
 
+    let didNavigate = false
+
     setPaused(true)
     setStatus('checking')
     setMsg('Checking…')
@@ -92,18 +100,24 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className }: 
         setStatus('error')
         setMsg(j?.message || 'Scan failed')
       } else {
-        if (j.valid) {
-          setStatus('ok')
-          setMsg('OK: SUBSCRIPTION VALID')
-        } else {
-          setStatus('invalid')
-          setMsg('SUBSCRIPTION EXPIRED / INVALID')
-        }
+        // ✅ Navigate to result page (active vs expired)
+        const sp = new URLSearchParams()
+        sp.set('valid', j.valid ? '1' : '0')
+        if (j.days_remaining !== undefined && j.days_remaining !== null) sp.set('daysRemaining', String(j.days_remaining))
+        if (j.expires_on) sp.set('expiresOn', String(j.expires_on))
+        if (j.expired_days !== undefined && j.expired_days !== null) sp.set('expiredDays', String(j.expired_days))
+        if (j.expired_on) sp.set('expiredOn', String(j.expired_on))
+
+        router.push(`/scan/result?${sp.toString()}`)
+        didNavigate = true
+        return
       }
     } catch (e) {
       setStatus('error')
       setMsg(errToString(e))
     } finally {
+      // If we navigated to the result page, don't resume scanning here.
+      if (didNavigate) return
       if (resumeTimerRef.current) window.clearTimeout(resumeTimerRef.current)
       resumeTimerRef.current = window.setTimeout(() => {
         setPaused(false)
@@ -111,7 +125,7 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className }: 
         setMsg('Ready')
       }, 1500)
     }
-  }, [paused])
+  }, [paused, router])
 
   function manualRescan() {
     if (resumeTimerRef.current) window.clearTimeout(resumeTimerRef.current)

@@ -20,8 +20,9 @@ export async function GET() {
     // 1) Total de membres : table "profiles"
     //
     const { data: profiles, error: profilesError } = await supabase
-      .from('profiles') // ta table de membres
+      .from('profiles') // members profiles
       .select('user_id')
+      .eq('role', 'member')
 
     if (profilesError) {
       console.error('Error fetching profiles:', profilesError)
@@ -37,6 +38,9 @@ export async function GET() {
     }
 
     const total = profiles?.length ?? 0
+
+    // Only count subscriptions that belong to a real member profile
+    const memberIds = new Set<string>((profiles ?? []).map((p: any) => p.user_id as string).filter(Boolean))
 
     //
     // 2) Membres avec un abonnement ACTIF
@@ -64,7 +68,8 @@ export async function GET() {
     const activeMemberIds = new Set<string>()
     for (const row of subs ?? []) {
       if (row?.member_id) {
-        activeMemberIds.add(row.member_id as string)
+        const mid = row.member_id as string
+        if (memberIds.has(mid)) activeMemberIds.add(mid)
       }
     }
 

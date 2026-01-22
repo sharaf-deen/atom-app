@@ -33,7 +33,9 @@ type MembersStats = {
   inactive: number
 }
 
-type Mode = 'idle' | 'search' | 'inactive'
+type Mode = 'idle' | 'search' | 'list'
+
+type ListKind = 'all' | 'active' | 'inactive'
 
 const PAGE_SIZE = 20
 
@@ -48,9 +50,22 @@ function fmtDate(d?: string | null) {
   })
 }
 
+function listLabel(kind: ListKind) {
+  if (kind === 'all') return 'All members'
+  if (kind === 'active') return 'Active members'
+  return 'Inactive members'
+}
+
+function listSummaryLabel(kind: ListKind) {
+  if (kind === 'all') return 'member'
+  if (kind === 'active') return 'active member'
+  return 'inactive member'
+}
+
 export default function MembersSearch({ isStaff = false }: { isStaff?: boolean }) {
   const [q, setQ] = useState('')
   const [mode, setMode] = useState<Mode>('idle')
+  const [listKind, setListKind] = useState<ListKind>('all')
 
   const [rows, setRows] = useState<MemberRow[]>([])
   const [hasSearched, setHasSearched] = useState(false)
@@ -63,7 +78,7 @@ export default function MembersSearch({ isStaff = false }: { isStaff?: boolean }
   const [statsLoading, setStatsLoading] = useState(false)
   const [statsErr, setStatsErr] = useState<string | null>(null)
 
-  // Pagination (utilisée pour search & inactive)
+  // Pagination (utilisée pour search & lists)
   const [page, setPage] = useState(1)
   const [totalResults, setTotalResults] = useState<number | null>(null)
 
@@ -161,22 +176,24 @@ export default function MembersSearch({ isStaff = false }: { isStaff?: boolean }
     }
   }
 
-  async function loadInactive(targetPage = 1) {
+  async function loadList(kind: ListKind, targetPage = 1) {
     setLoading(true)
     setErr('')
 
     try {
-      const r = await fetch(`/api/members/inactive?page=${targetPage}`, {
+      const url = `/api/members/list?status=${encodeURIComponent(kind)}&page=${targetPage}&limit=${PAGE_SIZE}`
+      const r = await fetch(url, {
         headers: { Accept: 'application/json' },
       })
       const j = await r.json().catch(() => ({} as any))
 
       if (!r.ok || !j?.ok) {
-        setErr(j?.error || 'Failed to load inactive members')
+        setErr(j?.error || `Failed to load ${kind} members`)
         setRows([])
         setTotalResults(0)
         setPage(1)
-        setMode('inactive')
+        setMode('list')
+        setListKind(kind)
         setHasSearched(true)
         return
       }
@@ -185,14 +202,16 @@ export default function MembersSearch({ isStaff = false }: { isStaff?: boolean }
       setRows(items)
       setTotalResults(typeof j.total === 'number' ? j.total : items.length)
       setPage(typeof j.page === 'number' ? j.page : targetPage)
-      setMode('inactive')
+      setMode('list')
+      setListKind(kind)
       setHasSearched(true)
     } catch (e: any) {
       setErr(String(e?.message || e))
       setRows([])
       setTotalResults(0)
       setPage(1)
-      setMode('inactive')
+      setMode('list')
+      setListKind(kind)
       setHasSearched(true)
     } finally {
       setLoading(false)
@@ -201,7 +220,7 @@ export default function MembersSearch({ isStaff = false }: { isStaff?: boolean }
 
   async function refreshAll() {
     await loadStats()
-    if (mode === 'inactive') return loadInactive(page)
+    if (mode === 'list') return loadList(listKind, page)
     if (mode === 'search') return runSearch(page)
   }
 
@@ -218,19 +237,20 @@ export default function MembersSearch({ isStaff = false }: { isStaff?: boolean }
     setErr('')
     setHasSearched(false)
     setMode('idle')
+    setListKind('all')
     setPage(1)
     setTotalResults(null)
   }
 
   function goPrev() {
     if (page <= 1) return
-    if (mode === 'inactive') return loadInactive(page - 1)
+    if (mode === 'list') return loadList(listKind, page - 1)
     if (mode === 'search') return runSearch(page - 1)
   }
 
   function goNext() {
     if (page >= totalPages) return
-    if (mode === 'inactive') return loadInactive(page + 1)
+    if (mode === 'list') return loadList(listKind, page + 1)
     if (mode === 'search') return runSearch(page + 1)
   }
 
@@ -258,8 +278,31 @@ export default function MembersSearch({ isStaff = false }: { isStaff?: boolean }
               {loading && mode === 'search' ? 'Searching…' : 'Search'}
             </Button>
 
-            <Button variant="outline" onClick={() => loadInactive(1)} disabled={loading}>
-              Inactive list
+            <Button
+              variant="outline"
+              onClick={() => loadList('all', 1)}
+              disabled={loading}
+              title="List all members"
+            >
+              {loading && mode === 'list' && listKind === 'all' ? 'Loading…' : 'All'}
+            </Button>
+
+            <Button
+              variant="outline"
+              onClick={() => loadList('active', 1)}
+              disabled={loading}
+              title="List active members"
+            >
+              {loading && mode === 'list' && listKind === 'active' ? 'Loading…' : 'Active'}
+            </Button>
+
+            <Button
+              variant="outline"
+              onClick={() => loadList('inactive', 1)}
+              disabled={loading}
+              title="List inactive members"
+            >
+              {loading && mode === 'list' && listKind === 'inactive' ? 'Loading…' : 'Inactive'}
             </Button>
 
             <Button variant="outline" onClick={refreshAll} disabled={loading || statsLoading}>
@@ -289,26 +332,35 @@ export default function MembersSearch({ isStaff = false }: { isStaff?: boolean }
           {stats && !statsLoading && !statsErr && (
             <>
               <div className="grid gap-3 text-sm sm:grid-cols-3">
-                <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] px-4 py-3 shadow-soft">
+                <button
+                  type="button"
+                  onClick={() => loadList('all', 1)}
+                  className="group flex flex-col justify-between rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] px-4 py-3 text-left shadow-soft transition hover:-translate-y-0.5 hover:shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black/60"
+                >
                   <div className="text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">
                     Total members
                   </div>
-                  <div className="mt-1 text-xl font-semibold">{stats.total}</div>
-                </div>
-
-                <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] px-4 py-3 shadow-soft">
-                  <div className="text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">
-                    Active
-                  </div>
-                  <div className="mt-1 text-xl font-semibold text-emerald-600">{stats.active}</div>
-                  <div className="mt-1 text-[11px] text-[hsl(var(--muted))]">
-                    Active subscriptions (time or sessions)
-                  </div>
-                </div>
+                  <div className="mt-1 text-xl font-semibold group-hover:underline">{stats.total}</div>
+                  <div className="mt-1 text-[11px] text-[hsl(var(--muted))]">Tap to list all members</div>
+                </button>
 
                 <button
                   type="button"
-                  onClick={() => loadInactive(1)}
+                  onClick={() => loadList('active', 1)}
+                  className="group flex flex-col justify-between rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] px-4 py-3 text-left shadow-soft transition hover:-translate-y-0.5 hover:shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black/60"
+                >
+                  <div className="text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">
+                    Active
+                  </div>
+                  <div className="mt-1 text-xl font-semibold text-emerald-600 group-hover:underline">
+                    {stats.active}
+                  </div>
+                  <div className="mt-1 text-[11px] text-[hsl(var(--muted))]">Tap to list active members</div>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => loadList('inactive', 1)}
                   className="group flex flex-col justify-between rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] px-4 py-3 text-left shadow-soft transition hover:-translate-y-0.5 hover:shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black/60"
                 >
                   <div className="text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">
@@ -317,14 +369,12 @@ export default function MembersSearch({ isStaff = false }: { isStaff?: boolean }
                   <div className="mt-1 text-xl font-semibold text-amber-600 group-hover:underline">
                     {stats.inactive}
                   </div>
-                  <div className="mt-1 text-[11px] text-[hsl(var(--muted))]">
-                    Tap to list inactive members (20 per page)
-                  </div>
+                  <div className="mt-1 text-[11px] text-[hsl(var(--muted))]">Tap to list inactive members</div>
                 </button>
               </div>
 
               <p className="mt-2 text-[11px] text-[hsl(var(--muted))]">
-                Search a member, or open the inactive list.
+                You can search a member, or list All / Active / Inactive.
               </p>
             </>
           )}
@@ -342,10 +392,10 @@ export default function MembersSearch({ isStaff = false }: { isStaff?: boolean }
           <div className="mt-3 flex flex-col gap-1 text-sm text-[hsl(var(--muted))]">
             {rangeText ? <p>{rangeText}</p> : null}
             <p>
-              {mode === 'inactive'
+              {mode === 'list'
                 ? hasData
-                  ? `${totalResults ?? rows.length} inactive member${(totalResults ?? rows.length) > 1 ? 's' : ''} total.`
-                  : 'No inactive members.'
+                  ? `${totalResults ?? rows.length} ${listSummaryLabel(listKind)}${(totalResults ?? rows.length) > 1 ? 's' : ''} total.`
+                  : `No ${listLabel(listKind).toLowerCase()}.`
                 : hasData
                   ? `${totalResults ?? rows.length} member${(totalResults ?? rows.length) > 1 ? 's' : ''} found.`
                   : 'No members found.'}
@@ -469,7 +519,7 @@ export default function MembersSearch({ isStaff = false }: { isStaff?: boolean }
               })}
             </div>
 
-            {/* Pagination (search + inactive) */}
+            {/* Pagination (search + list) */}
             {totalResults !== null && totalResults > PAGE_SIZE && (
               <div className="mt-4 flex items-center justify-between text-xs text-[hsl(var(--muted))]">
                 <span>
