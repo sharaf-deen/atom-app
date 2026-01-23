@@ -8,6 +8,7 @@ import { getSessionUser, type Role } from '@/lib/session'
 import SignOutButton from '@/components/SignOutButton'
 import NavLoginLink from '@/components/NavLoginLink'
 import RoleMenu from '@/components/RoleMenu'
+import NotificationsBell from '@/components/NotificationsBell'
 import HideMenuOnRoutes from '@/components/HideMenuOnRoutes'
 
 type IconKey = 'dashboard' | 'bell' | 'gift' | 'id' | 'scan' | 'users' | 'user-cog' | 'bag' | 'wallet'
@@ -71,6 +72,7 @@ const AUTH_ROUTES = ['/login', '/signup', '/reset-password']
 export default async function AppNav() {
   const user = await getSessionUser()
   const items = user ? (MENU_BY_ROLE[user.role] ?? []) : []
+  const hasNotifications = items.some((it) => it.href === '/notifications')
 
   return (
     <nav className="sticky top-0 z-30 border-b bg-white dark:bg-black">
@@ -101,6 +103,7 @@ export default async function AppNav() {
           // Cache l’info user + bouton logout sur les pages d’auth
           <HideMenuOnRoutes routes={AUTH_ROUTES}>
             <div className="ml-auto flex items-center gap-3">
+              {hasNotifications ? <NotificationsBell /> : null}
               <span className="hidden text-xs text-gray-600 dark:text-gray-300 sm:inline">
                 {user.full_name || user.email || 'User'} · <strong>{user.role}</strong>
               </span>
