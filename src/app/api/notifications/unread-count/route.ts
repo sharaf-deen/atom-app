@@ -22,9 +22,7 @@ export async function GET() {
       )
     }
     const user = auth.user
-    if (!user) {
-      return noStore(NextResponse.json({ ok: false, error: 'NOT_AUTHENTICATED' }, { status: 401 }))
-    }
+    if (!user) return noStore(NextResponse.json({ ok: false, error: 'NOT_AUTHENTICATED' }, { status: 401 }))
 
     const { count, error } = await supa
       .from('notifications')
@@ -40,8 +38,6 @@ export async function GET() {
 
     return noStore(NextResponse.json({ ok: true, count: count ?? 0 }))
   } catch (e: any) {
-    return noStore(
-      NextResponse.json({ ok: false, error: e?.message || 'SERVER_ERROR' }, { status: 500 })
-    )
+    return noStore(NextResponse.json({ ok: false, error: e?.message || 'SERVER_ERROR' }, { status: 500 }))
   }
 }

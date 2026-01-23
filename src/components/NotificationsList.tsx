@@ -133,6 +133,7 @@ export default function NotificationsList({ isAdmin = false, sentOnly = false }:
       alert(j?.details || j?.error || 'Failed to mark as read')
       return
     }
+    window.dispatchEvent(new Event('notifications:updated'))
     await load(page)
   }
 
@@ -165,6 +166,7 @@ export default function NotificationsList({ isAdmin = false, sentOnly = false }:
       alert(j2?.details || j2?.error || 'Failed to mark all as read')
       return
     }
+    window.dispatchEvent(new Event('notifications:updated'))
     await load(page)
   }
 
