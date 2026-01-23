@@ -178,7 +178,7 @@ const MENU_BY_ROLE: GroupedMenuByRole = {
   ],
 }
 
-function SectionGrid({ section }: { section: Section }) {
+function SectionGrid({ section, unreadCount }: { section: Section; unreadCount: number }) {
   const items = section.items ?? []
   if (!items.length) return null
   return (
@@ -189,6 +189,8 @@ function SectionGrid({ section }: { section: Section }) {
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {items.map((it) => {
           const Icon = it.icon
+          const isNotif = it.href === '/notifications'
+          const showUnread = isNotif && unreadCount > 0
           return (
             <Link
               key={it.href}
@@ -196,12 +198,34 @@ function SectionGrid({ section }: { section: Section }) {
               className="group block rounded-2xl border border-[hsl(var(--border))] bg-white p-5 shadow-soft transition ease-soft hover:shadow-md hover:shadow-black/10 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
             >
               <div className="flex items-center justify-between">
-                <h3 className="text-lg font-semibold tracking-tight">{it.label}</h3>
+                <h3
+                  className={
+                    'text-lg font-semibold tracking-tight ' +
+                    (showUnread ? 'text-red-600' : '')
+                  }
+                >
+                  {it.label}
+                </h3>
                 <span
                   aria-hidden
-                  className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-[hsl(var(--border))] transition group-hover:translate-x-0.5"
+                  className={
+                    'relative inline-flex h-10 w-10 items-center justify-center rounded-xl border transition group-hover:translate-x-0.5 ' +
+                    (showUnread
+                      ? 'border-red-500'
+                      : 'border-[hsl(var(--border))]')
+                  }
                 >
-                  <Icon size={18} strokeWidth={2.2} className="text-black" />
+                  <Icon
+                    size={18}
+                    strokeWidth={2.2}
+                    className={showUnread ? 'text-red-600' : 'text-black'}
+                  />
+                  {showUnread ? (
+                    <span
+                      aria-hidden
+                      className="absolute -right-1 -top-1 h-3 w-3 rounded-full bg-red-600"
+                    />
+                  ) : null}
                 </span>
               </div>
               {it.desc && <p className="mt-1 text-sm text-[hsl(var(--muted))]">{it.desc}</p>}
@@ -218,6 +242,22 @@ export default async function HomePage() {
   const displayName = user ? await getDisplayName(user) : null
   const role: Role | null = user?.role ?? null
   const grouped = role ? MENU_BY_ROLE[role] : []
+
+  // Unread notifications count (for red indicator on Home + menu)
+  let unreadCount = 0
+  if (user) {
+    try {
+      const supabase = createSupabaseRSC()
+      const { count } = await supabase
+        .from('notifications')
+        .select('id', { count: 'exact', head: true })
+        .eq('user_id', user.id)
+        .is('read_at', null)
+      unreadCount = Number(count ?? 0)
+    } catch {
+      unreadCount = 0
+    }
+  }
 
   // Avatar signé (RSC) — uniquement pour member / coach / assistant_coach
   let signedAvatar = ''
@@ -268,7 +308,7 @@ export default async function HomePage() {
             {/* Sections groupées */}
             <div className="space-y-8">
               {grouped.map((section) => (
-                <SectionGrid key={section.title} section={section} />
+                <SectionGrid key={section.title} section={section} unreadCount={unreadCount} />
               ))}
             </div>
           </>
