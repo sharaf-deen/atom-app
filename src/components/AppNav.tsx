@@ -103,7 +103,7 @@ export default async function AppNav() {
           // Cache l’info user + bouton logout sur les pages d’auth
           <HideMenuOnRoutes routes={AUTH_ROUTES}>
             <div className="ml-auto flex items-center gap-3">
-              {hasNotifications ? <NotificationsBell /> : null}
+              {hasNotifications ? <NotificationsBell pollMs={5000} /> : null}
               <span className="hidden text-xs text-gray-600 dark:text-gray-300 sm:inline">
                 {user.full_name || user.email || 'User'} · <strong>{user.role}</strong>
               </span>

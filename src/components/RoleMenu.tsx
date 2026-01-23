@@ -77,12 +77,14 @@ export default function RoleMenu({ items }: { items: MenuItem[] }) {
 
     const onUpdate = () => refreshUnread()
     window.addEventListener('notifications:updated', onUpdate)
+    window.addEventListener('atom:notifications:changed', onUpdate as any)
 
     // Keep it fresh even if user stays in the app
-    const t = window.setInterval(() => refreshUnread(), 60_000)
+    const t = window.setInterval(() => refreshUnread(), 5_000)
 
     return () => {
       window.removeEventListener('notifications:updated', onUpdate)
+      window.removeEventListener('atom:notifications:changed', onUpdate as any)
       window.clearInterval(t)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -93,8 +95,6 @@ export default function RoleMenu({ items }: { items: MenuItem[] }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open])
 
-  const showBtnBadge = hasNotifications && unreadCount > 0
-
   return (
     <div className="relative">
       <button
@@ -103,26 +103,11 @@ export default function RoleMenu({ items }: { items: MenuItem[] }) {
         className="relative rounded-full bg-black text-white dark:bg-white dark:text-black px-4 py-1.5 text-sm font-semibold shadow-soft hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-black/60 dark:focus:ring-white/60"
         aria-haspopup="menu"
         aria-expanded={open}
-        aria-label={
-          showBtnBadge
-            ? `Menu (${unreadCount > 99 ? '99+' : unreadCount} unread notifications)`
-            : 'Menu'
-        }
+        aria-label="Menu"
       >
         <span className="inline-flex items-center gap-2">
           Menu {open ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
         </span>
-
-        {/* ✅ Badge directly on the Menu button */}
-        {showBtnBadge ? (
-          <span
-            className="absolute -right-1 -top-1 inline-flex h-5 min-w-[20px] items-center justify-center rounded-full bg-red-600 px-1 text-[11px] font-bold text-white shadow"
-            aria-hidden
-            title={`${unreadCount} unread notifications`}
-          >
-            {unreadCount > 99 ? '99+' : unreadCount}
-          </span>
-        ) : null}
       </button>
 
       {/* Overlay 30% covering the page (click to close) */}

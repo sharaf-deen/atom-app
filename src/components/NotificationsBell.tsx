@@ -6,7 +6,7 @@ import { Bell } from 'lucide-react'
 
 type Props = {
   href?: string
-  /** Polling interval in ms (fallback if no events are dispatched). Default: 15000 */
+  /** Polling interval in ms (fallback if no events are dispatched). Default: 5000 */
   pollMs?: number
   className?: string
 }
@@ -17,7 +17,7 @@ function fmtCount(n: number) {
   return String(n)
 }
 
-export default function NotificationsBell({ href = '/notifications', pollMs = 15000, className = '' }: Props) {
+export default function NotificationsBell({ href = '/notifications', pollMs = 5000, className = '' }: Props) {
   const [count, setCount] = useState<number>(0)
   const mounted = useRef(false)
 
@@ -48,6 +48,7 @@ export default function NotificationsBell({ href = '/notifications', pollMs = 15
 
     document.addEventListener('visibilitychange', onVisibility)
     window.addEventListener('atom:notifications:changed', onNotifChanged as any)
+    window.addEventListener('notifications:updated', onNotifChanged as any)
 
     const t = pollMs > 0 ? window.setInterval(fetchCount, pollMs) : 0
 
@@ -55,6 +56,7 @@ export default function NotificationsBell({ href = '/notifications', pollMs = 15
       mounted.current = false
       document.removeEventListener('visibilitychange', onVisibility)
       window.removeEventListener('atom:notifications:changed', onNotifChanged as any)
+      window.removeEventListener('notifications:updated', onNotifChanged as any)
       if (t) window.clearInterval(t)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
