@@ -2,6 +2,9 @@
 import { NextResponse } from 'next/server'
 import { createSupabaseRSC } from '@/lib/supabaseServer'
 
+export const dynamic = 'force-dynamic'
+export const revalidate = 0
+
 type Role = 'member' | 'assistant_coach' | 'coach' | 'reception' | 'admin' | 'super_admin'
 type MemberRow = {
   user_id: string
@@ -84,7 +87,7 @@ export async function GET(req: Request) {
 
     const { data, error, count } = await qb
     if (error) {
-      return NextResponse.json({ ok: false, error: error.message }, { status: 400 })
+      return NextResponse.json({ ok: false, error: error.message }, { status: 400, headers: { 'Cache-Control': 'no-store' } })
     }
 
     const items: MemberRow[] =
@@ -122,8 +125,8 @@ export async function GET(req: Request) {
       }
     }
 
-    return NextResponse.json({ ok: true, items, page, limit, total: count ?? null })
+    return NextResponse.json({ ok: true, items, page, limit, total: count ?? null }, { headers: { 'Cache-Control': 'no-store' } })
   } catch (e: any) {
-    return NextResponse.json({ ok: false, error: String(e?.message || e) }, { status: 500 })
+    return NextResponse.json({ ok: false, error: String(e?.message || e) }, { status: 500, headers: { 'Cache-Control': 'no-store' } })
   }
 }

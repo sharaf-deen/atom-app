@@ -90,6 +90,14 @@ function listSummaryLabel(kind: ListKind) {
   return 'inactive member'
 }
 
+function resolveActive(mode: Mode, listKind: ListKind, active?: boolean | null) {
+  if (active === true || active === false) return active
+  if (mode !== 'list') return active
+  if (listKind === 'active') return true
+  if (listKind === 'inactive') return false
+  return active
+}
+
 export default function MembersSearch({ isStaff = false }: { isStaff?: boolean }) {
   const [q, setQ] = useState('')
   const [mode, setMode] = useState<Mode>('idle')
@@ -455,7 +463,7 @@ export default function MembersSearch({ isStaff = false }: { isStaff?: boolean }
                         <td className="border-t border-[hsl(var(--border))] px-4 py-3">
                           <div className="flex items-center justify-between gap-2">
                           <div className="font-medium">{name}</div>
-                          <StatusBadge active={m.is_active} />
+                          <StatusBadge active={resolveActive(mode, listKind, m.is_active)} />
                         </div>
                         </td>
                         <td className="border-t border-[hsl(var(--border))] px-4 py-3">
@@ -505,7 +513,7 @@ export default function MembersSearch({ isStaff = false }: { isStaff?: boolean }
                       <div className="text-sm text-[hsl(var(--muted))]">Name</div>
                       <div className="flex items-center justify-between gap-2">
                       <div className="font-medium">{name}</div>
-                      <StatusBadge active={m.is_active} />
+                      <StatusBadge active={resolveActive(mode, listKind, m.is_active)} />
                     </div>
                     </div>
 

@@ -2,6 +2,9 @@
 import { NextResponse } from 'next/server'
 import { createSupabaseRSC } from '@/lib/supabaseServer'
 
+export const dynamic = 'force-dynamic'
+export const revalidate = 0
+
 const DEFAULT_LIMIT = 20
 const MAX_LIMIT = 200
 
@@ -18,6 +21,7 @@ type MemberRow = {
   role: Role | null
   created_at: string | null
   member_id: string | null
+  is_active?: boolean
 }
 
 function intParam(raw: string | null, fallback: number, min: number, max: number) {
@@ -38,7 +42,7 @@ export async function GET(req: Request) {
       : null
 
     if (!status) {
-      return NextResponse.json({ ok: false, error: 'Invalid status. Use all|active|inactive.' }, { status: 400 })
+      return NextResponse.json({ ok: false, error: 'Invalid status. Use all|active|inactive.' }, { status: 400, headers: { 'Cache-Control': 'no-store' } })
     }
 
     const page = intParam(url.searchParams.get('page'), 1, 1, 1_000_000)
@@ -47,6 +51,32 @@ export async function GET(req: Request) {
     const to = from + limit - 1
 
     const today = new Date().toISOString().slice(0, 10) // 'YYYY-MM-DD'
+
+    async function addActiveFlag(items: MemberRow[]) {
+      const ids = items.map((i) => i.user_id).filter(Boolean)
+      if (ids.length === 0) return items.map((i) => ({ ...i, is_active: false }))
+      const { data: subs, error: subsError2 } = await supabase
+        .from('subscriptions')
+        .select('member_id, end_date, status')
+        .eq('status', 'active')
+        .gte('end_date', today)
+        .in('member_id', ids)
+
+      if (subsError2) {
+        console.error('Error fetching subscriptions (active flag):', subsError2)
+        // Fallback: assume inactive (better safe than wrong green)
+        return items.map((i) => ({ ...i, is_active: false }))
+      }
+
+      const activeSet = new Set<string>()
+      for (const s of subs ?? []) {
+        const mid = (s as any)?.member_id as string | null
+        if (mid) activeSet.add(mid)
+      }
+
+      return items.map((i) => ({ ...i, is_active: activeSet.has(i.user_id) }))
+    }
+
 
     // ALL members (role='member')
     if (status === 'all') {
@@ -62,20 +92,21 @@ export async function GET(req: Request) {
 
       if (error) {
         console.error('Error fetching members (all):', error)
-        return NextResponse.json({ ok: false, error: error.message }, { status: 500 })
+        return NextResponse.json({ ok: false, error: error.message }, { status: 500, headers: { 'Cache-Control': 'no-store' } })
       }
 
       const items = (data ?? []) as MemberRow[]
+      const itemsWith = await addActiveFlag(items)
       return NextResponse.json(
         {
           ok: true,
           status,
-          items,
+          items: itemsWith,
           total: typeof count === 'number' ? count : items.length,
           page,
           pageSize: limit,
         },
-        { status: 200 },
+        { status: 200, headers: { 'Cache-Control': 'no-store' } },
       )
     }
 
@@ -88,7 +119,7 @@ export async function GET(req: Request) {
 
     if (subsError) {
       console.error('Error fetching subscriptions (list):', subsError)
-      return NextResponse.json({ ok: false, error: subsError.message }, { status: 500 })
+      return NextResponse.json({ ok: false, error: subsError.message }, { status: 500, headers: { 'Cache-Control': 'no-store' } })
     }
 
     const activeIds = new Set<string>()
@@ -103,7 +134,7 @@ export async function GET(req: Request) {
       if (ids.length === 0) {
         return NextResponse.json(
           { ok: true, status, items: [], total: 0, page, pageSize: limit },
-          { status: 200 },
+          { status: 200, headers: { 'Cache-Control': 'no-store' } },
         )
       }
 
@@ -120,20 +151,21 @@ export async function GET(req: Request) {
 
       if (error) {
         console.error('Error fetching members (active):', error)
-        return NextResponse.json({ ok: false, error: error.message }, { status: 500 })
+        return NextResponse.json({ ok: false, error: error.message }, { status: 500, headers: { 'Cache-Control': 'no-store' } })
       }
 
       const items = (data ?? []) as MemberRow[]
+      const itemsWith = items.map((i) => ({ ...i, is_active: true }))
       return NextResponse.json(
         {
           ok: true,
           status,
-          items,
+          items: itemsWith,
           total: typeof count === 'number' ? count : items.length,
           page,
           pageSize: limit,
         },
-        { status: 200 },
+        { status: 200, headers: { 'Cache-Control': 'no-store' } },
       )
     }
 
@@ -146,13 +178,13 @@ export async function GET(req: Request) {
 
     if (profilesError) {
       console.error('Error fetching profiles (inactive list):', profilesError)
-      return NextResponse.json({ ok: false, error: profilesError.message }, { status: 500 })
+      return NextResponse.json({ ok: false, error: profilesError.message }, { status: 500, headers: { 'Cache-Control': 'no-store' } })
     }
 
     const allProfiles = (profiles ?? []) as MemberRow[]
     const inactiveProfiles = allProfiles.filter((p) => !activeIds.has(p.user_id))
     const total = inactiveProfiles.length
-    const items = inactiveProfiles.slice(from, from + limit)
+    const items = inactiveProfiles.slice(from, from + limit).map((i) => ({ ...i, is_active: false }))
 
     return NextResponse.json(
       {
@@ -163,7 +195,7 @@ export async function GET(req: Request) {
         page,
         pageSize: limit,
       },
-      { status: 200 },
+      { status: 200, headers: { 'Cache-Control': 'no-store' } },
     )
   } catch (e: any) {
     console.error('Unexpected error in /api/members/list:', e)
@@ -175,7 +207,7 @@ export async function GET(req: Request) {
           JSON.stringify(e, Object.getOwnPropertyNames(e)) ||
           'Unexpected error',
       },
-      { status: 500 },
+      { status: 500, headers: { 'Cache-Control': 'no-store' } },
     )
   }
 }

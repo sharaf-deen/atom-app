@@ -2,6 +2,10 @@
 import { NextResponse } from 'next/server'
 import { createSupabaseRSC } from '@/lib/supabaseServer'
 
+export const dynamic = 'force-dynamic'
+export const revalidate = 0
+
+
 /**
  * Stats globales des membres :
  *  - total    : nombre total de membres (table profiles)
@@ -33,7 +37,7 @@ export async function GET() {
             profilesError.message || JSON.stringify(profilesError)
           }`,
         },
-        { status: 500 },
+        { status: 500, headers: { 'Cache-Control': 'no-store' } },
       )
     }
 
@@ -60,7 +64,7 @@ export async function GET() {
             subsError.message || JSON.stringify(subsError)
           }`,
         },
-        { status: 500 },
+        { status: 500, headers: { 'Cache-Control': 'no-store' } },
       )
     }
 
@@ -83,7 +87,7 @@ export async function GET() {
         active,
         inactive,
       },
-      { status: 200 },
+      { status: 200, headers: { 'Cache-Control': 'no-store' } },
     )
   } catch (e: any) {
     console.error('Unexpected error in /api/members/stats:', e)
@@ -95,7 +99,7 @@ export async function GET() {
           JSON.stringify(e, Object.getOwnPropertyNames(e)) ||
           'Unexpected error',
       },
-      { status: 500 },
+      { status: 500, headers: { 'Cache-Control': 'no-store' } },
     )
   }
 }
