@@ -1,7 +1,8 @@
 // src/components/CreateMemberForm.tsx
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 
 import Button from '@/components/ui/Button'
@@ -36,6 +37,9 @@ function ageFromDob(dob?: string) {
 }
 
 export default function CreateMemberForm() {
+  const router = useRouter()
+  const emailRef = useRef<HTMLInputElement>(null)
+
   const [form, setForm] = useState<NewMemberPayload>({ email: '', date_of_birth: '' })
   const [busy, setBusy] = useState(false)
   const [status, setStatus] = useState<Status>({ kind: '', msg: '' })
@@ -97,6 +101,13 @@ export default function CreateMemberForm() {
       setStatus({ kind: 'success', msg: 'Member created. An invite email was sent.' })
       toast.success('Member created')
 
+      // Reset the form so you can create another member right away
+      setForm({ email: '', date_of_birth: '' })
+      // Refresh server data (lists/stats on the page)
+      router.refresh()
+      // Focus back to the email field
+      setTimeout(() => emailRef.current?.focus(), 50)
+
       setTimeout(() => {
         setStatus((s) => (s.kind === 'success' ? { kind: '', msg: '' } : s))
       }, 2500)
@@ -139,6 +150,7 @@ export default function CreateMemberForm() {
           <input
             type="email"
             required
+            ref={emailRef}
             value={form.email}
             onChange={(e) => update('email', e.target.value)}
             className="rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2"
