@@ -171,10 +171,6 @@ export default async function ProfilePage() {
                   <span className="text-[hsl(var(--muted))]">Joined:</span> {fmtDate(p.created_at)}
                 </div>
               ) : null}
-
-              <div className="mt-2 text-[11px] text-[hsl(var(--muted))] break-all">
-                <span className="text-[hsl(var(--muted))]">QR value:</span> {p.qr_code ?? '—'}
-              </div>
             </div>
           </div>
 

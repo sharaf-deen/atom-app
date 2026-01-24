@@ -108,9 +108,6 @@ export default function CreateMemberForm() {
       // Focus back to the email field
       setTimeout(() => emailRef.current?.focus(), 50)
 
-      setTimeout(() => {
-        setStatus((s) => (s.kind === 'success' ? { kind: '', msg: '' } : s))
-      }, 2500)
     } catch (e: any) {
       const msg = String(e?.message || e)
       setStatus({ kind: 'error', msg })
@@ -134,10 +131,28 @@ export default function CreateMemberForm() {
           >
             <div className="flex flex-wrap items-center gap-2">
               <span>{status.msg}</span>
-              {status.kind === 'success' && createdId ? (
-                <a className="underline" href={`/members/${createdId}`} target="_self" rel="noreferrer">
-                  View member
-                </a>
+              {status.kind === 'success' ? (
+                <div className="flex flex-wrap items-center gap-2">
+                  {createdId ? (
+                    <a className="underline" href={`/members/${createdId}`} target="_self" rel="noreferrer">
+                      View member
+                    </a>
+                  ) : null}
+
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => {
+                      // Clear the success banner and keep the form ready
+                      setStatus({ kind: '', msg: '' })
+                      setCreatedId(null)
+                      setTimeout(() => emailRef.current?.focus(), 50)
+                    }}
+                  >
+                    Create another
+                  </Button>
+                </div>
               ) : null}
             </div>
           </InlineAlert>
