@@ -6,11 +6,14 @@ import { Bell } from 'lucide-react'
 
 type Props = {
   href?: string
+  label?: string
+  desc?: string
+  /** Initial count (server-rendered). */
+  initialCount?: number
   /** Polling interval in ms while the app is visible. Default: 5000 */
   pollMs?: number
   /** Polling interval in ms while the app is hidden/in background. Default: 30000 */
   pollHiddenMs?: number
-  className?: string
 }
 
 function fmtCount(n: number) {
@@ -19,13 +22,15 @@ function fmtCount(n: number) {
   return String(n)
 }
 
-export default function NotificationsBell({
+export default function HomeNotificationsTile({
   href = '/notifications',
+  label = 'Notifications',
+  desc,
+  initialCount = 0,
   pollMs = 5000,
   pollHiddenMs = 30000,
-  className = '',
 }: Props) {
-  const [count, setCount] = useState<number>(0)
+  const [count, setCount] = useState<number>(Number(initialCount) || 0)
   const timerRef = useRef<number | null>(null)
   const inFlightRef = useRef(false)
 
@@ -57,23 +62,22 @@ export default function NotificationsBell({
   }
 
   useEffect(() => {
+    // First refresh + start eco timer
     fetchCount()
     setTimer(currentPollMs())
 
     function onVisibility() {
-      // Switch to eco interval when hidden; refresh immediately when visible
+      // Eco mode: slow down in background; refresh immediately when visible
       if (document.visibilityState === 'visible') fetchCount()
       setTimer(currentPollMs())
     }
 
     function onFocus() {
-      // If user comes back to the tab, refresh immediately
       fetchCount()
       setTimer(currentPollMs())
     }
 
     function onNotifChanged() {
-      // Any part of the app can dispatch this event after marking messages read
       fetchCount()
     }
 
@@ -93,31 +97,37 @@ export default function NotificationsBell({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pollMs, pollHiddenMs])
 
-  const show = count > 0
-  const label = show ? `Notifications (${count} unread)` : 'Notifications'
+  const unread = count > 0
 
   return (
     <Link
       href={href}
-      aria-label={label}
-      title={label}
       className={
-        'relative inline-flex items-center justify-center rounded-xl border px-2.5 py-2 shadow-soft transition hover:bg-black/[0.03] dark:hover:bg-white/[0.06] ' +
-        (show ? 'border-red-500' : 'border-black/10 dark:border-white/10') +
-        ' ' +
-        className
+        'group block rounded-2xl border border-[hsl(var(--border))] bg-white p-5 shadow-soft transition ease-soft hover:shadow-md hover:shadow-black/10 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 ' +
+        (unread ? 'border-red-200 bg-red-50 hover:shadow-red-100' : '')
       }
     >
-      <Bell size={18} strokeWidth={2.2} className={show ? 'text-red-600' : 'text-black dark:text-white'} />
-
-      {show ? (
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <h3 className={'text-lg font-semibold tracking-tight ' + (unread ? 'text-red-700' : '')}>{label}</h3>
+          {unread ? (
+            <span
+              className="inline-flex min-w-[24px] h-6 items-center justify-center rounded-full bg-red-600 px-2 text-xs font-bold text-white"
+              aria-label={`${count} unread notifications`}
+              title={`${count} unread notifications`}
+            >
+              {fmtCount(count)}
+            </span>
+          ) : null}
+        </div>
         <span
-          className="absolute -right-2 -top-2 min-w-[18px] px-1.5 h-[18px] rounded-full bg-red-600 text-white text-[11px] leading-[18px] text-center font-semibold shadow"
           aria-hidden
+          className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-[hsl(var(--border))] transition group-hover:translate-x-0.5"
         >
-          {fmtCount(count)}
+          <Bell size={18} strokeWidth={2.2} className={unread ? 'text-red-700' : 'text-black'} />
         </span>
-      ) : null}
+      </div>
+      {desc ? <p className="mt-1 text-sm text-[hsl(var(--muted))]">{desc}</p> : null}
     </Link>
   )
 }

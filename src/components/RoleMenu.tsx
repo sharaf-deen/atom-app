@@ -30,6 +30,9 @@ const ICONS: Record<IconKey, React.ComponentType<{ size?: number; strokeWidth?: 
   wallet: Wallet,
 }
 
+const VISIBLE_POLL_MS = 5_000
+const HIDDEN_POLL_MS = 30_000
+
 export default function RoleMenu({ items }: { items: MenuItem[] }) {
   const [open, setOpen] = useState(false)
   const btnRef = useRef<HTMLButtonElement | null>(null)
@@ -38,12 +41,16 @@ export default function RoleMenu({ items }: { items: MenuItem[] }) {
   const hasNotifications = useMemo(() => items.some((it) => it.href === '/notifications'), [items])
 
   const [unreadCount, setUnreadCount] = useState<number>(0)
+  const timerRef = useRef<number | null>(null)
+  const inFlightRef = useRef(false)
 
   async function refreshUnread() {
     if (!hasNotifications) {
       setUnreadCount(0)
       return
     }
+    if (inFlightRef.current) return
+    inFlightRef.current = true
     try {
       const r = await fetch('/api/notifications/unread-count', { cache: 'no-store' })
       const j = await r.json().catch(() => ({}))
@@ -51,7 +58,21 @@ export default function RoleMenu({ items }: { items: MenuItem[] }) {
       setUnreadCount(Number(j.count || 0))
     } catch {
       // ignore
+    } finally {
+      inFlightRef.current = false
     }
+  }
+
+  function currentPollMs() {
+    const visible = typeof document !== 'undefined' && document.visibilityState === 'visible'
+    return visible ? VISIBLE_POLL_MS : HIDDEN_POLL_MS
+  }
+
+  function setTimer(ms: number) {
+    if (timerRef.current) window.clearInterval(timerRef.current)
+    timerRef.current = null
+    if (!hasNotifications) return
+    if (ms > 0) timerRef.current = window.setInterval(refreshUnread, ms)
   }
 
   useEffect(() => {
@@ -74,18 +95,28 @@ export default function RoleMenu({ items }: { items: MenuItem[] }) {
 
   useEffect(() => {
     refreshUnread()
+    setTimer(currentPollMs())
 
     const onUpdate = () => refreshUnread()
+
+    function onVisibility() {
+      // Eco mode: slow down in background; refresh immediately when visible
+      if (document.visibilityState === 'visible') refreshUnread()
+      setTimer(currentPollMs())
+    }
+
     window.addEventListener('notifications:updated', onUpdate)
     window.addEventListener('atom:notifications:changed', onUpdate as any)
-
-    // Keep it fresh even if user stays in the app
-    const t = window.setInterval(() => refreshUnread(), 5_000)
+    document.addEventListener('visibilitychange', onVisibility)
+    window.addEventListener('focus', onVisibility)
 
     return () => {
       window.removeEventListener('notifications:updated', onUpdate)
       window.removeEventListener('atom:notifications:changed', onUpdate as any)
-      window.clearInterval(t)
+      document.removeEventListener('visibilitychange', onVisibility)
+      window.removeEventListener('focus', onVisibility)
+      if (timerRef.current) window.clearInterval(timerRef.current)
+      timerRef.current = null
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hasNotifications])

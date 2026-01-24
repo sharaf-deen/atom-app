@@ -7,6 +7,8 @@ import Link from 'next/link'
 import Image from 'next/image'
 import { getSessionUser, type Role } from '@/lib/session'
 import { createSupabaseRSC } from '@/lib/supabaseServer'
+import HomeNotificationsTile from '@/components/HomeNotificationsTile'
+
 
 // Lucide icons
 import {
@@ -178,7 +180,13 @@ const MENU_BY_ROLE: GroupedMenuByRole = {
   ],
 }
 
-function SectionGrid({ section, unreadNotificationsCount = 0 }: { section: Section; unreadNotificationsCount?: number }) {
+function SectionGrid({
+  section,
+  initialUnreadNotificationsCount = 0,
+}: {
+  section: Section
+  initialUnreadNotificationsCount?: number
+}) {
   const items = section.items ?? []
   if (!items.length) return null
   return (
@@ -188,37 +196,30 @@ function SectionGrid({ section, unreadNotificationsCount = 0 }: { section: Secti
       </h2>
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {items.map((it) => {
+          if (it.href === '/notifications') {
+            return (
+              <HomeNotificationsTile
+                key={it.href}
+                href={it.href}
+                label={it.label}
+                desc={it.desc}
+                initialCount={initialUnreadNotificationsCount}
+              />
+            )
+          }
+
           const Icon = it.icon
           return (
             <Link
               key={it.href}
               href={it.href}
               className={
-                "group block rounded-2xl border border-[hsl(var(--border))] bg-white p-5 shadow-soft transition ease-soft hover:shadow-md hover:shadow-black/10 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 " +
-                (it.href === '/notifications' && unreadNotificationsCount > 0
-                  ? 'border-red-200 bg-red-50 hover:shadow-red-100'
-                  : '')
+                'group block rounded-2xl border border-[hsl(var(--border))] bg-white p-5 shadow-soft transition ease-soft hover:shadow-md hover:shadow-black/10 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2'
               }
             >
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
-                  <h3
-                    className={
-                      "text-lg font-semibold tracking-tight " +
-                      (it.href === '/notifications' && unreadNotificationsCount > 0 ? "text-red-700" : "")
-                    }
-                  >
-                    {it.label}
-                  </h3>
-                  {it.href === '/notifications' && unreadNotificationsCount > 0 ? (
-                    <span
-                      className="inline-flex min-w-[24px] h-6 items-center justify-center rounded-full bg-red-600 px-2 text-xs font-bold text-white"
-                      aria-label={`${unreadNotificationsCount} unread notifications`}
-                      title={`${unreadNotificationsCount} unread notifications`}
-                    >
-                      {unreadNotificationsCount > 99 ? '99+' : unreadNotificationsCount}
-                    </span>
-                  ) : null}
+                  <h3 className="text-lg font-semibold tracking-tight">{it.label}</h3>
                 </div>
                 <span
                   aria-hidden
@@ -235,6 +236,7 @@ function SectionGrid({ section, unreadNotificationsCount = 0 }: { section: Secti
     </div>
   )
 }
+
 
 export default async function HomePage() {
   const user = (await getSessionUser()) as SessionUser | null
@@ -303,7 +305,7 @@ export default async function HomePage() {
             {/* Sections groupées */}
             <div className="space-y-8">
               {grouped.map((section) => (
-                <SectionGrid key={section.title} section={section} unreadNotificationsCount={unreadNotificationsCount} />
+                <SectionGrid key={section.title} section={section} initialUnreadNotificationsCount={unreadNotificationsCount} />
               ))}
             </div>
           </>
