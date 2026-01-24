@@ -201,9 +201,6 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
               <div><span className="text-[hsl(var(--muted))]">Phone:</span> {profile.phone ?? '—'}</div>
               <div><span className="text-[hsl(var(--muted))]">Role:</span> {profile.role ?? 'member'}</div>
               <div><span className="text-[hsl(var(--muted))]">Joined:</span> {fmtDate(profile.created_at)}</div>
-              <div className="mt-2 text-[11px] text-[hsl(var(--muted))] break-all">
-                <span className="text-[hsl(var(--muted))]">QR value:</span> {profile.qr_code ?? '—'}
-              </div>
             </div>
           </div>
 
