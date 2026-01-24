@@ -73,7 +73,7 @@ export async function POST(req: Request) {
       .from('profiles')
       .select('role')
       .eq('user_id', actor.id)
-      .maybeSingle<{ role: Role | null }>()
+      .maybeSingle()
 
     if (meErr) {
       return noStore(
@@ -148,13 +148,7 @@ export async function POST(req: Request) {
         .from('profiles')
         .select('user_id, first_name, last_name, phone, date_of_birth')
         .ilike('email', email)
-        .maybeSingle<{
-          user_id: string
-          first_name: string | null
-          last_name: string | null
-          phone: string | null
-          date_of_birth: string | null
-        }>()
+        .maybeSingle()
 
       if (existing?.user_id) {
         const patch: Record<string, any> = {}

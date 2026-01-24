@@ -106,7 +106,7 @@ export default async function ProfilePage() {
     .from('profiles')
     .select('user_id, email, first_name, last_name, phone, role, member_id, qr_code, id_photo_path, date_of_birth, created_at')
     .eq('user_id', me.id)
-    .maybeSingle<ProfileRow>()
+    .maybeSingle()
 
   const p: ProfileRow = {
     user_id: me.id,
@@ -118,6 +118,7 @@ export default async function ProfilePage() {
     member_id: profile?.member_id ?? me.member_id ?? null,
     qr_code: profile?.qr_code ?? me.qr_code ?? null,
     id_photo_path: profile?.id_photo_path ?? me.id_photo_path ?? null,
+    date_of_birth: (profile as any)?.date_of_birth ?? null,
     created_at: profile?.created_at ?? null,
   }
 

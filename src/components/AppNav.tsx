@@ -80,7 +80,7 @@ export default async function AppNav() {
         {/* Brand */}
         <Link href="/" className="group flex items-center gap-2" aria-label="ATOM Jiu-Jitsu">
           <Image
-            src="/atom4app.png"
+            src="/atom4app.svg"
             alt="ATOM Jiu-Jitsu"
             width={112}
             height={28}

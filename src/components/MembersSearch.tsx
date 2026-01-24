@@ -25,6 +25,7 @@ type MemberRow = {
   role: Role | null
   created_at: string | null
   member_id: string | null
+  date_of_birth: string | null
   is_active?: boolean | null
 }
 
@@ -49,6 +50,49 @@ function fmtDate(d?: string | null) {
     month: 'short',
     day: '2-digit',
   })
+
+}
+
+function ageYears(dob?: string | null) {
+  if (!dob) return null
+  const dateOnly = dob.length === 10 ? dob : dob.slice(0, 10)
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateOnly)) return null
+  const [y, m, d] = dateOnly.split('-').map(Number)
+  const born = new Date(Date.UTC(y, m - 1, d))
+  if (isNaN(born.getTime())) return null
+
+  const now = new Date()
+  const today = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()))
+  let age = today.getUTCFullYear() - born.getUTCFullYear()
+  const mm = today.getUTCMonth() - born.getUTCMonth()
+  if (mm < 0 || (mm === 0 && today.getUTCDate() < born.getUTCDate())) age--
+  if (age < 0) return null
+  return age
+}
+
+function ageGroup(dob?: string | null) {
+  const age = ageYears(dob)
+  if (age === null) return null
+  return age < 17 ? 'Kid' : 'Adult'
+}
+
+function AgeBadge({ dob }: { dob?: string | null }) {
+  const g = ageGroup(dob ?? null)
+  if (!g) return null
+
+  const isKid = g === 'Kid'
+  return (
+    <span
+      className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold ${
+        isKid
+          ? 'border-sky-200 bg-sky-50 text-sky-700'
+          : 'border-violet-200 bg-violet-50 text-violet-700'
+      }`}
+      title={dob ? `Date of birth: ${dob}` : undefined}
+    >
+      {g}
+    </span>
+  )
 }
 
 function StatusBadge({ active }: { active?: boolean | null }) {
@@ -463,7 +507,10 @@ export default function MembersSearch({ isStaff = false }: { isStaff?: boolean }
                         <td className="border-t border-[hsl(var(--border))] px-4 py-3">
                           <div className="flex items-center justify-between gap-2">
                           <div className="font-medium">{name}</div>
-                          <StatusBadge active={resolveActive(mode, listKind, m.is_active)} />
+                          <div className="flex items-center gap-2">
+                            <StatusBadge active={resolveActive(mode, listKind, m.is_active)} />
+                            <AgeBadge dob={m.date_of_birth} />
+                          </div>
                         </div>
                         </td>
                         <td className="border-t border-[hsl(var(--border))] px-4 py-3">
@@ -513,7 +560,10 @@ export default function MembersSearch({ isStaff = false }: { isStaff?: boolean }
                       <div className="text-sm text-[hsl(var(--muted))]">Name</div>
                       <div className="flex items-center justify-between gap-2">
                       <div className="font-medium">{name}</div>
-                      <StatusBadge active={resolveActive(mode, listKind, m.is_active)} />
+                      <div className="flex items-center gap-2">
+                        <StatusBadge active={resolveActive(mode, listKind, m.is_active)} />
+                        <AgeBadge dob={m.date_of_birth} />
+                      </div>
                     </div>
                     </div>
 

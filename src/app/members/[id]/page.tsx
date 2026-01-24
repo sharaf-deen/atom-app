@@ -12,6 +12,18 @@ import { getSessionUser, type Role } from '@/lib/session'
 import QrImage from '@/components/QrImage'
 import SubscribeDialog, { type Plan } from '@/components/SubscribeDialog'
 
+type MemberProfileRow = {
+  user_id: string
+  email: string | null
+  first_name: string | null
+  last_name: string | null
+  phone: string | null
+  role: Role | null
+  qr_code: string | null
+  created_at: string | null
+  date_of_birth: string | null
+}
+
 function todayDateOnlyUTC() {
   return new Date().toISOString().slice(0, 10) // YYYY-MM-DD (UTC)
 }
@@ -103,21 +115,13 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
 
   const supa = createSupabaseRSC()
 
-  const { data: profile } = await supa
+  const { data: profileRaw } = await supa
     .from('profiles')
     .select('user_id, email, first_name, last_name, phone, role, qr_code, created_at, date_of_birth')
     .eq('user_id', params.id)
-    .maybeSingle<{
-      user_id: string
-      email: string | null
-      first_name: string | null
-      last_name: string | null
-      phone: string | null
-      role: Role | null
-      qr_code: string | null
-      created_at: string | null
-      date_of_birth: string | null
-    }>()
+    .maybeSingle()
+
+  const profile = (profileRaw ?? null) as MemberProfileRow | null
 
   if (!profile) return notFound()
 

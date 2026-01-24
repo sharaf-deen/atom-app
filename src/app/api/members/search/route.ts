@@ -15,6 +15,7 @@ type MemberRow = {
   role: Role | null
   created_at: string | null
   member_id: string | null
+  date_of_birth: string | null
   is_active?: boolean | null
 }
 
@@ -56,7 +57,8 @@ export async function GET(req: Request) {
         phone,
         role,
         created_at,
-        member_id
+        member_id,
+        date_of_birth
       `,
         { count: 'exact', head: false },
       )
@@ -100,6 +102,7 @@ export async function GET(req: Request) {
         role: (r.role ?? null) as Role | null,
         created_at: r.created_at ?? null,
         member_id: r.member_id ?? null,
+        date_of_birth: r.date_of_birth ?? null,
       })) ?? []
 
     // Compute active flag for the returned items only (fast)

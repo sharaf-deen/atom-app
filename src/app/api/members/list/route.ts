@@ -21,6 +21,7 @@ type MemberRow = {
   role: Role | null
   created_at: string | null
   member_id: string | null
+  date_of_birth: string | null
   is_active?: boolean
 }
 
@@ -82,7 +83,7 @@ export async function GET(req: Request) {
     if (status === 'all') {
       const { data, error, count } = await supabase
         .from('profiles')
-        .select('user_id, email, first_name, last_name, phone, role, created_at, member_id', {
+        .select('user_id, email, first_name, last_name, phone, role, created_at, member_id, date_of_birth', {
           count: 'exact',
           head: false,
         })
@@ -140,7 +141,7 @@ export async function GET(req: Request) {
 
       const { data, error, count } = await supabase
         .from('profiles')
-        .select('user_id, email, first_name, last_name, phone, role, created_at, member_id', {
+        .select('user_id, email, first_name, last_name, phone, role, created_at, member_id, date_of_birth', {
           count: 'exact',
           head: false,
         })
@@ -172,7 +173,7 @@ export async function GET(req: Request) {
     // INACTIVE list
     const { data: profiles, error: profilesError } = await supabase
       .from('profiles')
-      .select('user_id, email, first_name, last_name, phone, role, created_at, member_id')
+      .select('user_id, email, first_name, last_name, phone, role, created_at, member_id, date_of_birth')
       .eq('role', 'member')
       .order('created_at', { ascending: false })
 
