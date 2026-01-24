@@ -21,6 +21,7 @@ type ProfileRow = {
   member_id: string | null
   qr_code: string | null
   id_photo_path: string | null
+  date_of_birth: string | null
   created_at: string | null
 }
 
@@ -35,6 +36,29 @@ type SubRow = {
   sessions_used: number | null
   amount: number | null
   paid_at: string | null
+}
+
+function ageYears(dob?: string | null) {
+  if (!dob) return null
+  const dateOnly = dob.length === 10 ? dob : dob.slice(0, 10)
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateOnly)) return null
+  const [y, m, d] = dateOnly.split('-').map(Number)
+  const born = new Date(Date.UTC(y, m - 1, d))
+  if (isNaN(born.getTime())) return null
+
+  const now = new Date()
+  const today = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()))
+  let age = today.getUTCFullYear() - born.getUTCFullYear()
+  const mm = today.getUTCMonth() - born.getUTCMonth()
+  if (mm < 0 || (mm === 0 && today.getUTCDate() < born.getUTCDate())) age--
+  if (age < 0) return null
+  return age
+}
+
+function ageGroup(dob?: string | null) {
+  const age = ageYears(dob)
+  if (age === null) return null
+  return age < 17 ? 'Kid' : 'Adult'
 }
 
 function todayDateOnlyUTC() {
@@ -80,7 +104,7 @@ export default async function ProfilePage() {
 
   const { data: profile } = await supa
     .from('profiles')
-    .select('user_id, email, first_name, last_name, phone, role, member_id, qr_code, id_photo_path, created_at')
+    .select('user_id, email, first_name, last_name, phone, role, member_id, qr_code, id_photo_path, date_of_birth, created_at')
     .eq('user_id', me.id)
     .maybeSingle<ProfileRow>()
 
@@ -125,6 +149,13 @@ export default async function ProfilePage() {
               </div>
               <div>
                 <span className="text-[hsl(var(--muted))]">Phone:</span> {p.phone ?? '—'}
+              </div>
+              <div>
+                <span className="text-[hsl(var(--muted))]">Date of birth:</span> {fmtDate(p.date_of_birth)}
+              </div>
+              <div>
+                <span className="text-[hsl(var(--muted))]">Category:</span>{' '}
+                {ageGroup(p.date_of_birth) ? `${ageGroup(p.date_of_birth)} (${ageYears(p.date_of_birth)}y)` : '—'}
               </div>
               <div>
                 <span className="text-[hsl(var(--muted))]">Role:</span> {p.role ?? 'member'}

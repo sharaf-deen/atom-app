@@ -16,11 +16,31 @@ type Body =
       phone?: string
       first_name?: string
       last_name?: string
+      date_of_birth?: string
+      dateOfBirth?: string
+      dob?: string
     }
   | Record<string, any>
 
 const STAFF: Role[] = ['reception', 'admin', 'super_admin']
 const can = (r: Role) => STAFF.includes(r)
+
+function isValidDateOnly(dateOnly: string) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateOnly)) return false
+  const [y, m, d] = dateOnly.split('-').map(Number)
+  const dt = new Date(Date.UTC(y, m - 1, d))
+  if (isNaN(dt.getTime())) return false
+  // Ensure components match (e.g. 2025-02-30 should fail)
+  return (
+    dt.getUTCFullYear() === y &&
+    dt.getUTCMonth() === m - 1 &&
+    dt.getUTCDate() === d
+  )
+}
+
+function todayDateOnlyUTC() {
+  return new Date().toISOString().slice(0, 10)
+}
 
 function noStore(res: NextResponse) {
   res.headers.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate')
@@ -81,6 +101,24 @@ export async function POST(req: Request) {
       null) as string | null
     const phone = (String(body.phone ?? '').trim() || null) as string | null
 
+    const dobRaw = String((body as any).date_of_birth ?? (body as any).dateOfBirth ?? (body as any).dob ?? '').trim()
+    const date_of_birth = (dobRaw || null) as string | null
+
+    if (date_of_birth) {
+      if (!isValidDateOnly(date_of_birth)) {
+        return noStore(
+          NextResponse.json({ ok: false, error: 'INVALID_DATE_OF_BIRTH' }, { status: 400 }),
+        )
+      }
+      const today = todayDateOnlyUTC()
+      if (date_of_birth > today) {
+        return noStore(
+          NextResponse.json({ ok: false, error: 'DATE_OF_BIRTH_IN_FUTURE' }, { status: 400 }),
+        )
+      }
+    }
+
+
     if (!email) {
       return noStore(
         NextResponse.json({ ok: false, error: 'MISSING_EMAIL' }, { status: 400 }),
@@ -108,13 +146,14 @@ export async function POST(req: Request) {
     {
       const { data: existing } = await admin
         .from('profiles')
-        .select('user_id, first_name, last_name, phone')
+        .select('user_id, first_name, last_name, phone, date_of_birth')
         .ilike('email', email)
         .maybeSingle<{
           user_id: string
           first_name: string | null
           last_name: string | null
           phone: string | null
+          date_of_birth: string | null
         }>()
 
       if (existing?.user_id) {
@@ -122,6 +161,7 @@ export async function POST(req: Request) {
         if (first_name) patch.first_name = first_name
         if (last_name) patch.last_name = last_name
         if (phone) patch.phone = phone
+        if (date_of_birth) patch.date_of_birth = date_of_birth
 
         if (Object.keys(patch).length > 0) {
           await admin.from('profiles').update(patch).eq('user_id', existing.user_id)
@@ -193,6 +233,7 @@ export async function POST(req: Request) {
         first_name,
         last_name,
         phone,
+        date_of_birth,
         role: 'member',
         qr_code: `atom:${userId}`,
       },
@@ -212,7 +253,7 @@ export async function POST(req: Request) {
       NextResponse.json({
         ok: true,
         user_id: userId,
-        user: { id: userId, email, first_name, last_name, phone },
+        user: { id: userId, email, first_name, last_name, phone, date_of_birth },
         message: 'Member invited and profile saved.',
       }),
     )

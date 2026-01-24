@@ -1,7 +1,7 @@
 // src/components/CreateMemberForm.tsx
 'use client'
 
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { toast } from 'sonner'
 
 import Button from '@/components/ui/Button'
@@ -12,12 +12,31 @@ type NewMemberPayload = {
   first_name?: string
   last_name?: string
   phone?: string
+  // YYYY-MM-DD
+  date_of_birth?: string
 }
 
 type Status = { kind: '' | 'info' | 'success' | 'error'; msg: string }
 
+function ageFromDob(dob?: string) {
+  if (!dob || !/^\d{4}-\d{2}-\d{2}$/.test(dob)) return null
+  const [y, m, d] = dob.split('-').map(Number)
+  const born = new Date(Date.UTC(y, m - 1, d))
+  if (isNaN(born.getTime())) return null
+
+  const now = new Date()
+  const today = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()))
+  if (born.getTime() > today.getTime()) return null
+
+  let age = today.getUTCFullYear() - born.getUTCFullYear()
+  const mm = today.getUTCMonth() - born.getUTCMonth()
+  if (mm < 0 || (mm === 0 && today.getUTCDate() < born.getUTCDate())) age--
+  if (age < 0) return null
+  return age
+}
+
 export default function CreateMemberForm() {
-  const [form, setForm] = useState<NewMemberPayload>({ email: '' })
+  const [form, setForm] = useState<NewMemberPayload>({ email: '', date_of_birth: '' })
   const [busy, setBusy] = useState(false)
   const [status, setStatus] = useState<Status>({ kind: '', msg: '' })
   const [createdId, setCreatedId] = useState<string | null>(null)
@@ -27,10 +46,16 @@ export default function CreateMemberForm() {
   }
 
   function resetForm() {
-    setForm({ email: '' })
+    setForm({ email: '', date_of_birth: '' })
     setStatus({ kind: '', msg: '' })
     setCreatedId(null)
   }
+
+  const emailOk = !!(form.email || '').trim()
+
+  const age = useMemo(() => ageFromDob(form.date_of_birth || ''), [form.date_of_birth])
+  const ageGroup = age === null ? null : age < 17 ? 'Kid' : 'Adult'
+  const dobOk = age !== null // valid + not in future
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -43,9 +68,11 @@ export default function CreateMemberForm() {
       first_name: (form.first_name || '').trim() || undefined,
       last_name: (form.last_name || '').trim() || undefined,
       phone: (form.phone || '').trim() || undefined,
+      date_of_birth: (form.date_of_birth || '').trim() || undefined,
       // aliases camelCase (au cas où on les supporte côté API)
       firstName: (form.first_name || '').trim() || undefined,
       lastName: (form.last_name || '').trim() || undefined,
+      dateOfBirth: (form.date_of_birth || '').trim() || undefined,
     }
 
     try {
@@ -70,7 +97,6 @@ export default function CreateMemberForm() {
       setStatus({ kind: 'success', msg: 'Member created. An invite email was sent.' })
       toast.success('Member created')
 
-      // Option: nettoyer le message success après un petit moment
       setTimeout(() => {
         setStatus((s) => (s.kind === 'success' ? { kind: '', msg: '' } : s))
       }, 2500)
@@ -83,8 +109,6 @@ export default function CreateMemberForm() {
     }
   }
 
-  const emailOk = !!(form.email || '').trim()
-
   return (
     <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-5 shadow-soft">
       <h3 className="text-lg font-semibold">Create new member</h3>
@@ -95,13 +119,7 @@ export default function CreateMemberForm() {
       {status.msg ? (
         <div className="mt-3">
           <InlineAlert
-            variant={
-              status.kind === 'error'
-                ? 'error'
-                : status.kind === 'success'
-                ? 'success'
-                : 'info'
-            }
+            variant={status.kind === 'error' ? 'error' : status.kind === 'success' ? 'success' : 'info'}
           >
             <div className="flex flex-wrap items-center gap-2">
               <span>{status.msg}</span>
@@ -142,6 +160,22 @@ export default function CreateMemberForm() {
         </label>
 
         <label className="grid gap-1">
+          <span className="text-sm font-medium">Date of birth *</span>
+          <input
+            type="date"
+            required
+            value={form.date_of_birth ?? ''}
+            onChange={(e) => update('date_of_birth', e.target.value)}
+            className="rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2"
+            disabled={busy}
+            max={new Date().toISOString().slice(0, 10)}
+          />
+          <span className="text-[11px] text-[hsl(var(--muted))]">
+            {dobOk && ageGroup ? `Auto category: ${ageGroup} (${age} years old)` : 'Used to classify the member as Kid (<17) or Adult (>=17).'}
+          </span>
+        </label>
+
+        <label className="grid gap-1">
           <span className="text-sm font-medium">First name</span>
           <input
             value={form.first_name ?? ''}
@@ -164,7 +198,7 @@ export default function CreateMemberForm() {
         </label>
 
         <div className="mt-2 flex flex-wrap gap-2 sm:col-span-2">
-          <Button type="submit" disabled={busy || !emailOk}>
+          <Button type="submit" disabled={busy || !emailOk || !dobOk}>
             {busy ? 'Creating…' : 'Create member'}
           </Button>
 
