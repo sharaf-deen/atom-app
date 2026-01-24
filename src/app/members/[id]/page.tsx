@@ -117,17 +117,40 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
     }> | null
   }
 
-  const today = todayDateOnlyUTC()
-  const from = addDays(today, -30)
-  const { data: attendance } = await supa
-    .from('attendance')
-    .select('id, date, valid, from_sessions, subscription_id')
-    .eq('member_id', profile.user_id)
-    .gte('date', from)
-    .lte('date', today)
-    .order('date', { ascending: false })
-    .limit(1000) as {
-    data: Array<{ id: string; date: string; valid: boolean | null; from_sessions: boolean | null; subscription_id: string | null }> | null
+  // Attendance is a staff-only view.
+  // Members / coaches can see their own profile + subscriptions, but not attendance.
+  let attendance:
+    | Array<{
+        id: string
+        date: string
+        valid: boolean | null
+        from_sessions: boolean | null
+        subscription_id: string | null
+      }>
+    | null = null
+
+  if (isStaff) {
+    const today = todayDateOnlyUTC()
+    const from = addDays(today, -30)
+    const { data } = (await supa
+      .from('attendance')
+      .select('id, date, valid, from_sessions, subscription_id')
+      .eq('member_id', profile.user_id)
+      .gte('date', from)
+      .lte('date', today)
+      .order('date', { ascending: false })
+      .limit(1000)) as {
+      data:
+        | Array<{
+            id: string
+            date: string
+            valid: boolean | null
+            from_sessions: boolean | null
+            subscription_id: string | null
+          }>
+        | null
+    }
+    attendance = data ?? null
   }
 
   const subPlanById = new Map<string, Plan | null>((subs ?? []).map((s) => [s.id, s.plan]))
@@ -149,7 +172,7 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
     <main>
       <PageHeader
         title="Member"
-        subtitle="Profile, QR, subscriptions and attendance"
+        subtitle={isStaff ? 'Profile, QR, subscriptions and attendance' : 'Profile, QR and subscriptions'}
         right={
           isStaff ? (
             <Link
@@ -321,46 +344,50 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
           )}
         </section>
 
-        {/* Attendance */}
-        <section className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-5 shadow-soft">
-          <h2 className="font-semibold">Attendance (last 30 days)</h2>
-          {(attendance ?? []).length === 0 ? (
-            <div className="mt-2 text-sm text-[hsl(var(--muted))]">No attendance.</div>
-          ) : (
-            <div className="mt-2 overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead className="text-[hsl(var(--muted))]">
-                  <tr className="border-b border-[hsl(var(--border))]">
-                    <th className="text-left px-3 py-2">Date</th>
-                    <th className="text-left px-3 py-2">Valid</th>
-                    <th className="text-left px-3 py-2">From sessions</th>
-                    <th className="text-left px-3 py-2">Plan</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {(attendance ?? []).map((a) => (
-                    <tr key={a.id} className="border-t border-[hsl(var(--border))]">
-                      <td className="px-3 py-2">{fmtDate(a.date)}</td>
-                      <td className="px-3 py-2">
-                        <span
-                          className={`text-[11px] px-2 py-0.5 rounded-2xl border ${
-                            a.valid ? 'bg-emerald-50 border-emerald-300 text-emerald-900' : 'bg-rose-50 border-rose-300 text-rose-900'
-                          }`}
-                        >
-                          {a.valid ? 'valid' : 'invalid'}
-                        </span>
-                      </td>
-                      <td className="px-3 py-2">{a.from_sessions ? 'yes' : 'no'}</td>
-                      <td className="px-3 py-2">
-                        {a.subscription_id ? humanPlan(subPlanById.get(a.subscription_id) ?? null) : '—'}
-                      </td>
+        {/* Attendance (staff only) */}
+        {isStaff ? (
+          <section className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-5 shadow-soft">
+            <h2 className="font-semibold">Attendance (last 30 days)</h2>
+            {(attendance ?? []).length === 0 ? (
+              <div className="mt-2 text-sm text-[hsl(var(--muted))]">No attendance.</div>
+            ) : (
+              <div className="mt-2 overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead className="text-[hsl(var(--muted))]">
+                    <tr className="border-b border-[hsl(var(--border))]">
+                      <th className="text-left px-3 py-2">Date</th>
+                      <th className="text-left px-3 py-2">Valid</th>
+                      <th className="text-left px-3 py-2">From sessions</th>
+                      <th className="text-left px-3 py-2">Plan</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </section>
+                  </thead>
+                  <tbody>
+                    {(attendance ?? []).map((a) => (
+                      <tr key={a.id} className="border-t border-[hsl(var(--border))]">
+                        <td className="px-3 py-2">{fmtDate(a.date)}</td>
+                        <td className="px-3 py-2">
+                          <span
+                            className={`text-[11px] px-2 py-0.5 rounded-2xl border ${
+                              a.valid
+                                ? 'bg-emerald-50 border-emerald-300 text-emerald-900'
+                                : 'bg-rose-50 border-rose-300 text-rose-900'
+                            }`}
+                          >
+                            {a.valid ? 'valid' : 'invalid'}
+                          </span>
+                        </td>
+                        <td className="px-3 py-2">{a.from_sessions ? 'yes' : 'no'}</td>
+                        <td className="px-3 py-2">
+                          {a.subscription_id ? humanPlan(subPlanById.get(a.subscription_id) ?? null) : '—'}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </section>
+        ) : null}
       </Section>
     </main>
   )
