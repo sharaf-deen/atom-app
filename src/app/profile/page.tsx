@@ -136,6 +136,20 @@ export default async function ProfilePage() {
       <PageHeader title="Profile" subtitle="Your account info" />
 
       <Section className="space-y-6">
+        
+        {/* Profile photo */}
+        {canManagePhoto ? (
+          <section className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-5 shadow-soft">
+            <h2 className="font-semibold">Profile photo</h2>
+            <p className="mt-1 text-sm text-[hsl(var(--muted))]">
+              Upload a square photo (JPG/PNG/WEBP). Max 5 MB.
+            </p>
+            <div className="mt-4">
+              <ProfileIdPhoto userId={me.id} idPhotoPath={p.id_photo_path} />
+            </div>
+          </section>
+        ) : null}
+        
         {/* Identity + QR */}
         <section className="grid gap-4 md:grid-cols-[1fr_260px]">
           <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-5 shadow-soft">
@@ -185,19 +199,6 @@ export default async function ProfilePage() {
             )}
           </div>
         </section>
-
-        {/* Profile photo */}
-        {canManagePhoto ? (
-          <section className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-5 shadow-soft">
-            <h2 className="font-semibold">Profile photo</h2>
-            <p className="mt-1 text-sm text-[hsl(var(--muted))]">
-              Upload a square photo (JPG/PNG/WEBP). Max 5 MB.
-            </p>
-            <div className="mt-4">
-              <ProfileIdPhoto userId={me.id} idPhotoPath={p.id_photo_path} />
-            </div>
-          </section>
-        ) : null}
 
         {/* Subscriptions (no attendance for member/coach/assistant coach) */}
         <section className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-5 shadow-soft space-y-3">
