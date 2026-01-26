@@ -9,6 +9,7 @@ import Badge from '@/components/ui/Badge'
 import { Card, CardContent } from '@/components/ui/Card'
 
 type Role = 'coach' | 'assistant_coach'
+type TargetRole = Role | 'member'
 
 type CoachRow = {
   user_id: string
@@ -102,7 +103,7 @@ export default function CoachesManager() {
     }
   }
 
-  async function setRole(user_id: string, role: Role) {
+  async function setRole(user_id: string, role: TargetRole) {
     setUpdatingId(user_id)
     setErr('')
 
@@ -122,9 +123,17 @@ export default function CoachesManager() {
         return
       }
 
-      setRows((prev) =>
-        prev.map((x) => (x.user_id === user_id ? { ...x, role } : x)),
-      )
+      if (role === 'member') {
+        // Remove from the list immediately
+        setRows((prev) => prev.filter((x) => x.user_id !== user_id))
+        setTotal((t) => (typeof t === 'number' ? Math.max(0, t - 1) : t))
+        // Refresh the current page to keep pagination consistent
+        load(page)
+      } else {
+        setRows((prev) =>
+          prev.map((x) => (x.user_id === user_id ? { ...x, role } : x)),
+        )
+      }
     } catch (e: any) {
       setErr(String(e?.message || e))
     } finally {
@@ -319,6 +328,24 @@ export default function CoachesManager() {
                         }}
                       >
                         {isBusy ? 'Working…' : actionLabel}
+                      </Button>
+
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={loading || isBusy || !r.role}
+                        title="Remove from coaches (set role to member)"
+                        onClick={() => {
+                          if (!r.role) return
+                          const ok = window.confirm(
+                            `Remove ${fullName(r)} from coaches? (Role will be set to member)`,
+                          )
+                          if (!ok) return
+                          setRole(r.user_id, 'member')
+                        }}
+                        className="border-red-200 text-red-700 hover:bg-red-50"
+                      >
+                        {isBusy ? 'Working…' : 'Remove'}
                       </Button>
                     </div>
                   </div>

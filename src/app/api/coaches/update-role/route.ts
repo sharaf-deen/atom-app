@@ -8,7 +8,7 @@ import type { Role as AppRole } from '@/lib/session'
 import { createSupabaseServerActionClient } from '@/lib/supabaseServer'
 import { createClient } from '@supabase/supabase-js'
 
-type TargetRole = 'coach' | 'assistant_coach'
+type TargetRole = 'coach' | 'assistant_coach' | 'member'
 
 type Body =
   | {
@@ -67,7 +67,7 @@ export async function POST(req: Request) {
       return noStore(NextResponse.json({ ok: false, error: 'MISSING_USER_ID' }, { status: 400 }))
     }
 
-    if (role !== 'coach' && role !== 'assistant_coach') {
+    if (role !== 'coach' && role !== 'assistant_coach' && role !== 'member') {
       return noStore(NextResponse.json({ ok: false, error: 'INVALID_ROLE' }, { status: 400 }))
     }
 
