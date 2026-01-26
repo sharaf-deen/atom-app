@@ -7,6 +7,7 @@ import { toast } from 'sonner'
 
 import Button from '@/components/ui/Button'
 import InlineAlert from '@/components/ui/InlineAlert'
+import Modal from '@/components/ui/Modal'
 
 type NewMemberPayload = {
   email: string
@@ -44,6 +45,8 @@ export default function CreateMemberForm() {
   const [busy, setBusy] = useState(false)
   const [status, setStatus] = useState<Status>({ kind: '', msg: '' })
   const [createdId, setCreatedId] = useState<string | null>(null)
+  const [postCreateOpen, setPostCreateOpen] = useState(false)
+  const [createdEmail, setCreatedEmail] = useState<string | null>(null)
 
   function update<K extends keyof NewMemberPayload>(k: K, v: NewMemberPayload[K]) {
     setForm((f) => ({ ...f, [k]: v }))
@@ -53,6 +56,7 @@ export default function CreateMemberForm() {
     setForm({ email: '', date_of_birth: '' })
     setStatus({ kind: '', msg: '' })
     setCreatedId(null)
+    setCreatedEmail(null)
   }
 
   const emailOk = !!(form.email || '').trim()
@@ -66,9 +70,12 @@ export default function CreateMemberForm() {
     setBusy(true)
     setStatus({ kind: 'info', msg: 'Creating member…' })
     setCreatedId(null)
+    setCreatedEmail(null)
+
+    const email = (form.email || '').trim().toLowerCase()
 
     const payload = {
-      email: (form.email || '').trim().toLowerCase(),
+      email,
       first_name: (form.first_name || '').trim() || undefined,
       last_name: (form.last_name || '').trim() || undefined,
       phone: (form.phone || '').trim() || undefined,
@@ -97,6 +104,7 @@ export default function CreateMemberForm() {
 
       const id: string = j.user?.id || j.id || j.user_id
       setCreatedId(id || null)
+      setCreatedEmail(email)
 
       setStatus({ kind: 'success', msg: 'Member created. An invite email was sent.' })
       toast.success('Member created')
@@ -105,8 +113,9 @@ export default function CreateMemberForm() {
       setForm({ email: '', date_of_birth: '' })
       // Refresh server data (lists/stats on the page)
       router.refresh()
-      // Focus back to the email field
-      setTimeout(() => emailRef.current?.focus(), 50)
+
+      // Open the post-create modal with actions
+      setPostCreateOpen(true)
 
     } catch (e: any) {
       const msg = String(e?.message || e)
@@ -129,32 +138,7 @@ export default function CreateMemberForm() {
           <InlineAlert
             variant={status.kind === 'error' ? 'error' : status.kind === 'success' ? 'success' : 'info'}
           >
-            <div className="flex flex-wrap items-center gap-2">
-              <span>{status.msg}</span>
-              {status.kind === 'success' ? (
-                <div className="flex flex-wrap items-center gap-2">
-                  {createdId ? (
-                    <a className="underline" href={`/members/${createdId}`} target="_self" rel="noreferrer">
-                      View member
-                    </a>
-                  ) : null}
-
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    onClick={() => {
-                      // Clear the success banner and keep the form ready
-                      setStatus({ kind: '', msg: '' })
-                      setCreatedId(null)
-                      setTimeout(() => emailRef.current?.focus(), 50)
-                    }}
-                  >
-                    Create another
-                  </Button>
-                </div>
-              ) : null}
-            </div>
+            <span>{status.msg}</span>
           </InlineAlert>
         </div>
       ) : null}
@@ -234,6 +218,64 @@ export default function CreateMemberForm() {
           </Button>
         </div>
       </form>
+
+      <Modal
+        open={postCreateOpen}
+        onClose={() => {
+          setPostCreateOpen(false)
+          // Keep it ready for the next action
+        }}
+        title="Member created"
+      >
+        <div className="grid gap-3">
+          <p className="text-sm text-[hsl(var(--muted))]">
+            {createdEmail ? (
+              <>Invite email sent to <span className="font-medium text-black">{createdEmail}</span>.</>
+            ) : (
+              <>Invite email has been sent.</>
+            )}
+          </p>
+
+          <div className="flex flex-wrap gap-2">
+            <Button
+              type="button"
+              onClick={() => {
+                // Close modal and get ready to create another
+                setPostCreateOpen(false)
+                setStatus({ kind: '', msg: '' })
+                setCreatedId(null)
+                setCreatedEmail(null)
+                setTimeout(() => emailRef.current?.focus(), 50)
+              }}
+            >
+              Create another
+            </Button>
+
+            <Button
+              type="button"
+              variant="outline"
+              disabled={!createdId}
+              onClick={() => {
+                if (!createdId) return
+                setPostCreateOpen(false)
+                router.push(`/members/${createdId}`)
+              }}
+            >
+              Go to member profile
+            </Button>
+
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={() => {
+                setPostCreateOpen(false)
+              }}
+            >
+              Close
+            </Button>
+          </div>
+        </div>
+      </Modal>
     </div>
   )
 }
