@@ -49,6 +49,7 @@ export default function CoachesManager() {
   const [err, setErr] = useState<string>('')
   const [page, setPage] = useState(1)
   const [total, setTotal] = useState<number>(0)
+  const [updatingId, setUpdatingId] = useState<string | null>(null)
 
   const totalPages = useMemo(() => {
     if (!total || total <= 0) return 1
@@ -98,6 +99,36 @@ export default function CoachesManager() {
       setErr(String(e?.message || e))
     } finally {
       setLoading(false)
+    }
+  }
+
+  async function setRole(user_id: string, role: Role) {
+    setUpdatingId(user_id)
+    setErr('')
+
+    try {
+      const r = await fetch('/api/coaches/update-role', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+        },
+        body: JSON.stringify({ user_id, role }),
+      })
+
+      const j = await r.json().catch(() => ({} as any))
+      if (!r.ok || !j?.ok) {
+        setErr(j?.error || 'Failed to update role')
+        return
+      }
+
+      setRows((prev) =>
+        prev.map((x) => (x.user_id === user_id ? { ...x, role } : x)),
+      )
+    } catch (e: any) {
+      setErr(String(e?.message || e))
+    } finally {
+      setUpdatingId(null)
     }
   }
 
@@ -224,49 +255,76 @@ export default function CoachesManager() {
 
           <div className="mt-4 divide-y divide-[hsl(var(--border))] rounded-2xl border border-[hsl(var(--border))]">
             <div className="grid grid-cols-1 gap-2 px-4 py-3 text-xs font-medium text-[hsl(var(--muted))] sm:grid-cols-12">
-              <div className="sm:col-span-4">Name</div>
+              <div className="sm:col-span-3">Name</div>
               <div className="sm:col-span-3">Email</div>
               <div className="sm:col-span-2">Phone</div>
               <div className="sm:col-span-2">Joined</div>
-              <div className="sm:col-span-1 text-right">Open</div>
+              <div className="sm:col-span-2 text-right">Actions</div>
             </div>
 
-            {rows.map((r) => (
-              <div
-                key={r.user_id}
-                className="grid grid-cols-1 gap-2 px-4 py-3 text-sm sm:grid-cols-12 sm:items-center"
-              >
-                <div className="sm:col-span-4">
-                  <div className="flex items-center gap-2">
-                    <div className="font-medium">{fullName(r)}</div>
-                    <Badge
-                      className={
-                        r.role === 'coach'
-                          ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
-                          : 'border-blue-200 bg-blue-50 text-blue-700'
-                      }
-                    >
-                      {r.role === 'coach' ? 'Coach' : 'Assistant'}
-                    </Badge>
+            {rows.map((r) => {
+              const isBusy = updatingId === r.user_id
+              const nextRole: Role = r.role === 'coach' ? 'assistant_coach' : 'coach'
+              const actionLabel = r.role === 'coach' ? 'Demote' : 'Promote'
+              const actionHint =
+                r.role === 'coach' ? 'Demote to Assistant Coach' : 'Promote to Coach'
+
+              return (
+                <div
+                  key={r.user_id}
+                  className="grid grid-cols-1 gap-2 px-4 py-3 text-sm sm:grid-cols-12 sm:items-center"
+                >
+                  <div className="sm:col-span-3">
+                    <div className="flex items-center gap-2">
+                      <div className="font-medium">{fullName(r)}</div>
+                      <Badge
+                        className={
+                          r.role === 'coach'
+                            ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                            : 'border-blue-200 bg-blue-50 text-blue-700'
+                        }
+                      >
+                        {r.role === 'coach' ? 'Coach' : 'Assistant'}
+                      </Badge>
+                    </div>
+                    <div className="mt-1 text-xs text-[hsl(var(--muted))]">
+                      {r.member_id ? `Member ID: ${r.member_id}` : '—'}
+                    </div>
                   </div>
-                  <div className="mt-1 text-xs text-[hsl(var(--muted))]">
-                    {r.member_id ? `Member ID: ${r.member_id}` : '—'}
+
+                  <div className="sm:col-span-3 text-[hsl(var(--muted))]">{r.email ?? '—'}</div>
+                  <div className="sm:col-span-2 text-[hsl(var(--muted))]">{r.phone ?? '—'}</div>
+                  <div className="sm:col-span-2 text-[hsl(var(--muted))]">{fmtDate(r.created_at)}</div>
+
+                  <div className="sm:col-span-2 sm:text-right">
+                    <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
+                      <Link href={`/members/${r.user_id}`} className="inline-block">
+                        <Button variant="outline" size="sm" disabled={loading || isBusy}>
+                          Open
+                        </Button>
+                      </Link>
+
+                      <Button
+                        variant={r.role === 'assistant_coach' ? 'solid' : 'outline'}
+                        size="sm"
+                        disabled={loading || isBusy || !r.role}
+                        title={actionHint}
+                        onClick={() => {
+                          if (!r.role) return
+                          const ok = window.confirm(
+                            `${actionHint} for ${fullName(r)}?`,
+                          )
+                          if (!ok) return
+                          setRole(r.user_id, nextRole)
+                        }}
+                      >
+                        {isBusy ? 'Working…' : actionLabel}
+                      </Button>
+                    </div>
                   </div>
                 </div>
-
-                <div className="sm:col-span-3 text-[hsl(var(--muted))]">{r.email ?? '—'}</div>
-                <div className="sm:col-span-2 text-[hsl(var(--muted))]">{r.phone ?? '—'}</div>
-                <div className="sm:col-span-2 text-[hsl(var(--muted))]">{fmtDate(r.created_at)}</div>
-
-                <div className="sm:col-span-1 sm:text-right">
-                  <Link href={`/members/${r.user_id}`} className="inline-block">
-                    <Button variant="outline" size="sm">
-                      Open
-                    </Button>
-                  </Link>
-                </div>
-              </div>
-            ))}
+              )
+            })}
           </div>
         </CardContent>
       </Card>
