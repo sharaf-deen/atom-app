@@ -27,6 +27,11 @@ export default function ReloadButton({
         startTransition(() => {
           // router.refresh() = re-fetch RSC data (best for dashboards)
           router.refresh()
+
+          // Also notify client components that use client-side fetch so they can refetch.
+          try {
+            window.dispatchEvent(new Event('atom:reload'))
+          } catch {}
         })
       }}
       aria-label={label}

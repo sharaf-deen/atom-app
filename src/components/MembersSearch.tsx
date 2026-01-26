@@ -183,8 +183,9 @@ export default function MembersSearch({ isStaff = false }: { isStaff?: boolean }
       setStatsLoading(true)
       setStatsErr(null)
 
-      const r = await fetch('/api/members/stats', {
+      const r = await fetch(`/api/members/stats?ts=${Date.now()}`, {
         headers: { Accept: 'application/json' },
+        cache: 'no-store',
       })
       const j = await r.json().catch(() => ({} as any))
 
@@ -212,6 +213,17 @@ export default function MembersSearch({ isStaff = false }: { isStaff?: boolean }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  // Make the top-right header Reload button actually refresh this client list
+  useEffect(() => {
+    const onReload = () => {
+      refreshAll()
+    }
+    window.addEventListener('atom:reload', onReload as any)
+    return () => window.removeEventListener('atom:reload', onReload as any)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode, listKind, page, q])
+
+
   async function runSearch(targetPage = 1) {
     const query = q.trim()
 
@@ -224,8 +236,8 @@ export default function MembersSearch({ isStaff = false }: { isStaff?: boolean }
     setErr('')
 
     try {
-      const url = `/api/members/search?q=${encodeURIComponent(query)}&page=${targetPage}&limit=${PAGE_SIZE}`
-      const r = await fetch(url, { headers: { Accept: 'application/json' } })
+      const url = `/api/members/search?q=${encodeURIComponent(query)}&page=${targetPage}&limit=${PAGE_SIZE}&ts=${Date.now()}`
+      const r = await fetch(url, { headers: { Accept: 'application/json' }, cache: 'no-store' })
       const j = await r.json().catch(() => ({} as any))
 
       if (!r.ok || !j?.ok) {
@@ -261,9 +273,10 @@ export default function MembersSearch({ isStaff = false }: { isStaff?: boolean }
     setErr('')
 
     try {
-      const url = `/api/members/list?status=${encodeURIComponent(kind)}&page=${targetPage}&limit=${PAGE_SIZE}`
+      const url = `/api/members/list?status=${encodeURIComponent(kind)}&page=${targetPage}&limit=${PAGE_SIZE}&ts=${Date.now()}`
       const r = await fetch(url, {
         headers: { Accept: 'application/json' },
+        cache: 'no-store',
       })
       const j = await r.json().catch(() => ({} as any))
 
@@ -536,6 +549,9 @@ export default function MembersSearch({ isStaff = false }: { isStaff?: boolean }
                                 defaultPlan={'1m' as Plan}
                                 defaultSessions={10}
                                 buttonLabel="Subscribe"
+                                onCreated={() => {
+                                  refreshAll()
+                                }}
                               />
                             )}
                           </div>
@@ -603,7 +619,10 @@ export default function MembersSearch({ isStaff = false }: { isStaff?: boolean }
                           defaultPlan={'1m' as Plan}
                           defaultSessions={10}
                           buttonLabel="Subscribe"
-                        />
+                                onCreated={() => {
+                                  refreshAll()
+                                }}
+                              />
                       )}
                     </div>
                   </div>
