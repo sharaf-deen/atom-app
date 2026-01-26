@@ -104,6 +104,21 @@ export default function NotificationsList({ isAdmin = false, sentOnly = false }:
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [box, tab, kind, debQ, sentOnly])
 
+
+  // Listen to top Reload button and global notification updates
+  useEffect(() => {
+    const handler = () => {
+      // reload current page with current filters
+      load(page)
+    }
+    window.addEventListener('atom:reload', handler)
+    window.addEventListener('notifications:updated', handler)
+    return () => {
+      window.removeEventListener('atom:reload', handler)
+      window.removeEventListener('notifications:updated', handler)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [page, box, tab, kind, debQ, sentOnly])
   function toggle(id: string) {
     setSelected((prev) => {
       const next = new Set(prev)
@@ -266,16 +281,7 @@ export default function NotificationsList({ isAdmin = false, sentOnly = false }:
           </div>
 
           <div className="sm:ml-auto flex items-center gap-2">
-            <Button
-              onClick={() => load(page)}
-              variant="outline"
-              disabled={loading}
-              className="px-3 py-2"
-            >
-              {loading ? 'Loading…' : 'Refresh'}
-            </Button>
-
-            {/* Boutons de lecture : seulement si Inbox visible */}
+{/* Boutons de lecture : seulement si Inbox visible */}
             {!sentOnly && box === 'inbox' && (
               <>
                 <Button

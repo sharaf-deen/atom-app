@@ -75,6 +75,9 @@ export default function NotificationsSender() {
       setBody('')
       setSelectedIds([])
       setEmails('')
+      // Notify other UI parts (badges, lists) to refresh
+      window.dispatchEvent(new Event('notifications:updated'))
+      window.dispatchEvent(new Event('atom:reload'))
     } catch (e: any) {
       setMsg(String(e?.message || e))
     } finally {

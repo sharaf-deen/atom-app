@@ -62,7 +62,19 @@ export default function NotificationsMemberInbox() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  async function markAllRead() {
+  
+  // Listen to global reload signals (top Reload button / notification updates)
+  useEffect(() => {
+    const handler = () => load(page)
+    window.addEventListener('atom:reload', handler)
+    window.addEventListener('notifications:updated', handler)
+    return () => {
+      window.removeEventListener('atom:reload', handler)
+      window.removeEventListener('notifications:updated', handler)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [page])
+async function markAllRead() {
     const unreadIds = items.filter((x) => !x.read_at).map((x) => x.id)
     if (unreadIds.length === 0) return
     setMsg('')
@@ -102,14 +114,7 @@ export default function NotificationsMemberInbox() {
       <CardContent>
         {/* Actions top bar */}
         <div className="flex flex-wrap items-center gap-2">
-          <Button
-            variant="outline"
-            onClick={() => load(page)}
-            disabled={loading}
-          >
-            {loading ? 'Loading…' : 'Refresh'}
-          </Button>
-          <Button
+<Button
             variant="outline"
             onClick={markAllRead}
             disabled={loading || items.every((i) => !!i.read_at)}
