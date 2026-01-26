@@ -290,7 +290,7 @@ export default async function HomePage() {
 
               <div className="flex flex-col items-end gap-2">
                 {canShowAvatar && signedAvatar ? (
-                  <div className="relative h-16 w-16 sm:h-20 sm:w-20 lg:h-24 lg:w-24 overflow-hidden rounded-full border ring-1 ring-[hsl(var(--border))] bg-white shadow-soft">
+                  <div className="relative h-24 w-24 sm:h-32 sm:w-32 lg:h-36 lg:w-36 overflow-hidden rounded-full border ring-1 ring-[hsl(var(--border))] bg-white shadow-soft">
                     <Image
                       src={signedAvatar}
                       alt="Profile photo"

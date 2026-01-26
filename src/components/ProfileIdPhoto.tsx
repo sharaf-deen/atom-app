@@ -5,7 +5,6 @@ import { useEffect, useMemo, useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import Image from 'next/image'
 import { createSupabaseBrowserClient } from '@/lib/supabaseBrowser'
-import Button from '@/components/ui/Button'
 import { Camera, Trash2, Save, X } from 'lucide-react'
 
 type Props = { userId: string; idPhotoPath?: string | null }
@@ -20,6 +19,7 @@ export default function ProfileIdPhoto({ userId, idPhotoPath }: Props) {
 
   const [file, setFile] = useState<File | null>(null)
   const [busy, setBusy] = useState(false)
+  const [busyAction, setBusyAction] = useState<'upload' | 'delete' | ''>('')
   const [msg, setMsg] = useState<string>('')
   const [signedUrl, setSignedUrl] = useState<string>('')
   const [editing, setEditing] = useState(false)
@@ -32,10 +32,13 @@ export default function ProfileIdPhoto({ userId, idPhotoPath }: Props) {
         setEditing(true)
         return
       }
+
       const { data, error } = await supabase.storage
         .from('id-photos')
         .createSignedUrl(idPhotoPath, 60 * 10)
+
       if (!mounted) return
+
       if (error) {
         setMsg(error.message)
         setSignedUrl('')
@@ -44,7 +47,10 @@ export default function ProfileIdPhoto({ userId, idPhotoPath }: Props) {
         setEditing(false)
       }
     })()
-    return () => { mounted = false }
+
+    return () => {
+      mounted = false
+    }
   }, [idPhotoPath, supabase])
 
   const preview = useMemo(() => (file ? URL.createObjectURL(file) : ''), [file])
@@ -60,7 +66,10 @@ export default function ProfileIdPhoto({ userId, idPhotoPath }: Props) {
 
   async function onUpload() {
     if (!file) return
-    setBusy(true); setMsg('')
+    setBusyAction('upload')
+    setBusy(true)
+    setMsg('')
+
     try {
       const ext = file.type === 'image/png' ? 'png' : file.type === 'image/webp' ? 'webp' : 'jpg'
       const objectPath = `${userId}/id-photo.${ext}`
@@ -76,26 +85,41 @@ export default function ProfileIdPhoto({ userId, idPhotoPath }: Props) {
         .eq('user_id', userId)
       if (upErr2) throw upErr2
 
-      setMsg('Profile photo saved ✅'); setFile(null)
+      setMsg('Profile photo saved ✅')
+      setFile(null)
       startTransition(() => router.refresh())
     } catch (e: any) {
       setMsg(e?.message || 'Upload failed')
-    } finally { setBusy(false) }
+    } finally {
+      setBusy(false)
+      setBusyAction('')
+    }
   }
 
   async function onDelete() {
     if (!idPhotoPath) return
-    setBusy(true); setMsg('')
+    setBusyAction('delete')
+    setBusy(true)
+    setMsg('')
+
     try {
       const { error: delErr } = await supabase.storage.from('id-photos').remove([idPhotoPath])
       if (delErr) throw delErr
-      const { error: upErr } = await supabase.from('profiles').update({ id_photo_path: null }).eq('user_id', userId)
+
+      const { error: upErr } = await supabase
+        .from('profiles')
+        .update({ id_photo_path: null })
+        .eq('user_id', userId)
       if (upErr) throw upErr
+
       setMsg('Photo removed.')
       startTransition(() => router.refresh())
     } catch (e: any) {
       setMsg(e?.message || 'Delete failed')
-    } finally { setBusy(false) }
+    } finally {
+      setBusy(false)
+      setBusyAction('')
+    }
   }
 
   return (
@@ -176,7 +200,14 @@ export default function ProfileIdPhoto({ userId, idPhotoPath }: Props) {
             </div>
           )}
 
-          {!!msg && <div className="text-sm">{msg}</div>}
+          {busy ? (
+            <div className="text-sm text-[hsl(var(--muted))] flex items-center gap-2">
+              <span className="inline-block h-2 w-2 rounded-full bg-[hsl(var(--muted))] animate-pulse" />
+              {busyAction === 'delete' ? 'Removing photo…' : 'Uploading photo…'}
+            </div>
+          ) : null}
+
+          {!!msg && !busy && <div className="text-sm">{msg}</div>}
         </div>
       </div>
     </div>
