@@ -7,6 +7,7 @@ import { getSessionUser } from '@/lib/session'
 import AccessDeniedPage from '@/components/AccessDeniedPage'
 import PageHeader from '@/components/layout/PageHeader'
 import Section from '@/components/layout/Section'
+import CoachesManager from '@/components/CoachesManager'
 
 export default async function CoachesPage() {
   const sessionUser = await getSessionUser()
@@ -32,9 +33,7 @@ export default async function CoachesPage() {
     <main>
       <PageHeader title="Coaches" subtitle="Manage coaches" />
       <Section className="max-w-5xl">
-        <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-5 shadow-soft">
-          <div className="text-sm text-[hsl(var(--muted))]">Coming soon.</div>
-        </div>
+        <CoachesManager />
       </Section>
     </main>
   )
