@@ -17,7 +17,7 @@ type Body =
     }
   | Record<string, any>
 
-const ALLOWED_ACTORS: AppRole[] = ['admin', 'super_admin']
+const ALLOWED_ACTORS: AppRole[] = ['super_admin']
 const can = (r: AppRole) => ALLOWED_ACTORS.includes(r)
 
 function noStore(res: NextResponse) {

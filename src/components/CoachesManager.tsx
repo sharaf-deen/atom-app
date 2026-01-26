@@ -42,7 +42,9 @@ function fullName(r: CoachRow) {
   return n || r.email || r.member_id || '—'
 }
 
-export default function CoachesManager() {
+export default function CoachesManager({ viewerRole }: { viewerRole: string }) {
+  const canManage = viewerRole === 'super_admin'
+
   const [kind, setKind] = useState<Kind>('all')
   const [q, setQ] = useState('')
   const [rows, setRows] = useState<CoachRow[]>([])
@@ -104,6 +106,11 @@ export default function CoachesManager() {
   }
 
   async function setRole(user_id: string, role: TargetRole) {
+    if (!canManage) {
+      setErr('FORBIDDEN')
+      return
+    }
+
     setUpdatingId(user_id)
     setErr('')
 
@@ -224,6 +231,12 @@ export default function CoachesManager() {
               Assistant Coaches
             </Button>
           </div>
+
+          {!canManage && (
+            <div className="mt-3 text-xs text-[hsl(var(--muted))]">
+              Only <span className="font-medium">Super Admin</span> can promote, demote, or remove coaches.
+            </div>
+          )}
         </CardContent>
       </Card>
 
@@ -312,6 +325,9 @@ export default function CoachesManager() {
                           Open
                         </Button>
                       </Link>
+                      {canManage && (
+                        <>
+
 
                       <Button
                         variant={r.role === 'assistant_coach' ? 'solid' : 'outline'}
@@ -347,12 +363,20 @@ export default function CoachesManager() {
                       >
                         {isBusy ? 'Working…' : 'Remove'}
                       </Button>
+                        </>
+                      )}
                     </div>
                   </div>
                 </div>
               )
             })}
           </div>
+
+          {!canManage && (
+            <div className="mt-3 text-xs text-[hsl(var(--muted))]">
+              Only <span className="font-medium">Super Admin</span> can promote, demote, or remove coaches.
+            </div>
+          )}
         </CardContent>
       </Card>
     </div>

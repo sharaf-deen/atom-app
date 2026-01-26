@@ -33,7 +33,7 @@ export default async function CoachesPage() {
     <main>
       <PageHeader title="Coaches" subtitle="Manage coaches" />
       <Section className="max-w-5xl">
-        <CoachesManager />
+        <CoachesManager viewerRole={sessionUser.role} />
       </Section>
     </main>
   )
