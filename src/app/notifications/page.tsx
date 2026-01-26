@@ -2,6 +2,7 @@
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
+import { redirect } from 'next/navigation'
 import { getSessionUser } from '@/lib/session'
 import PageHeader from '@/components/layout/PageHeader'
 import Section from '@/components/layout/Section'
@@ -28,6 +29,11 @@ export default async function NotificationsPage() {
     )
   }
 
+  // 🚫 Reception is not allowed to access notifications at all
+  if (me.role === 'reception') {
+    redirect('/')
+  }
+
   const role = me.role
   const isAdmin = role === 'admin'
   const isSuper = role === 'super_admin'
@@ -47,27 +53,17 @@ export default async function NotificationsPage() {
       />
 
       <Section className="space-y-6">
-        {/* Création d'annonces (admin + super_admin) */}
-        {(isAdmin || isSuper) && (
-            <NotificationsSender />
-        )}
+        {/* Create announcements (admin + super_admin) */}
+        {(isAdmin || isSuper) && <NotificationsSender />}
 
-        {/* 
-          - member / coach / assistant_coach : inbox générale
-          - admin / super_admin : liste "sentOnly" (comme demandé)
-        */}
-        {(isMember || isCoach || isAssistantCoach) && (
-            <NotificationsList />
-        )}
+        {/* member / coach / assistant_coach : inbox */}
+        {(isMember || isCoach || isAssistantCoach) && <NotificationsList />}
 
-        {(isAdmin || isSuper) && (
-            <NotificationsList isAdmin sentOnly />
-        )}
+        {/* admin / super_admin : sent only */}
+        {(isAdmin || isSuper) && <NotificationsList isAdmin sentOnly />}
 
-        {/* Bloc inbox “member messages” réservé aux super_admin */}
-        {isSuper && (
-            <NotificationsMemberInbox />
-        )}
+        {/* Member messages inbox (super_admin only) */}
+        {isSuper && <NotificationsMemberInbox />}
       </Section>
     </main>
   )

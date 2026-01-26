@@ -322,7 +322,7 @@ export default function CoachesManager({ viewerRole }: { viewerRole: string }) {
                     <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
                       <Link href={`/members/${r.user_id}`} className="inline-block">
                         <Button variant="outline" size="sm" disabled={loading || isBusy}>
-                          Open
+                          View
                         </Button>
                       </Link>
                       {canManage && (

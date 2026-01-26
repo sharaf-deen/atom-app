@@ -4,6 +4,7 @@ export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
 import { NextResponse } from 'next/server'
+import { createClient } from '@supabase/supabase-js'
 import { createSupabaseServerActionClient } from '@/lib/supabaseServer'
 
 type Plan = '1m' | '3m' | '6m' | '12m' | 'sessions'
@@ -59,6 +60,30 @@ function normQR(v: unknown): string | null {
   return raw
 }
 
+function humanPlan(p: Plan, sessionsTotal?: number | null) {
+  switch (p) {
+    case '1m':
+      return '1 month'
+    case '3m':
+      return '3 months'
+    case '6m':
+      return '6 months'
+    case '12m':
+      return '12 months'
+    case 'sessions':
+      return `Per sessions${sessionsTotal ? ` (${sessionsTotal})` : ''}`
+  }
+}
+
+function makeAdminClient() {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY
+  if (!url || !key) return null
+  return createClient(url, key, {
+    auth: { autoRefreshToken: false, persistSession: false },
+  })
+}
+
 export async function POST(req: Request) {
   try {
     const supa = createSupabaseServerActionClient()
@@ -76,8 +101,23 @@ export async function POST(req: Request) {
 
     if (meErr) return json(500, { ok: false, error: 'PROFILE_LOOKUP_FAILED', details: meErr.message })
 
-    const isStaff = ['reception', 'admin', 'super_admin'].includes(me?.role ?? 'member')
+    const role = me?.role ?? 'member'
+    const isStaff = ['reception', 'admin', 'super_admin'].includes(role)
     if (!isStaff) return json(403, { ok: false, error: 'FORBIDDEN' })
+
+    // Service role client (to bypass notifications RLS, and triggers if any)
+    const admin = makeAdminClient()
+    if (!admin) {
+      // We can still create the subscription with user session, but notification insert may fail
+      // and, if you have a DB trigger inserting into notifications, the subscription insert itself can fail.
+      // Better to fail fast with a clear hint.
+      return json(500, {
+        ok: false,
+        error: 'SERVICE_ROLE_MISSING',
+        details:
+          'SUPABASE_SERVICE_ROLE_KEY (and NEXT_PUBLIC_SUPABASE_URL) must be set on the server to create subscription notifications safely.',
+      })
+    }
 
     // 2) Parse payload
     const body = await req.json().catch(() => ({} as any))
@@ -92,7 +132,6 @@ export async function POST(req: Request) {
     if (!Number.isFinite(amountNum) || amountNum < 0) {
       return json(400, { ok: false, error: 'INVALID_AMOUNT', details: 'Amount must be a positive number.' })
     }
-    // si tu veux limiter:
     if (amountNum > 1_000_000_000) {
       return json(400, { ok: false, error: 'AMOUNT_TOO_LARGE' })
     }
@@ -105,7 +144,7 @@ export async function POST(req: Request) {
     // 3) Resolve member_id (memberId | qr | email)
     if (!memberId) {
       if (member_qr) {
-        const { data: profByQr, error: qrErr } = await supa
+        const { data: profByQr, error: qrErr } = await admin
           .from('profiles')
           .select('user_id')
           .eq('qr_code', member_qr)
@@ -113,7 +152,7 @@ export async function POST(req: Request) {
         if (qrErr) return json(500, { ok: false, error: 'MEMBER_LOOKUP_FAILED', details: qrErr.message })
         memberId = profByQr?.user_id ?? null
       } else if (member_email) {
-        const { data: profByEmail, error: emErr } = await supa
+        const { data: profByEmail, error: emErr } = await admin
           .from('profiles')
           .select('user_id')
           .eq('email', member_email)
@@ -132,12 +171,13 @@ export async function POST(req: Request) {
       })
     }
 
-    // (Optionnel mais utile) Vérifier que le member existe vraiment
-    const { data: exists, error: exErr } = await supa
+    // Verify member exists
+    const { data: exists, error: exErr } = await admin
       .from('profiles')
-      .select('user_id')
+      .select('user_id, first_name, last_name, email')
       .eq('user_id', memberId)
-      .maybeSingle<{ user_id: string }>()
+      .maybeSingle<{ user_id: string; first_name: string | null; last_name: string | null; email: string | null }>()
+
     if (exErr) return json(500, { ok: false, error: 'PROFILE_CHECK_FAILED', details: exErr.message })
     if (!exists) return json(404, { ok: false, error: 'MEMBER_NOT_FOUND' })
 
@@ -155,11 +195,13 @@ export async function POST(req: Request) {
       paid_at,
     }
 
+    let sessions_total: number | null = null
+
     if (plan === 'sessions') {
       // Sessions: start_date optional (default today UTC), fixed 45d validity
       const requestedStart = isISODateOnly(body?.start_date) ? String(body.start_date) : dateOnlyUTC()
       const sessionsTotalRaw = Number(body?.sessions_total ?? 10)
-      const sessions_total = Math.max(1, Math.min(10, Math.floor(Number.isFinite(sessionsTotalRaw) ? sessionsTotalRaw : 10)))
+      sessions_total = Math.max(1, Math.min(10, Math.floor(Number.isFinite(sessionsTotalRaw) ? sessionsTotalRaw : 10)))
 
       payload.start_date = requestedStart
       payload.end_date = addDays(requestedStart, 45)
@@ -168,7 +210,13 @@ export async function POST(req: Request) {
     } else {
       // Time plans require start_date
       const start = isISODateOnly(body?.start_date) ? String(body.start_date) : null
-      if (!start) return json(400, { ok: false, error: 'START_DATE_REQUIRED', details: 'start_date (YYYY-MM-DD) is required for time plans.' })
+      if (!start) {
+        return json(400, {
+          ok: false,
+          error: 'START_DATE_REQUIRED',
+          details: 'start_date (YYYY-MM-DD) is required for time plans.',
+        })
+      }
 
       const months = plan === '1m' ? 1 : plan === '3m' ? 3 : plan === '6m' ? 6 : 12
       payload.start_date = start
@@ -177,8 +225,8 @@ export async function POST(req: Request) {
       payload.sessions_used = null
     }
 
-    // 5) Insert
-    const { data: inserted, error: insErr } = await supa
+    // 5) Insert subscription with service role (bypasses RLS + any trigger that inserts notifications)
+    const { data: inserted, error: insErr } = await admin
       .from('subscriptions')
       .insert(payload)
       .select('id')
@@ -188,7 +236,47 @@ export async function POST(req: Request) {
       return json(500, { ok: false, error: 'INSERT_FAILED', details: insErr.message })
     }
 
-    return json(200, { ok: true, id: inserted?.id, ...payload })
+    // 6) Try to create a notification for the member (do NOT block subscription if this fails)
+    let notification_ok = false
+    let notification_error: string | null = null
+
+    try {
+      const memberName = [exists.first_name ?? '', exists.last_name ?? ''].join(' ').trim() || exists.email || 'Member'
+      const end = payload.end_date
+      const title = 'Subscription updated'
+      const bodyText =
+        plan === 'sessions'
+          ? `Hi ${memberName}, your ${humanPlan(plan, sessions_total)} package is active. Valid until ${end}.`
+          : `Hi ${memberName}, your ${humanPlan(plan)} subscription is active until ${end}.`
+
+      const { error: nErr } = await admin.from('notifications').insert({
+        user_id: memberId,
+        member_id: memberId,
+        title,
+        body: bodyText,
+        kind: 'billing',
+        created_by: auth.user.id,
+        // read_at intentionally null
+      })
+
+      if (nErr) {
+        notification_ok = false
+        notification_error = nErr.message
+      } else {
+        notification_ok = true
+      }
+    } catch (e: any) {
+      notification_ok = false
+      notification_error = e?.message ?? String(e)
+    }
+
+    return json(200, {
+      ok: true,
+      id: inserted?.id,
+      ...payload,
+      notification_ok,
+      ...(notification_error ? { notification_error } : {}),
+    })
   } catch (e: any) {
     return json(500, { ok: false, error: 'SERVER_ERROR', details: e?.message ?? String(e) })
   }
