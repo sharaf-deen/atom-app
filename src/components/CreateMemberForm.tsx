@@ -26,6 +26,9 @@ function ageFromDob(dob?: string) {
   const born = new Date(Date.UTC(y, m - 1, d))
   if (isNaN(born.getTime())) return null
 
+  // Strict validity check (avoid JS date rollover e.g. 2024-02-31)
+  if (born.getUTCFullYear() !== y || born.getUTCMonth() !== m - 1 || born.getUTCDate() !== d) return null
+
   const now = new Date()
   const today = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()))
   if (born.getTime() > today.getTime()) return null
@@ -42,6 +45,21 @@ export default function CreateMemberForm() {
   const emailRef = useRef<HTMLInputElement>(null)
 
   const [form, setForm] = useState<NewMemberPayload>({ email: '', date_of_birth: '' })
+
+  const [dobParts, setDobParts] = useState<{ day: string; month: string; year: string }>({
+    day: '',
+    month: '',
+    year: '',
+  })
+
+  function setDobPart(part: 'day' | 'month' | 'year', value: string) {
+    setDobParts((prev) => {
+      const next = { ...prev, [part]: value }
+      const iso = next.year && next.month && next.day ? `${next.year}-${next.month}-${next.day}` : ''
+      update('date_of_birth', iso)
+      return next
+    })
+  }
   const [busy, setBusy] = useState(false)
   const [status, setStatus] = useState<Status>({ kind: '', msg: '' })
   const [createdId, setCreatedId] = useState<string | null>(null)
@@ -54,6 +72,7 @@ export default function CreateMemberForm() {
 
   function resetForm() {
     setForm({ email: '', date_of_birth: '' })
+    setDobParts({ day: '', month: '', year: '' })
     setStatus({ kind: '', msg: '' })
     setCreatedId(null)
     setCreatedEmail(null)
@@ -170,17 +189,64 @@ export default function CreateMemberForm() {
           />
         </label>
 
-        <label className="grid gap-1">
+        <label className="grid gap-1 sm:col-span-2">
           <span className="text-sm font-medium">Date of birth *</span>
-          <input
-            type="date"
-            required
-            value={form.date_of_birth ?? ''}
-            onChange={(e) => update('date_of_birth', e.target.value)}
-            className="rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2"
-            disabled={busy}
-            max={new Date().toISOString().slice(0, 10)}
-          />
+
+          <div className="grid grid-cols-3 gap-2">
+            <select
+              required
+              value={dobParts.day}
+              onChange={(e) => setDobPart('day', e.target.value)}
+              className="rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2"
+              disabled={busy}
+            >
+              <option value="" disabled>
+                DD
+              </option>
+              {Array.from({ length: 31 }, (_, i) => String(i + 1).padStart(2, '0')).map((d) => (
+                <option key={d} value={d}>
+                  {d}
+                </option>
+              ))}
+            </select>
+
+            <select
+              required
+              value={dobParts.month}
+              onChange={(e) => setDobPart('month', e.target.value)}
+              className="rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2"
+              disabled={busy}
+            >
+              <option value="" disabled>
+                MM
+              </option>
+              {Array.from({ length: 12 }, (_, i) => String(i + 1).padStart(2, '0')).map((m) => (
+                <option key={m} value={m}>
+                  {m}
+                </option>
+              ))}
+            </select>
+
+            <select
+              required
+              value={dobParts.year}
+              onChange={(e) => setDobPart('year', e.target.value)}
+              className="rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2"
+              disabled={busy}
+            >
+              <option value="" disabled>
+                YYYY
+              </option>
+              {Array.from({ length: new Date().getUTCFullYear() - 1900 + 1 }, (_, i) => String(new Date().getUTCFullYear() - i)).map(
+                (y) => (
+                  <option key={y} value={y}>
+                    {y}
+                  </option>
+                )
+              )}
+            </select>
+          </div>
+
           <span className="text-[11px] text-[hsl(var(--muted))]">
             {dobOk && ageGroup ? `Auto category: ${ageGroup} (${age} years old)` : 'Used to classify the member as Kid (<17) or Adult (>=17).'}
           </span>
