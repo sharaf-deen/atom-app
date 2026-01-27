@@ -20,6 +20,7 @@ type Item = {
   user_id?: string | null
   recipient_name?: string
   recipient_email?: string | null
+  recipient_count?: number
 }
 
 const KINDS = ['all', 'info', 'order_update', 'billing', 'promo'] as const
@@ -415,7 +416,14 @@ export default function NotificationsList({ isAdmin = false, sentOnly = false }:
                         {isSentView ? (
                           <div className="text-xs">
                             <div className="font-medium">{n.recipient_name || '—'}</div>
-                            <div className="text-[hsl(var(--muted))]">{n.recipient_email || ''}</div>
+                            {n.recipient_email ? (
+                              <div className="text-[hsl(var(--muted))]">{n.recipient_email}</div>
+                            ) : null}
+                            {typeof n.recipient_count === 'number' ? (
+                              <div className="text-[hsl(var(--muted))]">
+                                {n.recipient_count} recipient{n.recipient_count == 1 ? '' : 's'}
+                              </div>
+                            ) : null}
                           </div>
                         ) : n.read_at ? (
                           <Badge className="bg-black text-white border-black">Read</Badge>
@@ -502,6 +510,9 @@ export default function NotificationsList({ isAdmin = false, sentOnly = false }:
                         <span className="font-medium">{n.recipient_name || '—'}</span>
                         {n.recipient_email ? (
                           <span className="text-[hsl(var(--muted))]"> · {n.recipient_email}</span>
+                        ) : null}
+                        {typeof n.recipient_count === 'number' ? (
+                          <span className="text-[hsl(var(--muted))]"> · {n.recipient_count} recipient{n.recipient_count == 1 ? '' : 's'}</span>
                         ) : null}
                       </>
                     ) : n.read_at ? (
