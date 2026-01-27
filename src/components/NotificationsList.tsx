@@ -56,6 +56,7 @@ export default function NotificationsList({ isAdmin = false, sentOnly = false }:
   const [loading, setLoading] = useState(false)
   const [err, setErr] = useState<string>('')
   const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [audCounts, setAudCounts] = useState<{ members: number; coaches: number; assistant_coaches: number } | null>(null)
 
   // Align when prop changes
   useEffect(() => {
@@ -69,32 +70,159 @@ export default function NotificationsList({ isAdmin = false, sentOnly = false }:
     return () => clearTimeout(t)
   }, [q])
 
+  async function ensureAudienceCounts() {
+    if (audCounts) return audCounts
+    try {
+      const r = await fetch('/api/notifications/audience-counts', { cache: 'no-store' })
+      const j: any = await safeJson(r)
+      if (r.ok && j?.ok) {
+        const next = {
+          members: Number(j.members || 0),
+          coaches: Number(j.coaches || 0),
+          assistant_coaches: Number(j.assistant_coaches || 0),
+        }
+        setAudCounts(next)
+        return next
+      }
+    } catch {}
+    return { members: 0, coaches: 0, assistant_coaches: 0 }
+  }
+
+  function groupSent(
+    rows: any[],
+    counts: { members: number; coaches: number; assistant_coaches: number }
+  ): Item[] {
+    const norm = (s: any) => String(s ?? '').trim().replace(/\s+/g, ' ')
+    const timeKey = (iso: any) => {
+      const s = String(iso ?? '')
+      return s.length >= 19 ? s.slice(0, 19) : s
+    }
+
+    const out: Item[] = []
+    const map = new Map<
+      string,
+      { item: Item; recipients: { name?: string; email?: string | null }[] }
+    >()
+
+    for (const r of rows) {
+      // Key based on second-level timestamp + content (good enough to represent one "send")
+      const k = `${timeKey(r.created_at)}|${norm(r.kind)}|${norm(r.title)}|${norm(r.body)}`
+      let g = map.get(k)
+      if (!g) {
+        const base: Item = {
+          id: k,
+          title: r.title ?? null,
+          body: String(r.body ?? ''),
+          kind: r.kind ?? null,
+          created_at: String(r.created_at ?? ''),
+        }
+        g = { item: base, recipients: [] }
+        map.set(k, g)
+        out.push(g.item)
+      }
+
+      // Collect recipients from non-grouped APIs
+      g.recipients.push({
+        name: (r.recipient_name ?? r.recipient ?? '') as any,
+        email: (r.recipient_email ?? r.recipientEmail ?? null) as any,
+      })
+
+      // If API already provides grouped fields, keep them
+      if (typeof r.recipient_count === 'number' && r.recipient_count > 0) {
+        g.item.recipient_count = r.recipient_count
+        g.item.recipient_name = r.recipient_name
+        g.item.recipient_email = r.recipient_email ?? null
+      }
+    }
+
+    // Finalize labels for groups that were not already labeled by API
+    for (const item of out) {
+      if (typeof item.recipient_count === 'number' && item.recipient_count > 0) continue
+
+      const g = map.get(item.id)
+      const n = g?.recipients.length || 0
+      item.recipient_count = n
+
+      if (n === 1) {
+        item.recipient_name = (g?.recipients[0]?.name || '—').toString().trim() || '—'
+        item.recipient_email = g?.recipients[0]?.email ?? null
+      } else if (n > 1) {
+        if (counts.members > 0 && n === counts.members) item.recipient_name = 'All members'
+        else if (counts.coaches > 0 && n === counts.coaches) item.recipient_name = 'All coaches'
+        else if (counts.assistant_coaches > 0 && n === counts.assistant_coaches) item.recipient_name = 'All assistant coaches'
+        else item.recipient_name = `Custom (${n})`
+        item.recipient_email = null
+      } else {
+        item.recipient_name = '—'
+        item.recipient_email = null
+      }
+    }
+
+    return out
+  }
+
   async function load(p = page) {
     setLoading(true)
     setErr('')
     try {
+      const isSentView = sentOnly || box === 'sent'
       const params = new URLSearchParams()
+
+      // Sent: fetch a larger window and group client-side so "All members/coaches/custom" becomes 1 line.
+      if (isSentView) {
+        params.set('page', '1')
+        params.set('limit', '1000')
+        if (kind !== 'all') params.set('kind', kind)
+        if (debQ) params.set('q', debQ)
+
+        const [counts, r] = await Promise.all([
+          ensureAudienceCounts(),
+          fetch(`/api/notifications/sent/list?${params.toString()}`, { cache: 'no-store' }),
+        ])
+        const j: any = await safeJson(r)
+
+        if (!r.ok || !j?.ok) {
+          setErr(j?.details || j?.error || 'Failed to load')
+          setItems([])
+          setTotal(0)
+          return
+        }
+
+        const raw = Array.isArray(j.items) ? j.items : []
+        // If the API already returns grouped rows, keep them as-is.
+        const alreadyGrouped =
+          raw.length > 0 && typeof raw[0]?.recipient_count === 'number' && !raw[0]?.user_id
+
+        const grouped: Item[] = alreadyGrouped ? (raw as Item[]) : groupSent(raw, counts)
+
+        const totalGroups = grouped.length
+        const offset = (p - 1) * PER_PAGE
+        setItems(grouped.slice(offset, offset + PER_PAGE))
+        setTotal(totalGroups)
+        setPage(p)
+        setSelected(new Set())
+        return
+      }
+
+      // Inbox (server paginated)
       params.set('page', String(p))
       params.set('limit', String(PER_PAGE))
       if (kind !== 'all') params.set('kind', kind)
       if (debQ) params.set('q', debQ)
-
-      let url = '/api/notifications/list'
       if (!sentOnly && box === 'inbox' && tab === 'unread') {
         params.set('unread', '1')
       }
-      if (sentOnly || box === 'sent') {
-        url = '/api/notifications/sent/list'
-      }
 
-      const r = await fetch(`${url}?${params.toString()}`, { cache: 'no-store' })
+      const r = await fetch(`/api/notifications/list?${params.toString()}`, { cache: 'no-store' })
       const j: any = await safeJson(r)
+
       if (!r.ok || !j?.ok) {
         setErr(j?.details || j?.error || 'Failed to load')
         setItems([])
         setTotal(0)
         return
       }
+
       setItems(Array.isArray(j.items) ? j.items : [])
       setTotal(Number(j.total || 0))
       setPage(Number(j.page || p))
@@ -105,6 +233,7 @@ export default function NotificationsList({ isAdmin = false, sentOnly = false }:
       setLoading(false)
     }
   }
+
 
   useEffect(() => {
     setPage(1)
