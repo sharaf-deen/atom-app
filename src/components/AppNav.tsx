@@ -11,7 +11,7 @@ import RoleMenu from '@/components/RoleMenu'
 import NotificationsBell from '@/components/NotificationsBell'
 import HideMenuOnRoutes from '@/components/HideMenuOnRoutes'
 
-type IconKey = 'dashboard' | 'bell' | 'gift' | 'id' | 'scan' | 'users' | 'user-cog' | 'bag' | 'wallet'
+type IconKey = 'dashboard' | 'bell' | 'gift' | 'id' | 'scan' | 'users' | 'user-cog' | 'bag' | 'wallet' | 'calendar'
 type MenuItem = { label: string; href: string; icon: IconKey }
 type MenuByRole = Record<Role, MenuItem[]>
 
@@ -19,6 +19,7 @@ const MENU_BY_ROLE: MenuByRole = {
   member: [
     { label: 'Store', href: '/store', icon: 'bag' },
     { label: 'Notifications', href: '/notifications', icon: 'bell' },
+    { label: 'Schedule', href: '/schedule', icon: 'calendar' },
     { label: 'My Profile', href: '/profile', icon: 'id' },
     { label: 'Packages & Promos', href: '/packages-and-promos', icon: 'gift' },
     { label: 'Contact Admin', href: '/contact', icon: 'user-cog' },
@@ -26,6 +27,7 @@ const MENU_BY_ROLE: MenuByRole = {
   assistant_coach: [
     { label: 'Store', href: '/store', icon: 'bag' },
     { label: 'Notifications', href: '/notifications', icon: 'bell' },
+    { label: 'Schedule', href: '/schedule', icon: 'calendar' },
     { label: 'My Profile', href: '/profile', icon: 'id' },
     { label: 'Packages & Promos', href: '/packages-and-promos', icon: 'gift' },
   ],
@@ -36,6 +38,7 @@ const MENU_BY_ROLE: MenuByRole = {
     { label: 'Packages & Promos', href: '/packages-and-promos', icon: 'gift' },
   ],
   reception: [
+    { label: 'Schedule', href: '/schedule', icon: 'calendar' },
     { label: 'Membership', href: '/kiosk', icon: 'id' },
     { label: 'Scan', href: '/scan', icon: 'scan' },
     { label: 'Members', href: '/members', icon: 'users' },
@@ -44,6 +47,7 @@ const MENU_BY_ROLE: MenuByRole = {
   admin: [
     { label: 'Dashboard', href: '/admin', icon: 'dashboard' },
     { label: 'Notifications', href: '/notifications', icon: 'bell' },
+    { label: 'Schedule', href: '/schedule', icon: 'calendar' },
     { label: 'Packages & Promos', href: '/packages-and-promos', icon: 'gift' },
     { label: 'Membership', href: '/kiosk', icon: 'id' },
     { label: 'Scan', href: '/scan', icon: 'scan' },
@@ -56,6 +60,7 @@ const MENU_BY_ROLE: MenuByRole = {
     { label: 'Home', href: '/', icon: 'dashboard' },
     { label: 'Dashboard', href: '/admin', icon: 'dashboard' },
     { label: 'Notifications', href: '/notifications', icon: 'bell' },
+    { label: 'Schedule', href: '/schedule', icon: 'calendar' },
     { label: 'Packages & Promos', href: '/packages-and-promos', icon: 'gift' },
     { label: 'Membership', href: '/kiosk', icon: 'id' },
     { label: 'Scan', href: '/scan', icon: 'scan' },
@@ -80,7 +85,7 @@ export default async function AppNav() {
         {/* Brand */}
         <Link href="/" className="group flex items-center gap-2" aria-label="ATOM Jiu-Jitsu">
           <Image
-            src="/atom4app.svg"
+            src="/atom4app.png"
             alt="ATOM Jiu-Jitsu"
             width={112}
             height={28}

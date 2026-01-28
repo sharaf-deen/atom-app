@@ -14,6 +14,7 @@ import {
   UserCog,
   ShoppingBag,
   Wallet,
+  CalendarDays,
   Circle,
 } from 'lucide-react'
 import type { IconKey, MenuItem } from './AppNav'
@@ -28,6 +29,7 @@ const ICONS: Record<IconKey, React.ComponentType<{ size?: number; strokeWidth?: 
   'user-cog': UserCog,
   bag: ShoppingBag,
   wallet: Wallet,
+  calendar: CalendarDays,
 }
 
 const VISIBLE_POLL_MS = 5_000
