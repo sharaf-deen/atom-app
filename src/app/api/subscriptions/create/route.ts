@@ -237,6 +237,11 @@ export async function POST(req: Request) {
     }
 
     // 6) Try to create a notification for the member (do NOT block subscription if this fails)
+    // Notifications insert:
+    // - For reception: use the authenticated client so auth.uid() is set (some DB triggers/policies may depend on it)
+    // - For admin/super_admin: keep service role (bypass RLS) if available
+    const notifClient = role === 'reception' ? supa : admin
+
     let notification_ok = false
     let notification_error: string | null = null
 
@@ -249,7 +254,7 @@ export async function POST(req: Request) {
           ? `Hi ${memberName}, your ${humanPlan(plan, sessions_total)} package is active. Valid until ${end}.`
           : `Hi ${memberName}, your ${humanPlan(plan)} subscription is active until ${end}.`
 
-      const { error: nErr } = await admin.from('notifications').insert({
+      const { error: nErr } = await notifClient.from('notifications').insert({
         user_id: memberId,
         member_id: memberId,
         title,
