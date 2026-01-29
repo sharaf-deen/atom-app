@@ -11,18 +11,7 @@ import { createSupabaseRSC } from '@/lib/supabaseServer'
 import { getSessionUser, type Role } from '@/lib/session'
 import QrImage from '@/components/QrImage'
 import SubscribeDialog, { type Plan } from '@/components/SubscribeDialog'
-
-type MemberProfileRow = {
-  user_id: string
-  email: string | null
-  first_name: string | null
-  last_name: string | null
-  phone: string | null
-  role: Role | null
-  qr_code: string | null
-  created_at: string | null
-  date_of_birth: string | null
-}
+import SubscriptionManageRowActions from '@/components/SubscriptionManageRowActions'
 
 function todayDateOnlyUTC() {
   return new Date().toISOString().slice(0, 10) // YYYY-MM-DD (UTC)
@@ -39,29 +28,6 @@ function fmtDate(dateStr?: string | null) {
   if (isNaN(dt.getTime())) return dateStr
   return dt.toLocaleDateString('en-GB', { year: 'numeric', month: 'short', day: '2-digit' })
 }
-function ageYears(dob?: string | null) {
-  if (!dob) return null
-  const dateOnly = dob.length === 10 ? dob : dob.slice(0, 10)
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateOnly)) return null
-  const [y, m, d] = dateOnly.split('-').map(Number)
-  const born = new Date(Date.UTC(y, m - 1, d))
-  if (isNaN(born.getTime())) return null
-
-  const now = new Date()
-  const today = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()))
-  let age = today.getUTCFullYear() - born.getUTCFullYear()
-  const mm = today.getUTCMonth() - born.getUTCMonth()
-  if (mm < 0 || (mm === 0 && today.getUTCDate() < born.getUTCDate())) age--
-  if (age < 0) return null
-  return age
-}
-
-function ageGroup(dob?: string | null) {
-  const age = ageYears(dob)
-  if (age === null) return null
-  return age < 17 ? 'Kid' : 'Adult'
-}
-
 function daysLeft(endDate?: string | null) {
   if (!endDate) return null
   const t = todayDateOnlyUTC()
@@ -95,6 +61,7 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
 
   const STAFF: Role[] = ['reception', 'admin', 'super_admin']
   const isStaff = STAFF.includes(me.role)
+  const canManageSubscriptions = ['admin', 'super_admin'].includes(me.role)
   const isSelf = me.id === params.id
 
   // Staff can view anyone. Non-staff can only view self.
@@ -115,13 +82,20 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
 
   const supa = createSupabaseRSC()
 
-  const { data: profileRaw } = await supa
+  const { data: profile } = await supa
     .from('profiles')
-    .select('user_id, email, first_name, last_name, phone, role, qr_code, created_at, date_of_birth')
+    .select('user_id, email, first_name, last_name, phone, role, qr_code, created_at')
     .eq('user_id', params.id)
-    .maybeSingle()
-
-  const profile = (profileRaw ?? null) as MemberProfileRow | null
+    .maybeSingle<{
+      user_id: string
+      email: string | null
+      first_name: string | null
+      last_name: string | null
+      phone: string | null
+      role: Role | null
+      qr_code: string | null
+      created_at: string | null
+    }>()
 
   if (!profile) return notFound()
 
@@ -135,7 +109,7 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
       id: string
       subscription_type: 'time' | 'sessions' | null
       plan: Plan | null
-      status: 'active' | 'expired' | 'canceled' | 'paused' | null
+      status: string | null
       start_date: string | null
       end_date: string | null
       sessions_total: number | null
@@ -227,13 +201,11 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
               </div>
               <div><span className="text-[hsl(var(--muted))]">Email:</span> {profile.email ?? '—'}</div>
               <div><span className="text-[hsl(var(--muted))]">Phone:</span> {profile.phone ?? '—'}</div>
-              <div><span className="text-[hsl(var(--muted))]">Date of birth:</span> {fmtDate(profile.date_of_birth)}</div>
-              <div>
-                <span className="text-[hsl(var(--muted))]">Category:</span>{' '}
-                {ageGroup(profile.date_of_birth) ? `${ageGroup(profile.date_of_birth)} (${ageYears(profile.date_of_birth)}y)` : '—'}
-              </div>
               <div><span className="text-[hsl(var(--muted))]">Role:</span> {profile.role ?? 'member'}</div>
               <div><span className="text-[hsl(var(--muted))]">Joined:</span> {fmtDate(profile.created_at)}</div>
+              <div className="mt-2 text-[11px] text-[hsl(var(--muted))] break-all">
+                <span className="text-[hsl(var(--muted))]">QR value:</span> {profile.qr_code ?? '—'}
+              </div>
             </div>
           </div>
 
@@ -310,6 +282,7 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
                     <th className="text-left px-3 py-2">Amount</th>
                     <th className="text-left px-3 py-2">Paid at</th>
                     <th className="text-left px-3 py-2">Badges</th>
+	                    {canManageSubscriptions && <th className="text-left px-3 py-2">Actions</th>}
                   </tr>
                 </thead>
                 <tbody>
@@ -365,6 +338,11 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
                             )}
                           </div>
                         </td>
+	                        {canManageSubscriptions && (
+	                          <td className="px-3 py-2">
+	                            <SubscriptionManageRowActions sub={s} />
+	                          </td>
+	                        )}
                       </tr>
                     )
                   })}
