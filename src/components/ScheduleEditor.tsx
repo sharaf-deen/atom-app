@@ -46,23 +46,32 @@ type DayBlock = {
   other: DaySession[]
 }
 
+const TAGS: Tag[] = ['Gi', 'NoGi', 'Wrestling', 'Competition', 'Open Mat']
+
+function cn(...parts: Array<string | null | undefined | false>) {
+  return parts.filter((p): p is string => Boolean(p)).join(' ')
+}
+
 function hasDigit(s: string) {
   return /\d/.test(s)
 }
 
 function normalizeDash(line: string) {
-  return line.replace(/\s-\s/g, ' – ')
+  // Normalize a few dash variants to an en-dash surrounded by spaces
+  return line
+    .replace(/\s-\s/g, ' – ')
+    .replace(/\s—\s/g, ' – ')
+    .replace(/\s–\s/g, ' – ')
 }
 
 function extractTags(text: string): Tag[] {
   const t = text.toLowerCase()
   const out: Tag[] = []
   if (t.includes('nogi') || t.includes('no-gi') || t.includes('no gi')) out.push('NoGi')
-  if (t.includes('gi')) out.push('Gi')
+  if (t.includes('(gi)') || (t.includes(' gi') || t.includes('gi ')) || t.endsWith('gi')) out.push('Gi')
   if (t.includes('wrestling')) out.push('Wrestling')
   if (t.includes('competition')) out.push('Competition')
   if (t.includes('open mat')) out.push('Open Mat')
-  // de-dupe while keeping order
   return Array.from(new Set(out))
 }
 
@@ -84,7 +93,11 @@ function parseTimeRight(right: string) {
 }
 
 function parseProgram(partA: string): { tops: string[]; blocks: ProgramBlock[] } {
-  const lines = partA.split(/\r?\n/).map((x) => x.trim()).filter((x) => x.length > 0)
+  const lines = partA
+    .split(/\r?\n/)
+    .map((x) => x.trim())
+    .filter((x) => x.length > 0)
+
   const blocks: ProgramBlock[] = []
   const tops: string[] = []
 
@@ -94,8 +107,9 @@ function parseProgram(partA: string): { tops: string[]; blocks: ProgramBlock[] }
 
   const pushCur = () => {
     if (!cur) return
-    // tags from content + items
-    const allText = [cur.title, cur.subtitle, cur.description, ...cur.items.map((i) => i.raw)].filter(Boolean).join(' | ')
+    const allText = [cur.title, cur.subtitle, cur.description, ...cur.items.map((i) => i.raw)]
+      .filter(Boolean)
+      .join(' | ')
     cur.tags = extractTags(allText)
     blocks.push(cur)
     cur = null
@@ -137,7 +151,6 @@ function parseProgram(partA: string): { tops: string[]; blocks: ProgramBlock[] }
     }
 
     if (isTitle) {
-      // Start a new block
       if (cur) pushCur()
       cur = {
         id: `p_${idn++}`,
@@ -150,7 +163,6 @@ function parseProgram(partA: string): { tops: string[]; blocks: ProgramBlock[] }
     }
 
     if (!cur) {
-      // Fallback: create a block
       cur = {
         id: `p_${idn++}`,
         top: top || 'Schedule',
@@ -170,7 +182,6 @@ function parseProgram(partA: string): { tops: string[]; blocks: ProgramBlock[] }
       continue
     }
 
-    // Default: treat as a schedule line
     if (isTimeLine) {
       const [l, r] = t.split('–').map((x) => x.trim())
       const { time, detail } = parseTimeRight(r)
@@ -247,7 +258,6 @@ function parseByDay(partB: string): DayBlock[] {
       continue
     }
 
-    // fallback: if line has no time, show it as an "other" note
     cur.other.push({ time: '', text: t, tags: extractTags(t) })
   }
 
@@ -274,18 +284,37 @@ function TagPills({ tags }: { tags: Tag[] }) {
   )
 }
 
+function FilterChip({
+  active,
+  children,
+  onClick,
+}: {
+  active: boolean
+  children: ReactNode
+  onClick: () => void
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        'rounded-full border px-3 py-1 text-xs font-medium transition',
+        active ? 'bg-black text-white border-black' : 'bg-white text-black border-[hsl(var(--border))] hover:bg-black/5'
+      )}
+    >
+      {children}
+    </button>
+  )
+}
+
 function ProgramCard({ b }: { b: ProgramBlock }) {
   return (
     <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-5 shadow-soft">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="text-base font-semibold leading-6">{b.title}</div>
-          {b.subtitle ? (
-            <div className="mt-1 text-sm font-medium text-[hsl(var(--muted))]">{b.subtitle}</div>
-          ) : null}
-          {b.description ? (
-            <div className="mt-2 text-sm text-[hsl(var(--muted))]">{b.description}</div>
-          ) : null}
+          {b.subtitle ? <div className="mt-1 text-sm font-medium text-[hsl(var(--muted))]">{b.subtitle}</div> : null}
+          {b.description ? <div className="mt-2 text-sm text-[hsl(var(--muted))]">{b.description}</div> : null}
         </div>
         <TagPills tags={b.tags} />
       </div>
@@ -298,12 +327,13 @@ function ProgramCard({ b }: { b: ProgramBlock }) {
             const detail = it.detail
 
             return (
-              <div key={idx} className="flex items-start gap-3 rounded-xl border border-[hsl(var(--border))] bg-white/60 px-3 py-2">
-                <div className="min-w-[88px]">
+              <div
+                key={idx}
+                className="flex items-start gap-3 rounded-xl border border-[hsl(var(--border))] bg-white/60 px-3 py-2"
+              >
+                <div className="min-w-[92px]">
                   {left ? (
-                    <div className="text-xs font-semibold uppercase tracking-wide text-[hsl(var(--muted))]">
-                      {left}
-                    </div>
+                    <div className="text-xs font-semibold uppercase tracking-wide text-[hsl(var(--muted))]">{left}</div>
                   ) : (
                     <div className="text-xs font-semibold uppercase tracking-wide text-[hsl(var(--muted))]">Info</div>
                   )}
@@ -346,13 +376,18 @@ function DayCard({ d }: { d: DayBlock }) {
       </div>
 
       <div className="mt-4 grid gap-4 md:grid-cols-2">
-        <div className={hasKids ? '' : 'opacity-50'}>
+        <div className={cn(!hasKids && 'opacity-50')}>
           <div className="text-xs font-semibold uppercase tracking-wide text-[hsl(var(--muted))]">Kids & Teens</div>
           <div className="mt-2 space-y-2">
             {d.kids.length ? (
               d.kids.map((s, idx) => (
-                <div key={idx} className="flex items-start gap-3 rounded-xl border border-[hsl(var(--border))] bg-white/60 px-3 py-2">
-                  <div className="shrink-0 rounded-lg bg-black px-2 py-1 text-xs font-semibold text-white">{s.time}</div>
+                <div
+                  key={idx}
+                  className="flex items-start gap-3 rounded-xl border border-[hsl(var(--border))] bg-white/60 px-3 py-2"
+                >
+                  <div className="shrink-0 rounded-lg bg-black px-2 py-1 text-xs font-semibold text-white">
+                    {s.time}
+                  </div>
                   <div className="min-w-0">
                     <div className="text-sm font-medium leading-5">{s.text}</div>
                     {s.tags.length ? (
@@ -371,13 +406,18 @@ function DayCard({ d }: { d: DayBlock }) {
           </div>
         </div>
 
-        <div className={hasAdults ? '' : 'opacity-50'}>
+        <div className={cn(!hasAdults && 'opacity-50')}>
           <div className="text-xs font-semibold uppercase tracking-wide text-[hsl(var(--muted))]">Adults</div>
           <div className="mt-2 space-y-2">
             {d.adults.length ? (
               d.adults.map((s, idx) => (
-                <div key={idx} className="flex items-start gap-3 rounded-xl border border-[hsl(var(--border))] bg-white/60 px-3 py-2">
-                  <div className="shrink-0 rounded-lg bg-black px-2 py-1 text-xs font-semibold text-white">{s.time}</div>
+                <div
+                  key={idx}
+                  className="flex items-start gap-3 rounded-xl border border-[hsl(var(--border))] bg-white/60 px-3 py-2"
+                >
+                  <div className="shrink-0 rounded-lg bg-black px-2 py-1 text-xs font-semibold text-white">
+                    {s.time}
+                  </div>
                   <div className="min-w-0">
                     <div className="text-sm font-medium leading-5">{s.text}</div>
                     {s.tags.length ? (
@@ -410,6 +450,11 @@ function DayCard({ d }: { d: DayBlock }) {
   )
 }
 
+function includesQuery(hay: string, q: string) {
+  if (!q) return true
+  return hay.toLowerCase().includes(q)
+}
+
 export default function ScheduleEditor({ initialContent, canEdit, updatedAt }: Props) {
   const [editing, setEditing] = useState(false)
   const [content, setContent] = useState(initialContent)
@@ -417,6 +462,10 @@ export default function ScheduleEditor({ initialContent, canEdit, updatedAt }: P
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [ok, setOk] = useState<string | null>(null)
+
+  // Search / filters
+  const [q, setQ] = useState('')
+  const [activeTags, setActiveTags] = useState<Tag[]>([])
 
   useEffect(() => {
     setContent(initialContent)
@@ -432,6 +481,59 @@ export default function ScheduleEditor({ initialContent, canEdit, updatedAt }: P
   useEffect(() => {
     if (tab === 'day' && !parts.b) setTab('program')
   }, [parts.b, tab])
+
+  const qlc = useMemo(() => q.trim().toLowerCase(), [q])
+  const tagsSet = useMemo(() => new Set(activeTags), [activeTags])
+  const filtersActive = qlc.length > 0 || activeTags.length > 0
+
+  function matchesTags(tags: Tag[]) {
+    if (tagsSet.size === 0) return true
+    return tags.some((t) => tagsSet.has(t))
+  }
+
+  const programBlocksFiltered = useMemo(() => {
+    return program.blocks.filter((b) => {
+      if (!matchesTags(b.tags)) return false
+      if (!qlc) return true
+      const text = [b.top, b.title, b.subtitle, b.description, ...b.items.map((i) => i.raw)].filter(Boolean).join(' ')
+      return includesQuery(text, qlc)
+    })
+  }, [program.blocks, qlc, tagsSet])  // eslint-disable-line react-hooks/exhaustive-deps
+
+  const programTopsFiltered = useMemo(() => {
+    // Keep known headings order, only include headings that have any blocks
+    const tops = program.tops.filter((t) => programBlocksFiltered.some((b) => b.top === t))
+    // If blocks exist without a known top, we'll render them under "Other"
+    return tops
+  }, [program.tops, programBlocksFiltered])
+
+  const byDayFiltered = useMemo(() => {
+    if (!byDay.length) return []
+    const out: DayBlock[] = []
+    for (const d of byDay) {
+      const kids = d.kids.filter((s) => matchesTags(s.tags) && (!qlc || includesQuery(`${s.time} ${s.text}`, qlc)))
+      const adults = d.adults.filter((s) => matchesTags(s.tags) && (!qlc || includesQuery(`${s.time} ${s.text}`, qlc)))
+      const other = d.other.filter((s) => matchesTags(s.tags) && (!qlc || includesQuery(s.text, qlc)))
+      if (kids.length || adults.length || other.length) out.push({ day: d.day, kids, adults, other })
+    }
+    return out
+  }, [byDay, qlc, tagsSet])  // eslint-disable-line react-hooks/exhaustive-deps
+
+  const resultsCount = useMemo(() => {
+    if (!filtersActive) return null
+    if (tab === 'program') return programBlocksFiltered.length
+    // count sessions shown
+    return byDayFiltered.reduce((acc, d) => acc + d.kids.length + d.adults.length + d.other.length, 0)
+  }, [filtersActive, tab, programBlocksFiltered, byDayFiltered])
+
+  function toggleTag(t: Tag) {
+    setActiveTags((prev) => (prev.includes(t) ? prev.filter((x) => x !== t) : [...prev, t]))
+  }
+
+  function clearFilters() {
+    setQ('')
+    setActiveTags([])
+  }
 
   async function onSave() {
     setSaving(true)
@@ -473,9 +575,7 @@ export default function ScheduleEditor({ initialContent, canEdit, updatedAt }: P
               {canEdit ? 'Visible to all users. Editable only by super admin.' : 'Visible to all users.'}
             </p>
             {updatedAt ? (
-              <div className="mt-2 text-xs text-[hsl(var(--muted))]">
-                Last updated: {new Date(updatedAt).toLocaleString()}
-              </div>
+              <div className="mt-2 text-xs text-[hsl(var(--muted))]">Last updated: {new Date(updatedAt).toLocaleString()}</div>
             ) : null}
           </div>
 
@@ -500,9 +600,7 @@ export default function ScheduleEditor({ initialContent, canEdit, updatedAt }: P
         </div>
 
         {error ? (
-          <div className="mt-3 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-            {error}
-          </div>
+          <div className="mt-3 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>
         ) : null}
 
         {editing ? (
@@ -520,47 +618,74 @@ export default function ScheduleEditor({ initialContent, canEdit, updatedAt }: P
           </div>
         ) : (
           <div className="mt-4">
-            <div className="flex flex-wrap items-center gap-2">
-              <button
-                onClick={() => setTab('program')}
-                className={`rounded-full px-3 py-1 text-sm border transition ${
-                  tab === 'program'
-                    ? 'bg-black text-white border-black'
-                    : 'bg-white text-black border-[hsl(var(--border))]'
-                }`}
-              >
-                By Program
-              </button>
-              <button
-                onClick={() => setTab('day')}
-                disabled={!parts.b}
-                className={`rounded-full px-3 py-1 text-sm border transition ${
-                  tab === 'day'
-                    ? 'bg-black text-white border-black'
-                    : 'bg-white text-black border-[hsl(var(--border))]'
-                } ${!parts.b ? 'opacity-40 cursor-not-allowed' : ''}`}
-              >
-                By Day
-              </button>
+            {/* Controls */}
+            <div className="flex flex-col gap-3">
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    onClick={() => setTab('program')}
+                    className={cn(
+                      'rounded-full px-3 py-1 text-sm border transition',
+                      tab === 'program' ? 'bg-black text-white border-black' : 'bg-white text-black border-[hsl(var(--border))]'
+                    )}
+                  >
+                    By Program
+                  </button>
+                  <button
+                    onClick={() => setTab('day')}
+                    disabled={!parts.b}
+                    className={cn(
+                      'rounded-full px-3 py-1 text-sm border transition',
+                      tab === 'day' ? 'bg-black text-white border-black' : 'bg-white text-black border-[hsl(var(--border))]',
+                      !parts.b ? 'opacity-40 cursor-not-allowed' : null
+                    )}
+                  >
+                    By Day
+                  </button>
 
-              <div className="ml-auto flex flex-wrap gap-2">
-                <Pill>Gi</Pill>
-                <Pill>NoGi</Pill>
-                <Pill>Wrestling</Pill>
-                <Pill>Competition</Pill>
+                  {filtersActive && resultsCount !== null ? (
+                    <span className="ml-1 text-xs text-[hsl(var(--muted))]">
+                      {resultsCount} match{resultsCount === 1 ? '' : 'es'}
+                    </span>
+                  ) : null}
+                </div>
+
+                <div className="ml-auto flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center">
+                  <input
+                    type="search"
+                    value={q}
+                    onChange={(e) => setQ(e.target.value)}
+                    placeholder="Search classes…"
+                    className="h-9 w-full sm:w-72 rounded-xl border border-[hsl(var(--border))] bg-white px-3 text-sm outline-none focus:ring-2 focus:ring-black/20"
+                  />
+                  {filtersActive ? (
+                    <Button variant="outline" onClick={clearFilters}>
+                      Clear
+                    </Button>
+                  ) : null}
+                </div>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                {TAGS.map((t) => (
+                  <FilterChip key={t} active={activeTags.includes(t)} onClick={() => toggleTag(t)}>
+                    {t}
+                  </FilterChip>
+                ))}
               </div>
             </div>
 
+            {/* Content */}
             {tab === 'program' ? (
               <div className="mt-5 space-y-8">
-                {program.tops.map((top) => {
-                  const blocks = program.blocks.filter((b) => b.top === top)
+                {programTopsFiltered.map((top) => {
+                  const blocks = programBlocksFiltered.filter((b) => b.top === top)
                   if (!blocks.length) return null
                   return (
                     <div key={top} className="space-y-3">
                       <div className="flex items-center justify-between">
                         <h3 className="text-lg font-semibold tracking-tight">{top}</h3>
-                        <div className="text-xs text-[hsl(var(--muted))]">{blocks.length} programs</div>
+                        <div className="text-xs text-[hsl(var(--muted))]">{blocks.length} program{blocks.length === 1 ? '' : 's'}</div>
                       </div>
                       <div className="grid gap-4 md:grid-cols-2">
                         {blocks.map((b) => (
@@ -571,12 +696,12 @@ export default function ScheduleEditor({ initialContent, canEdit, updatedAt }: P
                   )
                 })}
 
-                {/* Fallback for blocks without a known top heading */}
-                {program.blocks.some((b) => !program.tops.includes(b.top)) ? (
+                {/* Other blocks (no known heading) */}
+                {programBlocksFiltered.some((b) => !program.tops.includes(b.top)) ? (
                   <div className="space-y-3">
                     <h3 className="text-lg font-semibold tracking-tight">Other</h3>
                     <div className="grid gap-4 md:grid-cols-2">
-                      {program.blocks
+                      {programBlocksFiltered
                         .filter((b) => !program.tops.includes(b.top))
                         .map((b) => (
                           <ProgramCard key={b.id} b={b} />
@@ -584,12 +709,26 @@ export default function ScheduleEditor({ initialContent, canEdit, updatedAt }: P
                     </div>
                   </div>
                 ) : null}
+
+                {filtersActive && programBlocksFiltered.length === 0 ? (
+                  <div className="rounded-2xl border border-[hsl(var(--border))] bg-white/60 p-6 text-sm text-[hsl(var(--muted))]">
+                    No results. Try adjusting your search or filters.
+                  </div>
+                ) : null}
               </div>
             ) : (
-              <div className="mt-5 grid gap-4 lg:grid-cols-2">
-                {byDay.map((d) => (
-                  <DayCard key={d.day} d={d} />
-                ))}
+              <div className="mt-5">
+                {byDayFiltered.length ? (
+                  <div className="grid gap-4 lg:grid-cols-2">
+                    {byDayFiltered.map((d) => (
+                      <DayCard key={d.day} d={d} />
+                    ))}
+                  </div>
+                ) : (
+                  <div className="rounded-2xl border border-[hsl(var(--border))] bg-white/60 p-6 text-sm text-[hsl(var(--muted))]">
+                    No results. Try adjusting your search or filters.
+                  </div>
+                )}
               </div>
             )}
           </div>
