@@ -68,7 +68,7 @@ function extractTags(text: string): Tag[] {
   const t = text.toLowerCase()
   const out: Tag[] = []
   if (t.includes('nogi') || t.includes('no-gi') || t.includes('no gi')) out.push('NoGi')
-  if (t.includes('(gi)') || (t.includes(' gi') || t.includes('gi ')) || t.endsWith('gi')) out.push('Gi')
+  if (t.includes('(gi)') || t.includes('· gi') || t.includes(' gi') || t.endsWith('gi')) out.push('Gi')
   if (t.includes('wrestling')) out.push('Wrestling')
   if (t.includes('competition')) out.push('Competition')
   if (t.includes('open mat')) out.push('Open Mat')
@@ -265,25 +265,6 @@ function parseByDay(partB: string): DayBlock[] {
   return out
 }
 
-function Pill({ children }: { children: ReactNode }) {
-  return (
-    <span className="inline-flex items-center rounded-full border border-[hsl(var(--border))] bg-white px-2 py-0.5 text-[11px] font-medium text-[hsl(var(--muted))]">
-      {children}
-    </span>
-  )
-}
-
-function TagPills({ tags }: { tags: Tag[] }) {
-  if (!tags?.length) return null
-  return (
-    <div className="flex flex-wrap gap-1">
-      {tags.map((t) => (
-        <Pill key={t}>{t}</Pill>
-      ))}
-    </div>
-  )
-}
-
 function FilterChip({
   active,
   children,
@@ -298,8 +279,10 @@ function FilterChip({
       type="button"
       onClick={onClick}
       className={cn(
-        'rounded-full border px-3 py-1 text-xs font-medium transition',
-        active ? 'bg-black text-white border-black' : 'bg-white text-black border-[hsl(var(--border))] hover:bg-black/5'
+        'rounded-full border px-3 py-1 text-xs font-semibold transition',
+        active
+          ? 'bg-white text-black border-white'
+          : 'bg-transparent text-white/80 border-white/15 hover:border-white/30 hover:text-white'
       )}
     >
       {children}
@@ -307,51 +290,42 @@ function FilterChip({
   )
 }
 
-function ProgramCard({ b }: { b: ProgramBlock }) {
+function SectionTitle({ children }: { children: ReactNode }) {
   return (
-    <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-5 shadow-soft">
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <div className="text-base font-semibold leading-6">{b.title}</div>
-          {b.subtitle ? <div className="mt-1 text-sm font-medium text-[hsl(var(--muted))]">{b.subtitle}</div> : null}
-          {b.description ? <div className="mt-2 text-sm text-[hsl(var(--muted))]">{b.description}</div> : null}
-        </div>
-        <TagPills tags={b.tags} />
-      </div>
+    <div className="text-center">
+      <h3 className="text-3xl font-extrabold tracking-tight text-white">{children}</h3>
+    </div>
+  )
+}
+
+function ProgramCardSimple({ b }: { b: ProgramBlock }) {
+  return (
+    <div className="rounded-2xl border border-white/10 bg-black/40 p-5 shadow-soft">
+      <div className="text-lg font-extrabold tracking-tight text-orange-400">{b.title}</div>
+      {b.subtitle ? <div className="mt-2 text-xs font-bold uppercase tracking-wide text-white/60">{b.subtitle}</div> : null}
+      {b.description ? <div className="mt-2 text-xs font-semibold uppercase tracking-wide text-white/55">{b.description}</div> : null}
 
       {b.items?.length ? (
-        <div className="mt-4 space-y-2">
+        <div className="mt-3 space-y-1.5">
           {b.items.map((it, idx) => {
             const left = it.left
             const time = it.time
             const detail = it.detail
 
-            return (
-              <div
-                key={idx}
-                className="flex items-start gap-3 rounded-xl border border-[hsl(var(--border))] bg-white/60 px-3 py-2"
-              >
-                <div className="min-w-[92px]">
-                  {left ? (
-                    <div className="text-xs font-semibold uppercase tracking-wide text-[hsl(var(--muted))]">{left}</div>
-                  ) : (
-                    <div className="text-xs font-semibold uppercase tracking-wide text-[hsl(var(--muted))]">Info</div>
-                  )}
-                  {time ? (
-                    <div className="mt-1 inline-flex rounded-lg bg-black px-2 py-1 text-xs font-semibold text-white">
-                      {time}
-                    </div>
-                  ) : null}
+            if (left && time) {
+              return (
+                <div key={idx} className="text-sm text-white">
+                  <span className="font-semibold text-white">{left}</span>
+                  <span className="text-white/70"> – </span>
+                  <span className="font-semibold text-white">{time}</span>
+                  {detail ? <span className="text-white/90"> {detail}</span> : null}
                 </div>
+              )
+            }
 
-                <div className="min-w-0 flex-1">
-                  <div className="text-sm font-medium leading-5">{detail ?? it.raw}</div>
-                  {it.tags?.length ? (
-                    <div className="mt-1">
-                      <TagPills tags={it.tags} />
-                    </div>
-                  ) : null}
-                </div>
+            return (
+              <div key={idx} className="text-sm text-white/90">
+                {it.raw}
               </div>
             )
           })}
@@ -361,89 +335,55 @@ function ProgramCard({ b }: { b: ProgramBlock }) {
   )
 }
 
-function DayCard({ d }: { d: DayBlock }) {
-  const hasKids = d.kids.length > 0
-  const hasAdults = d.adults.length > 0
-
+function DayCardStacked({ d }: { d: DayBlock }) {
   return (
-    <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-5 shadow-soft">
-      <div className="flex items-center justify-between">
-        <div className="text-lg font-semibold tracking-tight">{d.day}</div>
-        <div className="flex gap-1">
-          {hasKids ? <Pill>Kids</Pill> : null}
-          {hasAdults ? <Pill>Adults</Pill> : null}
+    <div className="rounded-2xl border border-white/10 bg-black/40 p-5 shadow-soft">
+      <div className="text-xl font-extrabold tracking-tight text-orange-400">{d.day}</div>
+
+      <div className="mt-4">
+        <div className="text-xs font-bold uppercase tracking-wide text-white/60">Kids &amp; Teens</div>
+        <div className="mt-2 space-y-1">
+          {d.kids.length ? (
+            d.kids.map((s, idx) => (
+              <div key={idx} className="text-sm text-white">
+                <span className="font-semibold">{s.time}</span>
+                <span className="text-white/70"> – </span>
+                <span className="text-white/95">{s.text}</span>
+              </div>
+            ))
+          ) : (
+            <div className="text-sm text-white/30">—</div>
+          )}
         </div>
       </div>
 
-      <div className="mt-4 grid gap-4 md:grid-cols-2">
-        <div className={cn(!hasKids && 'opacity-50')}>
-          <div className="text-xs font-semibold uppercase tracking-wide text-[hsl(var(--muted))]">Kids & Teens</div>
-          <div className="mt-2 space-y-2">
-            {d.kids.length ? (
-              d.kids.map((s, idx) => (
-                <div
-                  key={idx}
-                  className="flex items-start gap-3 rounded-xl border border-[hsl(var(--border))] bg-white/60 px-3 py-2"
-                >
-                  <div className="shrink-0 rounded-lg bg-black px-2 py-1 text-xs font-semibold text-white">
-                    {s.time}
-                  </div>
-                  <div className="min-w-0">
-                    <div className="text-sm font-medium leading-5">{s.text}</div>
-                    {s.tags.length ? (
-                      <div className="mt-1">
-                        <TagPills tags={s.tags} />
-                      </div>
-                    ) : null}
-                  </div>
-                </div>
-              ))
-            ) : (
-              <div className="rounded-xl border border-[hsl(var(--border))] bg-white/50 px-3 py-2 text-sm text-[hsl(var(--muted))]">
-                —
+      <div className="mt-4">
+        <div className="text-xs font-bold uppercase tracking-wide text-white/60">Adults</div>
+        <div className="mt-2 space-y-1">
+          {d.adults.length ? (
+            d.adults.map((s, idx) => (
+              <div key={idx} className="text-sm text-white">
+                <span className="font-semibold">{s.time}</span>
+                <span className="text-white/70"> – </span>
+                <span className="text-white/95">{s.text}</span>
               </div>
-            )}
-          </div>
-        </div>
-
-        <div className={cn(!hasAdults && 'opacity-50')}>
-          <div className="text-xs font-semibold uppercase tracking-wide text-[hsl(var(--muted))]">Adults</div>
-          <div className="mt-2 space-y-2">
-            {d.adults.length ? (
-              d.adults.map((s, idx) => (
-                <div
-                  key={idx}
-                  className="flex items-start gap-3 rounded-xl border border-[hsl(var(--border))] bg-white/60 px-3 py-2"
-                >
-                  <div className="shrink-0 rounded-lg bg-black px-2 py-1 text-xs font-semibold text-white">
-                    {s.time}
-                  </div>
-                  <div className="min-w-0">
-                    <div className="text-sm font-medium leading-5">{s.text}</div>
-                    {s.tags.length ? (
-                      <div className="mt-1">
-                        <TagPills tags={s.tags} />
-                      </div>
-                    ) : null}
-                  </div>
-                </div>
-              ))
-            ) : (
-              <div className="rounded-xl border border-[hsl(var(--border))] bg-white/50 px-3 py-2 text-sm text-[hsl(var(--muted))]">
-                —
-              </div>
-            )}
-          </div>
+            ))
+          ) : (
+            <div className="text-sm text-white/30">—</div>
+          )}
         </div>
       </div>
 
       {d.other.length ? (
-        <div className="mt-4 rounded-xl border border-[hsl(var(--border))] bg-white/50 px-3 py-2 text-sm">
-          {d.other.map((x, i) => (
-            <div key={i} className="text-[hsl(var(--muted))]">
-              {x.text}
-            </div>
-          ))}
+        <div className="mt-4">
+          <div className="text-xs font-bold uppercase tracking-wide text-white/50">Other</div>
+          <div className="mt-2 space-y-1">
+            {d.other.map((x, i) => (
+              <div key={i} className="text-sm text-white/70">
+                {x.text}
+              </div>
+            ))}
+          </div>
         </div>
       ) : null}
     </div>
@@ -476,12 +416,6 @@ export default function ScheduleEditor({ initialContent, canEdit, updatedAt }: P
   const program = useMemo(() => parseProgram(parts.a), [parts.a])
   const byDay = useMemo(() => (parts.b ? parseByDay(parts.b) : []), [parts.b])
 
-  const [tab, setTab] = useState<'program' | 'day'>('program')
-
-  useEffect(() => {
-    if (tab === 'day' && !parts.b) setTab('program')
-  }, [parts.b, tab])
-
   const qlc = useMemo(() => q.trim().toLowerCase(), [q])
   const tagsSet = useMemo(() => new Set(activeTags), [activeTags])
   const filtersActive = qlc.length > 0 || activeTags.length > 0
@@ -491,21 +425,38 @@ export default function ScheduleEditor({ initialContent, canEdit, updatedAt }: P
     return tags.some((t) => tagsSet.has(t))
   }
 
-  const programBlocksFiltered = useMemo(() => {
-    return program.blocks.filter((b) => {
-      if (!matchesTags(b.tags)) return false
-      if (!qlc) return true
-      const text = [b.top, b.title, b.subtitle, b.description, ...b.items.map((i) => i.raw)].filter(Boolean).join(' ')
-      return includesQuery(text, qlc)
-    })
-  }, [program.blocks, qlc, tagsSet])  // eslint-disable-line react-hooks/exhaustive-deps
+  const adultBlocks = useMemo(() => {
+    return program.blocks
+      .filter((b) => b.top === 'Adults')
+      .filter((b) => {
+        if (!matchesTags(b.tags)) return false
+        if (!qlc) return true
+        const text = [b.title, b.subtitle, b.description, ...b.items.map((i) => i.raw)].filter(Boolean).join(' ')
+        return includesQuery(text, qlc)
+      })
+  }, [program.blocks, qlc, tagsSet]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  const programTopsFiltered = useMemo(() => {
-    // Keep known headings order, only include headings that have any blocks
-    const tops = program.tops.filter((t) => programBlocksFiltered.some((b) => b.top === t))
-    // If blocks exist without a known top, we'll render them under "Other"
-    return tops
-  }, [program.tops, programBlocksFiltered])
+  const kidsBlocks = useMemo(() => {
+    return program.blocks
+      .filter((b) => b.top === 'Kids & Teens')
+      .filter((b) => {
+        if (!matchesTags(b.tags)) return false
+        if (!qlc) return true
+        const text = [b.title, b.subtitle, b.description, ...b.items.map((i) => i.raw)].filter(Boolean).join(' ')
+        return includesQuery(text, qlc)
+      })
+  }, [program.blocks, qlc, tagsSet]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const otherProgramBlocks = useMemo(() => {
+    return program.blocks
+      .filter((b) => b.top !== 'Adults' && b.top !== 'Kids & Teens')
+      .filter((b) => {
+        if (!matchesTags(b.tags)) return false
+        if (!qlc) return true
+        const text = [b.top, b.title, b.subtitle, b.description, ...b.items.map((i) => i.raw)].filter(Boolean).join(' ')
+        return includesQuery(text, qlc)
+      })
+  }, [program.blocks, qlc, tagsSet]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const byDayFiltered = useMemo(() => {
     if (!byDay.length) return []
@@ -517,14 +468,14 @@ export default function ScheduleEditor({ initialContent, canEdit, updatedAt }: P
       if (kids.length || adults.length || other.length) out.push({ day: d.day, kids, adults, other })
     }
     return out
-  }, [byDay, qlc, tagsSet])  // eslint-disable-line react-hooks/exhaustive-deps
+  }, [byDay, qlc, tagsSet]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const resultsCount = useMemo(() => {
     if (!filtersActive) return null
-    if (tab === 'program') return programBlocksFiltered.length
-    // count sessions shown
-    return byDayFiltered.reduce((acc, d) => acc + d.kids.length + d.adults.length + d.other.length, 0)
-  }, [filtersActive, tab, programBlocksFiltered, byDayFiltered])
+    const sessions = byDayFiltered.reduce((acc, d) => acc + d.kids.length + d.adults.length + d.other.length, 0)
+    const programs = adultBlocks.length + kidsBlocks.length + otherProgramBlocks.length
+    return sessions + programs
+  }, [filtersActive, byDayFiltered, adultBlocks.length, kidsBlocks.length, otherProgramBlocks.length])
 
   function toggleTag(t: Tag) {
     setActiveTags((prev) => (prev.includes(t) ? prev.filter((x) => x !== t) : [...prev, t]))
@@ -565,22 +516,26 @@ export default function ScheduleEditor({ initialContent, canEdit, updatedAt }: P
     setError(null)
   }
 
+  const nothingToShow = useMemo(() => {
+    return byDayFiltered.length === 0 && adultBlocks.length === 0 && kidsBlocks.length === 0 && otherProgramBlocks.length === 0
+  }, [byDayFiltered.length, adultBlocks.length, kidsBlocks.length, otherProgramBlocks.length])
+
   return (
     <div className="space-y-4">
-      <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-5 shadow-soft">
+      <div className="rounded-2xl border border-white/10 bg-black/60 p-5 shadow-soft">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
-            <h2 className="text-base font-semibold">Weekly Schedule</h2>
-            <p className="mt-1 text-sm text-[hsl(var(--muted))]">
+            <h2 className="text-base font-semibold text-white">Schedule</h2>
+            <p className="mt-1 text-sm text-white/60">
               {canEdit ? 'Visible to all users. Editable only by super admin.' : 'Visible to all users.'}
             </p>
             {updatedAt ? (
-              <div className="mt-2 text-xs text-[hsl(var(--muted))]">Last updated: {new Date(updatedAt).toLocaleString()}</div>
+              <div className="mt-2 text-xs text-white/50">Last updated: {new Date(updatedAt).toLocaleString()}</div>
             ) : null}
           </div>
 
           <div className="flex items-center gap-2">
-            {ok ? <span className="text-sm font-medium text-emerald-600">{ok}</span> : null}
+            {ok ? <span className="text-sm font-medium text-emerald-400">{ok}</span> : null}
             {canEdit && !editing ? (
               <Button variant="outline" onClick={() => setEditing(true)}>
                 Edit
@@ -600,137 +555,110 @@ export default function ScheduleEditor({ initialContent, canEdit, updatedAt }: P
         </div>
 
         {error ? (
-          <div className="mt-3 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>
+          <div className="mt-3 rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-200">
+            {error}
+          </div>
         ) : null}
 
         {editing ? (
           <div className="mt-4 space-y-2">
-            <label className="text-sm font-medium">Schedule content</label>
+            <label className="text-sm font-medium text-white">Schedule content</label>
             <textarea
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
-              className="min-h-[520px] w-full rounded-2xl border border-[hsl(var(--border))] bg-white p-3 text-sm outline-none focus:ring-2 focus:ring-black/20"
+              className="min-h-[520px] w-full rounded-2xl border border-white/15 bg-black/40 p-3 text-sm text-white outline-none placeholder:text-white/40 focus:ring-2 focus:ring-white/20"
               placeholder="Paste your schedule here..."
             />
-            <p className="text-xs text-[hsl(var(--muted))]">
-              Tip: keep the marker <span className="font-mono">Weekly Schedule by Day</span> to enable the “By Day” tab.
+            <p className="text-xs text-white/50">
+              Tip: keep the marker <span className="font-mono">Weekly Schedule by Day</span> to enable the “By Day” section.
             </p>
           </div>
         ) : (
           <div className="mt-4">
             {/* Controls */}
             <div className="flex flex-col gap-3">
-              <div className="flex flex-wrap items-center gap-2">
-                <div className="flex flex-wrap items-center gap-2">
-                  <button
-                    onClick={() => setTab('program')}
-                    className={cn(
-                      'rounded-full px-3 py-1 text-sm border transition',
-                      tab === 'program' ? 'bg-black text-white border-black' : 'bg-white text-black border-[hsl(var(--border))]'
-                    )}
-                  >
-                    By Program
-                  </button>
-                  <button
-                    onClick={() => setTab('day')}
-                    disabled={!parts.b}
-                    className={cn(
-                      'rounded-full px-3 py-1 text-sm border transition',
-                      tab === 'day' ? 'bg-black text-white border-black' : 'bg-white text-black border-[hsl(var(--border))]',
-                      !parts.b ? 'opacity-40 cursor-not-allowed' : null
-                    )}
-                  >
-                    By Day
-                  </button>
-
-                  {filtersActive && resultsCount !== null ? (
-                    <span className="ml-1 text-xs text-[hsl(var(--muted))]">
-                      {resultsCount} match{resultsCount === 1 ? '' : 'es'}
-                    </span>
-                  ) : null}
-                </div>
-
-                <div className="ml-auto flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center">
+              <div className="flex flex-col gap-2 lg:flex-row lg:items-center">
+                <div className="flex items-center gap-2">
                   <input
                     type="search"
                     value={q}
                     onChange={(e) => setQ(e.target.value)}
                     placeholder="Search classes…"
-                    className="h-9 w-full sm:w-72 rounded-xl border border-[hsl(var(--border))] bg-white px-3 text-sm outline-none focus:ring-2 focus:ring-black/20"
+                    className="h-10 w-full rounded-xl border border-white/15 bg-black/30 px-3 text-sm text-white outline-none placeholder:text-white/40 focus:ring-2 focus:ring-white/20 lg:w-80"
                   />
                   {filtersActive ? (
                     <Button variant="outline" onClick={clearFilters}>
                       Clear
                     </Button>
                   ) : null}
-                </div>
-              </div>
 
-              <div className="flex flex-wrap items-center gap-2">
-                {TAGS.map((t) => (
-                  <FilterChip key={t} active={activeTags.includes(t)} onClick={() => toggleTag(t)}>
-                    {t}
-                  </FilterChip>
-                ))}
+                  {filtersActive && resultsCount !== null ? (
+                    <span className="ml-1 text-xs text-white/50">{resultsCount} matches</span>
+                  ) : null}
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2 lg:ml-auto">
+                  {TAGS.map((t) => (
+                    <FilterChip key={t} active={activeTags.includes(t)} onClick={() => toggleTag(t)}>
+                      {t}
+                    </FilterChip>
+                  ))}
+                </div>
               </div>
             </div>
 
             {/* Content */}
-            {tab === 'program' ? (
-              <div className="mt-5 space-y-8">
-                {programTopsFiltered.map((top) => {
-                  const blocks = programBlocksFiltered.filter((b) => b.top === top)
-                  if (!blocks.length) return null
-                  return (
-                    <div key={top} className="space-y-3">
-                      <div className="flex items-center justify-between">
-                        <h3 className="text-lg font-semibold tracking-tight">{top}</h3>
-                        <div className="text-xs text-[hsl(var(--muted))]">{blocks.length} program{blocks.length === 1 ? '' : 's'}</div>
-                      </div>
-                      <div className="grid gap-4 md:grid-cols-2">
-                        {blocks.map((b) => (
-                          <ProgramCard key={b.id} b={b} />
-                        ))}
-                      </div>
-                    </div>
-                  )
-                })}
-
-                {/* Other blocks (no known heading) */}
-                {programBlocksFiltered.some((b) => !program.tops.includes(b.top)) ? (
-                  <div className="space-y-3">
-                    <h3 className="text-lg font-semibold tracking-tight">Other</h3>
-                    <div className="grid gap-4 md:grid-cols-2">
-                      {programBlocksFiltered
-                        .filter((b) => !program.tops.includes(b.top))
-                        .map((b) => (
-                          <ProgramCard key={b.id} b={b} />
-                        ))}
-                    </div>
-                  </div>
-                ) : null}
-
-                {filtersActive && programBlocksFiltered.length === 0 ? (
-                  <div className="rounded-2xl border border-[hsl(var(--border))] bg-white/60 p-6 text-sm text-[hsl(var(--muted))]">
-                    No results. Try adjusting your search or filters.
-                  </div>
-                ) : null}
-              </div>
-            ) : (
-              <div className="mt-5">
-                {byDayFiltered.length ? (
-                  <div className="grid gap-4 lg:grid-cols-2">
+            <div className="mt-8 space-y-14">
+              {byDayFiltered.length ? (
+                <section className="space-y-6">
+                  <SectionTitle>Weekly Schedule by Day</SectionTitle>
+                  <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-3">
                     {byDayFiltered.map((d) => (
-                      <DayCard key={d.day} d={d} />
+                      <DayCardStacked key={d.day} d={d} />
                     ))}
                   </div>
-                ) : (
-                  <div className="rounded-2xl border border-[hsl(var(--border))] bg-white/60 p-6 text-sm text-[hsl(var(--muted))]">
-                    No results. Try adjusting your search or filters.
+                </section>
+              ) : null}
+
+              {adultBlocks.length ? (
+                <section className="space-y-6">
+                  <SectionTitle>Adults</SectionTitle>
+                  <div className="grid gap-6 md:grid-cols-2">
+                    {adultBlocks.map((b) => (
+                      <ProgramCardSimple key={b.id} b={b} />
+                    ))}
                   </div>
-                )}
-              </div>
-            )}
+                </section>
+              ) : null}
+
+              {kidsBlocks.length ? (
+                <section className="space-y-6">
+                  <SectionTitle>Kids &amp; Teens</SectionTitle>
+                  <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-3">
+                    {kidsBlocks.map((b) => (
+                      <ProgramCardSimple key={b.id} b={b} />
+                    ))}
+                  </div>
+                </section>
+              ) : null}
+
+              {otherProgramBlocks.length ? (
+                <section className="space-y-6">
+                  <SectionTitle>Other</SectionTitle>
+                  <div className="grid gap-6 md:grid-cols-2">
+                    {otherProgramBlocks.map((b) => (
+                      <ProgramCardSimple key={b.id} b={b} />
+                    ))}
+                  </div>
+                </section>
+              ) : null}
+
+              {filtersActive && nothingToShow ? (
+                <div className="rounded-2xl border border-white/10 bg-black/30 p-6 text-sm text-white/60">
+                  No results. Try adjusting your search or filters.
+                </div>
+              ) : null}
+            </div>
           </div>
         )}
       </div>
