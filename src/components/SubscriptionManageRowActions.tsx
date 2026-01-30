@@ -20,7 +20,7 @@ export default function SubscriptionManageRowActions({
     // member_id is not required by this component, keep it optional to match callers.
     member_id?: string | null
     plan: Plan | string | null
-    subscription_type: 'time' | 'sessions'
+    subscription_type?: 'time' | 'sessions' | null
     status: string | null
     start_date: string | null
     end_date: string | null
@@ -32,7 +32,8 @@ export default function SubscriptionManageRowActions({
 }) {
   const router = useRouter()
 
-  const isTime = sub.subscription_type === 'time'
+  const stype = sub.subscription_type ?? (sub.sessions_total != null ? 'sessions' : 'time')
+  const isTime = stype === 'time'
 
   const [openEdit, setOpenEdit] = useState(false)
   const [openFreeze, setOpenFreeze] = useState(false)
