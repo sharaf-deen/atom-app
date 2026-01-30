@@ -46,7 +46,7 @@ type DayBlock = {
   other: DaySession[]
 }
 
-const TAGS: Tag[] = ['Gi', 'NoGi', 'Wrestling', 'Competition', 'Open Mat']
+type TabKey = 'day' | 'adults' | 'kids'
 
 function cn(...parts: Array<string | null | undefined | false>) {
   return parts.filter((p): p is string => Boolean(p)).join(' ')
@@ -134,7 +134,8 @@ function parseProgram(partA: string): { tops: string[]; blocks: ProgramBlock[] }
       !t.includes(':') &&
       !t.includes('·') &&
       t.length <= 60
-    const isLongText = !hasDigit(t) && !t.includes('–') && !t.includes(':') && t.length > 60
+    // Long descriptive lines (can contain an en dash) should not be treated as titles.
+    const isLongText = !hasDigit(t) && !t.includes(':') && t.length > 60
 
     // Special case: Competition Team > Group A / Group B as separate blocks
     if (cur && cur.title === 'Competition Team' && /^Group\s+[A-Z]$/i.test(t)) {
@@ -151,6 +152,14 @@ function parseProgram(partA: string): { tops: string[]; blocks: ProgramBlock[] }
     }
 
     if (isTitle) {
+      // Many schedule lines are "short descriptions" (e.g. "All levels") that should belong to the current
+      // block rather than starting a new block. If we haven't collected any items yet, treat a short line
+      // as a subtitle/description.
+      if (cur && cur.items.length === 0 && !cur.subtitle && !cur.description) {
+        cur.subtitle = t
+        continue
+      }
+
       if (cur) pushCur()
       cur = {
         id: `p_${idn++}`,
@@ -265,7 +274,7 @@ function parseByDay(partB: string): DayBlock[] {
   return out
 }
 
-function FilterChip({
+function TabButton({
   active,
   children,
   onClick,
@@ -279,11 +288,10 @@ function FilterChip({
       type="button"
       onClick={onClick}
       className={cn(
-        'rounded-full border px-3 py-1 text-xs font-semibold transition',
-        active
-          ? 'bg-white text-black border-white'
-          : 'bg-transparent text-white/80 border-white/15 hover:border-white/30 hover:text-white'
+        'h-9 rounded-xl px-3 text-sm font-semibold transition',
+        active ? 'bg-neutral-900 text-white' : 'bg-white text-neutral-700 hover:bg-neutral-50'
       )}
+      aria-pressed={active}
     >
       {children}
     </button>
@@ -293,17 +301,21 @@ function FilterChip({
 function SectionTitle({ children }: { children: ReactNode }) {
   return (
     <div className="text-center">
-      <h3 className="text-3xl font-extrabold tracking-tight text-white">{children}</h3>
+      <h3 className="text-3xl font-extrabold tracking-tight text-neutral-900">{children}</h3>
     </div>
   )
 }
 
 function ProgramCardSimple({ b }: { b: ProgramBlock }) {
   return (
-    <div className="rounded-2xl border border-white/10 bg-black/40 p-5 shadow-soft">
-      <div className="text-lg font-extrabold tracking-tight text-orange-400">{b.title}</div>
-      {b.subtitle ? <div className="mt-2 text-xs font-bold uppercase tracking-wide text-white/60">{b.subtitle}</div> : null}
-      {b.description ? <div className="mt-2 text-xs font-semibold uppercase tracking-wide text-white/55">{b.description}</div> : null}
+    <div className="rounded-2xl border border-neutral-200 bg-white p-5 shadow-soft">
+      <div className="text-lg font-extrabold tracking-tight text-neutral-900">{b.title}</div>
+      {b.subtitle ? (
+        <div className="mt-2 text-xs font-bold uppercase tracking-wide text-neutral-500">{b.subtitle}</div>
+      ) : null}
+      {b.description ? (
+        <div className="mt-2 text-xs font-semibold uppercase tracking-wide text-neutral-500">{b.description}</div>
+      ) : null}
 
       {b.items?.length ? (
         <div className="mt-3 space-y-1.5">
@@ -314,17 +326,17 @@ function ProgramCardSimple({ b }: { b: ProgramBlock }) {
 
             if (left && time) {
               return (
-                <div key={idx} className="text-sm text-white">
-                  <span className="font-semibold text-white">{left}</span>
-                  <span className="text-white/70"> – </span>
-                  <span className="font-semibold text-white">{time}</span>
-                  {detail ? <span className="text-white/90"> {detail}</span> : null}
+                <div key={idx} className="text-sm text-neutral-900">
+                  <span className="font-semibold">{left}</span>
+                  <span className="text-neutral-500"> – </span>
+                  <span className="font-semibold">{time}</span>
+                  {detail ? <span className="text-neutral-700"> {detail}</span> : null}
                 </div>
               )
             }
 
             return (
-              <div key={idx} className="text-sm text-white/90">
+              <div key={idx} className="text-sm text-neutral-800">
                 {it.raw}
               </div>
             )
@@ -335,51 +347,89 @@ function ProgramCardSimple({ b }: { b: ProgramBlock }) {
   )
 }
 
+function ItemLine({ it }: { it: ProgramItem }) {
+  const left = it.left
+  const time = it.time
+  const detail = it.detail
+
+  if (left && time) {
+    return (
+      <div className="text-sm text-neutral-900">
+        <span className="font-semibold">{left}</span>
+        <span className="text-neutral-500"> – </span>
+        <span className="font-semibold">{time}</span>
+        {detail ? <span className="text-neutral-700"> {detail}</span> : null}
+      </div>
+    )
+  }
+
+  return <div className="text-sm text-neutral-800">{it.raw}</div>
+}
+
+function BlockCard({ title, subtitle, description, children }: { title: string; subtitle?: string; description?: string; children: ReactNode }) {
+  return (
+    <div className="rounded-2xl border border-neutral-200 bg-white p-5 shadow-soft">
+      <div className="text-lg font-extrabold tracking-tight text-neutral-900">{title}</div>
+      {subtitle ? (
+        <div className="mt-2 text-xs font-bold uppercase tracking-wide text-neutral-500">{subtitle}</div>
+      ) : null}
+      {description ? (
+        <div className="mt-2 text-xs font-semibold uppercase tracking-wide text-neutral-500">{description}</div>
+      ) : null}
+      <div className="mt-3 space-y-1.5">{children}</div>
+    </div>
+  )
+}
+
+function isTitleMatch(title: string, pattern: RegExp) {
+  return pattern.test(title.replace(/–/g, '-'))
+}
+
 function DayCardStacked({ d }: { d: DayBlock }) {
   return (
-    <div className="rounded-2xl border border-white/10 bg-black/40 p-5 shadow-soft">
-      <div className="text-xl font-extrabold tracking-tight text-orange-400">{d.day}</div>
+    <div className="rounded-2xl border border-neutral-200 bg-white p-5 shadow-soft">
+      <div className="text-xl font-extrabold tracking-tight text-neutral-900">{d.day}</div>
 
       <div className="mt-4">
-        <div className="text-xs font-bold uppercase tracking-wide text-white/60">Kids &amp; Teens</div>
+        <div className="text-xs font-bold uppercase tracking-wide text-neutral-500">Kids &amp; Teens</div>
         <div className="mt-2 space-y-1">
           {d.kids.length ? (
             d.kids.map((s, idx) => (
-              <div key={idx} className="text-sm text-white">
+              <div key={idx} className="text-sm text-neutral-900">
                 <span className="font-semibold">{s.time}</span>
-                <span className="text-white/70"> – </span>
-                <span className="text-white/95">{s.text}</span>
+                <span className="text-neutral-500"> – </span>
+                <span className="text-neutral-800">{s.text}</span>
               </div>
             ))
           ) : (
-            <div className="text-sm text-white/30">—</div>
+            <div className="text-sm text-neutral-400">—</div>
           )}
         </div>
       </div>
 
       <div className="mt-4">
-        <div className="text-xs font-bold uppercase tracking-wide text-white/60">Adults</div>
+        <div className="text-xs font-bold uppercase tracking-wide text-neutral-500">Adults</div>
         <div className="mt-2 space-y-1">
           {d.adults.length ? (
             d.adults.map((s, idx) => (
-              <div key={idx} className="text-sm text-white">
+              <div key={idx} className="text-sm text-neutral-900">
                 <span className="font-semibold">{s.time}</span>
-                <span className="text-white/70"> – </span>
-                <span className="text-white/95">{s.text}</span>
+                <span className="text-neutral-500"> – </span>
+                <span className="text-neutral-800">{s.text}</span>
               </div>
             ))
           ) : (
-            <div className="text-sm text-white/30">—</div>
+            <div className="text-sm text-neutral-400">—</div>
           )}
         </div>
       </div>
 
       {d.other.length ? (
         <div className="mt-4">
-          <div className="text-xs font-bold uppercase tracking-wide text-white/50">Other</div>
+          <div className="text-xs font-bold uppercase tracking-wide text-neutral-500">Other</div>
           <div className="mt-2 space-y-1">
             {d.other.map((x, i) => (
-              <div key={i} className="text-sm text-white/70">
+              <div key={i} className="text-sm text-neutral-600">
                 {x.text}
               </div>
             ))}
@@ -390,9 +440,12 @@ function DayCardStacked({ d }: { d: DayBlock }) {
   )
 }
 
-function includesQuery(hay: string, q: string) {
-  if (!q) return true
-  return hay.toLowerCase().includes(q)
+function findFirstBlock(blocks: ProgramBlock[], re: RegExp) {
+  return blocks.find((b) => isTitleMatch(b.title, re)) || null
+}
+
+function findBlocks(blocks: ProgramBlock[], re: RegExp) {
+  return blocks.filter((b) => isTitleMatch(b.title, re))
 }
 
 export default function ScheduleEditor({ initialContent, canEdit, updatedAt }: Props) {
@@ -403,9 +456,7 @@ export default function ScheduleEditor({ initialContent, canEdit, updatedAt }: P
   const [error, setError] = useState<string | null>(null)
   const [ok, setOk] = useState<string | null>(null)
 
-  // Search / filters
-  const [q, setQ] = useState('')
-  const [activeTags, setActiveTags] = useState<Tag[]>([])
+  const [tab, setTab] = useState<TabKey>('day')
 
   useEffect(() => {
     setContent(initialContent)
@@ -416,75 +467,59 @@ export default function ScheduleEditor({ initialContent, canEdit, updatedAt }: P
   const program = useMemo(() => parseProgram(parts.a), [parts.a])
   const byDay = useMemo(() => (parts.b ? parseByDay(parts.b) : []), [parts.b])
 
-  const qlc = useMemo(() => q.trim().toLowerCase(), [q])
-  const tagsSet = useMemo(() => new Set(activeTags), [activeTags])
-  const filtersActive = qlc.length > 0 || activeTags.length > 0
+  const adultBlocksAll = useMemo(() => program.blocks.filter((b) => b.top === 'Adults'), [program.blocks])
+  const kidsBlocksAll = useMemo(() => program.blocks.filter((b) => b.top === 'Kids & Teens'), [program.blocks])
 
-  function matchesTags(tags: Tag[]) {
-    if (tagsSet.size === 0) return true
-    return tags.some((t) => tagsSet.has(t))
-  }
+  const adultsStructured = useMemo(() => {
+    const beginners = findFirstBlock(adultBlocksAll, /^Beginners$/i)
+    const intermediate = findFirstBlock(adultBlocksAll, /^Intermediate$/i)
+    const openMat = findFirstBlock(adultBlocksAll, /^Open\s+Mat$/i)
+    const advanced =
+      findFirstBlock(adultBlocksAll, /^Advanced\b/i) ||
+      findFirstBlock(adultBlocksAll, /^Advanced\s*-\s*Competition\s+Team$/i)
 
-  const adultBlocks = useMemo(() => {
-    return program.blocks
-      .filter((b) => b.top === 'Adults')
-      .filter((b) => {
-        if (!matchesTags(b.tags)) return false
-        if (!qlc) return true
-        const text = [b.title, b.subtitle, b.description, ...b.items.map((i) => i.raw)].filter(Boolean).join(' ')
-        return includesQuery(text, qlc)
-      })
-  }, [program.blocks, qlc, tagsSet]) // eslint-disable-line react-hooks/exhaustive-deps
+    // Optional: a trailing note line may exist in the schedule content; keep it if present.
+    const note = adultBlocksAll
+      .flatMap((b) => b.items)
+      .map((x) => x.raw)
+      .find((x) => x.toLowerCase().includes('contact the head coach'))
 
-  const kidsBlocks = useMemo(() => {
-    return program.blocks
-      .filter((b) => b.top === 'Kids & Teens')
-      .filter((b) => {
-        if (!matchesTags(b.tags)) return false
-        if (!qlc) return true
-        const text = [b.title, b.subtitle, b.description, ...b.items.map((i) => i.raw)].filter(Boolean).join(' ')
-        return includesQuery(text, qlc)
-      })
-  }, [program.blocks, qlc, tagsSet]) // eslint-disable-line react-hooks/exhaustive-deps
+    return { beginners, intermediate, openMat, advanced, note }
+  }, [adultBlocksAll])
 
-  const otherProgramBlocks = useMemo(() => {
-    return program.blocks
-      .filter((b) => b.top !== 'Adults' && b.top !== 'Kids & Teens')
-      .filter((b) => {
-        if (!matchesTags(b.tags)) return false
-        if (!qlc) return true
-        const text = [b.top, b.title, b.subtitle, b.description, ...b.items.map((i) => i.raw)].filter(Boolean).join(' ')
-        return includesQuery(text, qlc)
-      })
-  }, [program.blocks, qlc, tagsSet]) // eslint-disable-line react-hooks/exhaustive-deps
+  const kidsStructured = useMemo(() => {
+    const baby = findFirstBlock(kidsBlocksAll, /^Baby\s+3\s*[-–]\s*5\s+years$/i)
 
-  const byDayFiltered = useMemo(() => {
-    if (!byDay.length) return []
-    const out: DayBlock[] = []
-    for (const d of byDay) {
-      const kids = d.kids.filter((s) => matchesTags(s.tags) && (!qlc || includesQuery(`${s.time} ${s.text}`, qlc)))
-      const adults = d.adults.filter((s) => matchesTags(s.tags) && (!qlc || includesQuery(`${s.time} ${s.text}`, qlc)))
-      const other = d.other.filter((s) => matchesTags(s.tags) && (!qlc || includesQuery(s.text, qlc)))
-      if (kids.length || adults.length || other.length) out.push({ day: d.day, kids, adults, other })
+    const kids69 = findBlocks(kidsBlocksAll, /^Kids\s+6\s*[-–]\s*9\s+years$/i)
+    const kids69Beg = kids69.find((b) => (b.subtitle || '').toLowerCase().includes('beginners')) || null
+    const kids69Int = kids69.find((b) => (b.subtitle || '').toLowerCase().includes('intermediate')) || null
+
+    const teens1014 = findBlocks(kidsBlocksAll, /^Teens\s+10\s*[-–]\s*14\s+years$/i)
+    const teensBeg = teens1014.find((b) => (b.subtitle || '').toLowerCase().includes('beginners')) || null
+    const teensInt = teens1014.find((b) => (b.subtitle || '').toLowerCase().includes('intermediate')) || null
+
+    const compTeams = kidsBlocksAll.filter((b) => b.title === 'Competition Team')
+
+    // Group ordering: A then B then others
+    const compSorted = [...compTeams].sort((a, b) => {
+      const as = (a.subtitle || '').toUpperCase()
+      const bs = (b.subtitle || '').toUpperCase()
+      if (as === 'GROUP A') return -1
+      if (bs === 'GROUP A') return 1
+      if (as === 'GROUP B') return -1
+      if (bs === 'GROUP B') return 1
+      return as.localeCompare(bs)
+    })
+
+    return {
+      baby,
+      kids69Beg,
+      kids69Int,
+      teensBeg,
+      teensInt,
+      compSorted,
     }
-    return out
-  }, [byDay, qlc, tagsSet]) // eslint-disable-line react-hooks/exhaustive-deps
-
-  const resultsCount = useMemo(() => {
-    if (!filtersActive) return null
-    const sessions = byDayFiltered.reduce((acc, d) => acc + d.kids.length + d.adults.length + d.other.length, 0)
-    const programs = adultBlocks.length + kidsBlocks.length + otherProgramBlocks.length
-    return sessions + programs
-  }, [filtersActive, byDayFiltered, adultBlocks.length, kidsBlocks.length, otherProgramBlocks.length])
-
-  function toggleTag(t: Tag) {
-    setActiveTags((prev) => (prev.includes(t) ? prev.filter((x) => x !== t) : [...prev, t]))
-  }
-
-  function clearFilters() {
-    setQ('')
-    setActiveTags([])
-  }
+  }, [kidsBlocksAll])
 
   async function onSave() {
     setSaving(true)
@@ -517,25 +552,27 @@ export default function ScheduleEditor({ initialContent, canEdit, updatedAt }: P
   }
 
   const nothingToShow = useMemo(() => {
-    return byDayFiltered.length === 0 && adultBlocks.length === 0 && kidsBlocks.length === 0 && otherProgramBlocks.length === 0
-  }, [byDayFiltered.length, adultBlocks.length, kidsBlocks.length, otherProgramBlocks.length])
+    if (tab === 'day') return byDay.length === 0
+    if (tab === 'adults') return adultBlocksAll.length === 0
+    return kidsBlocksAll.length === 0
+  }, [tab, byDay.length, adultBlocksAll.length, kidsBlocksAll.length])
 
   return (
     <div className="space-y-4">
-      <div className="rounded-2xl border border-white/10 bg-black/60 p-5 shadow-soft">
+      <div className="rounded-2xl border border-neutral-200 bg-white p-5 shadow-soft">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
-            <h2 className="text-base font-semibold text-white">Schedule</h2>
-            <p className="mt-1 text-sm text-white/60">
+            <h2 className="text-base font-semibold text-neutral-900">Schedule</h2>
+            <p className="mt-1 text-sm text-neutral-600">
               {canEdit ? 'Visible to all users. Editable only by super admin.' : 'Visible to all users.'}
             </p>
             {updatedAt ? (
-              <div className="mt-2 text-xs text-white/50">Last updated: {new Date(updatedAt).toLocaleString()}</div>
+              <div className="mt-2 text-xs text-neutral-500">Last updated: {new Date(updatedAt).toLocaleString()}</div>
             ) : null}
           </div>
 
           <div className="flex items-center gap-2">
-            {ok ? <span className="text-sm font-medium text-emerald-400">{ok}</span> : null}
+            {ok ? <span className="text-sm font-medium text-emerald-600">{ok}</span> : null}
             {canEdit && !editing ? (
               <Button variant="outline" onClick={() => setEditing(true)}>
                 Edit
@@ -555,107 +592,217 @@ export default function ScheduleEditor({ initialContent, canEdit, updatedAt }: P
         </div>
 
         {error ? (
-          <div className="mt-3 rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-200">
-            {error}
-          </div>
+          <div className="mt-3 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>
         ) : null}
 
         {editing ? (
           <div className="mt-4 space-y-2">
-            <label className="text-sm font-medium text-white">Schedule content</label>
+            <label className="text-sm font-medium text-neutral-900">Schedule content</label>
             <textarea
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
-              className="min-h-[520px] w-full rounded-2xl border border-white/15 bg-black/40 p-3 text-sm text-white outline-none placeholder:text-white/40 focus:ring-2 focus:ring-white/20"
+              className="min-h-[520px] w-full rounded-2xl border border-neutral-200 bg-white p-3 text-sm text-neutral-900 outline-none placeholder:text-neutral-400 focus:ring-2 focus:ring-neutral-200"
               placeholder="Paste your schedule here..."
             />
-            <p className="text-xs text-white/50">
+            <p className="text-xs text-neutral-500">
               Tip: keep the marker <span className="font-mono">Weekly Schedule by Day</span> to enable the “By Day” section.
             </p>
           </div>
         ) : (
           <div className="mt-4">
-            {/* Controls */}
-            <div className="flex flex-col gap-3">
-              <div className="flex flex-col gap-2 lg:flex-row lg:items-center">
-                <div className="flex items-center gap-2">
-                  <input
-                    type="search"
-                    value={q}
-                    onChange={(e) => setQ(e.target.value)}
-                    placeholder="Search classes…"
-                    className="h-10 w-full rounded-xl border border-white/15 bg-black/30 px-3 text-sm text-white outline-none placeholder:text-white/40 focus:ring-2 focus:ring-white/20 lg:w-80"
-                  />
-                  {filtersActive ? (
-                    <Button variant="outline" onClick={clearFilters}>
-                      Clear
-                    </Button>
-                  ) : null}
-
-                  {filtersActive && resultsCount !== null ? (
-                    <span className="ml-1 text-xs text-white/50">{resultsCount} matches</span>
-                  ) : null}
-                </div>
-
-                <div className="flex flex-wrap items-center gap-2 lg:ml-auto">
-                  {TAGS.map((t) => (
-                    <FilterChip key={t} active={activeTags.includes(t)} onClick={() => toggleTag(t)}>
-                      {t}
-                    </FilterChip>
-                  ))}
-                </div>
+            {/* Tabs */}
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <div className="text-sm font-semibold text-neutral-700">Weekly schedule</div>
+              <div className="flex w-full gap-2 rounded-2xl border border-neutral-200 bg-neutral-50 p-1 sm:w-auto">
+                <TabButton active={tab === 'day'} onClick={() => setTab('day')}>
+                  By day
+                </TabButton>
+                <TabButton active={tab === 'adults'} onClick={() => setTab('adults')}>
+                  By adults
+                </TabButton>
+                <TabButton active={tab === 'kids'} onClick={() => setTab('kids')}>
+                  By kids
+                </TabButton>
               </div>
             </div>
 
             {/* Content */}
-            <div className="mt-8 space-y-14">
-              {byDayFiltered.length ? (
+            <div className="mt-8 space-y-10">
+              {tab === 'day' && byDay.length ? (
                 <section className="space-y-6">
                   <SectionTitle>Weekly Schedule by Day</SectionTitle>
                   <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-3">
-                    {byDayFiltered.map((d) => (
+                    {byDay.map((d) => (
                       <DayCardStacked key={d.day} d={d} />
                     ))}
                   </div>
                 </section>
               ) : null}
 
-              {adultBlocks.length ? (
+              {tab === 'adults' ? (
                 <section className="space-y-6">
                   <SectionTitle>Adults</SectionTitle>
-                  <div className="grid gap-6 md:grid-cols-2">
-                    {adultBlocks.map((b) => (
-                      <ProgramCardSimple key={b.id} b={b} />
-                    ))}
-                  </div>
+
+                  {adultsStructured.beginners || adultsStructured.intermediate || adultsStructured.openMat ? (
+                    <div className="grid gap-6 md:grid-cols-2">
+                      {adultsStructured.beginners ? (
+                        <BlockCard
+                          title="Beginners"
+                          subtitle="White belts & anyone who wants to build strong basics"
+                        >
+                          {adultsStructured.beginners.items.map((it, i) => (
+                            <ItemLine key={i} it={it} />
+                          ))}
+                        </BlockCard>
+                      ) : null}
+
+                      {adultsStructured.intermediate ? (
+                        <BlockCard
+                          title="Intermediate"
+                          subtitle="Students with solid basics, usually from blue belt and above"
+                        >
+                          {adultsStructured.intermediate.items.map((it, i) => (
+                            <ItemLine key={i} it={it} />
+                          ))}
+                        </BlockCard>
+                      ) : null}
+
+                      {adultsStructured.openMat ? (
+                        <div className="md:col-span-2">
+                          <BlockCard title="Open Mat" subtitle="All levels">
+                            {adultsStructured.openMat.items.map((it, i) => (
+                              <ItemLine key={i} it={it} />
+                            ))}
+
+                            {adultsStructured.advanced ? (
+                              <div className="mt-4 border-t border-neutral-200 pt-4">
+                                <div className="text-base font-extrabold tracking-tight text-neutral-900">
+                                  {adultsStructured.advanced.title.replace(/\s-\s/g, ' – ')}
+                                </div>
+                                {adultsStructured.advanced.description ? (
+                                  <div className="mt-2 text-sm text-neutral-600">{adultsStructured.advanced.description}</div>
+                                ) : null}
+                                <div className="mt-3 space-y-1.5">
+                                  {adultsStructured.advanced.items.map((it, i) => (
+                                    <ItemLine key={i} it={it} />
+                                  ))}
+                                </div>
+                              </div>
+                            ) : null}
+                          </BlockCard>
+                        </div>
+                      ) : null}
+                    </div>
+                  ) : adultBlocksAll.length ? (
+                    <div className="grid gap-6 md:grid-cols-2">
+                      {adultBlocksAll.map((b) => (
+                        <ProgramCardSimple key={b.id} b={b} />
+                      ))}
+                    </div>
+                  ) : null}
+
+                  {adultsStructured.note ? (
+                    <div className="rounded-2xl border border-neutral-200 bg-neutral-50 p-4 text-sm text-neutral-700">
+                      {adultsStructured.note}
+                    </div>
+                  ) : null}
                 </section>
               ) : null}
 
-              {kidsBlocks.length ? (
+              {tab === 'kids' ? (
                 <section className="space-y-6">
                   <SectionTitle>Kids &amp; Teens</SectionTitle>
-                  <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-3">
-                    {kidsBlocks.map((b) => (
-                      <ProgramCardSimple key={b.id} b={b} />
-                    ))}
-                  </div>
+
+                  {kidsStructured.baby || kidsStructured.kids69Beg || kidsStructured.teensBeg || kidsStructured.compSorted.length ? (
+                    <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-4">
+                      {kidsStructured.baby ? (
+                        <BlockCard title="Baby 3-5 years" subtitle="Beginners · Gi">
+                          {kidsStructured.baby.items.map((it, i) => (
+                            <ItemLine key={i} it={it} />
+                          ))}
+                        </BlockCard>
+                      ) : null}
+
+                      <BlockCard title="Kids 6–9 years">
+                        {kidsStructured.kids69Beg ? (
+                          <div>
+                            <div className="text-xs font-bold uppercase tracking-wide text-neutral-500">Beginners · Gi</div>
+                            <div className="mt-2 space-y-1.5">
+                              {kidsStructured.kids69Beg.items.map((it, i) => (
+                                <ItemLine key={i} it={it} />
+                              ))}
+                            </div>
+                          </div>
+                        ) : null}
+
+                        {kidsStructured.kids69Int ? (
+                          <div className="mt-4">
+                            <div className="text-xs font-bold uppercase tracking-wide text-neutral-500">Intermediate · Gi</div>
+                            <div className="mt-2 space-y-1.5">
+                              {kidsStructured.kids69Int.items.map((it, i) => (
+                                <ItemLine key={i} it={it} />
+                              ))}
+                            </div>
+                          </div>
+                        ) : null}
+                      </BlockCard>
+
+                      <BlockCard title="Teens 10–14 years">
+                        {kidsStructured.teensBeg ? (
+                          <div>
+                            <div className="text-xs font-bold uppercase tracking-wide text-neutral-500">Beginners · Gi</div>
+                            <div className="mt-2 space-y-1.5">
+                              {kidsStructured.teensBeg.items.map((it, i) => (
+                                <ItemLine key={i} it={it} />
+                              ))}
+                            </div>
+                          </div>
+                        ) : null}
+
+                        {kidsStructured.teensInt ? (
+                          <div className="mt-4">
+                            <div className="text-xs font-bold uppercase tracking-wide text-neutral-500">Intermediate · Gi</div>
+                            <div className="mt-2 space-y-1.5">
+                              {kidsStructured.teensInt.items.map((it, i) => (
+                                <ItemLine key={i} it={it} />
+                              ))}
+                            </div>
+                          </div>
+                        ) : null}
+                      </BlockCard>
+
+                      <BlockCard title="Competition Team">
+                        {kidsStructured.compSorted.length ? (
+                          <div className="space-y-4">
+                            {kidsStructured.compSorted.map((b) => (
+                              <div key={b.id}>
+                                {b.subtitle ? (
+                                  <div className="text-xs font-bold uppercase tracking-wide text-neutral-500">{b.subtitle}</div>
+                                ) : null}
+                                <div className="mt-2 space-y-1.5">
+                                  {b.items.map((it, i) => (
+                                    <ItemLine key={i} it={it} />
+                                  ))}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        ) : null}
+                      </BlockCard>
+                    </div>
+                  ) : kidsBlocksAll.length ? (
+                    <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-3">
+                      {kidsBlocksAll.map((b) => (
+                        <ProgramCardSimple key={b.id} b={b} />
+                      ))}
+                    </div>
+                  ) : null}
                 </section>
               ) : null}
 
-              {otherProgramBlocks.length ? (
-                <section className="space-y-6">
-                  <SectionTitle>Other</SectionTitle>
-                  <div className="grid gap-6 md:grid-cols-2">
-                    {otherProgramBlocks.map((b) => (
-                      <ProgramCardSimple key={b.id} b={b} />
-                    ))}
-                  </div>
-                </section>
-              ) : null}
-
-              {filtersActive && nothingToShow ? (
-                <div className="rounded-2xl border border-white/10 bg-black/30 p-6 text-sm text-white/60">
-                  No results. Try adjusting your search or filters.
+              {nothingToShow ? (
+                <div className="rounded-2xl border border-neutral-200 bg-neutral-50 p-6 text-sm text-neutral-600">
+                  No schedule data to display.
                 </div>
               ) : null}
             </div>
