@@ -11,7 +11,18 @@ import RoleMenu from '@/components/RoleMenu'
 import NotificationsBell from '@/components/NotificationsBell'
 import HideMenuOnRoutes from '@/components/HideMenuOnRoutes'
 
-type IconKey = 'dashboard' | 'bell' | 'gift' | 'id' | 'scan' | 'users' | 'user-cog' | 'bag' | 'wallet' | 'calendar'
+type IconKey =
+  | 'dashboard'
+  | 'bell'
+  | 'gift'
+  | 'id'
+  | 'scan'
+  | 'users'
+  | 'user-cog'
+  | 'bag'
+  | 'wallet'
+  | 'calendar'
+
 type MenuItem = { label: string; href: string; icon: IconKey }
 type MenuByRole = Record<Role, MenuItem[]>
 
@@ -34,6 +45,7 @@ const MENU_BY_ROLE: MenuByRole = {
   coach: [
     { label: 'Store', href: '/store', icon: 'bag' },
     { label: 'Notifications', href: '/notifications', icon: 'bell' },
+    { label: 'Schedule', href: '/schedule', icon: 'calendar' },
     { label: 'My Profile', href: '/profile', icon: 'id' },
     { label: 'Packages & Promos', href: '/packages-and-promos', icon: 'gift' },
   ],

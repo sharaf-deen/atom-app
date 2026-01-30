@@ -9,7 +9,6 @@ import { getSessionUser, type Role } from '@/lib/session'
 import { createSupabaseRSC } from '@/lib/supabaseServer'
 import HomeNotificationsTile from '@/components/HomeNotificationsTile'
 
-
 // Lucide icons
 import {
   LayoutDashboard,
@@ -21,6 +20,7 @@ import {
   UserCog,
   ShoppingBag,
   Wallet,
+  CalendarDays,
 } from 'lucide-react'
 
 type SessionUser = {
@@ -71,6 +71,7 @@ const MENU_BY_ROLE: GroupedMenuByRole = {
       items: [
         { label: 'My Profile', href: '/profile', icon: IdCard },
         { label: 'Notifications', href: '/notifications', icon: Bell },
+        { label: 'Schedule', href: '/schedule', icon: CalendarDays },
         { label: 'Store', href: '/store', icon: ShoppingBag },
         { label: 'Packages & Promos', href: '/packages-and-promos', icon: Gift },
       ],
@@ -83,6 +84,7 @@ const MENU_BY_ROLE: GroupedMenuByRole = {
       items: [
         { label: 'My Profile', href: '/profile', icon: IdCard },
         { label: 'Notifications', href: '/notifications', icon: Bell },
+        { label: 'Schedule', href: '/schedule', icon: CalendarDays },
         { label: 'Store', href: '/store', icon: ShoppingBag },
         { label: 'Packages & Promos', href: '/packages-and-promos', icon: Gift },
       ],
@@ -94,6 +96,7 @@ const MENU_BY_ROLE: GroupedMenuByRole = {
       items: [
         { label: 'My Profile', href: '/profile', icon: IdCard },
         { label: 'Notifications', href: '/notifications', icon: Bell },
+        { label: 'Schedule', href: '/schedule', icon: CalendarDays },
         { label: 'Store', href: '/store', icon: ShoppingBag },
         { label: 'Packages & Promos', href: '/packages-and-promos', icon: Gift },
       ],
@@ -103,6 +106,7 @@ const MENU_BY_ROLE: GroupedMenuByRole = {
     {
       title: 'Front desk',
       items: [
+        { label: 'Schedule', href: '/schedule', icon: CalendarDays },
         { label: 'Membership', href: '/kiosk', icon: IdCard },
         { label: 'Scan', href: '/scan', icon: ScanLine },
         { label: 'Members', href: '/members', icon: Users },
@@ -111,9 +115,7 @@ const MENU_BY_ROLE: GroupedMenuByRole = {
     },
     {
       title: 'Store',
-      items: [
-        { label: 'Store', href: '/store', icon: ShoppingBag },
-      ],
+      items: [{ label: 'Store', href: '/store', icon: ShoppingBag }],
     },
   ],
   admin: [
@@ -122,6 +124,7 @@ const MENU_BY_ROLE: GroupedMenuByRole = {
       items: [
         { label: 'Dashboard', href: '/admin', icon: LayoutDashboard },
         { label: 'Notifications', href: '/notifications', icon: Bell },
+        { label: 'Schedule', href: '/schedule', icon: CalendarDays },
       ],
     },
     {
@@ -153,6 +156,7 @@ const MENU_BY_ROLE: GroupedMenuByRole = {
       items: [
         { label: 'Dashboard', href: '/admin', icon: LayoutDashboard },
         { label: 'Notifications', href: '/notifications', icon: Bell },
+        { label: 'Schedule', href: '/schedule', icon: CalendarDays },
       ],
     },
     {
@@ -191,9 +195,7 @@ function SectionGrid({
   if (!items.length) return null
   return (
     <div className="space-y-3">
-      <h2 className="text-sm font-semibold tracking-wide text-[hsl(var(--muted))]">
-        {section.title}
-      </h2>
+      <h2 className="text-sm font-semibold tracking-wide text-[hsl(var(--muted))]">{section.title}</h2>
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {items.map((it) => {
           if (it.href === '/notifications') {
@@ -237,7 +239,6 @@ function SectionGrid({
   )
 }
 
-
 export default async function HomePage() {
   const user = (await getSessionUser()) as SessionUser | null
   const displayName = user ? await getDisplayName(user) : null
@@ -259,16 +260,11 @@ export default async function HomePage() {
   // Avatar signé (RSC) — uniquement pour member / coach / assistant_coach
   let signedAvatar = ''
   const canShowAvatar =
-    !!user &&
-    ['member', 'coach', 'assistant_coach'].includes(user.role) &&
-    !!user.id_photo_path
+    !!user && ['member', 'coach', 'assistant_coach'].includes(user.role) && !!user.id_photo_path
 
   if (canShowAvatar && user?.id_photo_path) {
     const supabase = createSupabaseRSC()
-    const { data } = await supabase
-      .storage
-      .from('id-photos')
-      .createSignedUrl(user.id_photo_path, 60 * 10)
+    const { data } = await supabase.storage.from('id-photos').createSignedUrl(user.id_photo_path, 60 * 10)
     signedAvatar = data?.signedUrl || ''
   }
 
@@ -280,23 +276,14 @@ export default async function HomePage() {
             {/* Header avec avatar au-dessus du rôle */}
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
-                <h1 className="text-2xl font-semibold tracking-tight">
-                  Welcome, {displayName}
-                </h1>
-                <p className="mt-1 text-sm text-[hsl(var(--muted))]">
-                  Choose a section to get started.
-                </p>
+                <h1 className="text-2xl font-semibold tracking-tight">Welcome, {displayName}</h1>
+                <p className="mt-1 text-sm text-[hsl(var(--muted))]">Choose a section to get started.</p>
               </div>
 
               <div className="flex flex-col items-end gap-2">
                 {canShowAvatar && signedAvatar ? (
                   <div className="relative h-24 w-24 sm:h-32 sm:w-32 lg:h-36 lg:w-36 overflow-hidden rounded-full border ring-1 ring-[hsl(var(--border))] bg-white shadow-soft">
-                    <Image
-                      src={signedAvatar}
-                      alt="Profile photo"
-                      fill
-                      className="object-cover"
-                    />
+                    <Image src={signedAvatar} alt="Profile photo" fill className="object-cover" />
                   </div>
                 ) : null}
               </div>
@@ -305,7 +292,11 @@ export default async function HomePage() {
             {/* Sections groupées */}
             <div className="space-y-8">
               {grouped.map((section) => (
-                <SectionGrid key={section.title} section={section} initialUnreadNotificationsCount={unreadNotificationsCount} />
+                <SectionGrid
+                  key={section.title}
+                  section={section}
+                  initialUnreadNotificationsCount={unreadNotificationsCount}
+                />
               ))}
             </div>
           </>
