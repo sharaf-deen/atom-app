@@ -12,6 +12,7 @@ import NotificationsBell from '@/components/NotificationsBell'
 import HideMenuOnRoutes from '@/components/HideMenuOnRoutes'
 
 type IconKey =
+  | 'home'
   | 'dashboard'
   | 'bell'
   | 'gift'
@@ -69,7 +70,7 @@ const MENU_BY_ROLE: MenuByRole = {
     { label: 'Expenses', href: '/expenses', icon: 'wallet' },
   ],
   super_admin: [
-    { label: 'Home', href: '/', icon: 'dashboard' },
+    { label: 'Home', href: '/', icon: 'home' },
     { label: 'Dashboard', href: '/admin', icon: 'dashboard' },
     { label: 'Notifications', href: '/notifications', icon: 'bell' },
     { label: 'Schedule', href: '/schedule', icon: 'calendar' },
