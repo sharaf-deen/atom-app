@@ -101,7 +101,7 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
 
   const { data: subs } = await supa
     .from('subscriptions')
-    .select('id, subscription_type, plan, status, start_date, end_date, sessions_total, sessions_used, amount, paid_at')
+    .select('id, subscription_type, plan, status, start_date, end_date, frozen_until, sessions_total, sessions_used, amount, paid_at')
     .eq('member_id', profile.user_id)
     .order('paid_at', { ascending: false })
     .limit(500) as {
@@ -112,6 +112,7 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
       status: string | null
       start_date: string | null
       end_date: string | null
+      frozen_until: string | null
       sessions_total: number | null
       sessions_used: number | null
       amount: number | null
@@ -203,9 +204,6 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
               <div><span className="text-[hsl(var(--muted))]">Phone:</span> {profile.phone ?? '—'}</div>
               <div><span className="text-[hsl(var(--muted))]">Role:</span> {profile.role ?? 'member'}</div>
               <div><span className="text-[hsl(var(--muted))]">Joined:</span> {fmtDate(profile.created_at)}</div>
-              <div className="mt-2 text-[11px] text-[hsl(var(--muted))] break-all">
-                <span className="text-[hsl(var(--muted))]">QR value:</span> {profile.qr_code ?? '—'}
-              </div>
             </div>
           </div>
 
@@ -293,6 +291,12 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
                     const soon = isTime && dleft !== null && dleft <= 7 && dleft >= 0
                     const expired = s.status === 'expired' || (isTime && (dleft ?? -999) < 0)
 
+                    const today = todayDateOnlyUTC()
+                    const isFrozen = !!(s.frozen_until && today < s.frozen_until)
+                    const freezeDays = isFrozen
+                      ? Math.max(0, Math.floor((new Date(`${s.frozen_until}T00:00:00Z`).getTime() - new Date(`${today}T00:00:00Z`).getTime()) / 86400000))
+                      : null
+
                     return (
                       <tr key={s.id} className="border-t border-[hsl(var(--border))]">
                         <td className="px-3 py-2">{s.subscription_type ?? '—'}</td>
@@ -323,6 +327,11 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
                             {expired && (
                               <span className="text-[11px] px-2 py-0.5 rounded-2xl border bg-rose-50 border-rose-300 text-rose-900">
                                 expired
+                              </span>
+                            )}
+                            {isFrozen && (
+                              <span className="text-[11px] px-2 py-0.5 rounded-2xl border bg-sky-50 border-sky-300 text-sky-900">
+                                frozen{typeof freezeDays === 'number' ? ` (${freezeDays}d)` : ''}
                               </span>
                             )}
                             {s.subscription_type === 'sessions' && (

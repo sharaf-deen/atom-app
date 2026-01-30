@@ -18,6 +18,9 @@ type ScanResponse = {
   expires_on?: string | null
   expired_days?: number | null
   expired_on?: string | null
+  frozen?: boolean
+  frozen_until?: string | null
+  freeze_days_remaining?: number | null
 }
 
 type Detected = { rawValue: string }
@@ -107,6 +110,9 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className }: 
         if (j.expires_on) sp.set('expiresOn', String(j.expires_on))
         if (j.expired_days !== undefined && j.expired_days !== null) sp.set('expiredDays', String(j.expired_days))
         if (j.expired_on) sp.set('expiredOn', String(j.expired_on))
+        if ((j as any).frozen) sp.set('frozen', '1')
+        if ((j as any).frozen_until) sp.set('frozenUntil', String((j as any).frozen_until))
+        if ((j as any).freeze_days_remaining !== undefined && (j as any).freeze_days_remaining !== null) sp.set('freezeDaysRemaining', String((j as any).freeze_days_remaining))
 
         router.push(`/scan/result?${sp.toString()}`)
         didNavigate = true

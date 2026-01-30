@@ -4,236 +4,251 @@ export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
 import { NextResponse } from 'next/server'
-import { createSupabaseServerActionClient } from '@/lib/supabaseServer'
+import { createClient } from '@supabase/supabase-js'
 
-import { createClient as createSupabaseAdmin } from '@supabase/supabase-js'
+type ScanBody = { code?: string }
 
-function noStore(res: NextResponse) {
-  res.headers.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate')
-  return res
+type ScanResponse = {
+  ok: boolean
+  valid?: boolean
+  message?: string
+  member_id?: string
+  subscription_id?: string | null
+  days_remaining?: number | null
+  expires_on?: string | null
+  expired_days?: number | null
+  expired_on?: string | null
+  frozen?: boolean
+  frozen_until?: string | null
+  freeze_days_remaining?: number | null
 }
 
-type Body = { code?: string }
+function json(status: number, body: ScanResponse) {
+  return NextResponse.json(body, { status })
+}
 
-function extractMemberId(raw: string): string | null {
-  const t = (raw || '').trim()
+function parseMemberIdFromCode(code: string): string | null {
+  const t = (code || '').trim()
   if (!t) return null
-  if (t.startsWith('atom:') || t.startsWith('ATOM:')) {
-    const id = t.slice(5)
-    return /^[0-9a-f-]{36}$/i.test(id) ? id : null
+  const lower = t.toLowerCase()
+  if (lower.startsWith('atom:')) {
+    const id = t.slice(5).trim()
+    if (/^[0-9a-f-]{36}$/i.test(id)) return id
   }
-  return /^[0-9a-f-]{36}$/i.test(t) ? t : null
+  if (/^[0-9a-f-]{36}$/i.test(t)) return t
+  return null
 }
 
-function todayIsoDate(): string {
+function todayDateOnlyUTC() {
   return new Date().toISOString().slice(0, 10)
 }
 
-function diffDays(dateOnlyA: string, dateOnlyB: string): number {
-  // Returns (A - B) in full days for YYYY-MM-DD strings (UTC midnight)
-  const a = String(dateOnlyA || '').trim()
-  const b = String(dateOnlyB || '').trim()
-  const ma = a.match(/^(\d{4})-(\d{2})-(\d{2})$/)
-  const mb = b.match(/^(\d{4})-(\d{2})-(\d{2})$/)
-  if (!ma || !mb) return 0
-  const utcA = Date.UTC(Number(ma[1]), Number(ma[2]) - 1, Number(ma[3]))
-  const utcB = Date.UTC(Number(mb[1]), Number(mb[2]) - 1, Number(mb[3]))
-  return Math.round((utcA - utcB) / 86400000)
+function daysBetweenUTC(fromDateOnly: string, toDateOnly: string) {
+  const from = new Date(`${fromDateOnly}T00:00:00Z`).getTime()
+  const to = new Date(`${toDateOnly}T00:00:00Z`).getTime()
+  return Math.floor((to - from) / 86400000)
 }
 
-const STAFF_CAN_SCAN = ['reception', 'admin', 'super_admin', 'coach', 'assistant_coach'] as const
-const STAFF_ALWAYS_VALID = ['reception', 'admin', 'super_admin', 'coach', 'assistant_coach'] as const
-type Role = (typeof STAFF_CAN_SCAN)[number] | 'member'
-
-// Helpers pour réponses cohérentes avec champ "message"
-function bad(status: number, message: string, extra: Record<string, any> = {}) {
-  return noStore(NextResponse.json({ ok: false, message, ...extra }, { status }))
-}
-function good(payload: Record<string, any>) {
-  return noStore(NextResponse.json({ ok: true, ...payload }))
+function makeAdminClient() {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY
+  if (!url || !key) return null
+  return createClient(url, key, { auth: { persistSession: false } })
 }
 
 export async function POST(req: Request) {
+  const admin = makeAdminClient()
+  if (!admin) {
+    return json(500, { ok: false, message: 'Server missing service key' })
+  }
+
+  let body: ScanBody = {}
   try {
-    // 0) Auth opérateur avec route client (respecte la session)
-    const route = createSupabaseServerActionClient()
-    const { data: auth, error: authErr } = await route.auth.getUser()
-    if (authErr) return bad(401, 'AUTH_ERROR: ' + authErr.message)
-    const user = auth.user
-    if (!user) return bad(401, 'NOT_AUTHENTICATED')
+    body = (await req.json()) as ScanBody
+  } catch {
+    body = {}
+  }
 
-    const { data: me, error: meErr } = await route
-      .from('profiles')
-      .select('role')
-      .eq('user_id', user.id)
-      .maybeSingle<{ role: string | null }>()
-    if (meErr) return bad(500, 'PROFILE_LOOKUP_FAILED: ' + meErr.message)
+  const memberId = parseMemberIdFromCode(body.code || '')
+  if (!memberId) {
+    return json(400, { ok: false, message: 'Invalid QR code' })
+  }
 
-    const myRole = (me?.role ?? 'member') as Role
-    if (!STAFF_CAN_SCAN.includes(myRole as any)) {
-      return bad(403, 'FORBIDDEN')
-    }
+  const today = todayDateOnlyUTC()
 
-    // 1) Lecture du code
-    const body = (await req.json().catch(() => ({}))) as Body
-    const raw = (body?.code || '').trim()
-    if (!raw) return bad(400, 'MISSING_QR')
+  // Try TIME-based subscription first
+  const { data: timeSub, error: timeErr } = await admin
+    .from('subscriptions')
+    .select('id, member_id, subscription_type, status, start_date, end_date, plan, frozen_until')
+    .eq('member_id', memberId)
+    .eq('subscription_type', 'time')
+    .eq('status', 'active')
+    .lte('start_date', today)
+    .gte('end_date', today)
+    .order('end_date', { ascending: false })
+    .limit(1)
+    .maybeSingle<{
+      id: string
+      member_id: string
+      subscription_type: 'time'
+      status: 'active'
+      start_date: string
+      end_date: string
+      plan: string | null
+      frozen_until: string | null
+    }>()
 
-    // 2) Client admin pour bypass RLS sur le workflow de scan
-    const admin = createSupabaseAdmin(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.SUPABASE_SERVICE_ROLE_KEY! // ⚠️ Service Role, serveur uniquement
-    )
+  if (timeErr) {
+    return json(500, { ok: false, message: timeErr.message })
+  }
 
-    // 3) Identifier le membre scanné (uuid direct ou lookup par qr_code)
-    let member_id = extractMemberId(raw)
-    if (!member_id) {
-      const { data: prof, error: qrErr } = await admin
-        .from('profiles')
-        .select('user_id')
-        .eq('qr_code', raw)
-        .maybeSingle<{ user_id: string }>()
-      if (qrErr) return bad(500, 'QR_LOOKUP_FAILED: ' + qrErr.message)
-      member_id = prof?.user_id ?? null
-    }
-    if (!member_id) return bad(400, 'INVALID_QR')
+  if (timeSub) {
+    const isFrozen = !!(timeSub.frozen_until && today < timeSub.frozen_until)
+    if (isFrozen) {
+      const freezeDays = Math.max(0, daysBetweenUTC(today, timeSub.frozen_until as string))
 
-    const today = todayIsoDate()
+      // Record attendance as invalid (frozen)
+      await admin
+        .from('attendance')
+        .insert({ member_id: memberId, date: today, valid: false, from_sessions: false, subscription_id: timeSub.id })
 
-    // 4) Rôle de la personne SCANNÉE
-    const { data: scannedProf, error: scannedErr } = await admin
-      .from('profiles')
-      .select('role')
-      .eq('user_id', member_id)
-      .maybeSingle<{ role: string | null }>()
-    if (scannedErr) return bad(500, 'SCANNED_PROFILE_LOOKUP_FAILED: ' + scannedErr.message)
-
-    const scannedRole = (scannedProf?.role ?? 'member') as Role
-
-    // 5) Staff scanné => toujours valid
-    if (STAFF_ALWAYS_VALID.includes(scannedRole as any)) {
-      const { error: insStaffErr } = await admin.from('attendance').insert({
-        member_id,
-        date: today,                 // si ta colonne a un DEFAULT, tu peux l’omettre
-        valid: true,
-        subscription_id: null,
-        source: 'kiosk_staff',
-        scanned_by: user.id,         // si tu as cette colonne
+      return json(200, {
+        ok: true,
+        valid: false,
+        frozen: true,
+        frozen_until: timeSub.frozen_until,
+        freeze_days_remaining: freezeDays,
+        member_id: memberId,
+        subscription_id: timeSub.id,
+        message: 'Subscription is frozen',
       })
-      if (insStaffErr) return bad(500, 'ATTENDANCE_INSERT_ERROR: ' + insStaffErr.message)
+    }
 
-      return good({
+    const daysRemaining = Math.max(0, daysBetweenUTC(today, timeSub.end_date))
+
+    // Record attendance valid
+    await admin
+      .from('attendance')
+      .insert({ member_id: memberId, date: today, valid: true, from_sessions: false, subscription_id: timeSub.id })
+
+    return json(200, {
+      ok: true,
+      valid: true,
+      member_id: memberId,
+      subscription_id: timeSub.id,
+      days_remaining: daysRemaining,
+      expires_on: timeSub.end_date,
+      message: 'Active subscription',
+    })
+  }
+
+  // Otherwise check SESSIONS-based subscription
+  const { data: sessSub, error: sessErr } = await admin
+    .from('subscriptions')
+    .select('id, member_id, subscription_type, status, sessions_total, sessions_used, frozen_until')
+    .eq('member_id', memberId)
+    .eq('subscription_type', 'sessions')
+    .eq('status', 'active')
+    .order('paid_at', { ascending: false })
+    .limit(1)
+    .maybeSingle<{
+      id: string
+      member_id: string
+      subscription_type: 'sessions'
+      status: 'active'
+      sessions_total: number | null
+      sessions_used: number | null
+      frozen_until: string | null
+    }>()
+
+  if (sessErr) {
+    return json(500, { ok: false, message: sessErr.message })
+  }
+
+  if (sessSub) {
+    const remaining = Math.max((sessSub.sessions_total ?? 0) - (sessSub.sessions_used ?? 0), 0)
+
+    const isFrozen = !!(sessSub.frozen_until && today < sessSub.frozen_until)
+    if (isFrozen) {
+      const freezeDays = Math.max(0, daysBetweenUTC(today, sessSub.frozen_until as string))
+
+      await admin
+        .from('attendance')
+        .insert({ member_id: memberId, date: today, valid: false, from_sessions: true, subscription_id: sessSub.id })
+
+      return json(200, {
+        ok: true,
+        valid: false,
+        frozen: true,
+        frozen_until: sessSub.frozen_until,
+        freeze_days_remaining: freezeDays,
+        member_id: memberId,
+        subscription_id: sessSub.id,
+        message: 'Subscription is frozen',
+      })
+    }
+
+    if (remaining > 0) {
+      // Decrement sessions_used and record attendance
+      await admin
+        .from('subscriptions')
+        .update({ sessions_used: (sessSub.sessions_used ?? 0) + 1 })
+        .eq('id', sessSub.id)
+
+      await admin
+        .from('attendance')
+        .insert({ member_id: memberId, date: today, valid: true, from_sessions: true, subscription_id: sessSub.id })
+
+      return json(200, {
+        ok: true,
         valid: true,
-        member_id,
-        subscription_id: null,
+        member_id: memberId,
+        subscription_id: sessSub.id,
         days_remaining: null,
         expires_on: null,
-        expired_days: null,
-        expired_on: null,
-        message: 'OK: STAFF ACCESS',
+        message: `Sessions remaining: ${remaining - 1}`,
       })
     }
 
-    // 6) Vérifier abonnements actifs (admin → bypass RLS)
-    const { data: subs, error: subsErr } = await admin
-      .from('subscriptions')
-      .select('id, subscription_type, plan, status, start_date, end_date, sessions_total, sessions_used')
-      .eq('member_id', member_id)
-      .eq('status', 'active')
-      .lte('start_date', today)
-      .gte('end_date', today)
-      .order('end_date', { ascending: false })
-      .limit(50)
-    if (subsErr) return bad(500, 'SUBSCRIPTION_LOOKUP_FAILED: ' + subsErr.message)
+    // sessions exhausted
+    await admin
+      .from('attendance')
+      .insert({ member_id: memberId, date: today, valid: false, from_sessions: true, subscription_id: sessSub.id })
 
-    // 7) Choisir l’abonnement prioritaire
-    let chosen: any = null
-    let useSessions = false
-
-    for (const s of subs || []) {
-      if (s.subscription_type === 'time') { chosen = s; break }
-    }
-    if (!chosen) {
-      for (const s of subs || []) {
-        if (s.subscription_type === 'sessions') {
-          const total = Number(s.sessions_total || 0)
-          const used = Number(s.sessions_used || 0)
-          if (total - used > 0) { chosen = s; useSessions = true; break }
-        }
-      }
-    }
-
-    let valid = !!chosen
-    let subscription_id: string | null = chosen?.id ?? null
-
-    // compute date-based info for UI (recomputed after any session consumption)
-    const expires_on: string | null = (chosen?.end_date ?? null) as any
-    let days_remaining: number | null = null
-
-    // 8) Consommer 1 séance si pack de sessions (avant l’insert attendance)
-    if (valid && useSessions && chosen) {
-      const nextUsed = Number(chosen.sessions_used || 0) + 1
-      const total = Number(chosen.sessions_total || 0)
-
-      const { data: urow, error: incErr } = await admin
-        .from('subscriptions')
-        .update({ sessions_used: nextUsed })
-        .eq('id', chosen.id)
-        .filter('sessions_used', 'lt', total) // garde DB
-        .select('id')
-        .maybeSingle<{ id: string }>()
-      if (incErr || !urow?.id) {
-        valid = false
-        subscription_id = null
-      }
-    }
-
-    // Final days_remaining (based on final validity)
-    days_remaining = valid && expires_on ? Math.max(0, diffDays(expires_on, today)) : null
-
-    // If invalid, best-effort: find the most recent subscription end_date to compute "expired since"
-    let expired_on: string | null = null
-    let expired_days: number | null = null
-    if (!valid) {
-      const { data: lastSub, error: lastErr } = await admin
-        .from('subscriptions')
-        .select('end_date')
-        .eq('member_id', member_id)
-        .not('end_date', 'is', null)
-        .order('end_date', { ascending: false })
-        .limit(1)
-        .maybeSingle<{ end_date: string | null }>()
-      if (!lastErr) {
-        expired_on = lastSub?.end_date ?? null
-        if (expired_on && expired_on < today) {
-          expired_days = Math.max(0, diffDays(today, expired_on))
-        }
-      }
-    }
-
-    // 9) Insérer l’assiduité
-    const { error: insErr } = await admin.from('attendance').insert({
-      member_id,
-      date: today,
-      valid,
-      subscription_id,
-      source: 'kiosk',
-      scanned_by: user.id, // si dispo
+    return json(200, {
+      ok: true,
+      valid: false,
+      member_id: memberId,
+      subscription_id: sessSub.id,
+      expired_days: 0,
+      expired_on: today,
+      message: 'No sessions left',
     })
-    if (insErr) return bad(500, 'ATTENDANCE_INSERT_ERROR: ' + insErr.message)
-
-    // 10) Réponse
-    return good({
-      valid,
-      member_id,
-      subscription_id,
-      days_remaining,
-      expires_on,
-      expired_days,
-      expired_on,
-      message: valid ? 'OK: subscription valid' : 'No active subscription for today',
-    })
-  } catch (e: any) {
-    return bad(500, e?.message || 'SERVER_ERROR')
   }
+
+  // No active subscription found: compute most recent expired info
+  const { data: lastSub } = await admin
+    .from('subscriptions')
+    .select('end_date')
+    .eq('member_id', memberId)
+    .order('end_date', { ascending: false })
+    .limit(1)
+    .maybeSingle<{ end_date: string | null }>()
+
+  const expiredOn = lastSub?.end_date || today
+  const expiredDays = Math.max(0, daysBetweenUTC(expiredOn, today))
+
+  await admin
+    .from('attendance')
+    .insert({ member_id: memberId, date: today, valid: false, from_sessions: false, subscription_id: null })
+
+  return json(200, {
+    ok: true,
+    valid: false,
+    member_id: memberId,
+    subscription_id: null,
+    expired_days: expiredDays,
+    expired_on: expiredOn,
+    message: 'No active subscription',
+  })
 }

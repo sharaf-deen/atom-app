@@ -129,9 +129,6 @@ export default function ScheduleEditor({ initialContent, canEdit, updatedAt }: P
         <div className="flex items-center justify-between gap-3">
           <div>
             <h2 className="text-base font-semibold">Weekly Schedule</h2>
-            <p className="mt-1 text-sm text-[hsl(var(--muted))]">
-              {canEdit ? 'Visible to all users. Editable only by super admin.' : 'Visible to all users.'}
-            </p>
           </div>
 
           <div className="flex items-center gap-2">
