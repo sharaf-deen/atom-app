@@ -487,6 +487,69 @@ export default function ScheduleEditor({ initialContent, canEdit, updatedAt }: P
     return { beginners, intermediate, openMat, advanced, note }
   }, [adultBlocksAll])
 
+  // Adults: ensure Advanced and Open Mat render as separate sections.
+  // Depending on how the schedule text is authored, the “Advanced – Competition Team” part can
+  // appear either as its own block or as a sub-section inside the Open Mat block.
+  const adultsView = useMemo(() => {
+    const beginners = adultsStructured.beginners
+    const intermediate = adultsStructured.intermediate
+
+    let openMatItems = adultsStructured.openMat?.items ?? []
+
+    // Advanced can be its own block...
+    let advancedItems = adultsStructured.advanced?.items ?? []
+    let advancedDescription = adultsStructured.advanced?.description
+
+    const defaultAdvancedDescription =
+      'For athletes preparing for competitions – you must ask the head coach before joining. Advanced sessions are not accessible if you do not attend the Intermediate classes'
+
+    // ...or it can be embedded inside Open Mat (as plain lines).
+    if (!adultsStructured.advanced && adultsStructured.openMat) {
+      const items = adultsStructured.openMat.items
+      const idx = items.findIndex((it) => /^advanced\b/i.test(it.raw.replace(/–/g, '-').trim()))
+      if (idx >= 0) {
+        const before = items.slice(0, idx)
+        let after = items.slice(idx + 1)
+
+        // Try to capture the long description line right after the Advanced header.
+        if (after.length) {
+          const first = after[0]
+          const isTime = Boolean(first.left && first.time)
+          const looksLikeDesc = !isTime && !hasDigit(first.raw) && first.raw.length > 50
+          if (looksLikeDesc) {
+            advancedDescription = first.raw
+            after = after.slice(1)
+          }
+        }
+
+        advancedItems = after
+        openMatItems = before
+      }
+    }
+
+    // If Advanced exists but the parser didn't set description, try to infer it from the first non-time item.
+    if (adultsStructured.advanced && !advancedDescription && advancedItems.length) {
+      const first = advancedItems[0]
+      const isTime = Boolean(first.left && first.time)
+      const looksLikeDesc = !isTime && !hasDigit(first.raw) && first.raw.length > 50
+      if (looksLikeDesc) {
+        advancedDescription = first.raw
+        advancedItems = advancedItems.slice(1)
+      }
+    }
+
+    // Remove any accidental “Advanced …” label that may still be inside Open Mat lines.
+    openMatItems = openMatItems.filter((it) => !/^advanced\b/i.test(it.raw.replace(/–/g, '-').trim()))
+
+    return {
+      beginners,
+      intermediate,
+      openMatItems,
+      advancedItems,
+      advancedDescription: advancedDescription || (advancedItems.length ? defaultAdvancedDescription : null),
+    }
+  }, [adultsStructured])
+
   const kidsStructured = useMemo(() => {
     const baby = findFirstBlock(kidsBlocksAll, /^Baby\s+3\s*[-–]\s*5\s+years$/i)
 
@@ -643,54 +706,45 @@ export default function ScheduleEditor({ initialContent, canEdit, updatedAt }: P
                 <section className="space-y-6">
                   <SectionTitle>Adults</SectionTitle>
 
-                  {adultsStructured.beginners || adultsStructured.intermediate || adultsStructured.openMat ? (
-                    <div className="grid gap-6 md:grid-cols-2">
-                      {adultsStructured.beginners ? (
-                        <BlockCard
-                          title="Beginners"
-                          subtitle="White belts & anyone who wants to build strong basics"
-                        >
-                          {adultsStructured.beginners.items.map((it, i) => (
-                            <ItemLine key={i} it={it} />
-                          ))}
-                        </BlockCard>
-                      ) : null}
-
-                      {adultsStructured.intermediate ? (
-                        <BlockCard
-                          title="Intermediate"
-                          subtitle="Students with solid basics, usually from blue belt and above"
-                        >
-                          {adultsStructured.intermediate.items.map((it, i) => (
-                            <ItemLine key={i} it={it} />
-                          ))}
-                        </BlockCard>
-                      ) : null}
-
-                      {adultsStructured.openMat ? (
-                        <div className="md:col-span-2">
-                          <BlockCard title="Open Mat" subtitle="All levels">
-                            {adultsStructured.openMat.items.map((it, i) => (
+                  {adultsView.beginners || adultsView.intermediate || adultsView.openMatItems.length || adultsView.advancedItems.length ? (
+                    <div className="space-y-6">
+                      <div className="grid gap-6 md:grid-cols-2">
+                        {adultsView.beginners ? (
+                          <BlockCard title="Beginners" subtitle="White belts & anyone who wants to build strong basics">
+                            {adultsView.beginners.items.map((it, i) => (
                               <ItemLine key={i} it={it} />
                             ))}
-
-                            {adultsStructured.advanced ? (
-                              <div className="mt-4 border-t border-neutral-200 pt-4">
-                                <div className="text-base font-extrabold tracking-tight text-neutral-900">
-                                  {adultsStructured.advanced.title.replace(/\s-\s/g, ' – ')}
-                                </div>
-                                {adultsStructured.advanced.description ? (
-                                  <div className="mt-2 text-sm text-neutral-600">{adultsStructured.advanced.description}</div>
-                                ) : null}
-                                <div className="mt-3 space-y-1.5">
-                                  {adultsStructured.advanced.items.map((it, i) => (
-                                    <ItemLine key={i} it={it} />
-                                  ))}
-                                </div>
-                              </div>
-                            ) : null}
                           </BlockCard>
-                        </div>
+                        ) : null}
+
+                        {adultsView.intermediate ? (
+                          <BlockCard title="Intermediate" subtitle="Students with solid basics, usually from blue belt and above">
+                            {adultsView.intermediate.items.map((it, i) => (
+                              <ItemLine key={i} it={it} />
+                            ))}
+                          </BlockCard>
+                        ) : null}
+                      </div>
+
+                      {adultsView.advancedItems.length ? (
+                        <BlockCard title="Advanced" subtitle="Competition Team">
+                          {adultsView.advancedDescription ? (
+                            <div className="text-sm text-neutral-600">{adultsView.advancedDescription}</div>
+                          ) : null}
+                          <div className="space-y-1.5">
+                            {adultsView.advancedItems.map((it, i) => (
+                              <ItemLine key={i} it={it} />
+                            ))}
+                          </div>
+                        </BlockCard>
+                      ) : null}
+
+                      {adultsView.openMatItems.length ? (
+                        <BlockCard title="Open Mat" subtitle="All levels">
+                          {adultsView.openMatItems.map((it, i) => (
+                            <ItemLine key={i} it={it} />
+                          ))}
+                        </BlockCard>
                       ) : null}
                     </div>
                   ) : adultBlocksAll.length ? (
