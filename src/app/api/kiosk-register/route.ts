@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { requireStaff } from '@/lib/apiAuth';
 import { createClient } from '@supabase/supabase-js';
 
 const admin = createClient(
@@ -8,6 +9,9 @@ const admin = createClient(
 );
 
 export async function POST(req: Request) {
+  const gate = await requireStaff()
+  if (!gate.ok) return gate.res
+
   try {
     const { first_name, last_name, email, phone } = await req.json();
 

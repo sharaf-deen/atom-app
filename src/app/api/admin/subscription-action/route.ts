@@ -3,6 +3,7 @@ export const runtime = 'nodejs';
 
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
+import { requireAdmin } from '@/lib/apiAuth'
 
 type Action = 'renew' | 'pause' | 'resume' | 'add_dropin';
 type Plan = 'monthly' | 'quarterly' | 'yearly';
@@ -65,6 +66,9 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
+  const gate = await requireAdmin()
+  if (!gate.ok) return gate.res
+
   try {
     const {
       user_id,
@@ -130,7 +134,7 @@ export async function POST(req: NextRequest) {
           .single();
         if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 400 });
 
-        await writeAudit(admin, actor_user_id ?? null, user_id, 'renew', {
+        await writeAudit(admin, gate.user.id, user_id, 'renew', {
           mode: 'insert',
           plan: usePlan,
           start_date: start,
@@ -165,7 +169,7 @@ export async function POST(req: NextRequest) {
         .eq('id', sub.id);
       if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 400 });
 
-      await writeAudit(admin, actor_user_id ?? null, user_id, 'renew', {
+      await writeAudit(admin, gate.user.id, user_id, 'renew', {
         mode: 'extend',
         plan: usePlan,
         base_from: base,
@@ -195,7 +199,7 @@ export async function POST(req: NextRequest) {
       const { error } = await admin.from('subscriptions').update({ status: 'suspended' }).eq('id', sub.id);
       if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 400 });
 
-      await writeAudit(admin, actor_user_id ?? null, user_id, 'pause', { sub_id: sub.id });
+      await writeAudit(admin, gate.user.id, user_id, 'pause', { sub_id: sub.id });
       return NextResponse.json({ ok: true, action, status: 'suspended' });
     }
 
@@ -206,7 +210,7 @@ export async function POST(req: NextRequest) {
       const { error } = await admin.from('subscriptions').update({ status: 'active' }).eq('id', sub.id);
       if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 400 });
 
-      await writeAudit(admin, actor_user_id ?? null, user_id, 'resume', { sub_id: sub.id });
+      await writeAudit(admin, gate.user.id, user_id, 'resume', { sub_id: sub.id });
       return NextResponse.json({ ok: true, action, status: 'active' });
     }
 
@@ -230,7 +234,7 @@ export async function POST(req: NextRequest) {
           .eq('id', sub.id);
         if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 400 });
 
-        await writeAudit(admin, actor_user_id ?? null, user_id, 'add_dropin', {
+        await writeAudit(admin, gate.user.id, user_id, 'add_dropin', {
           mode: 'increment',
           add,
           new_remaining: newRemaining,
@@ -267,7 +271,7 @@ export async function POST(req: NextRequest) {
         .single();
       if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 400 });
 
-      await writeAudit(admin, actor_user_id ?? null, user_id, 'add_dropin', {
+      await writeAudit(admin, gate.user.id, user_id, 'add_dropin', {
         mode: 'insert',
         add,
         start_date: dropStart,

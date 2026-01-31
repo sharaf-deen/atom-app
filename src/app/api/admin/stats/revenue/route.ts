@@ -1,10 +1,11 @@
 // src/app/api/admin/stats/revenue/route.ts
 export const runtime = 'nodejs'
-export const dynamic = 'force-dynamic'   // pas de cache statique côté Next
-export const revalidate = 0              // pas d'ISR
+export const dynamic = 'force-dynamic' // no Next static cache
+export const revalidate = 0 // no ISR
 
 import { NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
+import { requireAdmin } from '@/lib/apiAuth'
 
 type Plan = '1m' | '3m' | '6m' | '12m' | 'sessions'
 
@@ -26,6 +27,10 @@ function addDays(dateOnly: string, days: number) {
 }
 
 export async function GET(req: Request) {
+  // 🔒 PROTECTION: service role endpoint must not be public
+  const gate = await requireAdmin()
+  if (!gate.ok) return noStore(gate.res)
+
   try {
     const url = process.env.NEXT_PUBLIC_SUPABASE_URL!
     const service = process.env.SUPABASE_SERVICE_ROLE_KEY!
@@ -33,13 +38,15 @@ export async function GET(req: Request) {
       return noStore(NextResponse.json({ ok: false, error: 'Server env missing' }, { status: 500 }))
     }
 
-    const admin = createClient(url, service)
+    const admin = createClient(url, service, {
+      auth: { persistSession: false, autoRefreshToken: false },
+    })
 
     const { searchParams } = new URL(req.url)
     const type = (searchParams.get('type') ?? 'kpi').toLowerCase()
 
     // ------------------------------------------------------------------
-    // BRANCHE KPI (par défaut) — conserve tes RPC existantes
+    // KPI (par défaut) — conserve tes RPC existantes
     // ------------------------------------------------------------------
     if (type === 'kpi') {
       // RPCs (assure-toi d’avoir créé ces fonctions SQL côté Supabase)
@@ -62,10 +69,10 @@ export async function GET(req: Request) {
           expiring_in_7_days: Number(e?.[0]?.count ?? 0),
           todays_checkins: Number(c?.[0]?.count ?? 0),
           active_by_type: {
-            monthly: Number(types.monthly ?? 0),
-            quarterly: Number(types.quarterly ?? 0),
-            yearly: Number(types.yearly ?? 0),
-            dropin: Number(types.dropin ?? 0),
+            monthly: Number((types as any).monthly ?? 0),
+            quarterly: Number((types as any).quarterly ?? 0),
+            yearly: Number((types as any).yearly ?? 0),
+            dropin: Number((types as any).dropin ?? 0),
           },
         },
       })
@@ -73,7 +80,7 @@ export async function GET(req: Request) {
     }
 
     // ------------------------------------------------------------------
-    // BRANCHE REVENUE — agrège depuis subscriptions (pas besoin de RPC)
+    // REVENUE — agrège depuis subscriptions
     //  - query params: ?type=revenue&from=YYYY-MM-DD&to=YYYY-MM-DD
     //  - défaut: derniers 30 jours (inclus)
     // ------------------------------------------------------------------
@@ -143,15 +150,13 @@ export async function GET(req: Request) {
       return noStore(resp)
     }
 
-    // Type inconnu
-    return noStore(NextResponse.json(
-      { ok: false, error: 'INVALID_TYPE', hint: 'Use ?type=kpi or ?type=revenue' },
-      { status: 400 },
-    ))
+    return noStore(
+      NextResponse.json(
+        { ok: false, error: 'INVALID_TYPE', hint: 'Use ?type=kpi or ?type=revenue' },
+        { status: 400 },
+      ),
+    )
   } catch (err: any) {
-    return noStore(NextResponse.json(
-      { ok: false, error: err?.message ?? 'Server error' },
-      { status: 500 },
-    ))
+    return noStore(NextResponse.json({ ok: false, error: err?.message ?? 'Server error' }, { status: 500 }))
   }
 }

@@ -1,9 +1,15 @@
-export const runtime = 'nodejs';
-import { NextResponse } from 'next/server';
+export const runtime = 'nodejs'
 
-// Petit alias qui redirige vers /api/admin/stats côté client
-export async function GET() {
-  // On pourrait aussi copier la logique de /api/admin/stats ici,
-  // mais un alias simple suffit pour ton MVP.
-  return NextResponse.redirect(new URL('/api/admin/stats', 'http://localhost:3000'));
+import { NextResponse } from 'next/server'
+import { requireAdmin } from '@/lib/apiAuth'
+
+// Petit alias: /api/admin/kpis → /api/admin/stats/revenue?type=kpi
+export async function GET(req: Request) {
+  const gate = await requireAdmin()
+  if (!gate.ok) return gate.res
+
+  const url = new URL(req.url)
+  url.pathname = '/api/admin/stats/revenue'
+  url.searchParams.set('type', 'kpi')
+  return NextResponse.redirect(url)
 }

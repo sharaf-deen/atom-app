@@ -1,8 +1,12 @@
 export const runtime = 'nodejs';
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { requireAdmin } from '@/lib/apiAuth'
 
 export async function POST(req: NextRequest) {
+  const gate = await requireAdmin()
+  if (!gate.ok) return gate.res
+
   const { user_id, plan_type, remaining_classes, start_date, end_date } = await req.json();
 
   if (!user_id || !plan_type) {

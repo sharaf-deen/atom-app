@@ -4,6 +4,7 @@ export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
 import { NextResponse } from 'next/server'
+import { requireUser } from '@/lib/apiAuth'
 import { createClient } from '@supabase/supabase-js'
 
 type ScanBody = { code?: string }
@@ -57,6 +58,15 @@ function makeAdminClient() {
 }
 
 export async function POST(req: Request) {
+  // 🔒 Auth gate (reception/admin only)
+  const gate = await requireUser()
+  if (!gate.ok) return json(401, { ok: false, message: 'NOT_AUTHENTICATED' })
+  const role = gate.user.role
+  if (!(role === 'reception' || role === 'admin' || role === 'super_admin')) {
+    return json(403, { ok: false, message: 'FORBIDDEN' })
+  }
+
+
   const admin = makeAdminClient()
   if (!admin) {
     return json(500, { ok: false, message: 'Server missing service key' })
