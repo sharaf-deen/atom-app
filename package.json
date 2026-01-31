@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "gen:types": "supabase gen types typescript --linked --schema public > src/lib/database.types.ts"
   },
   "dependencies": {
     "@capacitor/android": "^7.4.4",
