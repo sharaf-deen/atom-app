@@ -58,7 +58,7 @@ async function getDisplayName(u: SessionUser): Promise<string> {
   return u.email ?? humanizeRole(u.role)
 }
 
-type IconType = React.ComponentType<{ size?: number; strokeWidth?: number; className?: string }>
+type IconType = React.ComponentType<{ size?: number | string; strokeWidth?: number | string; className?: string }>
 type MenuItem = { label: string; href: string; desc?: string; icon: IconType }
 type Section = { title: string; items: MenuItem[] }
 type GroupedMenuByRole = Record<Role, Section[]>

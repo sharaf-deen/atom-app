@@ -20,7 +20,7 @@ import {
 } from 'lucide-react'
 import type { IconKey, MenuItem } from './AppNav'
 
-const ICONS: Record<IconKey, React.ComponentType<{ size?: number; strokeWidth?: number; className?: string }>> = {
+const ICONS: Record<IconKey, React.ComponentType<{ size?: number | string; strokeWidth?: number | string; className?: string }>> = {
   home: House,
   dashboard: LayoutDashboard,
   bell: Bell,
