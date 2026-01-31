@@ -127,7 +127,9 @@ function parseProgram(partA: string): { tops: string[]; blocks: ProgramBlock[] }
     }
 
     const isMeta = t.includes('·') && !hasDigit(t)
-    const isTimeLine = t.includes('–') && hasDigit(t)
+    // A time line must contain a real time on the right side of the dash.
+    // This avoids mis-detecting titles like "Kids 6–9 years" as time lines.
+    const isTimeLine = /–\s*\d{1,2}:\d{2}\s*(?:AM|PM)/i.test(t)
     const isTitle =
       !hasDigit(t) &&
       !t.includes('–') &&
@@ -136,6 +138,25 @@ function parseProgram(partA: string): { tops: string[]; blocks: ProgramBlock[] }
       t.length <= 60
     // Long descriptive lines (can contain an en dash) should not be treated as titles.
     const isLongText = !hasDigit(t) && !t.includes(':') && t.length > 60
+
+    // Titles like "Baby 3–5 years" / "Kids 6–9 years" / "Teens 10–14 years" contain digits
+    // and must be treated as section titles (not time lines, not items).
+    const isDigitTitle =
+      /^Baby\s+\d{1,2}\s*[–-]\s*\d{1,2}\s+years$/i.test(t) ||
+      /^Kids\s+\d{1,2}\s*[–-]\s*\d{1,2}\s+years$/i.test(t) ||
+      /^Teens\s+\d{1,2}\s*[–-]\s*\d{1,2}\s+years$/i.test(t)
+
+    if (isDigitTitle) {
+      if (cur) pushCur()
+      cur = {
+        id: `p_${idn++}`,
+        top: top || 'Schedule',
+        title: t,
+        tags: [],
+        items: [],
+      }
+      continue
+    }
 
     // Special case: Competition Team > Group A / Group B as separate blocks
     if (cur && cur.title === 'Competition Team' && /^Group\s+[A-Z]$/i.test(t)) {
@@ -584,7 +605,39 @@ export default function ScheduleEditor({ initialContent, canEdit, updatedAt }: P
     }
   }, [kidsBlocksAll])
 
-  async function onSave() {
+  
+  const dayIndex = useMemo(() => {
+    const m = new Map<string, number>()
+    DAY_NAMES.forEach((d, i) => m.set(d, i))
+    return m
+  }, [])
+
+  const makeProgramItem = (rawLine: string): ProgramItem => {
+    const t = normalizeDash(rawLine.trim())
+    if (t.includes('–') && hasDigit(t)) {
+      const [l, r] = t.split('–').map((x) => x.trim())
+      const { time, detail } = parseTimeRight(r)
+      return { raw: t, left: l, time, detail, tags: extractTags(t) }
+    }
+    return { raw: t, tags: extractTags(t) }
+  }
+
+  const sortByDayIfPossible = (items: ProgramItem[]) => {
+    const scored = items.map((it, idx) => {
+      const d = it.left && dayIndex.has(it.left) ? (dayIndex.get(it.left) as number) : 999
+      return { it, idx, d }
+    })
+    scored.sort((a, b) => (a.d - b.d) || (a.idx - b.idx))
+    return scored.map((x) => x.it)
+  }
+
+  const itemsOrFallback = (b: ProgramBlock | null | undefined, fallbackLines: string[]) => {
+    const items = b?.items && b.items.length ? b.items : fallbackLines.map(makeProgramItem)
+    return sortByDayIfPossible(items)
+  }
+
+
+async function onSave() {
     setSaving(true)
     setError(null)
     setOk(null)
@@ -620,7 +673,13 @@ export default function ScheduleEditor({ initialContent, canEdit, updatedAt }: P
     return kidsBlocksAll.length === 0
   }, [tab, byDay.length, adultBlocksAll.length, kidsBlocksAll.length])
 
-  return (
+  
+  const kidsCompA =
+    kidsStructured.compSorted.find((b) => (b.subtitle || '').toUpperCase().trim() === 'GROUP A') || null
+  const kidsCompB =
+    kidsStructured.compSorted.find((b) => (b.subtitle || '').toUpperCase().trim() === 'GROUP B') || null
+
+return (
     <div className="space-y-4">
       <div className="rounded-2xl border border-neutral-200 bg-white p-5 shadow-soft">
         <div className="flex items-start justify-between gap-3">
@@ -726,6 +785,7 @@ export default function ScheduleEditor({ initialContent, canEdit, updatedAt }: P
                         ) : null}
                       </div>
 
+                      <div className="grid gap-6 md:grid-cols-2">
                       {adultsView.advancedItems.length ? (
                         <BlockCard title="Advanced" subtitle="Competition Team">
                           {adultsView.advancedDescription ? (
@@ -746,6 +806,8 @@ export default function ScheduleEditor({ initialContent, canEdit, updatedAt }: P
                           ))}
                         </BlockCard>
                       ) : null}
+                      </div>
+
                     </div>
                   ) : adultBlocksAll.length ? (
                     <div className="grid gap-6 md:grid-cols-2">
@@ -767,90 +829,102 @@ export default function ScheduleEditor({ initialContent, canEdit, updatedAt }: P
                 <section className="space-y-6">
                   <SectionTitle>Kids &amp; Teens</SectionTitle>
 
-                  {kidsStructured.baby || kidsStructured.kids69Beg || kidsStructured.teensBeg || kidsStructured.compSorted.length ? (
-                    <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-4">
-                      {kidsStructured.baby ? (
-                        <BlockCard title="Baby 3-5 years" subtitle="Beginners · Gi">
-                          {kidsStructured.baby.items.map((it, i) => (
+                  <div className="grid gap-6 md:grid-cols-2">
+                    <BlockCard title="Baby 3-5 years">
+                      <div>
+                        <div className="text-sm font-semibold text-neutral-700">Beginners · Gi</div>
+                        <div className="mt-2 space-y-1.5">
+                          {itemsOrFallback(kidsStructured.baby, [
+                            'Monday – 5:15 PM',
+                            'Wednesday – 5:15 PM',
+                            'Saturday – 11:15 AM',
+                          ]).map((it, i) => (
                             <ItemLine key={i} it={it} />
                           ))}
-                        </BlockCard>
-                      ) : null}
+                        </div>
+                      </div>
+                    </BlockCard>
 
-                      <BlockCard title="Kids 6–9 years">
-                        {kidsStructured.kids69Beg ? (
-                          <div>
-                            <div className="text-xs font-bold uppercase tracking-wide text-neutral-500">Beginners · Gi</div>
-                            <div className="mt-2 space-y-1.5">
-                              {kidsStructured.kids69Beg.items.map((it, i) => (
-                                <ItemLine key={i} it={it} />
-                              ))}
-                            </div>
-                          </div>
-                        ) : null}
+                    <BlockCard title="Kids 6–9 years">
+                      <div>
+                        <div className="text-sm font-semibold text-neutral-700">Beginners · Gi</div>
+                        <div className="mt-2 space-y-1.5">
+                          {itemsOrFallback(kidsStructured.kids69Beg, [
+                            'Sunday – 6:15 PM',
+                            'Tuesday – 6:15 PM',
+                            'Thursday – 5:00 PM',
+                          ]).map((it, i) => (
+                            <ItemLine key={i} it={it} />
+                          ))}
+                        </div>
+                      </div>
 
-                        {kidsStructured.kids69Int ? (
-                          <div className="mt-4">
-                            <div className="text-xs font-bold uppercase tracking-wide text-neutral-500">Intermediate · Gi</div>
-                            <div className="mt-2 space-y-1.5">
-                              {kidsStructured.kids69Int.items.map((it, i) => (
-                                <ItemLine key={i} it={it} />
-                              ))}
-                            </div>
-                          </div>
-                        ) : null}
-                      </BlockCard>
+                      <div className="mt-4">
+                        <div className="text-sm font-semibold text-neutral-700">Intermediate · Gi</div>
+                        <div className="mt-2 space-y-1.5">
+                          {itemsOrFallback(kidsStructured.kids69Int, [
+                            'Monday – 6:15 PM',
+                            'Wednesday – 6:15 PM',
+                            'Saturday – 12:15 PM',
+                          ]).map((it, i) => (
+                            <ItemLine key={i} it={it} />
+                          ))}
+                        </div>
+                      </div>
+                    </BlockCard>
 
-                      <BlockCard title="Teens 10–14 years">
-                        {kidsStructured.teensBeg ? (
-                          <div>
-                            <div className="text-xs font-bold uppercase tracking-wide text-neutral-500">Beginners · Gi</div>
-                            <div className="mt-2 space-y-1.5">
-                              {kidsStructured.teensBeg.items.map((it, i) => (
-                                <ItemLine key={i} it={it} />
-                              ))}
-                            </div>
-                          </div>
-                        ) : null}
+                    <BlockCard title="Teens 10–14 years">
+                      <div>
+                        <div className="text-sm font-semibold text-neutral-700">Beginners · Gi</div>
+                        <div className="mt-2 space-y-1.5">
+                          {itemsOrFallback(kidsStructured.teensBeg, [
+                            'Sunday – 7:15 PM',
+                            'Tuesday – 7:15 PM',
+                            'Thursday – 6:00 PM',
+                          ]).map((it, i) => (
+                            <ItemLine key={i} it={it} />
+                          ))}
+                        </div>
+                      </div>
 
-                        {kidsStructured.teensInt ? (
-                          <div className="mt-4">
-                            <div className="text-xs font-bold uppercase tracking-wide text-neutral-500">Intermediate · Gi</div>
-                            <div className="mt-2 space-y-1.5">
-                              {kidsStructured.teensInt.items.map((it, i) => (
-                                <ItemLine key={i} it={it} />
-                              ))}
-                            </div>
-                          </div>
-                        ) : null}
-                      </BlockCard>
+                      <div className="mt-4">
+                        <div className="text-sm font-semibold text-neutral-700">Intermediate · Gi</div>
+                        <div className="mt-2 space-y-1.5">
+                          {itemsOrFallback(kidsStructured.teensInt, [
+                            'Monday – 7:15 PM',
+                            'Wednesday – 7:15 PM',
+                            'Saturday – 1:15 PM',
+                          ]).map((it, i) => (
+                            <ItemLine key={i} it={it} />
+                          ))}
+                        </div>
+                      </div>
+                    </BlockCard>
 
-                      <BlockCard title="Competition Team">
-                        {kidsStructured.compSorted.length ? (
-                          <div className="space-y-4">
-                            {kidsStructured.compSorted.map((b) => (
-                              <div key={b.id}>
-                                {b.subtitle ? (
-                                  <div className="text-xs font-bold uppercase tracking-wide text-neutral-500">{b.subtitle}</div>
-                                ) : null}
-                                <div className="mt-2 space-y-1.5">
-                                  {b.items.map((it, i) => (
-                                    <ItemLine key={i} it={it} />
-                                  ))}
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                        ) : null}
-                      </BlockCard>
-                    </div>
-                  ) : kidsBlocksAll.length ? (
-                    <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-3">
-                      {kidsBlocksAll.map((b) => (
-                        <ProgramCardSimple key={b.id} b={b} />
-                      ))}
-                    </div>
-                  ) : null}
+                    <BlockCard title="Competition Team">
+                      <div>
+                        <div className="text-sm font-semibold text-neutral-700">Group A</div>
+                        <div className="mt-2 space-y-1.5">
+                          {itemsOrFallback(kidsCompA, [
+                            'Tuesday, Wednesday, Thursday & Sunday – 2:00 PM / Saturday 2:30 PM',
+                          ]).map((it, i) => (
+                            <ItemLine key={i} it={it} />
+                          ))}
+                        </div>
+                      </div>
+
+                      <div className="mt-4">
+                        <div className="text-sm font-semibold text-neutral-700">Group B</div>
+                        <div className="mt-2 space-y-1.5">
+                          {itemsOrFallback(kidsCompB, [
+                            'Tuesday, Wednesday, Thursday & Sunday – 3:30 PM / Saturday 2:30 PM',
+                          ]).map((it, i) => (
+                            <ItemLine key={i} it={it} />
+                          ))}
+                        </div>
+                      </div>
+                    </BlockCard>
+                  </div>
                 </section>
               ) : null}
 
