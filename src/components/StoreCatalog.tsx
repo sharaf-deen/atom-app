@@ -1,7 +1,7 @@
 // src/components/StoreCatalog.tsx
 'use client'
 
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { formatCurrency, toPriceString, parsePriceToCents } from '@/lib/money'
 import Button from '@/components/ui/Button'
@@ -42,6 +42,7 @@ export default function StoreCatalog({
   const [editingId, setEditingId] = useState<string | null>(null)
   const [edit, setEdit] = useState<Partial<Product>>({})
   const [editPrice, setEditPrice] = useState<string>('')
+
   const [busy, setBusy] = useState(false) // mutations
   const [loading, setLoading] = useState(false) // list fetch
 
@@ -57,7 +58,17 @@ export default function StoreCatalog({
   const [total, setTotal] = useState(0)
   const totalPages = useMemo(() => Math.max(1, Math.ceil(total / PER_PAGE)), [total])
 
+  // Anti race-condition (si plusieurs loads en parallèle)
+  const reqSeq = useRef(0)
+
+  // Auto-clear status
   const clearTimer = useRef<number | null>(null)
+  useEffect(() => {
+    return () => {
+      if (clearTimer.current) window.clearTimeout(clearTimer.current)
+    }
+  }, [])
+
   function flash(kind: StatusKind, msg: string, autoMs = 2500) {
     if (clearTimer.current) window.clearTimeout(clearTimer.current)
     setStatus({ kind, msg })
@@ -68,66 +79,75 @@ export default function StoreCatalog({
     }
   }
 
-  async function load(p = page) {
-    setLoading(true)
-    setStatus((s) => (s.kind === 'error' ? { kind: '', msg: '' } : s))
+  const loadPage = useCallback(
+    async (p: number) => {
+      const myReq = ++reqSeq.current
+      setLoading(true)
+      setStatus((s) => (s.kind === 'error' ? { kind: '', msg: '' } : s))
 
-    try {
-      const params = new URLSearchParams()
-      params.set('page', String(p))
-      params.set('limit', String(PER_PAGE))
+      try {
+        const params = new URLSearchParams()
+        params.set('page', String(p))
+        params.set('limit', String(PER_PAGE))
 
-      // ✅ IMPORTANT:
-      // - si canManage (super_admin), on envoie TOUJOURS active=all|1|0
-      // - si pas canManage, on ne met rien => API default active=1
-      if (canManage) params.set('active', active)
+        // ✅ IMPORTANT:
+        // - si canManage (super_admin), on envoie TOUJOURS active=all|1|0
+        // - si pas canManage, on ne met rien => API default active=1
+        if (canManage) params.set('active', active)
 
-      if (cat !== 'all') params.set('category', cat)
-      if (qApplied.trim()) params.set('q', qApplied.trim())
+        if (cat !== 'all') params.set('category', cat)
+        if (qApplied.trim()) params.set('q', qApplied.trim())
 
-      const r = await fetch(`/api/store/products/list?${params.toString()}`, {
-        cache: 'no-store',
-        credentials: 'include',
-      })
-      const j = await r.json().catch(() => ({}))
-      if (!r.ok || !j?.ok) {
-        const msg = j?.error || j?.details || 'Failed to load products'
+        const r = await fetch(`/api/store/products/list?${params.toString()}`, {
+          cache: 'no-store',
+          credentials: 'include',
+        })
+
+        const j = await r.json().catch(() => ({}))
+        if (myReq !== reqSeq.current) return // ignore réponse obsolète
+
+        if (!r.ok || !j?.ok) {
+          const msg = j?.error || j?.details || 'Failed to load products'
+          setItems([])
+          setTotal(0)
+          setPage(1)
+          setStatus({ kind: 'error', msg })
+          return
+        }
+
+        const itemsRaw: Product[] = Array.isArray(j.items) ? j.items : []
+        const totalFromApi = Number.isFinite(Number(j?.total)) ? Number(j.total) : 0
+        const nextPage = Number.isFinite(Number(j?.page)) ? Number(j.page) : p
+
+        setItems(itemsRaw)
+        setTotal(totalFromApi)
+        setPage(nextPage)
+      } catch (e: any) {
+        if (myReq !== reqSeq.current) return
+        const msg = String(e?.message || e)
         setItems([])
         setTotal(0)
         setPage(1)
         setStatus({ kind: 'error', msg })
-        return
+      } finally {
+        if (myReq === reqSeq.current) setLoading(false)
       }
+    },
+    [canManage, active, cat, qApplied]
+  )
 
-      const itemsRaw: Product[] = Array.isArray(j.items) ? j.items : []
-      const totalFromApi = Number.isFinite(Number(j?.total)) ? Number(j.total) : 0
-      const nextPage = Number.isFinite(Number(j?.page)) ? Number(j.page) : p
-
-      setItems(itemsRaw)
-      setTotal(totalFromApi)
-      setPage(nextPage)
-    } catch (e: any) {
-      const msg = String(e?.message || e)
-      setItems([])
-      setTotal(0)
-      setPage(1)
-      setStatus({ kind: 'error', msg })
-    } finally {
-      setLoading(false)
-    }
-  }
-
+  // Reload sur changement filtres
   useEffect(() => {
     setPage(1)
-    load(1)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [canManage, cat, active, qApplied])
+    loadPage(1)
+  }, [loadPage])
 
   function applySearch() {
     const next = q.trim()
     setPage(1)
     setQApplied(next)
   }
+
   function clearFilters() {
     setCat('all')
     setActive('all')
@@ -164,11 +184,13 @@ export default function StoreCatalog({
     setEditPrice(toPriceString(p.price_cents))
     setStatus({ kind: '', msg: '' })
   }
+
   function cancelEdit() {
     setEditingId(null)
     setEdit({})
     setEditPrice('')
   }
+
   function update<K extends keyof Product>(k: K, v: any) {
     setEdit((e) => ({ ...e, [k]: v }))
   }
@@ -177,15 +199,22 @@ export default function StoreCatalog({
     if (!editingId) return
     setBusy(true)
     setStatus({ kind: '', msg: '' })
+
     try {
+      const name = (edit.name || '').toString().trim()
+      const color = typeof edit.color === 'string' ? edit.color.trim() : ''
+      const size = typeof edit.size === 'string' ? edit.size.trim() : ''
+      const inventory_qty = Math.max(0, Number(edit.inventory_qty ?? 0))
+      const price_cents = parsePriceToCents(editPrice)
+
       const payload: any = {
         id: editingId,
         category: edit.category,
-        name: (edit.name || '').toString(),
-        color: typeof edit.color === 'string' ? edit.color : null,
-        size: typeof edit.size === 'string' ? edit.size : null,
-        price_cents: parsePriceToCents(editPrice),
-        inventory_qty: Number(edit.inventory_qty ?? 0),
+        name,
+        color: color || null,
+        size: size || null,
+        price_cents,
+        inventory_qty,
         is_active: !!edit.is_active,
       }
 
@@ -195,6 +224,7 @@ export default function StoreCatalog({
         body: JSON.stringify(payload),
         credentials: 'include',
       })
+
       const j = await r.json().catch(() => ({}))
       if (!r.ok || !j?.ok) {
         const msg = j?.details || j?.error || 'Update failed'
@@ -207,7 +237,7 @@ export default function StoreCatalog({
       toast.success('Product updated')
       setEditingId(null)
       setEditPrice('')
-      await load(page)
+      await loadPage(page)
     } catch (e: any) {
       const msg = String(e?.message || e)
       setStatus({ kind: 'error', msg })
@@ -221,11 +251,13 @@ export default function StoreCatalog({
     if (!confirm('Delete this product? This cannot be undone.')) return
     setBusy(true)
     setStatus({ kind: '', msg: '' })
+
     try {
       const r = await fetch(`/api/store/products/delete?id=${encodeURIComponent(id)}`, {
         method: 'DELETE',
         credentials: 'include',
       })
+
       const j = await r.json().catch(() => ({}))
       if (!r.ok || !j?.ok) {
         const msg = j?.hint || j?.details || j?.error || 'Delete failed'
@@ -238,7 +270,7 @@ export default function StoreCatalog({
       toast.success('Product deleted')
 
       const isLastOnPage = items.length === 1 && page > 1
-      await load(isLastOnPage ? page - 1 : page)
+      await loadPage(isLastOnPage ? page - 1 : page)
     } catch (e: any) {
       const msg = String(e?.message || e)
       setStatus({ kind: 'error', msg })
@@ -251,6 +283,7 @@ export default function StoreCatalog({
   async function toggleActive(id: string, nextActive: boolean) {
     setBusy(true)
     setStatus({ kind: '', msg: '' })
+
     try {
       const r = await fetch('/api/store/products/update', {
         method: 'PATCH',
@@ -258,6 +291,7 @@ export default function StoreCatalog({
         body: JSON.stringify({ id, is_active: nextActive }),
         credentials: 'include',
       })
+
       const j = await r.json().catch(() => ({}))
       if (!r.ok || !j?.ok) {
         const msg = j?.details || j?.error || 'Toggle failed'
@@ -268,7 +302,7 @@ export default function StoreCatalog({
 
       flash('success', nextActive ? 'Product activated.' : 'Product deactivated.')
       toast.success(nextActive ? 'Activated' : 'Deactivated')
-      await load(page)
+      await loadPage(page)
     } catch (e: any) {
       const msg = String(e?.message || e)
       setStatus({ kind: 'error', msg })
@@ -287,11 +321,11 @@ export default function StoreCatalog({
   return (
     <div className="space-y-4">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row gap-2 sm:items-center">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
         <h2 className="text-base font-semibold">Catalog</h2>
 
-        <div className="sm:ml-auto flex items-center gap-2">
-          <Button variant="outline" onClick={() => load(page)} disabled={anyWorking}>
+        <div className="flex items-center gap-2 sm:ml-auto">
+          <Button variant="outline" onClick={() => loadPage(page)} disabled={anyWorking}>
             {loading ? 'Refreshing…' : 'Refresh'}
           </Button>
           <Button variant="ghost" onClick={clearFilters} disabled={anyWorking}>
@@ -301,7 +335,7 @@ export default function StoreCatalog({
       </div>
 
       {/* Filters */}
-      <div className="grid gap-2 sm:grid-cols-[220px_220px_1fr_auto] items-end">
+      <div className="grid items-end gap-2 sm:grid-cols-[220px_220px_1fr_auto]">
         <Select value={cat} onChange={(e) => setCat(e.target.value as any)} aria-label="Category">
           <option value="all">All categories</option>
           {CATEGORIES.map((c) => (
@@ -379,7 +413,7 @@ export default function StoreCatalog({
       </div>
 
       {/* Grid produits */}
-      <div className="grid gap-3 grid-cols-1 sm:grid-cols-3 lg:grid-cols-4">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3 lg:grid-cols-4">
         {items.map((p) => {
           const isEditing = editingId === p.id
           const currency = p.currency ?? 'EGP'
@@ -391,17 +425,20 @@ export default function StoreCatalog({
               <CardContent>
                 {!isEditing ? (
                   <>
-                    <div className="text-xs text-[hsl(var(--muted))] uppercase flex items-center gap-2">
+                    <div className="flex items-center gap-2 text-xs uppercase text-[hsl(var(--muted))]">
                       {p.category.replace('_', ' ')}
                       {!p.is_active && <Badge>inactive</Badge>}
                       {out && <Badge>out</Badge>}
                     </div>
+
                     <div className="mt-1 font-medium">{p.name}</div>
+
                     <div className="text-sm text-[hsl(var(--muted))]">
                       {p.color || p.size ? [p.color, p.size].filter(Boolean).join(' · ') : '—'}
                     </div>
+
                     <div className="mt-2 text-lg font-semibold">{formatCurrency(p.price_cents, 'en-EG', currency)}</div>
-                    <div className="text-xs text-[hsl(var(--muted))] mt-1">Stock: {stock}</div>
+                    <div className="mt-1 text-xs text-[hsl(var(--muted))]">Stock: {stock}</div>
 
                     <div className="mt-3 flex flex-wrap items-center gap-2">
                       {showAdd && (
@@ -415,9 +452,11 @@ export default function StoreCatalog({
                           <Button variant="outline" onClick={() => startEdit(p)} disabled={anyWorking}>
                             Edit
                           </Button>
+
                           <Button variant="outline" onClick={() => toggleActive(p.id, !p.is_active)} disabled={anyWorking}>
                             {p.is_active ? 'Deactivate' : 'Activate'}
                           </Button>
+
                           <Button
                             variant="outline"
                             className="border border-red-400 text-red-600 hover:bg-red-50"
@@ -487,12 +526,7 @@ export default function StoreCatalog({
                     </div>
 
                     <label className="flex items-center gap-2 text-sm">
-                      <input
-                        type="checkbox"
-                        checked={!!edit.is_active}
-                        onChange={(e) => update('is_active', e.target.checked)}
-                        disabled={busy}
-                      />
+                      <input type="checkbox" checked={!!edit.is_active} onChange={(e) => update('is_active', e.target.checked)} disabled={busy} />
                       <span>Active</span>
                     </label>
 
@@ -518,13 +552,13 @@ export default function StoreCatalog({
 
       {/* Pagination */}
       <div className="flex items-center justify-center gap-2">
-        <Button variant="outline" onClick={() => load(Math.max(1, page - 1))} disabled={!canPrev || anyWorking}>
+        <Button variant="outline" onClick={() => loadPage(Math.max(1, page - 1))} disabled={!canPrev || anyWorking}>
           Prev
         </Button>
         <div className="text-xs text-[hsl(var(--muted))]">
           Page <strong>{page}</strong> / {totalPages}
         </div>
-        <Button variant="outline" onClick={() => load(Math.min(totalPages, page + 1))} disabled={!canNext || anyWorking}>
+        <Button variant="outline" onClick={() => loadPage(Math.min(totalPages, page + 1))} disabled={!canNext || anyWorking}>
           Next
         </Button>
       </div>

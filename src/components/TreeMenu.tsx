@@ -106,7 +106,6 @@ export default function TreeMenu({
           <div
             id="tree-menu-desktop"
             role="menu"
-            aria-label="Menu"
             className="hidden md:block"
             style={{
               position: 'absolute',
@@ -123,13 +122,9 @@ export default function TreeMenu({
               boxShadow: '0 1px 2px rgba(0,0,0,0.05), 0 6px 20px rgba(0,0,0,0.06)',
               padding: '8px',
               isolation: 'isolate',
-              mixBlendMode: 'normal',
-              WebkitBackdropFilter: 'none',
-              backdropFilter: 'none',
-              opacity: 1,
             }}
           >
-            <nav className="flex flex-col">
+            <nav className="flex flex-col" aria-label="Menu">
               {items.map((it) => (
                 <Link
                   key={it.href}
@@ -153,7 +148,6 @@ export default function TreeMenu({
           <div
             id="tree-menu-mobile"
             role="menu"
-            aria-label="Menu"
             className="md:hidden overflow-auto"
             style={{
               position: 'absolute',
@@ -171,10 +165,6 @@ export default function TreeMenu({
               boxShadow: '0 1px 2px rgba(0,0,0,0.05), 0 6px 20px rgba(0,0,0,0.06)',
               padding: '12px',
               isolation: 'isolate',
-              mixBlendMode: 'normal',
-              WebkitBackdropFilter: 'none',
-              backdropFilter: 'none',
-              opacity: 1,
             }}
           >
             <div className="mx-auto max-w-md">
@@ -189,7 +179,7 @@ export default function TreeMenu({
                   Fermer
                 </button>
               </div>
-              <nav className="flex flex-col">
+              <nav className="flex flex-col" aria-label="Menu">
                 {items.map((it) => (
                   <Link
                     key={it.href}

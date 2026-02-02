@@ -38,7 +38,6 @@ export default function StoreProductForm({
   const [name, setName] = useState(product?.name ?? '')
   const [color, setColor] = useState(product?.color ?? '')
   const [size, setSize] = useState(product?.size ?? '')
-  // UI price as decimal string (e.g. "450.00")
   const [price, setPrice] = useState<string>(toPriceString(product?.price_cents ?? 0))
   const [currency, setCurrency] = useState(product?.currency ?? 'EGP')
   const [inventory, setInventory] = useState<number>(Number(product?.inventory_qty ?? 0))
@@ -51,16 +50,15 @@ export default function StoreProductForm({
   })
 
   useEffect(() => {
-    if (product) {
-      setCategory(product.category ?? 'kimono')
-      setName(product.name ?? '')
-      setColor(product.color ?? '')
-      setSize(product.size ?? '')
-      setPrice(toPriceString(product.price_cents ?? 0))
-      setCurrency(product.currency ?? 'EGP')
-      setInventory(Number(product.inventory_qty ?? 0))
-      setActive(!!product.is_active || product.is_active === undefined)
-    }
+    if (!product) return
+    setCategory(product.category ?? 'kimono')
+    setName(product.name ?? '')
+    setColor(product.color ?? '')
+    setSize(product.size ?? '')
+    setPrice(toPriceString(product.price_cents ?? 0))
+    setCurrency(product.currency ?? 'EGP')
+    setInventory(Number(product.inventory_qty ?? 0))
+    setActive(product.is_active === undefined ? true : !!product.is_active)
   }, [product])
 
   async function onSubmit(e: React.FormEvent) {
@@ -130,14 +128,7 @@ export default function StoreProductForm({
           ))}
         </Select>
 
-        <Input
-          label="Name *"
-          required
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          disabled={busy}
-          aria-label="Name"
-        />
+        <Input label="Name *" required value={name} onChange={(e) => setName(e.target.value)} disabled={busy} aria-label="Name" />
       </div>
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
@@ -158,13 +149,7 @@ export default function StoreProductForm({
       </div>
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-        <Input
-          label="Currency"
-          value={currency ?? 'EGP'}
-          onChange={(e) => setCurrency(e.target.value)}
-          placeholder="EGP"
-          disabled={busy}
-        />
+        <Input label="Currency" value={currency ?? 'EGP'} onChange={(e) => setCurrency(e.target.value)} placeholder="EGP" disabled={busy} />
 
         <Input
           label="Inventory qty"
@@ -176,13 +161,7 @@ export default function StoreProductForm({
         />
 
         <label className="mt-7 flex items-center gap-2 text-sm">
-          <input
-            type="checkbox"
-            checked={active}
-            onChange={(e) => setActive(e.target.checked)}
-            disabled={busy}
-            aria-label="Active"
-          />
+          <input type="checkbox" checked={active} onChange={(e) => setActive(e.target.checked)} disabled={busy} aria-label="Active" />
           <span>Active</span>
         </label>
       </div>

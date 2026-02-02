@@ -94,7 +94,6 @@ export default function StoreMyOrders() {
             {o.note && <div className="mt-2 text-xs text-gray-600">Note: {o.note}</div>}
           </div>
         ))}
-
         {items.length === 0 && <div className="text-sm text-gray-500">No orders yet.</div>}
       </div>
     </section>
