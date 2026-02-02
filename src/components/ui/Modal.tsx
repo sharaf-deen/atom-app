@@ -1,12 +1,30 @@
 'use client'
 import * as React from 'react'
-export default function Modal({ open, onClose, title, children }: { open: boolean; onClose: () => void; title?: string; children: React.ReactNode }) {
-  if (!open) return null
+
+export default function Modal({
+  open,
+  onClose,
+  title,
+  children,
+}: {
+  open: boolean
+  onClose: () => void
+  title?: string
+  children: React.ReactNode
+}) {
   React.useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
+    if (!open) return
+
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose()
+    }
+
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
-  }, [onClose])
+  }, [open, onClose])
+
+  if (!open) return null
+
   return (
     <div className="fixed inset-0 z-[2000] flex items-center justify-center">
       <div className="absolute inset-0 bg-black/70" onClick={onClose} />
