@@ -1,3 +1,4 @@
+// src/components/TreeMenu.tsx
 'use client'
 import * as React from 'react'
 import Link from 'next/link'
@@ -64,7 +65,7 @@ export default function TreeMenu({
     setDeskPos({
       left: Math.round(r.left),
       top: Math.round(r.bottom + 8),
-      width: Math.min(Math.round(r.width), 384), // <- corrige ici
+      width: Math.min(Math.round(r.width), 384),
     })
   }, [])
 
@@ -105,15 +106,15 @@ export default function TreeMenu({
           <div
             id="tree-menu-desktop"
             role="menu"
-            aria-modal="true"
+            aria-label="Menu"
             className="hidden md:block"
             style={{
               position: 'absolute',
               zIndex: 1,
-              left: deskPos.left,                    // nombres -> px automatiques
+              left: deskPos.left,
               top: deskPos.top,
               width: Math.min(deskPos.width, 384),
-              maxWidth: 'min(90vw, 384px)',          // CSS valide
+              maxWidth: 'min(90vw, 384px)',
               pointerEvents: 'auto',
               backgroundColor: '#FFFFFF',
               color: '#000000',
@@ -152,7 +153,7 @@ export default function TreeMenu({
           <div
             id="tree-menu-mobile"
             role="menu"
-            aria-modal="true"
+            aria-label="Menu"
             className="md:hidden overflow-auto"
             style={{
               position: 'absolute',
@@ -215,7 +216,7 @@ export default function TreeMenu({
         aria-expanded={open}
         aria-controls="tree-menu-desktop tree-menu-mobile"
         onClick={() => setOpen((v) => !v)}
-        className="inline-flex items-center rounded-2xl border border-black/10 bg-black px-3 py-1.5 text-white text-sm font-medium shadow-soft hover:opacity-95 focus:outline-none focus:ring-2 focus:ring-black"
+        className="inline-flex items-center rounded-2xl border border-black/10 bg-black px-3 py-1.5 text-sm font-medium text-white shadow-soft hover:opacity-95 focus:outline-none focus:ring-2 focus:ring-black"
       >
         {buttonLabel} <span className="ml-2 text-xs">{open ? '▲' : '▼'}</span>
       </button>

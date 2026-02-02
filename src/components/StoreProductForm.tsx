@@ -61,7 +61,7 @@ export default function StoreProductForm({
       setInventory(Number(product.inventory_qty ?? 0))
       setActive(!!product.is_active || product.is_active === undefined)
     }
-  }, [product?.id])
+  }, [product])
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -187,11 +187,7 @@ export default function StoreProductForm({
         </label>
       </div>
 
-      {status.msg && (
-        <InlineAlert variant={status.kind === 'error' ? 'error' : 'success'}>
-          {status.msg}
-        </InlineAlert>
-      )}
+      {status.msg && <InlineAlert variant={status.kind === 'error' ? 'error' : 'success'}>{status.msg}</InlineAlert>}
 
       <div className="flex flex-wrap items-center gap-2">
         <Button type="submit" disabled={busy || !name.trim()}>
