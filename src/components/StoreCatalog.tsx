@@ -2,6 +2,7 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import { toast } from 'sonner'
 import { formatCurrency, toPriceString, parsePriceToCents } from '@/lib/money'
 import Button from '@/components/ui/Button'
@@ -28,6 +29,13 @@ const PER_PAGE = 8
 
 type StatusKind = '' | 'info' | 'success' | 'error'
 
+function clampInt(v: unknown, fallback: number) {
+  const n = Number(v)
+  if (!Number.isFinite(n)) return fallback
+  const i = Math.trunc(n)
+  return i <= 0 ? fallback : i
+}
+
 export default function StoreCatalog({
   showAdd = true,
   canManage = false,
@@ -35,6 +43,35 @@ export default function StoreCatalog({
   showAdd?: boolean
   canManage?: boolean
 }) {
+  const router = useRouter()
+  const pathname = usePathname()
+  const searchParams = useSearchParams()
+
+  // Parse initial URL params ONCE (refresh/share links)
+  const initRef = useRef<{
+    page: number
+    category: 'all' | Category
+    active: 'all' | '1' | '0'
+    q: string
+  } | null>(null)
+
+  if (!initRef.current) {
+    const page0 = clampInt(searchParams.get('page'), 1)
+
+    const cat0 = searchParams.get('category')
+    const category =
+      cat0 === 'kimono' || cat0 === 'rashguard' || cat0 === 'short' || cat0 === 'belt' ? cat0 : 'all'
+
+    const a0 = searchParams.get('active')
+    const active = a0 === '1' || a0 === '0' ? a0 : 'all'
+
+    const q0 = (searchParams.get('q') || '').toString()
+
+    initRef.current = { page: page0, category, active, q: q0 }
+  }
+
+  const init = initRef.current
+
   const [items, setItems] = useState<Product[]>([])
   const [status, setStatus] = useState<{ kind: StatusKind; msg: string }>({ kind: '', msg: '' })
 
@@ -47,28 +84,21 @@ export default function StoreCatalog({
   const [loading, setLoading] = useState(false) // list fetch
 
   // Filtres
-  const [cat, setCat] = useState<'all' | Category>('all')
+  const [cat, setCat] = useState<'all' | Category>(init?.category ?? 'all')
+
   // Pour super_admin: 'all' doit vraiment renvoyer active+inactive
-  const [active, setActive] = useState<'all' | '1' | '0'>('all')
-  const [q, setQ] = useState('')
-  const [qApplied, setQApplied] = useState('')
+  const [active, setActive] = useState<'all' | '1' | '0'>(init?.active ?? 'all')
+
+  const [q, setQ] = useState(init?.q ?? '')
+  const [qApplied, setQApplied] = useState((init?.q ?? '').trim())
 
   // Pagination
-  const [page, setPage] = useState(1)
+  const [page, setPage] = useState(init?.page ?? 1)
   const [total, setTotal] = useState(0)
   const totalPages = useMemo(() => Math.max(1, Math.ceil(total / PER_PAGE)), [total])
 
-  // Anti race-condition (si plusieurs loads en parallèle)
-  const reqSeq = useRef(0)
-
-  // Auto-clear status
+  // ---- status helper ----
   const clearTimer = useRef<number | null>(null)
-  useEffect(() => {
-    return () => {
-      if (clearTimer.current) window.clearTimeout(clearTimer.current)
-    }
-  }, [])
-
   function flash(kind: StatusKind, msg: string, autoMs = 2500) {
     if (clearTimer.current) window.clearTimeout(clearTimer.current)
     setStatus({ kind, msg })
@@ -79,9 +109,9 @@ export default function StoreCatalog({
     }
   }
 
-  const loadPage = useCallback(
+  // ---- fetch list ----
+  const load = useCallback(
     async (p: number) => {
-      const myReq = ++reqSeq.current
       setLoading(true)
       setStatus((s) => (s.kind === 'error' ? { kind: '', msg: '' } : s))
 
@@ -90,9 +120,8 @@ export default function StoreCatalog({
         params.set('page', String(p))
         params.set('limit', String(PER_PAGE))
 
-        // ✅ IMPORTANT:
-        // - si canManage (super_admin), on envoie TOUJOURS active=all|1|0
-        // - si pas canManage, on ne met rien => API default active=1
+        // - si canManage (super_admin), on envoie active=all|1|0
+        // - sinon on n’envoie rien => API default active=1
         if (canManage) params.set('active', active)
 
         if (cat !== 'all') params.set('category', cat)
@@ -102,15 +131,11 @@ export default function StoreCatalog({
           cache: 'no-store',
           credentials: 'include',
         })
-
         const j = await r.json().catch(() => ({}))
-        if (myReq !== reqSeq.current) return // ignore réponse obsolète
-
         if (!r.ok || !j?.ok) {
           const msg = j?.error || j?.details || 'Failed to load products'
           setItems([])
           setTotal(0)
-          setPage(1)
           setStatus({ kind: 'error', msg })
           return
         }
@@ -123,32 +148,93 @@ export default function StoreCatalog({
         setTotal(totalFromApi)
         setPage(nextPage)
       } catch (e: any) {
-        if (myReq !== reqSeq.current) return
         const msg = String(e?.message || e)
         setItems([])
         setTotal(0)
-        setPage(1)
         setStatus({ kind: 'error', msg })
       } finally {
-        if (myReq === reqSeq.current) setLoading(false)
+        setLoading(false)
       }
     },
     [canManage, active, cat, qApplied]
   )
 
-  // Reload sur changement filtres
+  // ---- Debounce search (applique automatiquement) ----
+  const qAppliedRef = useRef(qApplied)
   useEffect(() => {
-    setPage(1)
-    loadPage(1)
-  }, [loadPage])
+    qAppliedRef.current = qApplied
+  }, [qApplied])
 
-  function applySearch() {
-    const next = q.trim()
+  const debounceTimer = useRef<number | null>(null)
+  useEffect(() => {
+    if (debounceTimer.current) window.clearTimeout(debounceTimer.current)
+
+    debounceTimer.current = window.setTimeout(() => {
+      const next = q.trim()
+      if (next !== qAppliedRef.current) {
+        setPage(1)
+        setQApplied(next)
+      }
+    }, 350)
+
+    return () => {
+      if (debounceTimer.current) window.clearTimeout(debounceTimer.current)
+    }
+  }, [q])
+
+  // ---- Load on mount + when filters change (via load identity) ----
+  const didInit = useRef(false)
+  useEffect(() => {
+    // first mount: respect URL page
+    if (!didInit.current) {
+      didInit.current = true
+      void load(page)
+      return
+    }
+    // filters changed -> go to page 1
     setPage(1)
-    setQApplied(next)
+    void load(1)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [load])
+
+  // ---- Load on page change ----
+  useEffect(() => {
+    if (!didInit.current) return
+    void load(page)
+  }, [page, load])
+
+  // ---- Sync URL (page/category/q/active) ----
+  useEffect(() => {
+    if (!didInit.current) return
+
+    const next = new URLSearchParams()
+
+    if (cat !== 'all') next.set('category', cat)
+    if (qApplied.trim()) next.set('q', qApplied.trim())
+
+    if (canManage && active !== 'all') next.set('active', active)
+    if (page > 1) next.set('page', String(page))
+
+    const currentStr = searchParams.toString()
+    const nextStr = next.toString()
+
+    if (currentStr !== nextStr) {
+      const url = nextStr ? `${pathname}?${nextStr}` : pathname
+      router.replace(url, { scroll: false })
+    }
+  }, [router, pathname, searchParams, page, cat, qApplied, active, canManage])
+
+  function applySearchNow() {
+    if (debounceTimer.current) window.clearTimeout(debounceTimer.current)
+    const next = q.trim()
+    if (next !== qAppliedRef.current) {
+      setPage(1)
+      setQApplied(next)
+    }
   }
 
   function clearFilters() {
+    if (debounceTimer.current) window.clearTimeout(debounceTimer.current)
     setCat('all')
     setActive('all')
     setQ('')
@@ -201,20 +287,17 @@ export default function StoreCatalog({
     setStatus({ kind: '', msg: '' })
 
     try {
-      const name = (edit.name || '').toString().trim()
-      const color = typeof edit.color === 'string' ? edit.color.trim() : ''
-      const size = typeof edit.size === 'string' ? edit.size.trim() : ''
-      const inventory_qty = Math.max(0, Number(edit.inventory_qty ?? 0))
-      const price_cents = parsePriceToCents(editPrice)
+      const color = (typeof edit.color === 'string' ? edit.color : '').trim() || null
+      const size = (typeof edit.size === 'string' ? edit.size : '').trim() || null
 
       const payload: any = {
         id: editingId,
         category: edit.category,
-        name,
-        color: color || null,
-        size: size || null,
-        price_cents,
-        inventory_qty,
+        name: (edit.name || '').toString(),
+        color,
+        size,
+        price_cents: parsePriceToCents(editPrice),
+        inventory_qty: Number(edit.inventory_qty ?? 0),
         is_active: !!edit.is_active,
       }
 
@@ -224,7 +307,6 @@ export default function StoreCatalog({
         body: JSON.stringify(payload),
         credentials: 'include',
       })
-
       const j = await r.json().catch(() => ({}))
       if (!r.ok || !j?.ok) {
         const msg = j?.details || j?.error || 'Update failed'
@@ -237,7 +319,7 @@ export default function StoreCatalog({
       toast.success('Product updated')
       setEditingId(null)
       setEditPrice('')
-      await loadPage(page)
+      await load(page)
     } catch (e: any) {
       const msg = String(e?.message || e)
       setStatus({ kind: 'error', msg })
@@ -257,7 +339,6 @@ export default function StoreCatalog({
         method: 'DELETE',
         credentials: 'include',
       })
-
       const j = await r.json().catch(() => ({}))
       if (!r.ok || !j?.ok) {
         const msg = j?.hint || j?.details || j?.error || 'Delete failed'
@@ -270,7 +351,7 @@ export default function StoreCatalog({
       toast.success('Product deleted')
 
       const isLastOnPage = items.length === 1 && page > 1
-      await loadPage(isLastOnPage ? page - 1 : page)
+      await load(isLastOnPage ? page - 1 : page)
     } catch (e: any) {
       const msg = String(e?.message || e)
       setStatus({ kind: 'error', msg })
@@ -291,7 +372,6 @@ export default function StoreCatalog({
         body: JSON.stringify({ id, is_active: nextActive }),
         credentials: 'include',
       })
-
       const j = await r.json().catch(() => ({}))
       if (!r.ok || !j?.ok) {
         const msg = j?.details || j?.error || 'Toggle failed'
@@ -302,7 +382,7 @@ export default function StoreCatalog({
 
       flash('success', nextActive ? 'Product activated.' : 'Product deactivated.')
       toast.success(nextActive ? 'Activated' : 'Deactivated')
-      await loadPage(page)
+      await load(page)
     } catch (e: any) {
       const msg = String(e?.message || e)
       setStatus({ kind: 'error', msg })
@@ -325,7 +405,7 @@ export default function StoreCatalog({
         <h2 className="text-base font-semibold">Catalog</h2>
 
         <div className="flex items-center gap-2 sm:ml-auto">
-          <Button variant="outline" onClick={() => loadPage(page)} disabled={anyWorking}>
+          <Button variant="outline" onClick={() => void load(page)} disabled={anyWorking}>
             {loading ? 'Refreshing…' : 'Refresh'}
           </Button>
           <Button variant="ghost" onClick={clearFilters} disabled={anyWorking}>
@@ -336,7 +416,12 @@ export default function StoreCatalog({
 
       {/* Filters */}
       <div className="grid items-end gap-2 sm:grid-cols-[220px_220px_1fr_auto]">
-        <Select value={cat} onChange={(e) => setCat(e.target.value as any)} aria-label="Category">
+        <Select
+          value={cat}
+          onChange={(e) => setCat(e.target.value as any)}
+          aria-label="Category"
+          disabled={anyWorking}
+        >
           <option value="all">All categories</option>
           {CATEGORIES.map((c) => (
             <option key={c} value={c}>
@@ -346,7 +431,12 @@ export default function StoreCatalog({
         </Select>
 
         {canManage ? (
-          <Select value={active} onChange={(e) => setActive(e.target.value as any)} aria-label="Active filter">
+          <Select
+            value={active}
+            onChange={(e) => setActive(e.target.value as any)}
+            aria-label="Active filter"
+            disabled={anyWorking}
+          >
             <option value="all">All (active + inactive)</option>
             <option value="1">Only active</option>
             <option value="0">Only inactive</option>
@@ -363,14 +453,14 @@ export default function StoreCatalog({
             onKeyDown={(e) => {
               if (e.key === 'Enter') {
                 e.preventDefault()
-                applySearch()
+                applySearchNow()
               }
             }}
             disabled={anyWorking}
           />
         </div>
 
-        <Button variant="outline" onClick={applySearch} disabled={anyWorking}>
+        <Button variant="outline" onClick={applySearchNow} disabled={anyWorking}>
           Search
         </Button>
       </div>
@@ -452,15 +542,13 @@ export default function StoreCatalog({
                           <Button variant="outline" onClick={() => startEdit(p)} disabled={anyWorking}>
                             Edit
                           </Button>
-
                           <Button variant="outline" onClick={() => toggleActive(p.id, !p.is_active)} disabled={anyWorking}>
                             {p.is_active ? 'Deactivate' : 'Activate'}
                           </Button>
-
                           <Button
                             variant="outline"
                             className="border border-red-400 text-red-600 hover:bg-red-50"
-                            onClick={() => deleteItem(p.id)}
+                            onClick={() => void deleteItem(p.id)}
                             disabled={anyWorking}
                           >
                             Delete
@@ -526,12 +614,17 @@ export default function StoreCatalog({
                     </div>
 
                     <label className="flex items-center gap-2 text-sm">
-                      <input type="checkbox" checked={!!edit.is_active} onChange={(e) => update('is_active', e.target.checked)} disabled={busy} />
+                      <input
+                        type="checkbox"
+                        checked={!!edit.is_active}
+                        onChange={(e) => update('is_active', e.target.checked)}
+                        disabled={busy}
+                      />
                       <span>Active</span>
                     </label>
 
                     <div className="flex items-center gap-2 pt-1">
-                      <Button onClick={saveEdit} disabled={busy}>
+                      <Button onClick={() => void saveEdit()} disabled={busy}>
                         {busy ? 'Saving…' : 'Save'}
                       </Button>
                       <Button variant="outline" onClick={cancelEdit} disabled={busy}>
@@ -552,13 +645,13 @@ export default function StoreCatalog({
 
       {/* Pagination */}
       <div className="flex items-center justify-center gap-2">
-        <Button variant="outline" onClick={() => loadPage(Math.max(1, page - 1))} disabled={!canPrev || anyWorking}>
+        <Button variant="outline" onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={!canPrev || anyWorking}>
           Prev
         </Button>
         <div className="text-xs text-[hsl(var(--muted))]">
           Page <strong>{page}</strong> / {totalPages}
         </div>
-        <Button variant="outline" onClick={() => loadPage(Math.min(totalPages, page + 1))} disabled={!canNext || anyWorking}>
+        <Button variant="outline" onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={!canNext || anyWorking}>
           Next
         </Button>
       </div>
