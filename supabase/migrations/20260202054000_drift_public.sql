@@ -22,11 +22,50 @@ BEGIN
     CREATE TYPE public.freeze_request_status AS ENUM ('pending', 'approved', 'denied', 'canceled');
   END IF;
 END
--AllMatches;create type "public"."payment_method" as enum ('cash', 'card', 'transfer', 'online');
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_type t
+    JOIN pg_namespace n ON n.oid = t.typnamespace
+    WHERE t.typname = 'payment_method'
+      AND n.nspname = 'public'
+  ) THEN
+    CREATE TYPE public.payment_method AS ENUM ('cash', 'card', 'transfer', 'online');
+  END IF;
+END
+$$;
 
-create type "public"."promo_discount_type" as enum ('percent', 'amount');
 
-create type "public"."user_role" as enum ('admin', 'coach', 'assistant_coach', 'member');
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_type t
+    JOIN pg_namespace n ON n.oid = t.typnamespace
+    WHERE t.typname = 'promo_discount_type'
+      AND n.nspname = 'public'
+  ) THEN
+    CREATE TYPE public.promo_discount_type AS ENUM ('percent', 'amount');
+  END IF;
+END
+$$;
+
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_type t
+    JOIN pg_namespace n ON n.oid = t.typnamespace
+    WHERE t.typname = 'user_role'
+      AND n.nspname = 'public'
+  ) THEN
+    CREATE TYPE public.user_role AS ENUM ('admin', 'coach', 'assistant_coach', 'member');
+  END IF;
+END
+$$;
+
 
 create sequence "public"."member_seq";
 
@@ -878,7 +917,7 @@ declare
   v_sub_id_text text;
   v_updated int;
 begin
-  -- Prend le pack 'sessions' actif, le plus proche d'expirer, avec sÃƒÆ’Ã‚Â©ances restantes
+  -- Prend le pack 'sessions' actif, le plus proche d'expirer, avec sÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â©ances restantes
   select id::text into v_sub_id_text
   from public.subscriptions
   where member_id = p_member_id
@@ -893,7 +932,7 @@ begin
     return null;
   end if;
 
-  -- IncrÃƒÆ’Ã‚Â©mente de faÃƒÆ’Ã‚Â§on atomique (marche pour uuid/bigint via cast en text)
+  -- IncrÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â©mente de faÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â§on atomique (marche pour uuid/bigint via cast en text)
   update public.subscriptions
   set sessions_used = coalesce(sessions_used,0) + 1
   where id::text = v_sub_id_text
@@ -927,7 +966,7 @@ begin
      and end_date < d;
   get diagnostics c_time = row_count;
 
-  -- 2) Expire SESSIONS : end_date < today OU plus de sÃƒÆ’Ã‚Â©ances utilisÃƒÆ’Ã‚Â©es
+  -- 2) Expire SESSIONS : end_date < today OU plus de sÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â©ances utilisÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â©es
   update public.subscriptions
      set status = 'expired'
    where subscription_type = 'sessions'
@@ -956,7 +995,7 @@ declare
   it record;
   current_qty integer;
 begin
-  -- Passage vers READY ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ dÃƒÆ’Ã‚Â©duction
+  -- Passage vers READY ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ dÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â©duction
   if (TG_OP = 'UPDATE'
       and new.status = 'ready'
       and (old.status is distinct from 'ready')) then
@@ -967,7 +1006,7 @@ begin
       where order_id = new.id
         and stock_deducted = false
     loop
-      -- verrouille la ligne produit pour concurrence sÃƒÆ’Ã‚Â»re
+      -- verrouille la ligne produit pour concurrence sÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â»re
       select inventory_qty
         into current_qty
       from public.store_products
@@ -995,7 +1034,7 @@ begin
     return new;
   end if;
 
-  -- Sortie de READY ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ restitution
+  -- Sortie de READY ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ restitution
   if (TG_OP = 'UPDATE'
       and old.status = 'ready'
       and (new.status is distinct from 'ready')) then
@@ -1070,7 +1109,7 @@ BEGIN
 
   NEW.kind := norm;
 
-  -- ÃƒÂ¢Ã…â€œÃ¢â‚¬Â¦ condition corrigÃƒÆ’Ã‚Â©e
+  -- ÃƒÆ’Ã‚Â¢Ãƒâ€¦Ã¢â‚¬Å“ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ condition corrigÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â©e
   IF NEW.kind IS NULL OR NOT (NEW.kind = ANY(allowed)) THEN
     RAISE EXCEPTION 'Invalid notifications.kind="%" (bytes=%) (allowed=%)',
       NEW.kind,
@@ -1093,7 +1132,7 @@ AS $function$
 declare
   new_role user_role := 'member';
 begin
-  -- RÃƒÆ’Ã‚Â©cupÃƒÆ’Ã‚Â¨re role depuis les mÃƒÆ’Ã‚Â©tadonnÃƒÆ’Ã‚Â©es si fourni (et valide)
+  -- RÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â©cupÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¨re role depuis les mÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â©tadonnÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â©es si fourni (et valide)
   if (new.raw_user_meta_data ? 'role') then
     begin
       new_role := (new.raw_user_meta_data->>'role')::user_role;
@@ -1259,7 +1298,7 @@ declare
   v_used int;
   v_remaining int;
 begin
-  -- 0) dÃƒÆ’Ã‚Â©jÃƒÆ’Ã‚Â  pointÃƒÆ’Ã‚Â© aujourd'hui ?
+  -- 0) dÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â©jÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â  pointÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â© aujourd'hui ?
   if exists (
     select 1 from public.attendance
     where member_id = p_member_id and date = today and valid is true
@@ -1325,14 +1364,14 @@ begin
     );
   end if;
 
-  -- 3) consommer 1 sÃƒÆ’Ã‚Â©ance de faÃƒÆ’Ã‚Â§on atomique
+  -- 3) consommer 1 sÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â©ance de faÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â§on atomique
   update public.subscriptions
   set sessions_used = coalesce(sessions_used,0) + 1
   where id = v_session_sub_id
     and coalesce(sessions_total,0) > coalesce(sessions_used,0);
 
   if not found then
-    -- plus de sÃƒÆ’Ã‚Â©ances (race) -> on enregistre invalid
+    -- plus de sÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â©ances (race) -> on enregistre invalid
     begin
       insert into public.attendance(member_id, date, valid, subscription_id, from_sessions)
       values (p_member_id, today, false, null, false);
@@ -1356,12 +1395,12 @@ begin
 
   v_remaining := greatest(coalesce(v_total,0) - coalesce(v_used,0), 0);
 
-  -- 5) insÃƒÆ’Ã‚Â©rer attendance (from_sessions=true)
+  -- 5) insÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â©rer attendance (from_sessions=true)
   begin
     insert into public.attendance(member_id, date, valid, subscription_id, from_sessions)
     values (p_member_id, today, true, v_session_sub_id, true);
   exception when unique_violation then
-    -- revert la conso si quelqu'un a insÃƒÆ’Ã‚Â©rÃƒÆ’Ã‚Â© en parallÃƒÆ’Ã‚Â¨le
+    -- revert la conso si quelqu'un a insÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â©rÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â© en parallÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¨le
     update public.subscriptions
     set sessions_used = greatest(coalesce(sessions_used,0) - 1, 0)
     where id = v_session_sub_id;
