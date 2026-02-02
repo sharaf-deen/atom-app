@@ -1,5 +1,6 @@
 // src/components/TreeMenu.tsx
 'use client'
+
 import * as React from 'react'
 import Link from 'next/link'
 import { createPortal } from 'react-dom'
@@ -106,6 +107,7 @@ export default function TreeMenu({
           <div
             id="tree-menu-desktop"
             role="menu"
+            aria-label="Main menu"
             className="hidden md:block"
             style={{
               position: 'absolute',
@@ -122,9 +124,13 @@ export default function TreeMenu({
               boxShadow: '0 1px 2px rgba(0,0,0,0.05), 0 6px 20px rgba(0,0,0,0.06)',
               padding: '8px',
               isolation: 'isolate',
+              mixBlendMode: 'normal',
+              WebkitBackdropFilter: 'none',
+              backdropFilter: 'none',
+              opacity: 1,
             }}
           >
-            <nav className="flex flex-col" aria-label="Menu">
+            <nav className="flex flex-col">
               {items.map((it) => (
                 <Link
                   key={it.href}
@@ -148,6 +154,7 @@ export default function TreeMenu({
           <div
             id="tree-menu-mobile"
             role="menu"
+            aria-label="Main menu"
             className="md:hidden overflow-auto"
             style={{
               position: 'absolute',
@@ -165,6 +172,10 @@ export default function TreeMenu({
               boxShadow: '0 1px 2px rgba(0,0,0,0.05), 0 6px 20px rgba(0,0,0,0.06)',
               padding: '12px',
               isolation: 'isolate',
+              mixBlendMode: 'normal',
+              WebkitBackdropFilter: 'none',
+              backdropFilter: 'none',
+              opacity: 1,
             }}
           >
             <div className="mx-auto max-w-md">
@@ -179,7 +190,7 @@ export default function TreeMenu({
                   Fermer
                 </button>
               </div>
-              <nav className="flex flex-col" aria-label="Menu">
+              <nav className="flex flex-col">
                 {items.map((it) => (
                   <Link
                     key={it.href}
@@ -206,7 +217,7 @@ export default function TreeMenu({
         aria-expanded={open}
         aria-controls="tree-menu-desktop tree-menu-mobile"
         onClick={() => setOpen((v) => !v)}
-        className="inline-flex items-center rounded-2xl border border-black/10 bg-black px-3 py-1.5 text-sm font-medium text-white shadow-soft hover:opacity-95 focus:outline-none focus:ring-2 focus:ring-black"
+        className="inline-flex items-center rounded-2xl border border-black/10 bg-black px-3 py-1.5 text-white text-sm font-medium shadow-soft hover:opacity-95 focus:outline-none focus:ring-2 focus:ring-black"
       >
         {buttonLabel} <span className="ml-2 text-xs">{open ? '▲' : '▼'}</span>
       </button>

@@ -28,12 +28,14 @@ export default function StoreMyOrders() {
   const [items, setItems] = useState<OrderRow[]>([])
   const [err, setErr] = useState('')
   const [page, setPage] = useState(1)
+  const [busy, setBusy] = useState(false)
 
   const load = useCallback(async () => {
     setErr('')
+    setBusy(true)
     try {
       const r = await fetch(`/api/store/orders/list?mine=1&page=${page}&limit=20`, { cache: 'no-store' })
-      const j = await r.json()
+      const j = await r.json().catch(() => ({}))
       if (!r.ok || !j?.ok) {
         setErr(j?.details || j?.error || 'Failed to load orders')
         return
@@ -41,27 +43,37 @@ export default function StoreMyOrders() {
       setItems(j.items || [])
     } catch (e: any) {
       setErr(String(e?.message || e))
+    } finally {
+      setBusy(false)
     }
   }, [page])
 
   useEffect(() => {
-    load()
+    void load()
   }, [load])
 
   return (
     <section className="rounded-xl border bg-white p-4">
       <div className="flex items-center gap-2">
         <h2 className="font-semibold">My orders</h2>
-        <button onClick={load} className="ml-2 rounded border px-2 py-1 text-sm hover:bg-gray-50">
-          Refresh
+        <button
+          onClick={load}
+          className="ml-2 rounded border px-2 py-1 text-sm hover:bg-gray-50 disabled:opacity-60"
+          disabled={busy}
+        >
+          {busy ? 'Loading…' : 'Refresh'}
         </button>
         {err && <span className="text-xs text-red-600">{err}</span>}
         <div className="ml-auto flex items-center gap-2">
-          <button className="rounded border px-2 py-1" onClick={() => setPage((p) => Math.max(1, p - 1))}>
+          <button
+            className="rounded border px-2 py-1 disabled:opacity-60"
+            onClick={() => setPage((p) => Math.max(1, p - 1))}
+            disabled={busy || page <= 1}
+          >
             Prev
           </button>
           <span className="text-xs">Page {page}</span>
-          <button className="rounded border px-2 py-1" onClick={() => setPage((p) => p + 1)}>
+          <button className="rounded border px-2 py-1 disabled:opacity-60" onClick={() => setPage((p) => p + 1)} disabled={busy}>
             Next
           </button>
         </div>
@@ -94,7 +106,7 @@ export default function StoreMyOrders() {
             {o.note && <div className="mt-2 text-xs text-gray-600">Note: {o.note}</div>}
           </div>
         ))}
-        {items.length === 0 && <div className="text-sm text-gray-500">No orders yet.</div>}
+        {!busy && items.length === 0 && <div className="text-sm text-gray-500">No orders yet.</div>}
       </div>
     </section>
   )
