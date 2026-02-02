@@ -1,6 +1,16 @@
-create type "public"."freeze_request_status" as enum ('pending', 'approved', 'denied', 'canceled');
-
-create type "public"."payment_method" as enum ('cash', 'card', 'transfer', 'online');
+DO -AllMatches
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_type t
+    JOIN pg_namespace n ON n.oid = t.typnamespace
+    WHERE t.typname = 'freeze_request_status'
+      AND n.nspname = 'public'
+  ) THEN
+    CREATE TYPE public.freeze_request_status AS ENUM ('pending', 'approved', 'denied', 'canceled');
+  END IF;
+END
+-AllMatches;create type "public"."payment_method" as enum ('cash', 'card', 'transfer', 'online');
 
 create type "public"."promo_discount_type" as enum ('percent', 'amount');
 
@@ -856,7 +866,7 @@ declare
   v_sub_id_text text;
   v_updated int;
 begin
-  -- Prend le pack 'sessions' actif, le plus proche d'expirer, avec séances restantes
+  -- Prend le pack 'sessions' actif, le plus proche d'expirer, avec sÃƒÂ©ances restantes
   select id::text into v_sub_id_text
   from public.subscriptions
   where member_id = p_member_id
@@ -871,7 +881,7 @@ begin
     return null;
   end if;
 
-  -- Incrémente de façon atomique (marche pour uuid/bigint via cast en text)
+  -- IncrÃƒÂ©mente de faÃƒÂ§on atomique (marche pour uuid/bigint via cast en text)
   update public.subscriptions
   set sessions_used = coalesce(sessions_used,0) + 1
   where id::text = v_sub_id_text
@@ -905,7 +915,7 @@ begin
      and end_date < d;
   get diagnostics c_time = row_count;
 
-  -- 2) Expire SESSIONS : end_date < today OU plus de séances utilisées
+  -- 2) Expire SESSIONS : end_date < today OU plus de sÃƒÂ©ances utilisÃƒÂ©es
   update public.subscriptions
      set status = 'expired'
    where subscription_type = 'sessions'
@@ -934,7 +944,7 @@ declare
   it record;
   current_qty integer;
 begin
-  -- Passage vers READY → déduction
+  -- Passage vers READY Ã¢â€ â€™ dÃƒÂ©duction
   if (TG_OP = 'UPDATE'
       and new.status = 'ready'
       and (old.status is distinct from 'ready')) then
@@ -945,7 +955,7 @@ begin
       where order_id = new.id
         and stock_deducted = false
     loop
-      -- verrouille la ligne produit pour concurrence sûre
+      -- verrouille la ligne produit pour concurrence sÃƒÂ»re
       select inventory_qty
         into current_qty
       from public.store_products
@@ -973,7 +983,7 @@ begin
     return new;
   end if;
 
-  -- Sortie de READY → restitution
+  -- Sortie de READY Ã¢â€ â€™ restitution
   if (TG_OP = 'UPDATE'
       and old.status = 'ready'
       and (new.status is distinct from 'ready')) then
@@ -1048,7 +1058,7 @@ BEGIN
 
   NEW.kind := norm;
 
-  -- ✅ condition corrigée
+  -- Ã¢Å“â€¦ condition corrigÃƒÂ©e
   IF NEW.kind IS NULL OR NOT (NEW.kind = ANY(allowed)) THEN
     RAISE EXCEPTION 'Invalid notifications.kind="%" (bytes=%) (allowed=%)',
       NEW.kind,
@@ -1071,7 +1081,7 @@ AS $function$
 declare
   new_role user_role := 'member';
 begin
-  -- Récupère role depuis les métadonnées si fourni (et valide)
+  -- RÃƒÂ©cupÃƒÂ¨re role depuis les mÃƒÂ©tadonnÃƒÂ©es si fourni (et valide)
   if (new.raw_user_meta_data ? 'role') then
     begin
       new_role := (new.raw_user_meta_data->>'role')::user_role;
@@ -1237,7 +1247,7 @@ declare
   v_used int;
   v_remaining int;
 begin
-  -- 0) déjà pointé aujourd'hui ?
+  -- 0) dÃƒÂ©jÃƒÂ  pointÃƒÂ© aujourd'hui ?
   if exists (
     select 1 from public.attendance
     where member_id = p_member_id and date = today and valid is true
@@ -1303,14 +1313,14 @@ begin
     );
   end if;
 
-  -- 3) consommer 1 séance de façon atomique
+  -- 3) consommer 1 sÃƒÂ©ance de faÃƒÂ§on atomique
   update public.subscriptions
   set sessions_used = coalesce(sessions_used,0) + 1
   where id = v_session_sub_id
     and coalesce(sessions_total,0) > coalesce(sessions_used,0);
 
   if not found then
-    -- plus de séances (race) -> on enregistre invalid
+    -- plus de sÃƒÂ©ances (race) -> on enregistre invalid
     begin
       insert into public.attendance(member_id, date, valid, subscription_id, from_sessions)
       values (p_member_id, today, false, null, false);
@@ -1334,12 +1344,12 @@ begin
 
   v_remaining := greatest(coalesce(v_total,0) - coalesce(v_used,0), 0);
 
-  -- 5) insérer attendance (from_sessions=true)
+  -- 5) insÃƒÂ©rer attendance (from_sessions=true)
   begin
     insert into public.attendance(member_id, date, valid, subscription_id, from_sessions)
     values (p_member_id, today, true, v_session_sub_id, true);
   exception when unique_violation then
-    -- revert la conso si quelqu'un a inséré en parallèle
+    -- revert la conso si quelqu'un a insÃƒÂ©rÃƒÂ© en parallÃƒÂ¨le
     update public.subscriptions
     set sessions_used = greatest(coalesce(sessions_used,0) - 1, 0)
     where id = v_session_sub_id;
