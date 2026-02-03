@@ -257,14 +257,30 @@ export async function POST(req: Request) {
       { onConflict: 'user_id' },
     )
 
-    if (profErr) {
-      return noStore(
-        NextResponse.json(
-          { ok: false, error: `PROFILE_INSERT_FAILED: ${profErr.message}` },
-          { status: 500 },
-        ),
-      )
-    }
+        if (profErr) {
+        // Postgres unique violation (ex: profiles_email_unique)
+        if ((profErr as any)?.code === '23505') {
+          return noStore(
+            NextResponse.json(
+              {
+                ok: false,
+                error: 'EMAIL_ALREADY_EXISTS',
+                details:
+                  'A user with this email already exists. Please search the member and open their profile instead.',
+              },
+              { status: 409 },
+            ),
+          )
+        }
+
+        return noStore(
+          NextResponse.json(
+            { ok: false, error: `PROFILE_INSERT_FAILED: ${profErr.message}` },
+            { status: 500 },
+          ),
+        )
+      }
+
 
     return noStore(
       NextResponse.json({
