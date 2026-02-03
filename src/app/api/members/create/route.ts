@@ -142,31 +142,28 @@ export async function POST(req: Request) {
       auth: { autoRefreshToken: false, persistSession: false },
     })
 
-    // 4) Si un profile existe déjà pour cet email → on met juste à jour les infos
+    // 4) Si un profile existe déjà pour cet email → on refuse la création.
+    //    Objectif : éviter les doublons et éviter d'écraser les infos d'un compte existant.
     {
       const { data: existing } = await admin
         .from('profiles')
-        .select('user_id, first_name, last_name, phone, date_of_birth')
+        .select('user_id, role')
         .ilike('email', email)
         .maybeSingle()
 
       if (existing?.user_id) {
-        const patch: Record<string, any> = {}
-        if (first_name) patch.first_name = first_name
-        if (last_name) patch.last_name = last_name
-        if (phone) patch.phone = phone
-        if (date_of_birth) patch.date_of_birth = date_of_birth
-
-        if (Object.keys(patch).length > 0) {
-          await admin.from('profiles').update(patch).eq('user_id', existing.user_id)
-        }
-
         return noStore(
-          NextResponse.json({
-            ok: true,
-            user_id: existing.user_id,
-            updated: Object.keys(patch),
-          }),
+          NextResponse.json(
+            {
+              ok: false,
+              error: 'EMAIL_ALREADY_EXISTS',
+              existing_user_id: existing.user_id,
+              existing_role: (existing as any).role ?? null,
+              details:
+                'A user with this email already exists. Please search the member and open their profile instead.',
+            },
+            { status: 409 },
+          ),
         )
       }
     }
@@ -203,20 +200,46 @@ export async function POST(req: Request) {
           (u: any) => u.email && u.email.toLowerCase() === email,
         ) ?? null
 
-      if (listErr || !existingAuth?.id) {
+      if (listErr) {
         return noStore(
           NextResponse.json(
             {
               ok: false,
               error: 'CREATE_USER_FAILED',
-              details: inviteErr?.message ?? listErr?.message ?? 'unknown',
+              details: listErr?.message ?? inviteErr?.message ?? 'unknown',
             },
             { status: 500 },
           ),
         )
       }
 
-      userId = existingAuth.id
+      // Email already exists in Auth → do not create a new member
+      if (existingAuth?.id) {
+        return noStore(
+          NextResponse.json(
+            {
+              ok: false,
+              error: 'EMAIL_ALREADY_EXISTS',
+              existing_user_id: existingAuth.id,
+              details:
+                'A user with this email already exists. Please search the member and open their profile instead.',
+            },
+            { status: 409 },
+          ),
+        )
+      }
+
+      // If we reach this point, invitation failed and we couldn't find the user.
+      return noStore(
+        NextResponse.json(
+          {
+            ok: false,
+            error: 'CREATE_USER_FAILED',
+            details: inviteErr?.message ?? 'unknown',
+          },
+          { status: 500 },
+        ),
+      )
     }
 
     // 7) Upsert dans public.profiles
