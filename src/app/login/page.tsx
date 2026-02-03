@@ -148,8 +148,8 @@ function LoginInner() {
           <p>If you were invited, use the link from your email first to set your password.</p>
           <p>
             Forgot your password?{' '}
-            <a className="underline" href="/reset">
-              Reset here
+            <a className="underline" href="/forgot-password">
+            Reset here
             </a>
           </p>
         </div>
