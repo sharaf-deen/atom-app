@@ -50,7 +50,6 @@ function fmtDate(d?: string | null) {
     month: 'short',
     day: '2-digit',
   })
-
 }
 
 function ageYears(dob?: string | null) {
@@ -84,9 +83,7 @@ function AgeBadge({ dob }: { dob?: string | null }) {
   return (
     <span
       className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold ${
-        isKid
-          ? 'border-sky-200 bg-sky-50 text-sky-700'
-          : 'border-violet-200 bg-violet-50 text-violet-700'
+        isKid ? 'border-sky-200 bg-sky-50 text-sky-700' : 'border-violet-200 bg-violet-50 text-violet-700'
       }`}
       title={dob ? `Date of birth: ${dob}` : undefined}
     >
@@ -222,7 +219,6 @@ export default function MembersSearch({ isStaff = false }: { isStaff?: boolean }
     return () => window.removeEventListener('atom:reload', onReload as any)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mode, listKind, page, q])
-
 
   async function runSearch(targetPage = 1) {
     const query = q.trim()
@@ -487,7 +483,9 @@ export default function MembersSearch({ isStaff = false }: { isStaff?: boolean }
             <p>
               {mode === 'list'
                 ? hasData
-                  ? `${totalResults ?? rows.length} ${listSummaryLabel(listKind)}${(totalResults ?? rows.length) > 1 ? 's' : ''} total.`
+                  ? `${totalResults ?? rows.length} ${listSummaryLabel(listKind)}${
+                      (totalResults ?? rows.length) > 1 ? 's' : ''
+                    } total.`
                   : `No ${listLabel(listKind).toLowerCase()}.`
                 : hasData
                   ? `${totalResults ?? rows.length} member${(totalResults ?? rows.length) > 1 ? 's' : ''} found.`
@@ -515,16 +513,18 @@ export default function MembersSearch({ isStaff = false }: { isStaff?: boolean }
                 <tbody>
                   {rows.map((m) => {
                     const name = [m.first_name ?? '', m.last_name ?? ''].join(' ').trim() || '—'
+                    const resolved = resolveActive(mode, listKind, m.is_active)
+                    const canSubscribe = isStaff && resolved === false // ✅ only inactive members can be subscribed
                     return (
                       <tr key={m.user_id} className="odd:bg-[hsl(var(--card))] even:bg-[hsl(var(--bg))]">
                         <td className="border-t border-[hsl(var(--border))] px-4 py-3">
                           <div className="flex items-center justify-between gap-2">
-                          <div className="font-medium">{name}</div>
-                          <div className="flex items-center gap-2">
-                            <StatusBadge active={resolveActive(mode, listKind, m.is_active)} />
-                            <AgeBadge dob={m.date_of_birth} />
+                            <div className="font-medium">{name}</div>
+                            <div className="flex items-center gap-2">
+                              <StatusBadge active={resolved} />
+                              <AgeBadge dob={m.date_of_birth} />
+                            </div>
                           </div>
-                        </div>
                         </td>
                         <td className="border-t border-[hsl(var(--border))] px-4 py-3">
                           <code className="text-xs">{m.member_id?.trim() || '—'}</code>
@@ -538,7 +538,7 @@ export default function MembersSearch({ isStaff = false }: { isStaff?: boolean }
                               <Link href={`/members/${m.user_id}`}>View</Link>
                             </Button>
 
-                            {isStaff && (
+                            {canSubscribe && (
                               <SubscribeDialog
                                 member={{
                                   user_id: m.user_id,
@@ -567,6 +567,8 @@ export default function MembersSearch({ isStaff = false }: { isStaff?: boolean }
             <div className="space-y-3 md:hidden">
               {rows.map((m) => {
                 const name = [m.first_name ?? '', m.last_name ?? ''].join(' ').trim() || '—'
+                const resolved = resolveActive(mode, listKind, m.is_active)
+                const canSubscribe = isStaff && resolved === false // ✅ only inactive members can be subscribed
                 return (
                   <div
                     key={m.user_id}
@@ -575,12 +577,12 @@ export default function MembersSearch({ isStaff = false }: { isStaff?: boolean }
                     <div className="mb-2">
                       <div className="text-sm text-[hsl(var(--muted))]">Name</div>
                       <div className="flex items-center justify-between gap-2">
-                      <div className="font-medium">{name}</div>
-                      <div className="flex items-center gap-2">
-                        <StatusBadge active={resolveActive(mode, listKind, m.is_active)} />
-                        <AgeBadge dob={m.date_of_birth} />
+                        <div className="font-medium">{name}</div>
+                        <div className="flex items-center gap-2">
+                          <StatusBadge active={resolved} />
+                          <AgeBadge dob={m.date_of_birth} />
+                        </div>
                       </div>
-                    </div>
                     </div>
 
                     <div className="mb-2">
@@ -608,7 +610,7 @@ export default function MembersSearch({ isStaff = false }: { isStaff?: boolean }
                         <Link href={`/members/${m.user_id}`}>View</Link>
                       </Button>
 
-                      {isStaff && (
+                      {canSubscribe && (
                         <SubscribeDialog
                           member={{
                             user_id: m.user_id,
@@ -619,10 +621,10 @@ export default function MembersSearch({ isStaff = false }: { isStaff?: boolean }
                           defaultPlan={'1m' as Plan}
                           defaultSessions={10}
                           buttonLabel="Subscribe"
-                                onCreated={() => {
-                                  refreshAll()
-                                }}
-                              />
+                          onCreated={() => {
+                            refreshAll()
+                          }}
+                        />
                       )}
                     </div>
                   </div>
