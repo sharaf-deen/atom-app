@@ -367,37 +367,6 @@ export default function MembersSearch({ isStaff = false }: { isStaff?: boolean }
               {loading && mode === 'search' ? 'Searching…' : 'Search'}
             </Button>
 
-            <Button
-              variant="outline"
-              onClick={() => loadList('all', 1)}
-              disabled={loading}
-              title="List all members"
-            >
-              {loading && mode === 'list' && listKind === 'all' ? 'Loading…' : 'All'}
-            </Button>
-
-            <Button
-              variant="outline"
-              onClick={() => loadList('active', 1)}
-              disabled={loading}
-              title="List active members"
-            >
-              {loading && mode === 'list' && listKind === 'active' ? 'Loading…' : 'Active'}
-            </Button>
-
-            <Button
-              variant="outline"
-              onClick={() => loadList('inactive', 1)}
-              disabled={loading}
-              title="List inactive members"
-            >
-              {loading && mode === 'list' && listKind === 'inactive' ? 'Loading…' : 'Inactive'}
-            </Button>
-
-            <Button variant="outline" onClick={refreshAll} disabled={loading || statsLoading}>
-              Reload
-            </Button>
-
             <Button variant="outline" onClick={handleReset} disabled={loading}>
               Reset
             </Button>
@@ -463,7 +432,7 @@ export default function MembersSearch({ isStaff = false }: { isStaff?: boolean }
               </div>
 
               <p className="mt-2 text-[11px] text-[hsl(var(--muted))]">
-                You can search a member, or list All / Active / Inactive.
+                You can search a member, or use the cards above to list members.
               </p>
             </>
           )}
