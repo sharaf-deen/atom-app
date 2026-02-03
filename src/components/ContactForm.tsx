@@ -8,9 +8,11 @@ import Textarea from '@/components/ui/Textarea'
 import Button from '@/components/ui/Button'
 
 export default function ContactForm() {
+  // Message form state
   const [subject, setSubject] = useState('')
   const [message, setMessage] = useState('')
 
+  // Common UI state
   const [busy, setBusy] = useState(false)
   const [status, setStatus] = useState<{ kind: '' | 'success' | 'error'; msg: string }>({
     kind: '',
@@ -73,6 +75,7 @@ export default function ContactForm() {
             aria-label="Message"
           />
 
+          {/* Status */}
           {status.msg && (
             <div
               className={
@@ -87,6 +90,7 @@ export default function ContactForm() {
             </div>
           )}
 
+          {/* Actions */}
           <div className="flex items-center gap-2">
             <Button type="submit" disabled={busy || !message.trim()}>
               {busy ? 'Sending…' : 'Send'}
