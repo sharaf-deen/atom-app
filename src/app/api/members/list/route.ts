@@ -1,4 +1,3 @@
-// src/app/api/members/list/route.ts
 import { NextResponse } from 'next/server'
 import { createSupabaseRSC } from '@/lib/supabaseServer'
 
@@ -56,11 +55,13 @@ export async function GET(req: Request) {
     async function addActiveFlag(items: MemberRow[]) {
       const ids = items.map((i) => i.user_id).filter(Boolean)
       if (ids.length === 0) return items.map((i) => ({ ...i, is_active: false }))
+
+      // ✅ Include sessions subscriptions (often end_date is NULL) + time subscriptions not expired.
       const { data: subs, error: subsError2 } = await supabase
         .from('subscriptions')
         .select('member_id, end_date, status')
         .eq('status', 'active')
-        .gte('end_date', today)
+        .or(`end_date.is.null,end_date.gte.${today}`)
         .in('member_id', ids)
 
       if (subsError2) {
@@ -77,7 +78,6 @@ export async function GET(req: Request) {
 
       return items.map((i) => ({ ...i, is_active: activeSet.has(i.user_id) }))
     }
-
 
     // ALL members (role='member')
     if (status === 'all') {
@@ -116,7 +116,7 @@ export async function GET(req: Request) {
       .from('subscriptions')
       .select('member_id, end_date, status')
       .eq('status', 'active')
-      .gte('end_date', today)
+      .or(`end_date.is.null,end_date.gte.${today}`)
 
     if (subsError) {
       console.error('Error fetching subscriptions (list):', subsError)

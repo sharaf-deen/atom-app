@@ -1,4 +1,3 @@
-// src/app/members/[id]/page.tsx
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
@@ -120,6 +119,19 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
     }> | null
   }
 
+  const today = todayDateOnlyUTC()
+
+  // ✅ UI rule: only allow creating a new subscription when the member has NO active subscription.
+  // Sessions: status='active' is considered active (typically no end_date).
+  // Time: active if status='active' and end_date is null or >= today.
+  const hasActiveSubscription = (subs ?? []).some((s) => {
+    if (s.status !== 'active') return false
+    if (s.subscription_type === 'sessions') return true
+    // time (or unknown): rely on end_date
+    if (!s.end_date) return true
+    return s.end_date >= today
+  })
+
   // Attendance is a staff-only view.
   // Members / coaches can see their own profile + subscriptions, but not attendance.
   let attendance:
@@ -133,7 +145,6 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
     | null = null
 
   if (isStaff) {
-    const today = todayDateOnlyUTC()
     const from = addDays(today, -30)
     const { data } = (await supa
       .from('attendance')
@@ -247,7 +258,7 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
           <div className="flex items-center gap-2">
             <h2 className="font-semibold">Subscriptions</h2>
 
-            {isStaff && (
+            {isStaff && !hasActiveSubscription ? (
               <div className="ml-auto">
                 <SubscribeDialog
                   member={{
@@ -261,7 +272,13 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
                   defaultSessions={10}
                 />
               </div>
-            )}
+            ) : null}
+
+            {isStaff && hasActiveSubscription ? (
+              <div className="ml-auto text-xs text-[hsl(var(--muted))]">
+                Active subscription exists — create a new one only after it ends.
+              </div>
+            ) : null}
           </div>
 
           {(subs ?? []).length === 0 ? (
@@ -280,7 +297,7 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
                     <th className="text-left px-3 py-2">Amount</th>
                     <th className="text-left px-3 py-2">Paid at</th>
                     <th className="text-left px-3 py-2">Badges</th>
-	                    {canManageSubscriptions && <th className="text-left px-3 py-2">Actions</th>}
+                    {canManageSubscriptions && <th className="text-left px-3 py-2">Actions</th>}
                   </tr>
                 </thead>
                 <tbody>
@@ -291,7 +308,6 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
                     const soon = isTime && dleft !== null && dleft <= 7 && dleft >= 0
                     const expired = s.status === 'expired' || (isTime && (dleft ?? -999) < 0)
 
-                    const today = todayDateOnlyUTC()
                     const isFrozen = !!(s.frozen_until && today < s.frozen_until)
                     const freezeDays = isFrozen
                       ? Math.max(0, Math.floor((new Date(`${s.frozen_until}T00:00:00Z`).getTime() - new Date(`${today}T00:00:00Z`).getTime()) / 86400000))
@@ -347,11 +363,11 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
                             )}
                           </div>
                         </td>
-	                        {canManageSubscriptions && (
-	                          <td className="px-3 py-2">
-	                            <SubscriptionManageRowActions sub={s} />
-	                          </td>
-	                        )}
+                        {canManageSubscriptions && (
+                          <td className="px-3 py-2">
+                            <SubscriptionManageRowActions sub={s} />
+                          </td>
+                        )}
                       </tr>
                     )
                   })}
