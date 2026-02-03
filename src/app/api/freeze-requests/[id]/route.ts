@@ -7,24 +7,25 @@ type Action = 'approve' | 'deny' | 'cancel'
 type Json = Record<string, unknown>
 
 function createSupabaseFromApiRoute() {
-  return createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
-      cookies: {
-        get: (name: string) => cookies().get(name)?.value,
-        set: () => {},
-        remove: () => {},
-      },
-    }
-  )
+  return createServerClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!, {
+    cookies: {
+      get: (name: string) => cookies().get(name)?.value,
+      set: () => {},
+      remove: () => {},
+    },
+  })
+}
+
+function isStaff(role: string | null | undefined) {
+  return role === 'reception' || role === 'admin' || role === 'super_admin'
 }
 
 export async function PATCH(req: Request, { params }: { params: { id: string } }) {
   try {
     const supabase = createSupabaseFromApiRoute()
-    const { data: userData } = await supabase.auth.getUser()
-    if (!userData?.user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+
+    const { data: userData, error: userErr } = await supabase.auth.getUser()
+    if (userErr || !userData?.user) return NextResponse.json({ error: 'Unauthorized' } as Json, { status: 401 })
     const uid = userData.user.id
     const id = params.id
 
@@ -33,44 +34,47 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
     const admin_note = (body as any).admin_note ? String((body as any).admin_note) : null
 
     if (!['approve', 'deny', 'cancel'].includes(action)) {
-      return NextResponse.json({ error: 'Invalid action' }, { status: 422 })
+      return NextResponse.json({ error: 'Invalid action' } as Json, { status: 422 })
     }
 
-    const { data: profile } = await supabase
+    // Staff only
+    const { data: profile, error: profErr } = await supabase
       .from('profiles')
       .select('role')
       .eq('user_id', uid)
       .single()
 
-    const { data: reqRow, error: reqErr } = await supabase
-      .from('freeze_requests')
-      .select('id, member_user_id, status')
-      .eq('id', id)
-      .single()
-    if (reqErr || !reqRow) return NextResponse.json({ error: 'Request not found' }, { status: 404 })
-
-    if (action === 'cancel') {
-      if (reqRow.member_user_id !== uid) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
-      if (reqRow.status !== 'pending') return NextResponse.json({ error: 'Only pending requests can be canceled' }, { status: 409 })
-
-      const { error } = await supabase.from('freeze_requests').update({ status: 'canceled' }).eq('id', id)
-      if (error) return NextResponse.json({ error: error.message }, { status: 400 })
-      return NextResponse.json({ ok: true })
+    if (profErr) return NextResponse.json({ error: 'Profile error', details: profErr.message } as Json, { status: 500 })
+    if (!isStaff(profile?.role)) {
+      return NextResponse.json({ error: 'FORBIDDEN' } as Json, { status: 403 })
     }
 
-    const isAdmin = profile?.role === 'admin' || profile?.role === 'super_admin'
-    if (!isAdmin) return NextResponse.json({ error: 'Admin only' }, { status: 403 })
-    if (reqRow.status !== 'pending') return NextResponse.json({ error: 'Only pending requests can be processed' }, { status: 409 })
+    const { data: reqRow, error: reqErr } = await supabase
+      .from('freeze_requests')
+      .select('id,status')
+      .eq('id', id)
+      .single()
 
-    const nextStatus = action === 'approve' ? 'approved' : 'denied'
+    if (reqErr || !reqRow) return NextResponse.json({ error: 'Request not found' } as Json, { status: 404 })
+    if (reqRow.status !== 'pending') {
+      return NextResponse.json({ error: 'Only pending requests can be processed' } as Json, { status: 409 })
+    }
+
+    const nextStatus = action === 'approve' ? 'approved' : action === 'deny' ? 'denied' : 'canceled'
+
     const { error } = await supabase
       .from('freeze_requests')
-      .update({ status: nextStatus, processed_by: uid, processed_at: new Date().toISOString(), admin_note: admin_note ?? null })
+      .update({
+        status: nextStatus,
+        processed_by: uid,
+        processed_at: new Date().toISOString(),
+        admin_note: admin_note ?? null,
+      })
       .eq('id', id)
-    if (error) return NextResponse.json({ error: error.message }, { status: 400 })
 
-    return NextResponse.json({ ok: true })
+    if (error) return NextResponse.json({ error: error.message } as Json, { status: 400 })
+    return NextResponse.json({ ok: true } as Json)
   } catch (e: any) {
-    return NextResponse.json({ error: 'Server error', details: e?.message ?? String(e) }, { status: 500 })
+    return NextResponse.json({ error: 'Server error', details: e?.message ?? String(e) } as Json, { status: 500 })
   }
 }
