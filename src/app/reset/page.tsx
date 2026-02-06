@@ -21,18 +21,7 @@ function scorePassword(pw: string) {
     entropyScore: 0,
   }
 
-  const commons = [
-    'password',
-    '123456',
-    '123456789',
-    'qwerty',
-    '111111',
-    '123123',
-    'abc123',
-    'letmein',
-    'azerty',
-    '000000',
-  ]
+  const commons = ['password', '123456', '123456789', 'qwerty', '111111', '123123', 'abc123', 'letmein', 'azerty', '000000']
   const lowerPw = pw.toLowerCase()
   res.common = commons.some((c) => lowerPw.includes(c))
 
@@ -125,7 +114,6 @@ export default function ResetPage() {
     const run = async () => {
       const params = getURLParams(window.location.href)
 
-      // If arriving with params (callback)
       const isCallback =
         !!params.code ||
         (!!params.access_token && !!params.refresh_token) ||
@@ -134,84 +122,80 @@ export default function ResetPage() {
       try {
         setErr('')
 
-        // ✅ First: if no callback params but session already exists (ex: user came from /auth/confirm)
-        if (!isCallback) {
-          const { data } = await supabase.auth.getSession()
-          if (!mounted) return
+        if (isCallback) {
+          setStage('exchanging')
+          setInfo('Finalizing your reset link…')
 
-          if (data.session) {
-            setStage('form')
-            setInfo('')
-            setErr('')
-            return
+          // 1) Implicit tokens in hash
+          if (params.access_token && params.refresh_token) {
+            const { error } = await supabase.auth.setSession({
+              access_token: params.access_token,
+              refresh_token: params.refresh_token,
+            })
+            if (error) throw error
+          }
+          // 2) token_hash flow (recommended)
+          else if (params.type && params.token_hash) {
+            const otpType = (params.type || 'recovery') as
+              | 'recovery'
+              | 'magiclink'
+              | 'invite'
+              | 'signup'
+              | 'email_change'
+
+            const { error } = await supabase.auth.verifyOtp({
+              type: otpType,
+              token_hash: params.token_hash,
+            } as any)
+
+            if (error) throw error
+          }
+          // 3) Legacy PKCE code flow (works ONLY if same browser/context has code_verifier)
+          else if (params.code) {
+            const { error } = await supabase.auth.exchangeCodeForSession(params.code)
+            if (error) throw error
+          } else {
+            throw new Error('Reset link is missing required parameters.')
           }
 
-          setStage('request')
+          // Sync cookies server-side so middleware/RSC see the session
+          try {
+            const { data } = await supabase.auth.getSession()
+            if (data.session) {
+              await fetch('/auth', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ event: 'SIGNED_IN', session: data.session }),
+              })
+            }
+          } catch {}
+
+          // Clean URL (avoid refresh issues)
+          window.history.replaceState({}, '', '/reset')
+
+          if (!mounted) return
+          setInfo('')
+          setStage('form')
           return
         }
 
-        // Callback path
-        setStage('exchanging')
-        setInfo('Finalizing your reset link…')
-
-        // 1) Implicit tokens in hash
-        if (params.access_token && params.refresh_token) {
-          const { error } = await supabase.auth.setSession({
-            access_token: params.access_token,
-            refresh_token: params.refresh_token,
-          })
-          if (error) throw error
-        }
-        // 2) token_hash flow (recommended)
-        else if (params.type && params.token_hash) {
-          const otpType = (params.type || 'recovery') as
-            | 'recovery'
-            | 'magiclink'
-            | 'invite'
-            | 'signup'
-            | 'email_change'
-
-          const { error } = await supabase.auth.verifyOtp({
-            type: otpType,
-            token_hash: params.token_hash,
-          } as any)
-
-          if (error) throw error
-        }
-        // 3) Legacy PKCE code flow (works ONLY if same browser/context has code_verifier)
-        else if (params.code) {
-          const { error } = await supabase.auth.exchangeCodeForSession(params.code)
-          if (error) throw error
-        } else {
-          throw new Error('Reset link is missing required parameters.')
-        }
-
-        // Sync cookies server-side so middleware/RSC see the session (same as /login)
-        try {
-          const { data } = await supabase.auth.getSession()
-          if (data.session) {
-            await fetch('/auth', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ event: 'SIGNED_IN', session: data.session }),
-            })
-          }
-        } catch {
-          // ignore
-        }
-
-        // Clean URL (avoid refresh issues)
-        window.history.replaceState({}, '', '/reset')
-
+        // No callback params: show form if session exists
+        const { data } = await supabase.auth.getSession()
         if (!mounted) return
-        setInfo('')
-        setStage('form')
+
+        if (data.session) {
+          setStage('form')
+          setInfo('')
+          setErr('')
+          return
+        }
+
+        setStage('request')
       } catch (e: any) {
         if (!mounted) return
 
         const msg = String(e?.message || e)
 
-        // Friendly hint for classic PKCE verifier issue
         if (msg.toLowerCase().includes('code verifier') || msg.toLowerCase().includes('code_verifier')) {
           setErr(
             'Link error: this reset link was opened in a browser/context that does not have the required code verifier. ' +
@@ -246,8 +230,8 @@ export default function ResetPage() {
     setInfo('Sending reset email…')
 
     try {
-      // Recommended: go through /auth/confirm (token_hash flow)
-      const redirectTo = `${window.location.origin}/auth/confirm?next=/reset`
+      // Recommended: your email template can point to /auth/confirm?token_hash=...&type=recovery&next=/reset
+      const redirectTo = `${window.location.origin}/reset`
 
       const { error } = await supabase.auth.resetPasswordForEmail(em, { redirectTo })
       if (error) {
@@ -257,7 +241,6 @@ export default function ResetPage() {
         return
       }
 
-      // Security best practice: do not confirm account existence
       setInfo('If an account exists for this email, you will receive a reset link shortly.')
       setErr('')
       setStage('request')
@@ -376,7 +359,6 @@ export default function ResetPage() {
             />
           </label>
 
-          {/* Strength meter */}
           <div className="space-y-1">
             <div className="h-2 w-full overflow-hidden rounded bg-gray-200">
               <div

@@ -11,6 +11,9 @@ import { getSessionUser, type Role } from '@/lib/session'
 import QrImage from '@/components/QrImage'
 import SubscribeDialog, { type Plan } from '@/components/SubscribeDialog'
 import SubscriptionManageRowActions from '@/components/SubscriptionManageRowActions'
+import ResendInviteButton from '@/components/ResendInviteButton'
+
+
 
 function todayDateOnlyUTC() {
   return new Date().toISOString().slice(0, 10) // YYYY-MM-DD (UTC)
@@ -186,18 +189,16 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
     <main>
       <PageHeader
         title="Member"
-        subtitle={isStaff ? 'Profile, QR, subscriptions and attendance' : 'Profile, QR and subscriptions'}
+        subtitle="Profile and subscriptions."
         right={
           isStaff ? (
-            <Link
-              href="/members"
-              className="px-4 py-2 rounded-2xl border border-[hsl(var(--border))] bg-white hover:bg-[hsl(var(--bg))]/80 shadow-soft text-sm"
-            >
-              Back to list
-            </Link>
+            <div className="flex items-center gap-2">
+              <ResendInviteButton userId={profile.user_id} email={profile.email} />
+            </div>
           ) : null
         }
       />
+
 
       <Section className="space-y-6">
         {/* Identity + QR */}
