@@ -135,7 +135,10 @@ export async function POST(req: Request) {
 
       if (existingErr) {
         return noStore(
-          NextResponse.json({ ok: false, error: 'PROFILE_LOOKUP_FAILED', details: existingErr.message }, { status: 500 }),
+          NextResponse.json(
+            { ok: false, error: 'PROFILE_LOOKUP_FAILED', details: existingErr.message },
+            { status: 500 },
+          ),
         )
       }
 
@@ -161,7 +164,11 @@ export async function POST(req: Request) {
       process.env.NEXT_PUBLIC_SITE_URL ||
       'http://localhost:3000'
 
-    const redirectTo = `${APP_URL.replace(/\/$/, '')}/auth/complete-invite`
+    // ✅ IMPORTANT: on envoie l'invite vers complete-invite + next=/auth/set-password
+    // Ainsi: email -> complete-invite -> session -> redirect to /auth/set-password (même UI que reset)
+    const redirectTo = `${APP_URL.replace(/\/$/, '')}/auth/complete-invite?next=${encodeURIComponent(
+      '/auth/set-password',
+    )}`
 
     // 6) Invite (création auth.users) + fallback (auth lookup via RPC)
     let userId: string | null = null
@@ -219,24 +226,21 @@ export async function POST(req: Request) {
     }
 
     // 7) Insert profile (onConflict user_id). Handle race unique on email (23505).
-    const { error: profErr } = await admin
-      .from('profiles')
-      .upsert(
-        {
-          user_id: userId!,
-          email, // déjà normalisé (lower/trim)
-          first_name,
-          last_name,
-          phone,
-          date_of_birth,
-          role: 'member',
-          qr_code: `atom:${userId}`,
-        },
-        { onConflict: 'user_id' },
-      )
+    const { error: profErr } = await admin.from('profiles').upsert(
+      {
+        user_id: userId!,
+        email,
+        first_name,
+        last_name,
+        phone,
+        date_of_birth,
+        role: 'member',
+        qr_code: `atom:${userId}`,
+      },
+      { onConflict: 'user_id' },
+    )
 
     if (profErr) {
-      // unique violation (email unique / indexes uniques)
       if ((profErr as any)?.code === '23505') {
         return noStore(
           NextResponse.json(
@@ -266,10 +270,7 @@ export async function POST(req: Request) {
   } catch (e: any) {
     console.error('members/create error:', e)
     return noStore(
-      NextResponse.json(
-        { ok: false, error: 'SERVER_ERROR', details: e?.message || String(e) },
-        { status: 500 },
-      ),
+      NextResponse.json({ ok: false, error: 'SERVER_ERROR', details: e?.message || String(e) }, { status: 500 }),
     )
   }
 }
