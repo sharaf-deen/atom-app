@@ -1,3 +1,4 @@
+// src/app/reset/page.tsx
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
@@ -77,22 +78,20 @@ function getURLParams(url: string) {
   const get = (k: string) => q.get(k) ?? h.get(k)
 
   return {
-    // PKCE code
+    // Legacy PKCE code
     code: get('code'),
 
-    // Email token flow (if used)
-    token: get('token') || get('token_hash'),
-    type: get('type'), // recovery | magiclink | invite | signup | email_change
+    // token_hash flow (recommended)
+    token_hash: get('token_hash') || get('token'),
+    type: get('type'),
 
-    // Fragment tokens after Supabase verify redirect (implicit flow)
+    // Implicit flow tokens (hash)
     access_token: h.get('access_token'),
     refresh_token: h.get('refresh_token'),
-    token_type: h.get('token_type'),
-    expires_in: h.get('expires_in'),
   }
 }
 
-type Stage = 'request' | 'sending' | 'exchanging' | 'form' | 'done' | 'error'
+type Stage = 'request' | 'sending' | 'exchanging' | 'form' | 'done'
 
 export default function ResetPage() {
   const router = useRouter()
@@ -108,30 +107,53 @@ export default function ResetPage() {
   // form stage
   const [password, setPassword] = useState('')
   const [confirm, setConfirm] = useState('')
-  const strength = useMemo(() => scorePassword(password), [password])
+  const [busyUpdate, setBusyUpdate] = useState(false)
 
+  const strength = useMemo(() => scorePassword(password), [password])
   const canSubmit =
     stage === 'form' &&
+    !busyUpdate &&
     password.length >= 8 &&
     password === confirm &&
     strength.score >= 3 &&
     !strength.common &&
     !strength.repeating
 
-  // Detect if we landed here from an email link (code / tokens present)
   useEffect(() => {
-    const params = getURLParams(window.location.href)
-    const isCallback =
-      !!params.code || (!!params.access_token && !!params.refresh_token) || (!!params.type && !!params.token)
-
-    if (!isCallback) return
-
-    setStage('exchanging')
-    setErr('')
-    setInfo('Finalizing your reset link…')
+    let mounted = true
 
     const run = async () => {
+      const params = getURLParams(window.location.href)
+
+      // If arriving with params (callback)
+      const isCallback =
+        !!params.code ||
+        (!!params.access_token && !!params.refresh_token) ||
+        (!!params.type && !!params.token_hash)
+
       try {
+        setErr('')
+
+        // ✅ First: if no callback params but session already exists (ex: user came from /auth/confirm)
+        if (!isCallback) {
+          const { data } = await supabase.auth.getSession()
+          if (!mounted) return
+
+          if (data.session) {
+            setStage('form')
+            setInfo('')
+            setErr('')
+            return
+          }
+
+          setStage('request')
+          return
+        }
+
+        // Callback path
+        setStage('exchanging')
+        setInfo('Finalizing your reset link…')
+
         // 1) Implicit tokens in hash
         if (params.access_token && params.refresh_token) {
           const { error } = await supabase.auth.setSession({
@@ -140,8 +162,8 @@ export default function ResetPage() {
           })
           if (error) throw error
         }
-        // 2) Email token flow (token_hash + type)
-        else if (params.type && params.token) {
+        // 2) token_hash flow (recommended)
+        else if (params.type && params.token_hash) {
           const otpType = (params.type || 'recovery') as
             | 'recovery'
             | 'magiclink'
@@ -149,10 +171,14 @@ export default function ResetPage() {
             | 'signup'
             | 'email_change'
 
-          const { error } = await supabase.auth.verifyOtp({ type: otpType, token_hash: params.token } as any)
+          const { error } = await supabase.auth.verifyOtp({
+            type: otpType,
+            token_hash: params.token_hash,
+          } as any)
+
           if (error) throw error
         }
-        // 3) PKCE code flow (code=...)
+        // 3) Legacy PKCE code flow (works ONLY if same browser/context has code_verifier)
         else if (params.code) {
           const { error } = await supabase.auth.exchangeCodeForSession(params.code)
           if (error) throw error
@@ -160,7 +186,7 @@ export default function ResetPage() {
           throw new Error('Reset link is missing required parameters.')
         }
 
-        // Optional: sync cookies server-side (same pattern as your /login)
+        // Sync cookies server-side so middleware/RSC see the session (same as /login)
         try {
           const { data } = await supabase.auth.getSession()
           if (data.session) {
@@ -171,52 +197,58 @@ export default function ResetPage() {
             })
           }
         } catch {
-          // ignore (still allows updateUser in client)
+          // ignore
         }
 
-        // Clean URL to avoid refresh problems
+        // Clean URL (avoid refresh issues)
         window.history.replaceState({}, '', '/reset')
 
+        if (!mounted) return
         setInfo('')
-        setErr('')
         setStage('form')
       } catch (e: any) {
+        if (!mounted) return
+
         const msg = String(e?.message || e)
 
-        // Friendlier hint for the classic PKCE verifier issue
+        // Friendly hint for classic PKCE verifier issue
         if (msg.toLowerCase().includes('code verifier') || msg.toLowerCase().includes('code_verifier')) {
           setErr(
             'Link error: this reset link was opened in a browser/context that does not have the required code verifier. ' +
-              'Please open the email link in the same browser/device where you requested the reset (on iPhone: “Open in Safari/Chrome”), ' +
-              'or request a new reset link below.'
+              'Please request a new reset link below and open it directly in Safari/Chrome (avoid in-app browsers).'
           )
-          setStage('request')
           setInfo('')
+          setStage('request')
           return
         }
 
         setErr(`Link error: ${msg}`)
-        setStage('error')
         setInfo('')
+        setStage('request')
       }
     }
 
     run()
+    return () => {
+      mounted = false
+    }
   }, [supabase])
 
   async function requestReset(e: React.FormEvent) {
     e.preventDefault()
     setErr('')
     setInfo('')
-    const em = email.trim()
 
+    const em = email.trim()
     if (!em) return
 
     setStage('sending')
     setInfo('Sending reset email…')
 
     try {
-      const redirectTo = `${window.location.origin}/reset`
+      // Recommended: go through /auth/confirm (token_hash flow)
+      const redirectTo = `${window.location.origin}/auth/confirm?next=/reset`
+
       const { error } = await supabase.auth.resetPasswordForEmail(em, { redirectTo })
       if (error) {
         setErr(error.message || 'Failed to send reset email.')
@@ -242,12 +274,14 @@ export default function ResetPage() {
 
     setErr('')
     setInfo('Updating password…')
+    setBusyUpdate(true)
 
     try {
       const { error } = await supabase.auth.updateUser({ password })
       if (error) {
         setErr(error.message || 'Failed to update password.')
         setInfo('')
+        setBusyUpdate(false)
         return
       }
 
@@ -259,6 +293,7 @@ export default function ResetPage() {
     } catch (e: any) {
       setErr(String(e?.message || e) || 'Unexpected error')
       setInfo('')
+      setBusyUpdate(false)
     }
   }
 
@@ -323,17 +358,6 @@ export default function ResetPage() {
         </div>
       )}
 
-      {stage === 'error' && (
-        <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-5 shadow-soft">
-          <p className="text-sm text-[hsl(var(--muted))]">You can request a new reset link.</p>
-          <div className="mt-3">
-            <Link className="underline text-sm" href="/login">
-              Back to login
-            </Link>
-          </div>
-        </div>
-      )}
-
       {stage === 'form' && (
         <form
           onSubmit={submitNewPassword}
@@ -348,6 +372,7 @@ export default function ResetPage() {
               onChange={(e) => setPassword(e.target.value)}
               minLength={8}
               required
+              disabled={busyUpdate}
             />
           </label>
 
@@ -384,6 +409,7 @@ export default function ResetPage() {
               onChange={(e) => setConfirm(e.target.value)}
               minLength={8}
               required
+              disabled={busyUpdate}
             />
           </label>
 
@@ -395,7 +421,7 @@ export default function ResetPage() {
             }`}
             title={!canSubmit ? 'Use a stronger password and ensure both fields match' : 'Update password'}
           >
-            Update password
+            {busyUpdate ? 'Updating…' : 'Update password'}
           </button>
 
           <div className="text-xs text-[hsl(var(--muted))]">
