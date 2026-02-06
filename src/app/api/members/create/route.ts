@@ -158,17 +158,16 @@ export async function POST(req: Request) {
       }
     }
 
-    // 5) redirectTo pour compléter l’invitation
+    // 5) redirectTo pour compléter l’invitation (version "propre")
+    // next = destination FINALE après /auth/set-password
     const APP_URL =
       process.env.NEXT_PUBLIC_APP_URL ||
       process.env.NEXT_PUBLIC_SITE_URL ||
       'http://localhost:3000'
 
-    // ✅ IMPORTANT: on envoie l'invite vers complete-invite + next=/auth/set-password
-    // Ainsi: email -> complete-invite -> session -> redirect to /auth/set-password (même UI que reset)
-    const redirectTo = `${APP_URL.replace(/\/$/, '')}/auth/complete-invite?next=${encodeURIComponent(
-      '/auth/set-password',
-    )}`
+    const appBase = APP_URL.replace(/\/$/, '')
+    const nextAfterPassword = '/profile'
+    const redirectTo = `${appBase}/auth/complete-invite?next=${encodeURIComponent(nextAfterPassword)}`
 
     // 6) Invite (création auth.users) + fallback (auth lookup via RPC)
     let userId: string | null = null
@@ -215,11 +214,7 @@ export async function POST(req: Request) {
 
       return noStore(
         NextResponse.json(
-          {
-            ok: false,
-            error: 'CREATE_USER_FAILED',
-            details: inviteErr?.message ?? 'unknown',
-          },
+          { ok: false, error: 'CREATE_USER_FAILED', details: inviteErr?.message ?? 'unknown' },
           { status: 500 },
         ),
       )

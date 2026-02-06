@@ -1,7 +1,7 @@
 // src/app/auth/complete-invite/page.tsx
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { Suspense, useEffect, useMemo, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { createSupabaseBrowserClient } from '@/lib/supabaseBrowser'
 
@@ -22,33 +22,66 @@ function parseHash(hash: string) {
 }
 
 function sanitizeNext(next: string | null) {
-  if (!next) return '/'
+  if (!next) return '/profile'
   const n = next.trim()
-  if (!n.startsWith('/')) return '/'
-  if (n.startsWith('//')) return '/'
-  if (n.includes('://')) return '/'
-  if (n.includes('\\')) return '/'
-  return n || '/'
+  if (!n.startsWith('/')) return '/profile'
+  if (n.startsWith('//')) return '/profile'
+  if (n.includes('://')) return '/profile'
+  if (n.includes('\\')) return '/profile'
+  return n || '/profile'
 }
 
 function loginUrl(nextUrl: string) {
-  return nextUrl && nextUrl !== '/'
+  return nextUrl && nextUrl !== '/profile'
     ? `/login?next=${encodeURIComponent(nextUrl)}`
     : '/login'
 }
 
-function setPasswordUrl(nextUrl: string) {
-  return nextUrl && nextUrl !== '/'
-    ? `/auth/set-password?next=${encodeURIComponent(nextUrl)}`
+/**
+ * We interpret "next" on /auth/complete-invite as:
+ * "where to go AFTER password is set".
+ *
+ * If someone passes next=/auth/set-password by mistake:
+ * - we convert it to /profile (default)
+ * - or if next=/auth/set-password?next=/something -> we extract /something
+ */
+function resolveNextAfterPassword(rawNext: string | null) {
+  const nextUrl = sanitizeNext(rawNext)
+
+  if (nextUrl.startsWith('/auth/set-password')) {
+    // Try to extract nested next from "/auth/set-password?next=/profile"
+    try {
+      const u = new URL(`http://local${nextUrl}`)
+      const nested = u.searchParams.get('next')
+      const nestedSanitized = sanitizeNext(nested)
+
+      // Prevent self-loop
+      if (nestedSanitized.startsWith('/auth/set-password')) return '/profile'
+      return nestedSanitized || '/profile'
+    } catch {
+      return '/profile'
+    }
+  }
+
+  return nextUrl || '/profile'
+}
+
+function setPasswordUrl(nextAfterPassword: string) {
+  return nextAfterPassword && nextAfterPassword !== '/profile'
+    ? `/auth/set-password?next=${encodeURIComponent(nextAfterPassword)}`
     : '/auth/set-password'
 }
 
-export default function CompleteInvitePage() {
+function CompleteInviteInner() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const supabase = useMemo(() => createSupabaseBrowserClient(), [])
 
-  const nextUrl = useMemo(() => sanitizeNext(searchParams.get('next')), [searchParams])
+  // "next" means: destination AFTER password is set
+  const nextAfterPassword = useMemo(
+    () => resolveNextAfterPassword(searchParams.get('next')),
+    [searchParams],
+  )
 
   const [state, setState] = useState<State>({
     kind: 'loading',
@@ -61,7 +94,7 @@ export default function CompleteInvitePage() {
       const { data: s0 } = await supabase.auth.getSession()
       if (s0.session) {
         setState({ kind: 'success', message: 'Session detected. Redirecting…' })
-        router.replace(setPasswordUrl(nextUrl))
+        router.replace(setPasswordUrl(nextAfterPassword))
         return
       }
 
@@ -128,14 +161,14 @@ export default function CompleteInvitePage() {
       setState({ kind: 'success', message: 'Account activated. Redirecting…' })
 
       // 4) Redirect to set password (preserve next)
-      router.replace(setPasswordUrl(nextUrl))
+      router.replace(setPasswordUrl(nextAfterPassword))
     }
 
     run()
-  }, [router, supabase, nextUrl])
+  }, [router, supabase, nextAfterPassword])
 
-  const goLogin = () => router.replace(loginUrl(nextUrl))
-  const goSetPassword = () => router.replace(setPasswordUrl(nextUrl))
+  const goLogin = () => router.replace(loginUrl(nextAfterPassword))
+  const goSetPassword = () => router.replace(setPasswordUrl(nextAfterPassword))
 
   return (
     <main className="flex min-h-[70vh] items-center justify-center px-4">
@@ -143,13 +176,9 @@ export default function CompleteInvitePage() {
         <div className="space-y-2">
           <h1 className="text-xl font-semibold">Complete Invite</h1>
 
-          {state.kind === 'loading' && (
-            <p className="text-sm text-gray-600">{state.message}</p>
-          )}
+          {state.kind === 'loading' && <p className="text-sm text-gray-600">{state.message}</p>}
 
-          {state.kind === 'success' && (
-            <p className="text-sm text-gray-700">{state.message}</p>
-          )}
+          {state.kind === 'success' && <p className="text-sm text-gray-700">{state.message}</p>}
 
           {state.kind === 'error' && (
             <>
@@ -159,24 +188,16 @@ export default function CompleteInvitePage() {
               </div>
 
               <div className="pt-2 flex gap-2 flex-wrap">
-                <button
-                  onClick={goLogin}
-                  className="border rounded-lg px-4 py-2 text-sm hover:bg-gray-50"
-                >
+                <button onClick={goLogin} className="border rounded-lg px-4 py-2 text-sm hover:bg-gray-50">
                   Go to login
                 </button>
 
-                <button
-                  onClick={goSetPassword}
-                  className="border rounded-lg px-4 py-2 text-sm hover:bg-gray-50"
-                >
+                <button onClick={goSetPassword} className="border rounded-lg px-4 py-2 text-sm hover:bg-gray-50">
                   I already have a password
                 </button>
               </div>
 
-              <p className="text-xs text-gray-500 pt-2">
-                If you need a new invite, ask an administrator to resend it.
-              </p>
+              <p className="text-xs text-gray-500 pt-2">If you need a new invite, ask an administrator to resend it.</p>
             </>
           )}
         </div>
@@ -188,5 +209,13 @@ export default function CompleteInvitePage() {
         )}
       </div>
     </main>
+  )
+}
+
+export default function CompleteInvitePage() {
+  return (
+    <Suspense fallback={<main className="flex min-h-[70vh] items-center justify-center px-4" />}>
+      <CompleteInviteInner />
+    </Suspense>
   )
 }

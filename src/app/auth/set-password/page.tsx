@@ -7,7 +7,32 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import InlineAlert from '@/components/ui/InlineAlert'
 import { createSupabaseBrowserClient } from '@/lib/supabaseBrowser'
 
-/** ===== Password strength helpers (same as /reset) ===== */
+function sanitizeNext(next: string | null) {
+  if (!next) return '/profile'
+  const n = next.trim()
+  if (!n.startsWith('/')) return '/profile'
+  if (n.startsWith('//')) return '/profile'
+  if (n.includes('://')) return '/profile'
+  if (n.includes('\\')) return '/profile'
+  return n || '/profile'
+}
+
+function loginUrl(nextUrl: string) {
+  return nextUrl && nextUrl !== '/' ? `/login?next=${encodeURIComponent(nextUrl)}` : '/login'
+}
+
+function parseHash(hash: string) {
+  const params = new URLSearchParams(hash.startsWith('#') ? hash.slice(1) : hash)
+  return {
+    access_token: params.get('access_token'),
+    refresh_token: params.get('refresh_token'),
+    error: params.get('error'),
+    error_description: params.get('error_description'),
+    type: params.get('type'),
+  }
+}
+
+/** ===== Password strength helpers ===== */
 function scorePassword(pw: string) {
   const res = {
     lengthOK: pw.length >= 8,
@@ -65,22 +90,17 @@ function strengthLabel(score: number) {
 }
 
 function strengthColor(score: number) {
-  return ['bg-red-500', 'bg-red-500', 'bg-yellow-500', 'bg-amber-500', 'bg-green-500', 'bg-green-600'][
-    Math.min(5, Math.max(0, score))
-  ]
+  return [
+    'bg-red-500',
+    'bg-red-500',
+    'bg-yellow-500',
+    'bg-amber-500',
+    'bg-green-500',
+    'bg-green-600',
+  ][Math.min(5, Math.max(0, score))]
 }
 
-function sanitizeNext(next: string | null) {
-  if (!next) return '/profile'
-  const n = next.trim()
-  if (!n.startsWith('/')) return '/profile'
-  if (n.startsWith('//')) return '/profile'
-  if (n.includes('://')) return '/profile'
-  if (n.includes('\\')) return '/profile'
-  return n || '/profile'
-}
-
-type Stage = 'checking' | 'form' | 'done' | 'blocked'
+type Stage = 'checking' | 'form' | 'done' | 'no_session'
 
 function SetPasswordInner() {
   const router = useRouter()
@@ -90,13 +110,12 @@ function SetPasswordInner() {
   const supabase = useMemo(() => createSupabaseBrowserClient(), [])
 
   const [stage, setStage] = useState<Stage>('checking')
+  const [busy, setBusy] = useState(false)
   const [info, setInfo] = useState('')
   const [err, setErr] = useState('')
 
   const [password, setPassword] = useState('')
   const [confirm, setConfirm] = useState('')
-  const [busy, setBusy] = useState(false)
-
   const strength = useMemo(() => scorePassword(password), [password])
 
   const canSubmit =
@@ -110,26 +129,92 @@ function SetPasswordInner() {
 
   useEffect(() => {
     let mounted = true
-    ;(async () => {
-      setErr('')
-      setInfo('Checking session…')
 
-      const { data } = await supabase.auth.getSession()
-      if (!mounted) return
+    const run = async () => {
+      try {
+        setErr('')
+        setInfo('Preparing…')
+        setStage('checking')
 
-      if (!data.session) {
+        // 0) Tokens in hash (invite link)
+        const { access_token, refresh_token, error, error_description } = parseHash(window.location.hash)
+
+        if (error || error_description) {
+          setErr(error_description || error || 'Invalid or expired invite link.')
+          setInfo('')
+          setStage('no_session')
+          return
+        }
+
+        if (access_token && refresh_token) {
+          setInfo('Signing you in…')
+
+          const { data: sessionData, error: sessionSetError } = await supabase.auth.setSession({
+            access_token,
+            refresh_token,
+          })
+
+          if (sessionSetError) {
+            setErr(sessionSetError.message)
+            setInfo('')
+            setStage('no_session')
+            return
+          }
+
+          // Sync cookies server-side
+          try {
+            await fetch('/auth', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ event: 'SIGNED_IN', session: sessionData.session }),
+            })
+          } catch {
+            // ignore
+          }
+
+          // Clean the hash from URL
+          try {
+            const clean = window.location.pathname + window.location.search
+            window.history.replaceState({}, document.title, clean)
+          } catch {}
+
+          if (!mounted) return
+          setInfo('')
+          setStage('form')
+          return
+        }
+
+        // 1) Otherwise: check session already present
+        const { data, error: sessErr } = await supabase.auth.getSession()
+        if (!mounted) return
+
+        if (sessErr) {
+          setErr(sessErr.message || 'Could not read session.')
+          setInfo('')
+          setStage('no_session')
+          return
+        }
+
+        if (!data.session) {
+          setErr(
+            'Session missing. Please open your invite link again in Safari/Chrome (avoid in-app browsers), or request a new link.'
+          )
+          setInfo('')
+          setStage('no_session')
+          return
+        }
+
         setInfo('')
-        setErr(
-          'You need an active session to set your password. Please open the invite link again, or sign in if you already have a password.'
-        )
-        setStage('blocked')
-        return
+        setStage('form')
+      } catch (e: any) {
+        if (!mounted) return
+        setErr(String(e?.message || e) || 'Unexpected error')
+        setInfo('')
+        setStage('no_session')
       }
+    }
 
-      setInfo('')
-      setStage('form')
-    })()
-
+    run()
     return () => {
       mounted = false
     }
@@ -144,15 +229,15 @@ function SetPasswordInner() {
     setInfo('Updating password…')
 
     try {
-      const { error } = await supabase.auth.updateUser({ password })
-      if (error) {
-        setErr(error.message || 'Failed to set password.')
+      const { error: updateErr } = await supabase.auth.updateUser({ password })
+      if (updateErr) {
+        setErr(updateErr.message || 'Failed to update password.')
         setInfo('')
         setBusy(false)
         return
       }
 
-      // Sync cookies server-side (same pattern as /login and /reset)
+      // Sync cookies server-side
       try {
         const { data } = await supabase.auth.getSession()
         if (data.session) {
@@ -166,11 +251,9 @@ function SetPasswordInner() {
         // ignore
       }
 
-      setErr('')
-      setInfo('✅ Password set. Redirecting…')
       setStage('done')
-
-      setTimeout(() => router.replace(nextUrl), 900)
+      setInfo('✅ Password set. Redirecting…')
+      setTimeout(() => router.replace(nextUrl), 700)
     } catch (e: any) {
       setErr(String(e?.message || e) || 'Unexpected error')
       setInfo('')
@@ -182,7 +265,9 @@ function SetPasswordInner() {
     <main className="mx-auto max-w-md p-6">
       <div className="mb-4">
         <h1 className="text-2xl font-semibold tracking-tight">Set your password</h1>
-        <p className="mt-1 text-sm text-[hsl(var(--muted))]">Choose a password to activate your account.</p>
+        <p className="mt-1 text-sm text-[hsl(var(--muted))]">
+          Choose a new password to activate your account.
+        </p>
       </div>
 
       {(!!err || !!info) && (
@@ -193,23 +278,35 @@ function SetPasswordInner() {
 
       {stage === 'checking' && (
         <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-5 shadow-soft">
-          <p className="text-sm text-[hsl(var(--muted))]">Checking session…</p>
+          <p className="text-sm text-[hsl(var(--muted))]">Preparing…</p>
         </div>
       )}
 
-      {stage === 'blocked' && (
+      {stage === 'no_session' && (
         <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-5 shadow-soft">
           <p className="text-sm text-[hsl(var(--muted))]">
-            Please open the invite email link again to activate your account.
+            You can either sign in, or request a new link.
           </p>
 
-          <div className="mt-3 text-xs text-[hsl(var(--muted))]">
-            Or go to{' '}
-            <Link className="underline" href="/login">
-              login
+          <div className="mt-4 flex flex-wrap gap-2">
+            <Link
+              href={loginUrl(nextUrl)}
+              className="rounded-xl bg-black px-4 py-2 text-sm font-medium text-white hover:opacity-90"
+            >
+              Go to login
             </Link>
-            .
+
+            <Link
+              href="/reset"
+              className="rounded-xl border border-[hsl(var(--border))] bg-white px-4 py-2 text-sm font-medium hover:bg-[hsl(var(--bg))]"
+            >
+              Request a new link
+            </Link>
           </div>
+
+          <p className="mt-3 text-xs text-[hsl(var(--muted))]">
+            Tip: if you opened the link inside Gmail/WhatsApp, try “Open in Safari/Chrome”.
+          </p>
         </div>
       )}
 
