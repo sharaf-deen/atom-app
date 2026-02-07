@@ -11,15 +11,19 @@ import { createClient } from '@supabase/supabase-js'
 const STAFF: Role[] = ['reception', 'admin', 'super_admin']
 const can = (r: Role) => STAFF.includes(r)
 
+// Audit action name (stable)
 const ACTION_RESEND = 'member_invite_resend'
 
 // Rate limit (par acteur)
 const RL_RESEND_LIMIT = 10
 const RL_RESEND_WINDOW_MIN = 10
 
-// Anti-spam (par membre ciblé)
+// Anti-spam (par membre ciblé, tous acteurs confondus)
 const RL_RESEND_PER_TARGET_LIMIT = 3
 const RL_RESEND_PER_TARGET_WINDOW_HOURS = 24
+
+// Cooldown anti double-click (par cible)
+const RL_TARGET_COOLDOWN_SECONDS = 60
 
 function noStore(res: NextResponse) {
   res.headers.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate')
@@ -45,6 +49,14 @@ function getUA(req: Request) {
   return req.headers.get('user-agent') || null
 }
 
+function getAppUrl() {
+  return (
+    process.env.NEXT_PUBLIC_APP_URL ||
+    process.env.NEXT_PUBLIC_SITE_URL ||
+    'http://localhost:3000'
+  ).replace(/\/$/, '')
+}
+
 async function safeAudit(admin: any, row: any) {
   try {
     await admin.from('audit_logs').insert(row)
@@ -53,11 +65,7 @@ async function safeAudit(admin: any, row: any) {
   }
 }
 
-async function countActions(
-  admin: any,
-  where: Record<string, any>,
-  sinceISO: string,
-) {
+async function countActions(admin: any, where: Record<string, any>, sinceISO: string) {
   try {
     let q = admin
       .from('audit_logs')
@@ -74,12 +82,11 @@ async function countActions(
   }
 }
 
-export async function POST(
-  req: Request,
-  ctx: { params: { id: string } },
-) {
+export async function POST(req: Request, ctx: { params: { id: string } }) {
   const ip = getIp(req)
   const userAgent = getUA(req)
+  const requestId = (globalThis.crypto as any)?.randomUUID?.() || `${Date.now()}-${Math.random()}`
+  const startedAt = Date.now()
 
   const memberUserId = String(ctx?.params?.id ?? '').trim()
   if (!isUuid(memberUserId)) {
@@ -88,6 +95,19 @@ export async function POST(
     )
   }
 
+  // Service role
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY
+  if (!url || !serviceKey) {
+    return noStore(
+      NextResponse.json({ ok: false, error: 'SERVER_MISCONFIGURED' }, { status: 500 }),
+    )
+  }
+
+  const admin = createClient(url, serviceKey, {
+    auth: { autoRefreshToken: false, persistSession: false },
+  })
+
   try {
     // 1) Auth acteur (staff uniquement)
     const supa = createSupabaseServerActionClient()
@@ -95,10 +115,7 @@ export async function POST(
 
     if (authErr) {
       return noStore(
-        NextResponse.json(
-          { ok: false, error: `AUTH_ERROR: ${authErr.message}` },
-          { status: 401 },
-        ),
+        NextResponse.json({ ok: false, error: `AUTH_ERROR: ${authErr.message}` }, { status: 401 }),
       )
     }
 
@@ -117,34 +134,16 @@ export async function POST(
 
     if (meErr) {
       return noStore(
-        NextResponse.json(
-          { ok: false, error: `ACTOR_PROFILE_ERROR: ${meErr.message}` },
-          { status: 500 },
-        ),
+        NextResponse.json({ ok: false, error: `ACTOR_PROFILE_ERROR: ${meErr.message}` }, { status: 500 }),
       )
     }
 
     const role = (me?.role ?? 'member') as Role
     if (!can(role)) {
-      return noStore(
-        NextResponse.json({ ok: false, error: 'FORBIDDEN' }, { status: 403 }),
-      )
+      return noStore(NextResponse.json({ ok: false, error: 'FORBIDDEN' }, { status: 403 }))
     }
 
-    // 2) Service role
-    const url = process.env.NEXT_PUBLIC_SUPABASE_URL
-    const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY
-    if (!url || !serviceKey) {
-      return noStore(
-        NextResponse.json({ ok: false, error: 'SERVER_MISCONFIGURED' }, { status: 500 }),
-      )
-    }
-
-    const admin = createClient(url, serviceKey, {
-      auth: { autoRefreshToken: false, persistSession: false },
-    })
-
-    // 3) Rate limit (par acteur)
+    // 2) Rate limit (par acteur)
     {
       const since = new Date(Date.now() - RL_RESEND_WINDOW_MIN * 60 * 1000).toISOString()
       const n = await countActions(
@@ -159,11 +158,14 @@ export async function POST(
           target_user_id: memberUserId,
           action: ACTION_RESEND,
           action_details: {
+            request_id: requestId,
             actor_email: actor.email ?? null,
             ip,
             user_agent: userAgent,
             outcome: 'blocked',
-            details: `rate_limited (${RL_RESEND_LIMIT}/${RL_RESEND_WINDOW_MIN}min)`,
+            reason: 'rate_limit_actor',
+            details: `${RL_RESEND_LIMIT}/${RL_RESEND_WINDOW_MIN}min`,
+            ms: Date.now() - startedAt,
           },
         })
 
@@ -176,7 +178,7 @@ export async function POST(
       }
     }
 
-    // 4) Profil cible
+    // 3) Profil cible
     const { data: prof, error: profErr } = await admin
       .from('profiles')
       .select('user_id, email, first_name, last_name, phone, role')
@@ -197,12 +199,48 @@ export async function POST(
       return noStore(NextResponse.json({ ok: false, error: 'MEMBER_HAS_NO_EMAIL' }, { status: 400 }))
     }
 
-    // 5) Anti-spam (par membre ciblé)
+    // 4) Cooldown par cible (anti double click)
+    {
+      const since = new Date(Date.now() - RL_TARGET_COOLDOWN_SECONDS * 1000).toISOString()
+      const n = await countActions(
+        admin,
+        { action: ACTION_RESEND, target_user_id: memberUserId },
+        since,
+      )
+
+      if (n !== null && n >= 1) {
+        await safeAudit(admin, {
+          actor_user_id: actor.id,
+          target_user_id: memberUserId,
+          action: ACTION_RESEND,
+          action_details: {
+            request_id: requestId,
+            actor_email: actor.email ?? null,
+            target_email: targetEmail,
+            ip,
+            user_agent: userAgent,
+            outcome: 'blocked',
+            reason: 'cooldown_target',
+            details: `${RL_TARGET_COOLDOWN_SECONDS}s`,
+            ms: Date.now() - startedAt,
+          },
+        })
+
+        const res = NextResponse.json(
+          { ok: false, error: 'RATE_LIMITED', details: 'Please wait a moment before resending again.' },
+          { status: 429 },
+        )
+        res.headers.set('Retry-After', String(RL_TARGET_COOLDOWN_SECONDS))
+        return noStore(res)
+      }
+    }
+
+    // 5) Anti-spam par cible (3 / 24h) TOUS acteurs confondus ✅
     {
       const since = new Date(Date.now() - RL_RESEND_PER_TARGET_WINDOW_HOURS * 60 * 60 * 1000).toISOString()
       const n = await countActions(
         admin,
-        { actor_user_id: actor.id, action: ACTION_RESEND, target_user_id: memberUserId },
+        { action: ACTION_RESEND, target_user_id: memberUserId },
         since,
       )
 
@@ -212,12 +250,15 @@ export async function POST(
           target_user_id: memberUserId,
           action: ACTION_RESEND,
           action_details: {
+            request_id: requestId,
             actor_email: actor.email ?? null,
             target_email: targetEmail,
             ip,
             user_agent: userAgent,
             outcome: 'blocked',
-            details: `target_rate_limited (${RL_RESEND_PER_TARGET_LIMIT}/${RL_RESEND_PER_TARGET_WINDOW_HOURS}h)`,
+            reason: 'rate_limit_target',
+            details: `${RL_RESEND_PER_TARGET_LIMIT}/${RL_RESEND_PER_TARGET_WINDOW_HOURS}h`,
+            ms: Date.now() - startedAt,
           },
         })
 
@@ -230,46 +271,84 @@ export async function POST(
       }
     }
 
-    // 6) Si déjà actif -> on refuse (il faut "reset password" dans ce cas)
+    // 6) Vérifie que l’auth user existe + statut actif
     let authUser: any = null
+    let authErr2: any = null
     try {
       const r = await (admin.auth.admin as any).getUserById(memberUserId)
       authUser = r?.data?.user ?? null
-    } catch {
-      // ignore
+      authErr2 = r?.error ?? null
+    } catch (e: any) {
+      authErr2 = e
     }
 
-    const confirmedAt = authUser?.email_confirmed_at || authUser?.confirmed_at
-    if (confirmedAt) {
+    // Profile orphelin => on bloque (sinon inviteUserByEmail risque de créer un autre userId)
+    if (!authUser) {
       await safeAudit(admin, {
         actor_user_id: actor.id,
         target_user_id: memberUserId,
         action: ACTION_RESEND,
         action_details: {
+          request_id: requestId,
           actor_email: actor.email ?? null,
           target_email: targetEmail,
           ip,
           user_agent: userAgent,
           outcome: 'rejected',
-          details: 'ALREADY_ACTIVE (email_confirmed_at)',
+          reason: 'orphan_profile_no_auth_user',
+          details: authErr2?.message ?? String(authErr2 ?? 'auth user not found'),
+          ms: Date.now() - startedAt,
         },
       })
 
       return noStore(
         NextResponse.json(
-          { ok: false, error: 'ALREADY_ACTIVE', details: 'Account already active. Use password reset instead of invite.' },
+          {
+            ok: false,
+            error: 'ORPHAN_PROFILE',
+            details:
+              'This profile does not have a matching auth user. Re-create the member (or fix auth/users) before resending invites.',
+          },
+          { status: 409 },
+        ),
+      )
+    }
+
+    const confirmedAt = authUser?.email_confirmed_at || authUser?.confirmed_at
+    const lastSignInAt = authUser?.last_sign_in_at
+
+    if (confirmedAt || lastSignInAt) {
+      await safeAudit(admin, {
+        actor_user_id: actor.id,
+        target_user_id: memberUserId,
+        action: ACTION_RESEND,
+        action_details: {
+          request_id: requestId,
+          actor_email: actor.email ?? null,
+          target_email: targetEmail,
+          ip,
+          user_agent: userAgent,
+          outcome: 'rejected',
+          reason: 'already_active',
+          details: confirmedAt ? 'email_confirmed_at' : 'last_sign_in_at',
+          ms: Date.now() - startedAt,
+        },
+      })
+
+      return noStore(
+        NextResponse.json(
+          {
+            ok: false,
+            error: 'ALREADY_ACTIVE',
+            details: 'Account already active. Use password reset instead of invite.',
+          },
           { status: 409 },
         ),
       )
     }
 
     // 7) Resend invite
-    const APP_URL =
-      process.env.NEXT_PUBLIC_APP_URL ||
-      process.env.NEXT_PUBLIC_SITE_URL ||
-      'http://localhost:3000'
-
-    const redirectTo = `${APP_URL.replace(/\/$/, '')}/auth/complete-invite`
+    const redirectTo = `${getAppUrl()}/auth/complete-invite`
 
     const { error: inviteErr } = await admin.auth.admin.inviteUserByEmail(targetEmail, {
       redirectTo,
@@ -287,14 +366,28 @@ export async function POST(
         target_user_id: memberUserId,
         action: ACTION_RESEND,
         action_details: {
+          request_id: requestId,
           actor_email: actor.email ?? null,
           target_email: targetEmail,
           ip,
           user_agent: userAgent,
           outcome: 'failed',
-          details: `INVITE_FAILED: ${inviteErr.message}`,
+          reason: 'invite_failed',
+          details: inviteErr.message,
+          ms: Date.now() - startedAt,
         },
       })
+
+      // Optionnel: map vers 409 si message indique déjà actif
+      const m = String(inviteErr.message || '').toLowerCase()
+      if (m.includes('already') || m.includes('registered') || m.includes('confirmed')) {
+        return noStore(
+          NextResponse.json(
+            { ok: false, error: 'ALREADY_ACTIVE', details: 'User already active. Use reset password.' },
+            { status: 409 },
+          ),
+        )
+      }
 
       return noStore(
         NextResponse.json({ ok: false, error: 'INVITE_FAILED', details: inviteErr.message }, { status: 500 }),
@@ -306,12 +399,14 @@ export async function POST(
       target_user_id: memberUserId,
       action: ACTION_RESEND,
       action_details: {
+        request_id: requestId,
         actor_email: actor.email ?? null,
         target_email: targetEmail,
         ip,
         user_agent: userAgent,
         outcome: 'ok',
         details: 'Invite resent',
+        ms: Date.now() - startedAt,
       },
     })
 
@@ -325,6 +420,22 @@ export async function POST(
     )
   } catch (e: any) {
     console.error('members/[id]/resend-invite error:', e)
+
+    // best effort audit
+    await safeAudit(admin, {
+      actor_user_id: null,
+      target_user_id: memberUserId,
+      action: ACTION_RESEND,
+      action_details: {
+        request_id: requestId,
+        ip,
+        user_agent: userAgent,
+        outcome: 'failed',
+        reason: 'server_error',
+        details: e?.message || String(e),
+      },
+    })
+
     return noStore(
       NextResponse.json({ ok: false, error: 'SERVER_ERROR', details: e?.message || String(e) }, { status: 500 }),
     )

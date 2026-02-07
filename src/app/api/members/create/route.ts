@@ -25,13 +25,6 @@ type Body =
 const STAFF: Role[] = ['reception', 'admin', 'super_admin']
 const can = (r: Role) => STAFF.includes(r)
 
-// Audit/rate-limit “action names”
-const ACTION_CREATE = 'member_invite_create'
-
-// Rate limit (par acteur)
-const RL_CREATE_LIMIT = 20 // ex: 20 créations
-const RL_CREATE_WINDOW_MIN = 15 // par 15 minutes
-
 function noStore(res: NextResponse) {
   res.headers.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate')
   return res
@@ -59,56 +52,68 @@ function normalizeOptionalText(raw: any) {
   return s ? s : null
 }
 
-function getIp(req: Request) {
-  const xf = req.headers.get('x-forwarded-for') || ''
-  const ip = xf.split(',')[0]?.trim()
-  return ip || req.headers.get('x-real-ip') || null
+function getAppUrl() {
+  return (
+    process.env.NEXT_PUBLIC_APP_URL ||
+    process.env.NEXT_PUBLIC_SITE_URL ||
+    'http://localhost:3000'
+  ).replace(/\/$/, '')
 }
 
-function getUA(req: Request) {
-  return req.headers.get('user-agent') || null
+function getIP(req: Request) {
+  const xf = req.headers.get('x-forwarded-for')
+  if (xf) return xf.split(',')[0].trim()
+  return req.headers.get('x-real-ip') || null
 }
 
-async function safeAudit(admin: any, row: any) {
+async function safeAudit(admin: any, payload: any) {
+  // Ne doit jamais casser la route si audit_logs absent
   try {
-    await admin.from('staff_audit_log').insert(row)
-  } catch {
-    // ignore (audit should never break the flow)
-  }
+    await admin.from('audit_logs').insert(payload)
+  } catch {}
 }
 
-async function checkRateLimit(admin: any, actorId: string, action: string, limit: number, windowMin: number) {
+async function rateLimitCount(admin: any, filters: { actor?: string; target?: string; action: string; sinceISO: string }) {
   try {
-    const since = new Date(Date.now() - windowMin * 60 * 1000).toISOString()
-
-    const { count, error } = await admin
-      .from('staff_audit_log')
+    let q = admin
+      .from('audit_logs')
       .select('id', { count: 'exact', head: true })
-      .eq('actor_user_id', actorId)
-      .eq('action', action)
-      .gte('created_at', since)
+      .eq('action', filters.action)
+      .gte('created_at', filters.sinceISO)
 
-    if (error) return { limited: false }
-    if ((count ?? 0) >= limit) return { limited: true, retryAfterSec: windowMin * 60 }
-    return { limited: false }
+    if (filters.actor) q = q.eq('actor_user_id', filters.actor)
+    if (filters.target) q = q.eq('target_user_id', filters.target)
+
+    const { count, error } = await q
+    if (error) return null
+    return count ?? 0
   } catch {
-    return { limited: false }
+    return null
   }
 }
 
 export async function POST(req: Request) {
-  const ip = getIp(req)
-  const userAgent = getUA(req)
+  const startedAt = Date.now()
+  const ip = getIP(req)
+
+  // Service Role client (admin)
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY
+  if (!url || !serviceKey) {
+    return noStore(NextResponse.json({ ok: false, error: 'SERVER_MISCONFIGURED' }, { status: 500 }))
+  }
+  const admin = createClient(url, serviceKey, {
+    auth: { autoRefreshToken: false, persistSession: false },
+  })
 
   try {
     const supa = createSupabaseServerActionClient()
 
-    // 1) Auth acteur (staff only)
+    // 1) Auth acteur (staff)
     const { data: authData, error: authErr } = await supa.auth.getUser()
     if (authErr) {
       return noStore(NextResponse.json({ ok: false, error: `AUTH_ERROR: ${authErr.message}` }, { status: 401 }))
     }
-
     const actor = authData.user
     if (!actor) {
       return noStore(NextResponse.json({ ok: false, error: 'NOT_AUTHENTICATED' }, { status: 401 }))
@@ -116,14 +121,12 @@ export async function POST(req: Request) {
 
     const { data: me, error: meErr } = await supa
       .from('profiles')
-      .select('role')
+      .select('role,email')
       .eq('user_id', actor.id)
       .maybeSingle()
 
     if (meErr) {
-      return noStore(
-        NextResponse.json({ ok: false, error: `ACTOR_PROFILE_ERROR: ${meErr.message}` }, { status: 500 }),
-      )
+      return noStore(NextResponse.json({ ok: false, error: `ACTOR_PROFILE_ERROR: ${meErr.message}` }, { status: 500 }))
     }
 
     const role = (me?.role ?? 'member') as Role
@@ -131,41 +134,26 @@ export async function POST(req: Request) {
       return noStore(NextResponse.json({ ok: false, error: 'FORBIDDEN' }, { status: 403 }))
     }
 
-    // 2) Service role client
-    const url = process.env.NEXT_PUBLIC_SUPABASE_URL
-    const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY
-    if (!url || !serviceKey) {
-      return noStore(NextResponse.json({ ok: false, error: 'SERVER_MISCONFIGURED' }, { status: 500 }))
-    }
-
-    const admin = createClient(url, serviceKey, {
-      auth: { autoRefreshToken: false, persistSession: false },
-    })
-
-    // 3) Rate limit (staff)
-    const rl = await checkRateLimit(admin, actor.id, ACTION_CREATE, RL_CREATE_LIMIT, RL_CREATE_WINDOW_MIN)
-    if (rl.limited) {
-      await safeAudit(admin, {
-        actor_user_id: actor.id,
-        actor_email: actor.email ?? null,
-        action: ACTION_CREATE,
-        ip,
-        user_agent: userAgent,
-        outcome: 'blocked',
-        details: `rate_limited (${RL_CREATE_LIMIT}/${RL_CREATE_WINDOW_MIN}min)`,
+    // 2) Rate limit (anti spam) : max 30 créations / heure / staff
+    {
+      const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString()
+      const n = await rateLimitCount(admin, {
+        actor: actor.id,
+        action: 'member.create',
+        sinceISO: oneHourAgo,
       })
-
-      const res = NextResponse.json(
-        { ok: false, error: 'RATE_LIMITED', details: 'Too many create attempts. Please try again later.' },
-        { status: 429 },
-      )
-      res.headers.set('Retry-After', String(rl.retryAfterSec ?? RL_CREATE_WINDOW_MIN * 60))
-      return noStore(res)
+      if (typeof n === 'number' && n >= 30) {
+        return noStore(
+          NextResponse.json(
+            { ok: false, error: 'RATE_LIMITED', details: 'Too many member creations. Please wait and try again.' },
+            { status: 429 },
+          ),
+        )
+      }
     }
 
-    // 4) Payload + normalisation
+    // 3) Payload normalisé
     const body = (await req.json()) as Body
-
     const email = normalizeEmail((body as any).email)
     const first_name = normalizeOptionalText((body as any).first_name ?? (body as any).firstName)
     const last_name = normalizeOptionalText((body as any).last_name ?? (body as any).lastName)
@@ -188,7 +176,7 @@ export async function POST(req: Request) {
       }
     }
 
-    // 5) DB check (index friendly): profile exists ?
+    // 4) Si profile existe déjà -> 409
     {
       const { data: existing, error: existingErr } = await admin
         .from('profiles')
@@ -205,16 +193,10 @@ export async function POST(req: Request) {
       if (existing?.user_id) {
         await safeAudit(admin, {
           actor_user_id: actor.id,
-          actor_email: actor.email ?? null,
-          action: ACTION_CREATE,
           target_user_id: existing.user_id,
-          target_email: email,
-          ip,
-          user_agent: userAgent,
-          outcome: 'rejected',
-          details: 'EMAIL_ALREADY_EXISTS (profiles)',
+          action: 'member.create_conflict',
+          action_details: { email, actor_role: role, ip },
         })
-
         return noStore(
           NextResponse.json(
             {
@@ -230,17 +212,11 @@ export async function POST(req: Request) {
       }
     }
 
-    // 6) redirectTo (invite)
-    const APP_URL =
-      process.env.NEXT_PUBLIC_APP_URL ||
-      process.env.NEXT_PUBLIC_SITE_URL ||
-      'http://localhost:3000'
+    // 5) redirectTo
+    const redirectTo = `${getAppUrl()}/auth/complete-invite`
 
-    const redirectTo = `${APP_URL.replace(/\/$/, '')}/auth/complete-invite`
-
-    // 7) Invite + fallback auth lookup (RPC)
+    // 6) Invite (email Supabase) + fallback auth lookup
     let userId: string | null = null
-
     const { data: invited, error: inviteErr } = await admin.auth.admin.inviteUserByEmail(email, {
       redirectTo,
       data: { first_name, last_name, phone, role: 'member' },
@@ -249,30 +225,47 @@ export async function POST(req: Request) {
     if (!inviteErr && invited?.user?.id) {
       userId = invited.user.id
     } else {
-      // fallback: auth lookup by email
-      const { data: authId, error: authLookupErr } = await admin.rpc('auth_user_id_by_email', {
-        p_email: email,
-      })
+      // Fallback (si ton RPC existe)
+      const { data: authId, error: rpcErr } = await admin.rpc('auth_user_id_by_email', { p_email: email })
 
-      if (authLookupErr) {
-        await safeAudit(admin, {
-          actor_user_id: actor.id,
-          actor_email: actor.email ?? null,
-          action: ACTION_CREATE,
-          target_email: email,
-          ip,
-          user_agent: userAgent,
-          outcome: 'failed',
-          details: `CREATE_USER_FAILED: ${inviteErr?.message ?? authLookupErr.message ?? 'unknown'}`,
-        })
+      // Si function absente -> fallback ultime listUsers (rare)
+      if (rpcErr && String(rpcErr.message || '').toLowerCase().includes('schema cache')) {
+        const { data: usersData, error: listErr } = await admin.auth.admin.listUsers({ page: 1, perPage: 1000 })
+        if (listErr) {
+          return noStore(
+            NextResponse.json(
+              { ok: false, error: 'CREATE_USER_FAILED', details: listErr.message ?? inviteErr?.message ?? 'unknown' },
+              { status: 500 },
+            ),
+          )
+        }
+        const existingAuth =
+          usersData?.users?.find((u: any) => u.email && u.email.toLowerCase() === email) ?? null
+
+        if (existingAuth?.id) {
+          await safeAudit(admin, {
+            actor_user_id: actor.id,
+            target_user_id: existingAuth.id,
+            action: 'member.create_conflict_auth',
+            action_details: { email, actor_role: role, ip, invite_error: inviteErr?.message ?? null },
+          })
+          return noStore(
+            NextResponse.json(
+              { ok: false, error: 'EMAIL_ALREADY_EXISTS', existing_user_id: existingAuth.id },
+              { status: 409 },
+            ),
+          )
+        }
 
         return noStore(
+          NextResponse.json({ ok: false, error: 'CREATE_USER_FAILED', details: inviteErr?.message ?? 'unknown' }, { status: 500 }),
+        )
+      }
+
+      if (rpcErr) {
+        return noStore(
           NextResponse.json(
-            {
-              ok: false,
-              error: 'CREATE_USER_FAILED',
-              details: inviteErr?.message ?? authLookupErr.message ?? 'unknown',
-            },
+            { ok: false, error: 'CREATE_USER_FAILED', details: inviteErr?.message ?? rpcErr.message ?? 'unknown' },
             { status: 500 },
           ),
         )
@@ -281,49 +274,24 @@ export async function POST(req: Request) {
       if (authId) {
         await safeAudit(admin, {
           actor_user_id: actor.id,
-          actor_email: actor.email ?? null,
-          action: ACTION_CREATE,
           target_user_id: String(authId),
-          target_email: email,
-          ip,
-          user_agent: userAgent,
-          outcome: 'rejected',
-          details: 'EMAIL_ALREADY_EXISTS (auth.users)',
+          action: 'member.create_conflict_auth',
+          action_details: { email, actor_role: role, ip, invite_error: inviteErr?.message ?? null },
         })
-
         return noStore(
           NextResponse.json(
-            {
-              ok: false,
-              error: 'EMAIL_ALREADY_EXISTS',
-              existing_user_id: String(authId),
-              details: 'A user with this email already exists. Please search the member and open their profile instead.',
-            },
+            { ok: false, error: 'EMAIL_ALREADY_EXISTS', existing_user_id: String(authId) },
             { status: 409 },
           ),
         )
       }
 
-      await safeAudit(admin, {
-        actor_user_id: actor.id,
-        actor_email: actor.email ?? null,
-        action: ACTION_CREATE,
-        target_email: email,
-        ip,
-        user_agent: userAgent,
-        outcome: 'failed',
-        details: `CREATE_USER_FAILED: ${inviteErr?.message ?? 'unknown'}`,
-      })
-
       return noStore(
-        NextResponse.json(
-          { ok: false, error: 'CREATE_USER_FAILED', details: inviteErr?.message ?? 'unknown' },
-          { status: 500 },
-        ),
+        NextResponse.json({ ok: false, error: 'CREATE_USER_FAILED', details: inviteErr?.message ?? 'unknown' }, { status: 500 }),
       )
     }
 
-    // 8) Upsert profile (race-safe)
+    // 7) Upsert profile (unique email race -> 23505)
     const { error: profErr } = await admin
       .from('profiles')
       .upsert(
@@ -344,56 +312,22 @@ export async function POST(req: Request) {
       if ((profErr as any)?.code === '23505') {
         await safeAudit(admin, {
           actor_user_id: actor.id,
-          actor_email: actor.email ?? null,
-          action: ACTION_CREATE,
-          target_user_id: userId,
-          target_email: email,
-          ip,
-          user_agent: userAgent,
-          outcome: 'rejected',
-          details: 'EMAIL_ALREADY_EXISTS (unique violation)',
+          target_user_id: userId!,
+          action: 'member.create_conflict_db',
+          action_details: { email, actor_role: role, ip, pg: { code: (profErr as any)?.code, message: profErr.message } },
         })
-
         return noStore(
-          NextResponse.json(
-            {
-              ok: false,
-              error: 'EMAIL_ALREADY_EXISTS',
-              details: 'A user with this email already exists. Please search the member and open their profile instead.',
-            },
-            { status: 409 },
-          ),
+          NextResponse.json({ ok: false, error: 'EMAIL_ALREADY_EXISTS' }, { status: 409 }),
         )
       }
-
-      await safeAudit(admin, {
-        actor_user_id: actor.id,
-        actor_email: actor.email ?? null,
-        action: ACTION_CREATE,
-        target_user_id: userId,
-        target_email: email,
-        ip,
-        user_agent: userAgent,
-        outcome: 'failed',
-        details: `PROFILE_INSERT_FAILED: ${profErr.message}`,
-      })
-
-      return noStore(
-        NextResponse.json({ ok: false, error: `PROFILE_INSERT_FAILED: ${profErr.message}` }, { status: 500 }),
-      )
+      return noStore(NextResponse.json({ ok: false, error: `PROFILE_INSERT_FAILED: ${profErr.message}` }, { status: 500 }))
     }
 
     await safeAudit(admin, {
       actor_user_id: actor.id,
-      actor_email: actor.email ?? null,
-      action: ACTION_CREATE,
-      target_user_id: userId,
-      target_email: email,
-      ip,
-      user_agent: userAgent,
-      outcome: 'ok',
-      details: 'Invite sent + profile upserted',
-      meta: { first_name, last_name },
+      target_user_id: userId!,
+      action: 'member.create',
+      action_details: { email, actor_role: role, ip, ms: Date.now() - startedAt },
     })
 
     return noStore(
@@ -405,6 +339,17 @@ export async function POST(req: Request) {
       }),
     )
   } catch (e: any) {
+    // best effort audit (no target)
+    try {
+      const msg = String(e?.message || e)
+      await safeAudit(admin, {
+        actor_user_id: null,
+        target_user_id: '00000000-0000-0000-0000-000000000000',
+        action: 'member.create_failed',
+        action_details: { error: msg, ip },
+      })
+    } catch {}
+
     console.error('members/create error:', e)
     return noStore(NextResponse.json({ ok: false, error: 'SERVER_ERROR', details: e?.message || String(e) }, { status: 500 }))
   }
