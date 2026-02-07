@@ -124,7 +124,7 @@ export default function SetPasswordPage() {
           <PasswordInput
             label="New password"
             value={password}
-            onChange={(e) => setPassword(e.target.value)}
+            onChange={(e) => setPassword((e.target as HTMLInputElement).value)}
             disabled={busy}
             minLength={8}
             required
@@ -134,7 +134,7 @@ export default function SetPasswordPage() {
           <PasswordInput
             label="Confirm password"
             value={confirm}
-            onChange={(e) => setConfirm(e.target.value)}
+            onChange={(e) => setConfirm((e.target as HTMLInputElement).value)}
             disabled={busy}
             minLength={8}
             required

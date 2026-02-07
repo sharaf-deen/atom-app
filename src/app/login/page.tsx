@@ -125,7 +125,7 @@ function LoginInner() {
         <PasswordInput
           label="Password"
           value={password}
-          onChange={(e) => setPassword(e.target.value)}
+          onChange={(e) => setPassword((e.target as HTMLInputElement).value)}
           autoComplete="current-password"
           required
           minLength={8}
