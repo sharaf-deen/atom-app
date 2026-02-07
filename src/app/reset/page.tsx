@@ -296,10 +296,6 @@ export default function ResetPasswordPage() {
             Back to login
           </Button>
 
-          <p className="text-xs text-[hsl(var(--muted))]">
-            Tip: make sure <span className="font-medium">{`${typeof window !== 'undefined' ? window.location.origin : ''}/reset`}</span>{' '}
-            is allowed in your Supabase Auth Redirect URLs.
-          </p>
         </form>
       )}
 

@@ -1,3 +1,4 @@
+// src/app/members/[id]/page.tsx
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
@@ -11,9 +12,14 @@ import { getSessionUser, type Role } from '@/lib/session'
 import QrImage from '@/components/QrImage'
 import SubscribeDialog, { type Plan } from '@/components/SubscribeDialog'
 import SubscriptionManageRowActions from '@/components/SubscriptionManageRowActions'
-import ResendInviteButton from '@/components/ResendInviteButton'
 
-
+type InvoiceRow = {
+  id: string
+  invoice_number: string | null
+  amount: number | null
+  currency: string | null
+  paid_at: string | null
+}
 
 function todayDateOnlyUTC() {
   return new Date().toISOString().slice(0, 10) // YYYY-MM-DD (UTC)
@@ -122,18 +128,13 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
     }> | null
   }
 
-  const today = todayDateOnlyUTC()
-
-  // ✅ UI rule: only allow creating a new subscription when the member has NO active subscription.
-  // Sessions: status='active' is considered active (typically no end_date).
-  // Time: active if status='active' and end_date is null or >= today.
-  const hasActiveSubscription = (subs ?? []).some((s) => {
-    if (s.status !== 'active') return false
-    if (s.subscription_type === 'sessions') return true
-    // time (or unknown): rely on end_date
-    if (!s.end_date) return true
-    return s.end_date >= today
-  })
+  const { data: invoices, error: invoicesErr } = (await supa
+    .from('invoices')
+    .select('id, invoice_number, amount, currency, paid_at')
+    .eq('member_id', profile.user_id)
+    .order('paid_at', { ascending: false })
+    .limit(200)) as { data: InvoiceRow[] | null; error?: any }
+  const invRows = invoicesErr ? [] : (invoices ?? [])
 
   // Attendance is a staff-only view.
   // Members / coaches can see their own profile + subscriptions, but not attendance.
@@ -148,6 +149,7 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
     | null = null
 
   if (isStaff) {
+    const today = todayDateOnlyUTC()
     const from = addDays(today, -30)
     const { data } = (await supa
       .from('attendance')
@@ -189,16 +191,18 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
     <main>
       <PageHeader
         title="Member"
-        subtitle="Profile and subscriptions."
+        subtitle={isStaff ? 'Profile, QR, subscriptions and attendance' : 'Profile, QR and subscriptions'}
         right={
           isStaff ? (
-            <div className="flex items-center gap-2">
-              <ResendInviteButton userId={profile.user_id} email={profile.email} />
-            </div>
+            <Link
+              href="/members"
+              className="px-4 py-2 rounded-2xl border border-[hsl(var(--border))] bg-white hover:bg-[hsl(var(--bg))]/80 shadow-soft text-sm"
+            >
+              Back to list
+            </Link>
           ) : null
         }
       />
-
 
       <Section className="space-y-6">
         {/* Identity + QR */}
@@ -259,7 +263,7 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
           <div className="flex items-center gap-2">
             <h2 className="font-semibold">Subscriptions</h2>
 
-            {isStaff && !hasActiveSubscription ? (
+            {isStaff && (
               <div className="ml-auto">
                 <SubscribeDialog
                   member={{
@@ -273,13 +277,7 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
                   defaultSessions={10}
                 />
               </div>
-            ) : null}
-
-            {isStaff && hasActiveSubscription ? (
-              <div className="ml-auto text-xs text-[hsl(var(--muted))]">
-                Active subscription exists — create a new one only after it ends.
-              </div>
-            ) : null}
+            )}
           </div>
 
           {(subs ?? []).length === 0 ? (
@@ -298,7 +296,7 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
                     <th className="text-left px-3 py-2">Amount</th>
                     <th className="text-left px-3 py-2">Paid at</th>
                     <th className="text-left px-3 py-2">Badges</th>
-                    {canManageSubscriptions && <th className="text-left px-3 py-2">Actions</th>}
+	                    {canManageSubscriptions && <th className="text-left px-3 py-2">Actions</th>}
                   </tr>
                 </thead>
                 <tbody>
@@ -309,6 +307,7 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
                     const soon = isTime && dleft !== null && dleft <= 7 && dleft >= 0
                     const expired = s.status === 'expired' || (isTime && (dleft ?? -999) < 0)
 
+                    const today = todayDateOnlyUTC()
                     const isFrozen = !!(s.frozen_until && today < s.frozen_until)
                     const freezeDays = isFrozen
                       ? Math.max(0, Math.floor((new Date(`${s.frozen_until}T00:00:00Z`).getTime() - new Date(`${today}T00:00:00Z`).getTime()) / 86400000))
@@ -364,14 +363,50 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
                             )}
                           </div>
                         </td>
-                        {canManageSubscriptions && (
-                          <td className="px-3 py-2">
-                            <SubscriptionManageRowActions sub={s} />
-                          </td>
-                        )}
+	                        {canManageSubscriptions && (
+	                          <td className="px-3 py-2">
+	                            <SubscriptionManageRowActions sub={s} />
+	                          </td>
+	                        )}
                       </tr>
                     )
                   })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
+
+        {/* Invoices */}
+        <section className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-5 shadow-soft space-y-3">
+          <div className="flex items-center gap-2">
+            <h2 className="font-semibold">Invoices</h2>
+          </div>
+
+          {invRows.length === 0 ? (
+            <div className="text-sm text-[hsl(var(--muted))]">No invoices yet.</div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="text-[hsl(var(--muted))]">
+                  <tr className="border-b border-[hsl(var(--border))]">
+                    <th className="text-left px-3 py-2">Invoice</th>
+                    <th className="text-left px-3 py-2">Paid at</th>
+                    <th className="text-left px-3 py-2">Amount</th>
+                    <th className="text-left px-3 py-2">Download</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {invRows.map((inv) => (
+                    <tr key={inv.id} className="border-t border-[hsl(var(--border))]">
+                      <td className="px-3 py-2"><code className="text-xs">{inv.invoice_number ?? '—'}</code></td>
+                      <td className="px-3 py-2">{fmtDate(inv.paid_at)}</td>
+                      <td className="px-3 py-2">{inv.amount ?? 0} {inv.currency ?? 'EGP'}</td>
+                      <td className="px-3 py-2">
+                        <a className="text-sm underline hover:opacity-80" href={`/api/invoices/${inv.id}/download`}>Download PDF</a>
+                      </td>
+                    </tr>
+                  ))}
                 </tbody>
               </table>
             </div>
@@ -422,6 +457,7 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
             )}
           </section>
         ) : null}
+
       </Section>
     </main>
   )

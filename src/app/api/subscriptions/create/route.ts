@@ -4,8 +4,9 @@ export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
 import { NextResponse } from 'next/server'
-import { createClient } from '@supabase/supabase-js'
+import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 import { createSupabaseServerActionClient } from '@/lib/supabaseServer'
+import { generateInvoicePdfBytes, makeInvoiceNumber, type InvoiceSnapshot } from '@/lib/invoices'
 
 type Plan = '1m' | '3m' | '6m' | '12m' | 'sessions'
 
@@ -75,13 +76,53 @@ function humanPlan(p: Plan, sessionsTotal?: number | null) {
   }
 }
 
-function makeAdminClient() {
+function makeAdminClient(): SupabaseClient<any, any, any, any, any> | null {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY
   if (!url || !key) return null
-  return createClient(url, key, {
+  return createClient<any>(url, key, {
     auth: { autoRefreshToken: false, persistSession: false },
   })
+}
+
+async function tryCreateInvoice(args: {
+  admin: SupabaseClient<any, any, any, any, any>
+  memberId: string
+  subscriptionId: string
+  paid_at: string
+  currency: string
+  snapshot: InvoiceSnapshot
+}) {
+  const { admin, memberId, subscriptionId, paid_at, currency, snapshot } = args
+
+  // 1) Generate PDF
+  const pdfBytes = await generateInvoicePdfBytes(snapshot)
+
+  // 2) Upload to Storage (bucket: invoices)
+  const filePath = `${memberId}/${snapshot.invoice_number}.pdf`
+  const up = await admin.storage
+    .from('invoices')
+    .upload(filePath, pdfBytes, { contentType: 'application/pdf', upsert: true })
+  if (up.error) throw up.error
+
+  // 3) Insert invoice row
+  const { data: inv, error: invErr } = await admin
+    .from('invoices')
+    .insert({
+      member_id: memberId,
+      subscription_id: subscriptionId,
+      invoice_number: snapshot.invoice_number,
+      amount: snapshot.transaction.amount,
+      currency,
+      paid_at,
+      pdf_path: filePath,
+      snapshot,
+    })
+    .select('id, invoice_number, pdf_path')
+    .maybeSingle<{ id: string; invoice_number: string; pdf_path: string }>()
+
+  if (invErr) throw invErr
+  return inv
 }
 
 export async function POST(req: Request) {
@@ -174,9 +215,9 @@ export async function POST(req: Request) {
     // Verify member exists
     const { data: exists, error: exErr } = await admin
       .from('profiles')
-      .select('user_id, first_name, last_name, email')
+      .select('user_id, first_name, last_name, email, member_id, created_at')
       .eq('user_id', memberId)
-      .maybeSingle<{ user_id: string; first_name: string | null; last_name: string | null; email: string | null }>()
+      .maybeSingle<{ user_id: string; first_name: string | null; last_name: string | null; email: string | null; member_id: string | null; created_at: string | null }>()
 
     if (exErr) return json(500, { ok: false, error: 'PROFILE_CHECK_FAILED', details: exErr.message })
     if (!exists) return json(404, { ok: false, error: 'MEMBER_NOT_FOUND' })
@@ -245,6 +286,53 @@ export async function POST(req: Request) {
     let notification_ok = false
     let notification_error: string | null = null
 
+    // 7) Create invoice PDF (do NOT block subscription if this fails)
+    let invoice_ok = false
+    let invoice_error: string | null = null
+    let invoice: { id: string; invoice_number: string } | null = null
+
+    try {
+      const invoice_number = makeInvoiceNumber({ paidAtISO: paid_at, subscriptionId: inserted?.id })
+      const snapshot: InvoiceSnapshot = {
+        invoice_number,
+        issued_at: paid_at,
+        gym: { name: 'ATOM Jiu-Jitsu Academy', city: 'Cairo', country: 'Egypt' },
+        member: {
+          user_id: memberId,
+          member_code: exists.member_id ?? null,
+          first_name: exists.first_name,
+          last_name: exists.last_name,
+          email: exists.email,
+          joined_at: exists.created_at,
+        },
+        transaction: {
+          subscription_id: inserted?.id ?? '—',
+          subscription_type,
+          plan,
+          start_date: payload.start_date ?? null,
+          end_date: payload.end_date ?? null,
+          sessions_total: sessions_total,
+          amount,
+          currency: 'EGP',
+          paid_at,
+        },
+      }
+
+      const invRow = await tryCreateInvoice({
+        admin,
+        memberId,
+        subscriptionId: inserted?.id ?? '',
+        paid_at,
+        currency: 'EGP',
+        snapshot,
+      })
+      invoice_ok = true
+      invoice = invRow ? { id: invRow.id, invoice_number: invRow.invoice_number } : null
+    } catch (e: any) {
+      invoice_ok = false
+      invoice_error = e?.message ?? String(e)
+    }
+
     try {
       const memberName = [exists.first_name ?? '', exists.last_name ?? ''].join(' ').trim() || exists.email || 'Member'
       const end = payload.end_date
@@ -280,7 +368,10 @@ export async function POST(req: Request) {
       id: inserted?.id,
       ...payload,
       notification_ok,
+      invoice_ok,
+      ...(invoice ? { invoice } : {}),
       ...(notification_error ? { notification_error } : {}),
+      ...(invoice_error ? { invoice_error } : {}),
     })
   } catch (e: any) {
     return json(500, { ok: false, error: 'SERVER_ERROR', details: e?.message ?? String(e) })
