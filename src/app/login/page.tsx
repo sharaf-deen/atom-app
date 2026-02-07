@@ -5,6 +5,7 @@ import { Suspense, useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { createSupabaseBrowserClient } from '@/lib/supabaseBrowser'
 import InlineAlert from '@/components/ui/InlineAlert'
+import PasswordInput from '@/components/ui/PasswordInput'
 
 function sanitizeNext(next: string | null) {
   if (!next) return '/'
@@ -121,19 +122,15 @@ function LoginInner() {
           />
         </label>
 
-        <label className="grid gap-1">
-          <span className="text-sm font-medium">Password</span>
-          <input
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            className="px-3 py-2 rounded-xl border border-[hsl(var(--border))] bg-white"
-            autoComplete="current-password"
-            required
-            minLength={8}
-            disabled={busy}
-          />
-        </label>
+        <PasswordInput
+          label="Password"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          autoComplete="current-password"
+          required
+          minLength={8}
+          disabled={busy}
+        />
 
         <button
           disabled={busy}
@@ -148,8 +145,8 @@ function LoginInner() {
           <p>If you were invited, use the link from your email first to set your password.</p>
           <p>
             Forgot your password?{' '}
-            <a className="underline" href="/forgot-password">
-            Reset here
+            <a className="underline" href="/reset">
+              Reset here
             </a>
           </p>
         </div>
