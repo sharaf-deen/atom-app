@@ -12,7 +12,7 @@ export default function AccessDeniedPage({
   nextPath,
   actions = [],
   showBackHome = true,
-  showProfile = false,
+  showProfile = true,
 }: {
   title: string
   subtitle?: string

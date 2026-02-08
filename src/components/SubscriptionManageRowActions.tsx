@@ -49,6 +49,10 @@ export default function SubscriptionManageRowActions({
 
   const [sessionsTotal, setSessionsTotal] = useState<string>(String(sub.sessions_total ?? 10))
 
+  // Optional invoice re-issue on edit (controlled by admin)
+  const [reissueInvoice, setReissueInvoice] = useState(false)
+  const [emailInvoice, setEmailInvoice] = useState(true)
+
   const [freezeDays, setFreezeDays] = useState<string>('7')
 
   const [status, setStatus] = useState<{ kind: '' | 'info' | 'success' | 'error'; msg: string }>({
@@ -136,10 +140,12 @@ export default function SubscriptionManageRowActions({
         patch.sessions_total = Math.floor(st)
       }
 
+      const invoice = reissueInvoice ? { generate: true, email: !!emailInvoice } : null
+
       const r = await fetch('/api/subscriptions/update', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: sub.id, patch }),
+        body: JSON.stringify({ id: sub.id, patch, ...(invoice ? { invoice } : {}) }),
       })
 
       const j = await r.json().catch(() => ({}))
@@ -149,7 +155,19 @@ export default function SubscriptionManageRowActions({
         return
       }
 
-      setStatus({ kind: 'success', msg: 'Updated.' })
+      // Controlled: re-issue invoice only if requested
+      let msg = 'Updated.'
+      if (reissueInvoice) {
+        if (j?.invoice_ok) {
+          msg += ` Invoice ${j?.invoice?.invoice_number ? `(${j.invoice.invoice_number}) ` : ''}generated.`
+          if (j?.email_sent) msg += ' Email sent.'
+          else if (j?.email_error) msg += ` Email not sent: ${j.email_error}`
+        } else {
+          msg += ` Invoice not generated: ${j?.invoice_error || 'unknown error'}`
+        }
+      }
+
+      setStatus({ kind: 'success', msg })
       toast.success('Saved')
       setTimeout(() => {
         setOpenEdit(false)
@@ -317,6 +335,40 @@ export default function SubscriptionManageRowActions({
                   </div>
                 </div>
               )}
+
+              {/* Invoice re-issue (controlled) */}
+              <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))]/40 p-4">
+                <label className="flex items-start gap-3">
+                  <input
+                    type="checkbox"
+                    checked={reissueInvoice}
+                    onChange={(e) => setReissueInvoice(e.target.checked)}
+                    disabled={busy}
+                    className="mt-1 h-4 w-4"
+                    aria-label="Re-issue invoice"
+                  />
+                  <div>
+                    <div className="text-sm font-medium">Re-issue invoice</div>
+                    <div className="text-xs text-[hsl(var(--muted))] mt-0.5">
+                      Generates a new PDF invoice after saving the changes.
+                    </div>
+                  </div>
+                </label>
+
+                <div className="mt-3 pl-7">
+                  <label className={`flex items-center gap-2 text-sm ${!reissueInvoice ? 'opacity-50' : ''}`}>
+                    <input
+                      type="checkbox"
+                      checked={emailInvoice}
+                      onChange={(e) => setEmailInvoice(e.target.checked)}
+                      disabled={busy || !reissueInvoice}
+                      className="h-4 w-4"
+                      aria-label="Send invoice by email"
+                    />
+                    <span>Send by email (signed download link valid 7 days)</span>
+                  </label>
+                </div>
+              </div>
 
               <div className="flex justify-end gap-2 pt-2">
                 <Button variant="outline" onClick={() => setOpenEdit(false)} disabled={busy}>

@@ -53,6 +53,7 @@ const MENU_BY_ROLE: MenuByRole = {
   reception: [
     { label: 'Schedule', href: '/schedule', icon: 'calendar' },
     { label: 'Membership', href: '/kiosk', icon: 'id' },
+    { label: 'My Profile', href: '/profile', icon: 'id' },
     { label: 'Scan', href: '/scan', icon: 'scan' },
     { label: 'Members', href: '/members', icon: 'users' },
     { label: 'Packages & Promos', href: '/packages-and-promos', icon: 'gift' },
@@ -60,6 +61,7 @@ const MENU_BY_ROLE: MenuByRole = {
   admin: [
     { label: 'Dashboard', href: '/admin', icon: 'dashboard' },
     { label: 'Notifications', href: '/notifications', icon: 'bell' },
+    { label: 'My Profile', href: '/profile', icon: 'id' },
     { label: 'Schedule', href: '/schedule', icon: 'calendar' },
     { label: 'Packages & Promos', href: '/packages-and-promos', icon: 'gift' },
     { label: 'Membership', href: '/kiosk', icon: 'id' },
@@ -73,6 +75,7 @@ const MENU_BY_ROLE: MenuByRole = {
     { label: 'Home', href: '/', icon: 'home' },
     { label: 'Dashboard', href: '/admin', icon: 'dashboard' },
     { label: 'Notifications', href: '/notifications', icon: 'bell' },
+    { label: 'My Profile', href: '/profile', icon: 'id' },
     { label: 'Schedule', href: '/schedule', icon: 'calendar' },
     { label: 'Packages & Promos', href: '/packages-and-promos', icon: 'gift' },
     { label: 'Membership', href: '/kiosk', icon: 'id' },

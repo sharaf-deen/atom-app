@@ -19,6 +19,7 @@ type InvoiceRow = {
   amount: number | null
   currency: string | null
   paid_at: string | null
+  created_at?: string | null
 }
 
 function todayDateOnlyUTC() {
@@ -130,9 +131,9 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
 
   const { data: invoices, error: invoicesErr } = (await supa
     .from('invoices')
-    .select('id, invoice_number, amount, currency, paid_at')
+    .select('id, invoice_number, amount, currency, paid_at, created_at')
     .eq('member_id', profile.user_id)
-    .order('paid_at', { ascending: false })
+    .order('created_at', { ascending: false })
     .limit(200)) as { data: InvoiceRow[] | null; error?: any }
   const invRows = invoicesErr ? [] : (invoices ?? [])
 

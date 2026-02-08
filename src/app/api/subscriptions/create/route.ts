@@ -110,7 +110,6 @@ async function tryCreateInvoice(args: {
     .from('invoices')
     .insert({
       member_id: memberId,
-      subscription_id: subscriptionId,
       invoice_number: snapshot.invoice_number,
       amount: snapshot.transaction.amount,
       currency,
@@ -306,8 +305,6 @@ export async function POST(req: Request) {
           joined_at: exists.created_at,
         },
         transaction: {
-          subscription_id: inserted?.id ?? '—',
-          subscription_type,
           plan,
           start_date: payload.start_date ?? null,
           end_date: payload.end_date ?? null,
