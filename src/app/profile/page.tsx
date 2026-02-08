@@ -27,7 +27,6 @@ type ProfileRow = {
 
 type SubRow = {
   id: string
-  subscription_type: 'time' | 'sessions' | null
   plan: Plan | null
   status: 'active' | 'expired' | 'canceled' | 'paused' | null
   start_date: string | null
@@ -36,15 +35,6 @@ type SubRow = {
   sessions_used: number | null
   amount: number | null
   paid_at: string | null
-}
-
-type InvoiceRow = {
-  id: string
-  invoice_number: string | null
-  amount: number | null
-  currency: string | null
-  paid_at: string | null
-  created_at?: string | null
 }
 
 function ageYears(dob?: string | null) {
@@ -133,19 +123,10 @@ export default async function ProfilePage() {
 
   const { data: subs } = (await supa
     .from('subscriptions')
-    .select('id, subscription_type, plan, status, start_date, end_date, sessions_total, sessions_used, amount, paid_at')
+    .select('id, plan, status, start_date, end_date, sessions_total, sessions_used, amount, paid_at')
     .eq('member_id', me.id)
     .order('paid_at', { ascending: false })
     .limit(500)) as { data: SubRow[] | null }
-
-  const { data: invoices, error: invoicesErr } = (await supa
-    .from('invoices')
-    .select('id, invoice_number, amount, currency, paid_at, created_at')
-    .eq('member_id', me.id)
-    .order('created_at', { ascending: false })
-    .limit(100)) as { data: InvoiceRow[] | null; error?: any }
-
-  const invRows = invoicesErr ? [] : (invoices ?? [])
 
   const canManagePhoto = ['member', 'coach', 'assistant_coach'].includes(me.role)
 
@@ -231,7 +212,6 @@ export default async function ProfilePage() {
               <table className="w-full text-sm">
                 <thead className="text-[hsl(var(--muted))]">
                   <tr className="border-b border-[hsl(var(--border))]">
-                    <th className="text-left px-3 py-2">Type</th>
                     <th className="text-left px-3 py-2">Plan</th>
                     <th className="text-left px-3 py-2">Status</th>
                     <th className="text-left px-3 py-2">Start</th>
@@ -244,19 +224,19 @@ export default async function ProfilePage() {
                 </thead>
                 <tbody>
                   {(subs ?? []).map((s) => {
+                    const isSessions = s.plan === 'sessions'
                     const remaining = Math.max((s.sessions_total ?? 0) - (s.sessions_used ?? 0), 0)
-                    const dleft = s.subscription_type === 'time' ? daysLeft(s.end_date) : null
+                    const dleft = !isSessions ? daysLeft(s.end_date) : null
                     const expired = s.status === 'expired' || (dleft !== null && dleft < 0)
 
                     return (
                       <tr key={s.id} className="border-t border-[hsl(var(--border))]">
-                        <td className="px-3 py-2">{s.subscription_type ?? '—'}</td>
                         <td className="px-3 py-2">{humanPlan(s.plan)}</td>
                         <td className="px-3 py-2">{s.status ?? '—'}</td>
                         <td className="px-3 py-2">{fmtDate(s.start_date)}</td>
                         <td className="px-3 py-2">{fmtDate(s.end_date)}</td>
                         <td className="px-3 py-2">
-                          {s.subscription_type === 'sessions'
+                          {isSessions
                             ? `${s.sessions_used ?? 0}/${s.sessions_total ?? 0}`
                             : '—'}
                         </td>
@@ -264,7 +244,7 @@ export default async function ProfilePage() {
                         <td className="px-3 py-2">{fmtDate(s.paid_at)}</td>
                         <td className="px-3 py-2">
                           <div className="flex flex-wrap gap-1">
-                            {s.subscription_type === 'time' && dleft !== null && dleft >= 0 && (
+                            {!isSessions && dleft !== null && dleft >= 0 && (
                               <span
                                 className={`text-[11px] px-2 py-0.5 rounded-2xl border ${
                                   dleft <= 7
@@ -280,7 +260,7 @@ export default async function ProfilePage() {
                                 expired
                               </span>
                             )}
-                            {s.subscription_type === 'sessions' && (
+                            {isSessions && (
                               <span
                                 className={`text-[11px] px-2 py-0.5 rounded-2xl border ${
                                   remaining <= 2
@@ -296,51 +276,6 @@ export default async function ProfilePage() {
                       </tr>
                     )
                   })}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </section>
-
-        {/* Invoices */}
-        <section className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-5 shadow-soft space-y-3">
-          <div className="flex items-center gap-2">
-            <h2 className="font-semibold">Invoices</h2>
-          </div>
-
-          {invRows.length === 0 ? (
-            <div className="text-sm text-[hsl(var(--muted))]">No invoices yet.</div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead className="text-[hsl(var(--muted))]">
-                  <tr className="border-b border-[hsl(var(--border))]">
-                    <th className="text-left px-3 py-2">Invoice</th>
-                    <th className="text-left px-3 py-2">Paid at</th>
-                    <th className="text-left px-3 py-2">Amount</th>
-                    <th className="text-left px-3 py-2">Download</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {invRows.map((inv) => (
-                    <tr key={inv.id} className="border-t border-[hsl(var(--border))]">
-                      <td className="px-3 py-2">
-                        <code className="text-xs">{inv.invoice_number ?? '—'}</code>
-                      </td>
-                      <td className="px-3 py-2">{fmtDate(inv.paid_at)}</td>
-                      <td className="px-3 py-2">
-                        {inv.amount ?? 0} {inv.currency ?? 'EGP'}
-                      </td>
-                      <td className="px-3 py-2">
-                        <a
-                          className="text-sm underline hover:opacity-80"
-                          href={`/api/invoices/${inv.id}/download`}
-                        >
-                          Download PDF
-                        </a>
-                      </td>
-                    </tr>
-                  ))}
                 </tbody>
               </table>
             </div>

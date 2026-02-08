@@ -84,7 +84,7 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
 
   const { data: profile } = await supa
     .from('profiles')
-    .select('user_id, email, first_name, last_name, phone, role, qr_code, created_at, member_id')
+    .select('user_id, email, first_name, last_name, phone, role, qr_code, created_at')
     .eq('user_id', params.id)
     .maybeSingle<{
       user_id: string
@@ -95,20 +95,18 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
       role: Role | null
       qr_code: string | null
       created_at: string | null
-      member_id: string
     }>()
 
   if (!profile) return notFound()
 
   const { data: subs } = await supa
     .from('subscriptions')
-    .select('id, subscription_type, plan, status, start_date, end_date, frozen_until, sessions_total, sessions_used, amount, paid_at')
+    .select('id, plan, status, start_date, end_date, frozen_until, sessions_total, sessions_used, amount, paid_at')
     .eq('member_id', profile.user_id)
     .order('paid_at', { ascending: false })
     .limit(500) as {
     data: Array<{
       id: string
-      subscription_type: 'time' | 'sessions' | null
       plan: Plan | null
       status: string | null
       start_date: string | null
@@ -159,8 +157,8 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
 
   const subPlanById = new Map<string, Plan | null>((subs ?? []).map((s) => [s.id, s.plan]))
 
-  const activeTime = (subs ?? []).filter((s) => s.subscription_type === 'time' && s.status === 'active')
-  const activeSessions = (subs ?? []).filter((s) => s.subscription_type === 'sessions' && s.status === 'active')
+  const activeTime = (subs ?? []).filter((s) => s.plan !== 'sessions' && s.status === 'active')
+  const activeSessions = (subs ?? []).filter((s) => s.plan === 'sessions' && s.status === 'active')
   const alerts: Array<{ kind: 'time' | 'sessions'; text: string }> = []
 
   for (const s of activeTime) {
@@ -171,22 +169,6 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
     const remaining = Math.max((s.sessions_total ?? 0) - (s.sessions_used ?? 0), 0)
     if (remaining <= 2) alerts.push({ kind: 'sessions', text: `Sessions plan: only ${remaining} session(s) left` })
   }
-
-  const hasActiveSubscription = (subs ?? []).some((s) => {
-    if (s.status !== 'active') return false
-
-    const today = todayDateOnlyUTC()
-    const end = s.end_date
-    if (end && today > end) return false
-
-    if (s.subscription_type === 'sessions') {
-      const total = s.sessions_total ?? 0
-      const used = s.sessions_used ?? 0
-      if (total > 0 && Math.max(total - used, 0) <= 0) return false
-    }
-
-    return true
-  })
 
   return (
     <main>
@@ -219,7 +201,6 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
               </div>
               <div><span className="text-[hsl(var(--muted))]">Email:</span> {profile.email ?? '—'}</div>
               <div><span className="text-[hsl(var(--muted))]">Phone:</span> {profile.phone ?? '—'}</div>
-              <div><span className="text-[hsl(var(--muted))]">Member ID:</span> {profile.member_id}</div>
               <div><span className="text-[hsl(var(--muted))]">Role:</span> {profile.role ?? 'member'}</div>
               <div><span className="text-[hsl(var(--muted))]">Joined:</span> {fmtDate(profile.created_at)}</div>
             </div>
@@ -265,27 +246,21 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
           <div className="flex items-center gap-2">
             <h2 className="font-semibold">Subscriptions</h2>
 
-            {isStaff ? (
-              <div className="ml-auto flex items-center gap-2">
-                {hasActiveSubscription ? (
-                  <span className="text-xs px-3 py-1 rounded-2xl border bg-amber-50 border-amber-300 text-amber-900">
-                    Active subscription running
-                  </span>
-                ) : (
-                  <SubscribeDialog
-                    member={{
-                      user_id: profile.user_id,
-                      email: profile.email,
-                      first_name: profile.first_name,
-                      last_name: profile.last_name,
-                    }}
-                    buttonLabel="New subscription"
-                    defaultPlan="1m"
-                    defaultSessions={10}
-                  />
-                )}
+            {isStaff && (
+              <div className="ml-auto">
+                <SubscribeDialog
+                  member={{
+                    user_id: profile.user_id,
+                    email: profile.email,
+                    first_name: profile.first_name,
+                    last_name: profile.last_name,
+                  }}
+                  buttonLabel="New subscription"
+                  defaultPlan="1m"
+                  defaultSessions={10}
+                />
               </div>
-            ) : null}
+            )}
           </div>
 
           {(subs ?? []).length === 0 ? (
@@ -295,7 +270,6 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
               <table className="w-full text-sm">
                 <thead className="text-[hsl(var(--muted))]">
                   <tr className="border-b border-[hsl(var(--border))]">
-                    <th className="text-left px-3 py-2">Type</th>
                     <th className="text-left px-3 py-2">Plan</th>
                     <th className="text-left px-3 py-2">Status</th>
                     <th className="text-left px-3 py-2">Start</th>
@@ -309,7 +283,8 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
                 </thead>
                 <tbody>
                   {(subs ?? []).map((s) => {
-                    const isTime = s.subscription_type === 'time'
+                    const isSessions = s.plan === 'sessions'
+                    const isTime = !isSessions
                     const remaining = Math.max((s.sessions_total ?? 0) - (s.sessions_used ?? 0), 0)
                     const dleft = daysLeft(s.end_date)
                     const soon = isTime && dleft !== null && dleft <= 7 && dleft >= 0
@@ -323,13 +298,12 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
 
                     return (
                       <tr key={s.id} className="border-t border-[hsl(var(--border))]">
-                        <td className="px-3 py-2">{s.subscription_type ?? '—'}</td>
                         <td className="px-3 py-2">{humanPlan(s.plan)}</td>
                         <td className="px-3 py-2">{s.status ?? '—'}</td>
                         <td className="px-3 py-2">{fmtDate(s.start_date)}</td>
                         <td className="px-3 py-2">{fmtDate(s.end_date)}</td>
                         <td className="px-3 py-2">
-                          {s.subscription_type === 'sessions'
+                          {isSessions
                             ? `${s.sessions_used ?? 0}/${s.sessions_total ?? 0} (left ${remaining})`
                             : '—'}
                         </td>
@@ -358,7 +332,7 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
                                 frozen{typeof freezeDays === 'number' ? ` (${freezeDays}d)` : ''}
                               </span>
                             )}
-                            {s.subscription_type === 'sessions' && (
+                            {isSessions && (
                               <span
                                 className={`text-[11px] px-2 py-0.5 rounded-2xl border ${
                                   remaining <= 2
