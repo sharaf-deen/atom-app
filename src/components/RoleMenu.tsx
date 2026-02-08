@@ -17,10 +17,15 @@ import {
   CalendarDays,
   House,
   Circle,
+  FileText, // ✅ AJOUT
 } from 'lucide-react'
+
+import type { LucideIcon } from 'lucide-react'
 import type { IconKey, MenuItem } from './AppNav'
 
-const ICONS: Record<IconKey, React.ComponentType<{ size?: number | string; strokeWidth?: number | string; className?: string }>> = {
+// Lucide icons accept size/strokeWidth as string | number.
+// Using LucideIcon keeps the typing compatible and avoids TS2322.
+const ICONS: Record<IconKey, LucideIcon> = {
   home: House,
   dashboard: LayoutDashboard,
   bell: Bell,
@@ -32,6 +37,7 @@ const ICONS: Record<IconKey, React.ComponentType<{ size?: number | string; strok
   bag: ShoppingBag,
   wallet: Wallet,
   calendar: CalendarDays,
+  'file-text': FileText,
 }
 
 const VISIBLE_POLL_MS = 5_000

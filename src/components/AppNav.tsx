@@ -23,6 +23,7 @@ type IconKey =
   | 'bag'
   | 'wallet'
   | 'calendar'
+  | 'file-text'
 
 type MenuItem = { label: string; href: string; icon: IconKey }
 type MenuByRole = Record<Role, MenuItem[]>
@@ -69,6 +70,7 @@ const MENU_BY_ROLE: MenuByRole = {
     { label: 'Members', href: '/members', icon: 'users' },
     { label: 'Coaches', href: '/coaches', icon: 'user-cog' },
     { label: 'Store', href: '/store', icon: 'bag' },
+    { label: 'Invoices', href: '/invoices', icon: 'file-text' },
     { label: 'Expenses', href: '/expenses', icon: 'wallet' },
   ],
   super_admin: [
@@ -83,6 +85,7 @@ const MENU_BY_ROLE: MenuByRole = {
     { label: 'Members', href: '/members', icon: 'users' },
     { label: 'Coaches', href: '/coaches', icon: 'user-cog' },
     { label: 'Store', href: '/store', icon: 'bag' },
+    { label: 'Invoices', href: '/invoices', icon: 'file-text' },
     { label: 'Expenses', href: '/expenses', icon: 'wallet' },
   ],
 }
