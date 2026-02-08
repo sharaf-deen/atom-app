@@ -85,6 +85,22 @@ function makeAdminClient(): SupabaseClient<any, any, any, any, any> | null {
   })
 }
 
+async function resolveSubscriptionId(args: {
+  admin: SupabaseClient<any, any, any, any, any>
+  memberId: string
+  fallbackPaidAt?: string
+}): Promise<string> {
+  const { admin, memberId } = args
+  const { data } = await admin
+    .from('subscriptions')
+    .select('id, paid_at, created_at')
+    .eq('member_id', memberId)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+  return data?.id ?? ''
+}
+
 async function tryCreateInvoice(args: {
   admin: SupabaseClient<any, any, any, any, any>
   memberId: string
@@ -94,22 +110,26 @@ async function tryCreateInvoice(args: {
   snapshot: InvoiceSnapshot
 }) {
   const { admin, memberId, subscriptionId, paid_at, currency, snapshot } = args
+  if (!subscriptionId) throw new Error('SUBSCRIPTION_ID_MISSING')
 
   // 1) Generate PDF
   const pdfBytes = await generateInvoicePdfBytes(snapshot)
 
   // 2) Upload to Storage (bucket: invoices)
-  const filePath = `${memberId}/${snapshot.invoice_number}.pdf`
+  let filePath = `${memberId}/${snapshot.invoice_number}.pdf`
   const up = await admin.storage
     .from('invoices')
     .upload(filePath, pdfBytes, { contentType: 'application/pdf', upsert: true })
   if (up.error) throw up.error
 
   // 3) Insert invoice row
+// 3) Insert invoice row (retry once if invoice_number collides)
+const insertOnce = async () => {
   const { data: inv, error: invErr } = await admin
     .from('invoices')
     .insert({
       member_id: memberId,
+      subscription_id: subscriptionId,
       invoice_number: snapshot.invoice_number,
       amount: snapshot.transaction.amount,
       currency,
@@ -118,10 +138,36 @@ async function tryCreateInvoice(args: {
       snapshot,
     })
     .select('id, invoice_number, pdf_path')
-    .maybeSingle<{ id: string; invoice_number: string; pdf_path: string }>()
+    .maybeSingle()
 
   if (invErr) throw invErr
   return inv
+}
+
+try {
+  return await insertOnce()
+} catch (e: any) {
+  const msg = e?.message ?? String(e)
+  // Postgres unique violation: 23505
+  const isUnique = e?.code === '23505' || /duplicate key/i.test(msg)
+  if (!isUnique) throw e
+
+  // Regenerate invoice number and retry safely (avoid overwriting someone else's invoice)
+  const newNumber = makeInvoiceNumber({ paidAtISO: paid_at, subscriptionId: crypto.randomUUID() })
+  snapshot.invoice_number = newNumber
+
+  const pdfBytes2 = await generateInvoicePdfBytes(snapshot)
+  const filePath2 = `${memberId}/${newNumber}.pdf`
+
+  const up2 = await admin.storage
+    .from('invoices')
+    .upload(filePath2, pdfBytes2, { contentType: 'application/pdf', upsert: true })
+  if (up2.error) throw up2.error
+
+  filePath = filePath2 // update for insert
+  return await insertOnce()
+}
+
 }
 
 export async function POST(req: Request) {
@@ -302,7 +348,7 @@ export async function POST(req: Request) {
       .from('subscriptions')
       .insert(payload)
       .select('id')
-      .maybeSingle<{ id: string }>()
+      .maybeSingle()
 
     if (insErr) {
       return json(500, { ok: false, error: 'INSERT_FAILED', details: insErr.message })
@@ -337,6 +383,8 @@ export async function POST(req: Request) {
           joined_at: exists.created_at,
         },
         transaction: {
+          subscription_id: inserted?.id ?? '—',
+          subscription_type,
           plan,
           start_date: payload.start_date ?? null,
           end_date: payload.end_date ?? null,
@@ -350,7 +398,7 @@ export async function POST(req: Request) {
       const invRow = await tryCreateInvoice({
         admin,
         memberId,
-        subscriptionId: inserted?.id ?? '',
+        subscriptionId: (inserted?.id ?? await resolveSubscriptionId({ admin, memberId, fallbackPaidAt: paid_at })),
         paid_at,
         currency: 'EGP',
         snapshot,

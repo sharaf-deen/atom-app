@@ -84,7 +84,7 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
 
   const { data: profile } = await supa
     .from('profiles')
-    .select('user_id, email, first_name, last_name, phone, role, qr_code, created_at')
+    .select('user_id, email, first_name, last_name, phone, role, qr_code, created_at, member_id')
     .eq('user_id', params.id)
     .maybeSingle<{
       user_id: string
@@ -95,6 +95,7 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
       role: Role | null
       qr_code: string | null
       created_at: string | null
+      member_id: string
     }>()
 
   if (!profile) return notFound()
@@ -218,6 +219,7 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
               </div>
               <div><span className="text-[hsl(var(--muted))]">Email:</span> {profile.email ?? '—'}</div>
               <div><span className="text-[hsl(var(--muted))]">Phone:</span> {profile.phone ?? '—'}</div>
+              <div><span className="text-[hsl(var(--muted))]">Member ID:</span> {profile.member_id}</div>
               <div><span className="text-[hsl(var(--muted))]">Role:</span> {profile.role ?? 'member'}</div>
               <div><span className="text-[hsl(var(--muted))]">Joined:</span> {fmtDate(profile.created_at)}</div>
             </div>
