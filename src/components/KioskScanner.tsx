@@ -234,7 +234,7 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className }: 
             <div className="flex items-center gap-2">
               <Button
                 variant="outline"
-                className="bg-transparent border-white/30 text-white hover:bg-white/10"
+                className="!bg-transparent !text-white !border-white/30 hover:!bg-white/10"
                 onClick={manualRescan}
                 disabled={!paused && status === 'idle'}
                 title="Resume scanning"
@@ -243,7 +243,7 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className }: 
               </Button>
               <Button
                 variant="outline"
-                className="bg-transparent border-white/30 text-white hover:bg-white/10"
+                className="!bg-transparent !text-white !border-white/30 hover:!bg-white/10"
                 onClick={toggleFacingMode}
                 title="Switch camera"
               >
@@ -251,7 +251,7 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className }: 
               </Button>
               <Button
                 variant="outline"
-                className="bg-transparent border-white/30 text-white hover:bg-white/10"
+                className="!bg-transparent !text-white !border-white/30 hover:!bg-white/10"
                 onClick={() => setFullScreen(false)}
                 title="Exit full screen"
               >
