@@ -40,7 +40,9 @@ function errToString(err: unknown) {
     const m = (err as any).message
     if (typeof m === 'string') return m
   }
-  try { return JSON.stringify(err) } catch {}
+  try {
+    return JSON.stringify(err)
+  } catch {}
   return 'Camera error'
 }
 
@@ -54,12 +56,35 @@ type KioskScannerProps = {
   className?: string
 }
 
+type FacingMode = 'environment' | 'user'
+
 export default function KioskScanner({ size = 'sm', ratio = '1:1', className }: KioskScannerProps) {
   const router = useRouter()
   const [paused, setPaused] = useState(false)
   const [status, setStatus] = useState<Status>('idle')
   const [msg, setMsg] = useState<string>('Ready')
   const resumeTimerRef = useRef<number | null>(null)
+
+  // Camera controls
+  const [facingMode, setFacingMode] = useState<FacingMode>('environment')
+  const [fullScreen, setFullScreen] = useState(false)
+
+  // Prevent background scroll + allow ESC to close fullscreen overlay
+  useEffect(() => {
+    if (!fullScreen) return
+    const prev = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setFullScreen(false)
+    }
+    window.addEventListener('keydown', onKeyDown)
+
+    return () => {
+      document.body.style.overflow = prev
+      window.removeEventListener('keydown', onKeyDown)
+    }
+  }, [fullScreen])
 
   useEffect(() => {
     return () => {
@@ -69,69 +94,78 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className }: 
 
   const statusBadge = useMemo(() => {
     switch (status) {
-      case 'checking': return <Badge>Checking…</Badge>
-      case 'ok': return <Badge>Valid</Badge>
-      case 'invalid': return <Badge>Invalid</Badge>
-      case 'error': return <Badge>Error</Badge>
-      default: return <Badge>Idle</Badge>
+      case 'checking':
+        return <Badge>Checking…</Badge>
+      case 'ok':
+        return <Badge>Valid</Badge>
+      case 'invalid':
+        return <Badge>Invalid</Badge>
+      case 'error':
+        return <Badge>Error</Badge>
+      default:
+        return <Badge>Idle</Badge>
     }
   }, [status])
 
-  const handleScan = useCallback(async (codes: Detected[]) => {
-    if (!codes || codes.length === 0 || paused) return
-    const raw = codes[0]?.rawValue ?? ''
-    if (!raw) return
+  const handleScan = useCallback(
+    async (codes: Detected[]) => {
+      if (!codes || codes.length === 0 || paused) return
+      const raw = codes[0]?.rawValue ?? ''
+      if (!raw) return
 
-    let didNavigate = false
+      let didNavigate = false
 
-    setPaused(true)
-    setStatus('checking')
-    setMsg('Checking…')
+      setPaused(true)
+      setStatus('checking')
+      setMsg('Checking…')
 
-    try {
-      const maybeId = parseMemberText(raw)
-      const payload = { code: maybeId ? `atom:${maybeId}` : raw }
+      try {
+        const maybeId = parseMemberText(raw)
+        const payload = { code: maybeId ? `atom:${maybeId}` : raw }
 
-      const r = await fetch('/api/kiosk/scan', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      })
-      const j: ScanResponse = await r.json().catch(() => ({ ok: false, message: 'Invalid response' }))
+        const r = await fetch('/api/kiosk/scan', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        })
+        const j: ScanResponse = await r.json().catch(() => ({ ok: false, message: 'Invalid response' }))
 
-      if (!r.ok || !j.ok) {
+        if (!r.ok || !j.ok) {
+          setStatus('error')
+          setMsg(j?.message || 'Scan failed')
+        } else {
+          // ✅ Navigate to result page (active vs expired)
+          const sp = new URLSearchParams()
+          sp.set('valid', j.valid ? '1' : '0')
+          if (j.days_remaining !== undefined && j.days_remaining !== null) sp.set('daysRemaining', String(j.days_remaining))
+          if (j.expires_on) sp.set('expiresOn', String(j.expires_on))
+          if (j.expired_days !== undefined && j.expired_days !== null) sp.set('expiredDays', String(j.expired_days))
+          if (j.expired_on) sp.set('expiredOn', String(j.expired_on))
+          if ((j as any).frozen) sp.set('frozen', '1')
+          if ((j as any).frozen_until) sp.set('frozenUntil', String((j as any).frozen_until))
+          if ((j as any).freeze_days_remaining !== undefined && (j as any).freeze_days_remaining !== null)
+            sp.set('freezeDaysRemaining', String((j as any).freeze_days_remaining))
+
+          router.push(`/scan/result?${sp.toString()}`)
+          didNavigate = true
+          return
+        }
+      } catch (e) {
         setStatus('error')
-        setMsg(j?.message || 'Scan failed')
-      } else {
-        // ✅ Navigate to result page (active vs expired)
-        const sp = new URLSearchParams()
-        sp.set('valid', j.valid ? '1' : '0')
-        if (j.days_remaining !== undefined && j.days_remaining !== null) sp.set('daysRemaining', String(j.days_remaining))
-        if (j.expires_on) sp.set('expiresOn', String(j.expires_on))
-        if (j.expired_days !== undefined && j.expired_days !== null) sp.set('expiredDays', String(j.expired_days))
-        if (j.expired_on) sp.set('expiredOn', String(j.expired_on))
-        if ((j as any).frozen) sp.set('frozen', '1')
-        if ((j as any).frozen_until) sp.set('frozenUntil', String((j as any).frozen_until))
-        if ((j as any).freeze_days_remaining !== undefined && (j as any).freeze_days_remaining !== null) sp.set('freezeDaysRemaining', String((j as any).freeze_days_remaining))
-
-        router.push(`/scan/result?${sp.toString()}`)
-        didNavigate = true
-        return
+        setMsg(errToString(e))
+      } finally {
+        // If we navigated to the result page, don't resume scanning here.
+        if (didNavigate) return
+        if (resumeTimerRef.current) window.clearTimeout(resumeTimerRef.current)
+        resumeTimerRef.current = window.setTimeout(() => {
+          setPaused(false)
+          setStatus('idle')
+          setMsg('Ready')
+        }, 1500)
       }
-    } catch (e) {
-      setStatus('error')
-      setMsg(errToString(e))
-    } finally {
-      // If we navigated to the result page, don't resume scanning here.
-      if (didNavigate) return
-      if (resumeTimerRef.current) window.clearTimeout(resumeTimerRef.current)
-      resumeTimerRef.current = window.setTimeout(() => {
-        setPaused(false)
-        setStatus('idle')
-        setMsg('Ready')
-      }, 1500)
-    }
-  }, [paused, router])
+    },
+    [paused, router]
+  )
 
   function manualRescan() {
     if (resumeTimerRef.current) window.clearTimeout(resumeTimerRef.current)
@@ -140,14 +174,95 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className }: 
     setMsg('Ready')
   }
 
-  // Taille & ratio du conteneur vidéo
+  function toggleFacingMode() {
+    // Force a fresh start when switching camera
+    manualRescan()
+    setFacingMode((m) => (m === 'environment' ? 'user' : 'environment'))
+  }
+
+  // Taille & ratio du conteneur vidéo (normal mode)
   const containerWidth = size === 'lg' ? 480 : size === 'md' ? 360 : 280
   const aspect = ratio === '1:1' ? '1 / 1' : '4 / 3'
+
+  const scannerKey = `${facingMode}-${fullScreen ? 'fs' : 'normal'}`
+
+  const scannerEl = (
+    <Scanner
+      key={scannerKey}
+      constraints={{ facingMode }}
+      onScan={handleScan}
+      onError={(err) => {
+        setStatus('error')
+        setMsg(errToString(err))
+      }}
+      components={{ finder: false }}
+      paused={paused}
+      styles={{
+        container: { width: '100%', height: '100%' },
+        video: { width: '100%', height: '100%', objectFit: 'cover' },
+      }}
+    />
+  )
+
+  // Fullscreen overlay (works everywhere, without relying on the Fullscreen API)
+  if (fullScreen) {
+    return (
+      <div className="fixed inset-0 z-50 bg-black/90 text-white">
+        <div className="mx-auto flex h-full max-w-5xl flex-col p-4">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <div className="text-base font-semibold">Scan member QR</div>
+              <div className="text-xs text-white/70">Use Flip Camera if needed. Press ESC to exit.</div>
+            </div>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                className="border-white/30 text-white hover:bg-white/10"
+                onClick={toggleFacingMode}
+                title="Switch camera"
+              >
+                Flip camera
+              </Button>
+              <Button
+                variant="outline"
+                className="border-white/30 text-white hover:bg-white/10"
+                onClick={() => setFullScreen(false)}
+                title="Exit full screen"
+              >
+                Exit full screen
+              </Button>
+            </div>
+          </div>
+
+          <div className="mt-4 flex-1">
+            <div className="h-full w-full overflow-hidden rounded-2xl border border-white/20 bg-black shadow-soft">
+              {scannerEl}
+            </div>
+          </div>
+
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <Button
+              variant="outline"
+              className="border-white/30 text-white hover:bg-white/10"
+              onClick={manualRescan}
+              disabled={!paused && status === 'idle'}
+              title="Resume scanning"
+            >
+              Rescan
+            </Button>
+            <span className={'text-sm ' + (status === 'error' ? 'text-rose-200' : status === 'ok' ? 'text-emerald-200' : 'text-white/80')}>
+              {msg}
+            </span>
+          </div>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <Card className={className}>
       <CardContent>
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between gap-3">
           <div>
             <h3 className="text-lg font-semibold">Scan member QR</h3>
             <p className="text-sm text-[hsl(var(--muted))] mt-1">
@@ -157,26 +272,26 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className }: 
           <div className="shrink-0">{statusBadge}</div>
         </div>
 
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <Button variant="outline" onClick={toggleFacingMode} title="Switch camera">
+            Flip camera
+          </Button>
+          <Button
+            variant="outline"
+            onClick={() => setFullScreen(true)}
+            title="Open camera in full screen"
+          >
+            Full screen
+          </Button>
+        </div>
+
         {/* Zone Scanner : réduite & centrée */}
         <div className="mt-3 flex justify-center">
           <div
             className="rounded-2xl overflow-hidden border border-[hsl(var(--border))] bg-[hsl(var(--card))]"
             style={{ width: containerWidth, aspectRatio: aspect as any }}
           >
-            <Scanner
-              constraints={{ facingMode: 'environment' }}
-              onScan={handleScan}
-              onError={(err) => {
-                setStatus('error')
-                setMsg(errToString(err))
-              }}
-              components={{ finder: false }}
-              paused={paused}
-              styles={{
-                container: { width: '100%', height: '100%', aspectRatio: aspect as any },
-                video: { width: '100%', height: '100%', objectFit: 'cover' },
-              }}
-            />
+            <div style={{ width: '100%', height: '100%', aspectRatio: aspect as any }}>{scannerEl}</div>
           </div>
         </div>
 
