@@ -221,6 +221,38 @@ export async function POST(req: Request) {
     if (exErr) return json(500, { ok: false, error: 'PROFILE_CHECK_FAILED', details: exErr.message })
     if (!exists) return json(404, { ok: false, error: 'MEMBER_NOT_FOUND' })
 
+    // Prevent creating a new subscription while the member still has an active one
+    // (UX also hides the button, but we enforce it server-side too.)
+    const today = dateOnlyUTC()
+    const { data: actives, error: actErr } = await admin
+      .from('subscriptions')
+      .select('id, subscription_type, end_date, sessions_total, sessions_used, status')
+      .eq('member_id', memberId)
+      .eq('status', 'active')
+
+    if (actErr) return json(500, { ok: false, error: 'ACTIVE_CHECK_FAILED', details: actErr.message })
+
+    const hasActive = (actives ?? []).some((s: any) => {
+      const end = (s?.end_date as string | null)
+      if (!end) return true
+      if (today > end) return false
+      const stype = (s?.subscription_type as string | null)
+      if (stype === 'sessions') {
+        const total = Number(s?.sessions_total ?? 0)
+        const used = Number(s?.sessions_used ?? 0)
+        if (Number.isFinite(total) && total > 0) return total - used > 0
+      }
+      return true
+    })
+
+    if (hasActive) {
+      return json(409, {
+        ok: false,
+        error: 'ACTIVE_SUBSCRIPTION_EXISTS',
+        details: 'This member already has an active subscription. Please edit or expire the current one first.',
+      })
+    }
+
     // 4) Build insert payload
     const paid_at = new Date().toISOString()
     const subscription_type = plan === 'sessions' ? 'sessions' : 'time'

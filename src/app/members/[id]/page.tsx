@@ -13,15 +13,6 @@ import QrImage from '@/components/QrImage'
 import SubscribeDialog, { type Plan } from '@/components/SubscribeDialog'
 import SubscriptionManageRowActions from '@/components/SubscriptionManageRowActions'
 
-type InvoiceRow = {
-  id: string
-  invoice_number: string | null
-  amount: number | null
-  currency: string | null
-  paid_at: string | null
-  created_at?: string | null
-}
-
 function todayDateOnlyUTC() {
   return new Date().toISOString().slice(0, 10) // YYYY-MM-DD (UTC)
 }
@@ -129,14 +120,6 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
     }> | null
   }
 
-  const { data: invoices, error: invoicesErr } = (await supa
-    .from('invoices')
-    .select('id, invoice_number, amount, currency, paid_at, created_at')
-    .eq('member_id', profile.user_id)
-    .order('created_at', { ascending: false })
-    .limit(200)) as { data: InvoiceRow[] | null; error?: any }
-  const invRows = invoicesErr ? [] : (invoices ?? [])
-
   // Attendance is a staff-only view.
   // Members / coaches can see their own profile + subscriptions, but not attendance.
   let attendance:
@@ -187,6 +170,22 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
     const remaining = Math.max((s.sessions_total ?? 0) - (s.sessions_used ?? 0), 0)
     if (remaining <= 2) alerts.push({ kind: 'sessions', text: `Sessions plan: only ${remaining} session(s) left` })
   }
+
+  const hasActiveSubscription = (subs ?? []).some((s) => {
+    if (s.status !== 'active') return false
+
+    const today = todayDateOnlyUTC()
+    const end = s.end_date
+    if (end && today > end) return false
+
+    if (s.subscription_type === 'sessions') {
+      const total = s.sessions_total ?? 0
+      const used = s.sessions_used ?? 0
+      if (total > 0 && Math.max(total - used, 0) <= 0) return false
+    }
+
+    return true
+  })
 
   return (
     <main>
@@ -264,21 +263,27 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
           <div className="flex items-center gap-2">
             <h2 className="font-semibold">Subscriptions</h2>
 
-            {isStaff && (
-              <div className="ml-auto">
-                <SubscribeDialog
-                  member={{
-                    user_id: profile.user_id,
-                    email: profile.email,
-                    first_name: profile.first_name,
-                    last_name: profile.last_name,
-                  }}
-                  buttonLabel="New subscription"
-                  defaultPlan="1m"
-                  defaultSessions={10}
-                />
+            {isStaff ? (
+              <div className="ml-auto flex items-center gap-2">
+                {hasActiveSubscription ? (
+                  <span className="text-xs px-3 py-1 rounded-2xl border bg-amber-50 border-amber-300 text-amber-900">
+                    Active subscription running
+                  </span>
+                ) : (
+                  <SubscribeDialog
+                    member={{
+                      user_id: profile.user_id,
+                      email: profile.email,
+                      first_name: profile.first_name,
+                      last_name: profile.last_name,
+                    }}
+                    buttonLabel="New subscription"
+                    defaultPlan="1m"
+                    defaultSessions={10}
+                  />
+                )}
               </div>
-            )}
+            ) : null}
           </div>
 
           {(subs ?? []).length === 0 ? (
@@ -378,42 +383,6 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
           )}
         </section>
 
-        {/* Invoices */}
-        <section className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-5 shadow-soft space-y-3">
-          <div className="flex items-center gap-2">
-            <h2 className="font-semibold">Invoices</h2>
-          </div>
-
-          {invRows.length === 0 ? (
-            <div className="text-sm text-[hsl(var(--muted))]">No invoices yet.</div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead className="text-[hsl(var(--muted))]">
-                  <tr className="border-b border-[hsl(var(--border))]">
-                    <th className="text-left px-3 py-2">Invoice</th>
-                    <th className="text-left px-3 py-2">Paid at</th>
-                    <th className="text-left px-3 py-2">Amount</th>
-                    <th className="text-left px-3 py-2">Download</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {invRows.map((inv) => (
-                    <tr key={inv.id} className="border-t border-[hsl(var(--border))]">
-                      <td className="px-3 py-2"><code className="text-xs">{inv.invoice_number ?? '—'}</code></td>
-                      <td className="px-3 py-2">{fmtDate(inv.paid_at)}</td>
-                      <td className="px-3 py-2">{inv.amount ?? 0} {inv.currency ?? 'EGP'}</td>
-                      <td className="px-3 py-2">
-                        <a className="text-sm underline hover:opacity-80" href={`/api/invoices/${inv.id}/download`}>Download PDF</a>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </section>
-
         {/* Attendance (staff only) */}
         {isStaff ? (
           <section className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-5 shadow-soft">
@@ -458,7 +427,6 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
             )}
           </section>
         ) : null}
-
       </Section>
     </main>
   )

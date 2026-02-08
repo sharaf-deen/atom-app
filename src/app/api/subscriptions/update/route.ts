@@ -299,19 +299,24 @@ export async function POST(req: Request) {
       const up = await admin.storage.from('invoices').upload(filePath, pdfBytes, { contentType: 'application/pdf', upsert: true })
       if (up.error) throw up.error
 
-      // 3) Insert invoice row
+      // 3) Upsert invoice row (same invoice_number can be regenerated after edits)
+      // Why upsert? invoice_number is UNIQUE, and for edits we want to overwrite the previous invoice
+      // (same payment) instead of failing with a duplicate-key error.
       const { data: inv, error: invErr } = await admin
         .from('invoices')
-        .insert({
-          member_id: memberId,
-          subscription_id: id,
-          invoice_number,
-          amount,
-          currency,
-          paid_at,
-          pdf_path: filePath,
-          snapshot,
-        })
+        .upsert(
+          {
+            member_id: memberId,
+            subscription_id: id,
+            invoice_number,
+            amount,
+            currency,
+            paid_at,
+            pdf_path: filePath,
+            snapshot,
+          },
+          { onConflict: 'invoice_number' }
+        )
         .select('id, invoice_number')
         .maybeSingle<{ id: string; invoice_number: string }>()
       if (invErr) throw invErr
