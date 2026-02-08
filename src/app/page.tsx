@@ -21,6 +21,7 @@ import {
   ShoppingBag,
   Wallet,
   CalendarDays,
+  FileText,
 } from 'lucide-react'
 
 type SessionUser = {
@@ -146,6 +147,7 @@ const MENU_BY_ROLE: GroupedMenuByRole = {
       title: 'Store & Finance',
       items: [
         { label: 'Store', href: '/store', icon: ShoppingBag },
+        { label: 'Invoices', href: '/invoices', icon: FileText },
         { label: 'Expenses', href: '/expenses', icon: Wallet },
       ],
     },
@@ -178,6 +180,7 @@ const MENU_BY_ROLE: GroupedMenuByRole = {
       title: 'Store & Finance',
       items: [
         { label: 'Store', href: '/store/admin', icon: ShoppingBag },
+        { label: 'Invoices', href: '/invoices', icon: FileText },
         { label: 'Expenses', href: '/expenses', icon: Wallet },
       ],
     },

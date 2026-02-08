@@ -15,16 +15,13 @@ import {
   ShoppingBag,
   Wallet,
   CalendarDays,
+  FileText,
   House,
   Circle,
-  FileText, // ✅ AJOUT
 } from 'lucide-react'
-
 import type { LucideIcon } from 'lucide-react'
 import type { IconKey, MenuItem } from './AppNav'
 
-// Lucide icons accept size/strokeWidth as string | number.
-// Using LucideIcon keeps the typing compatible and avoids TS2322.
 const ICONS: Record<IconKey, LucideIcon> = {
   home: House,
   dashboard: LayoutDashboard,
