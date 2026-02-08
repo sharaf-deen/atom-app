@@ -208,12 +208,14 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className }: 
   if (fullScreen) {
     return (
       <div className="fixed inset-0 z-50 bg-black/90 text-white">
-        <div className="mx-auto flex h-full max-w-5xl flex-col p-4">
-          <div className="flex items-center justify-between gap-3">
-            <div>
+        {/* Top bar */}
+        <div className="absolute inset-x-0 top-0 z-10 border-b border-white/10 bg-black/50 backdrop-blur-md">
+          <div className="mx-auto flex max-w-5xl flex-wrap items-center justify-between gap-3 px-4 py-3">
+            <div className="min-w-[220px]">
               <div className="text-base font-semibold">Scan member QR</div>
               <div className="text-xs text-white/70">Use Flip Camera if needed. Press ESC to exit.</div>
             </div>
+
             <div className="flex items-center gap-2">
               <Button
                 variant="outline"
@@ -233,26 +235,37 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className }: 
               </Button>
             </div>
           </div>
+        </div>
 
-          <div className="mt-4 flex-1">
+        <div className="mx-auto flex h-full max-w-5xl flex-col px-4 pb-4 pt-20">
+          <div className="flex-1">
             <div className="h-full w-full overflow-hidden rounded-2xl border border-white/20 bg-black shadow-soft">
               {scannerEl}
             </div>
           </div>
 
-          <div className="mt-3 flex flex-wrap items-center gap-2">
-            <Button
-              variant="outline"
-              className="bg-transparent border-white/30 text-white hover:bg-white/10"
-              onClick={manualRescan}
-              disabled={!paused && status === 'idle'}
-              title="Resume scanning"
-            >
-              Rescan
-            </Button>
-            <span className={'text-sm ' + (status === 'error' ? 'text-rose-200' : status === 'ok' ? 'text-emerald-200' : 'text-white/80')}>
-              {msg}
-            </span>
+          {/* Bottom status bar */}
+          <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-white/10 bg-black/40 px-3 py-2 backdrop-blur">
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                className="bg-transparent border-white/30 text-white hover:bg-white/10"
+                onClick={manualRescan}
+                disabled={!paused && status === 'idle'}
+                title="Resume scanning"
+              >
+                Rescan
+              </Button>
+              <span
+                className={
+                  'text-sm ' +
+                  (status === 'error' ? 'text-rose-200' : status === 'ok' ? 'text-emerald-200' : 'text-white/80')
+                }
+              >
+                {msg}
+              </span>
+            </div>
+            <span className="text-xs text-white/60">Tip: keep the QR centered and steady.</span>
           </div>
         </div>
       </div>
