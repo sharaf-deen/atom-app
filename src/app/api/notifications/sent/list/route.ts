@@ -1,11 +1,9 @@
-// src/app/api/notifications/sent/list/route.ts
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
 import { NextResponse } from 'next/server'
 import { createSupabaseServerActionClient } from '@/lib/supabaseServer'
-
 
 type Row = {
   id: string
@@ -14,7 +12,7 @@ type Row = {
   kind: string | null
   created_at: string
   read_at: string | null
-  user_id: string | null   // destinataire
+  user_id: string | null // destinataire
 }
 
 function noStore(res: NextResponse) {
@@ -29,7 +27,7 @@ export async function GET(req: Request) {
     // Auth
     const { data: auth } = await supa.auth.getUser()
     const user = auth.user
-    if (!user) return noStore(NextResponse.json({ ok:false, error:'NOT_AUTHENTICATED' }, { status:401 }))
+    if (!user) return noStore(NextResponse.json({ ok: false, error: 'NOT_AUTHENTICATED' }, { status: 401 }))
 
     // Rôle
     const { data: me, error: meErr } = await supa
@@ -37,9 +35,12 @@ export async function GET(req: Request) {
       .select('role')
       .eq('user_id', user.id)
       .maybeSingle<{ role: string | null }>()
-    if (meErr) return noStore(NextResponse.json({ ok:false, error:'PROFILE_LOOKUP_FAILED', details: meErr.message }, { status:500 }))
-    if (!me?.role || !['admin','super_admin'].includes(me.role)) {
-      return noStore(NextResponse.json({ ok:false, error:'FORBIDDEN' }, { status:403 }))
+    if (meErr)
+      return noStore(
+        NextResponse.json({ ok: false, error: 'PROFILE_LOOKUP_FAILED', details: meErr.message }, { status: 500 })
+      )
+    if (!me?.role || !['admin', 'super_admin'].includes(me.role)) {
+      return noStore(NextResponse.json({ ok: false, error: 'FORBIDDEN' }, { status: 403 }))
     }
 
     // Params
@@ -54,6 +55,7 @@ export async function GET(req: Request) {
       .from('notifications')
       .select('id, title, body, kind, created_at, read_at, user_id', { count: 'exact' })
       .eq('created_by', user.id)
+      .is('deleted_for_sender_at', null)
       .order('created_at', { ascending: false })
 
     if (kind && kind !== 'all') qy = qy.eq('kind', kind)
@@ -63,7 +65,7 @@ export async function GET(req: Request) {
     const to = from + limit - 1
     const { data, error, count } = await qy.range(from, to)
     if (error) {
-      return noStore(NextResponse.json({ ok:false, error:'QUERY_FAILED', details: error.message }, { status:500 }))
+      return noStore(NextResponse.json({ ok: false, error: 'QUERY_FAILED', details: error.message }, { status: 500 }))
     }
 
     const items = (data ?? []) as Row[]
@@ -93,14 +95,16 @@ export async function GET(req: Request) {
       }
     })
 
-    return noStore(NextResponse.json({
-      ok: true,
-      page,
-      pageSize: limit,
-      total: count ?? 0,
-      items: enriched,
-    }))
+    return noStore(
+      NextResponse.json({
+        ok: true,
+        page,
+        pageSize: limit,
+        total: count ?? 0,
+        items: enriched,
+      })
+    )
   } catch (e: any) {
-    return noStore(NextResponse.json({ ok:false, error: e?.message || 'SERVER_ERROR' }, { status:500 }))
+    return noStore(NextResponse.json({ ok: false, error: e?.message || 'SERVER_ERROR' }, { status: 500 }))
   }
 }

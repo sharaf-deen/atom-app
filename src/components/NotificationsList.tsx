@@ -1,4 +1,3 @@
-// src/components/NotificationsList.tsx
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
@@ -21,6 +20,8 @@ type Item = {
   recipient_name?: string
   recipient_email?: string | null
   recipient_count?: number
+  // For Sent view grouping: underlying notification row IDs
+  source_ids?: string[]
 }
 
 const KINDS = ['all', 'info', 'order_update', 'billing', 'promo'] as const
@@ -43,6 +44,10 @@ async function safeJson(r: Response) {
   }
 }
 
+function isUuid(v: string) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(v)
+}
+
 export default function NotificationsList({ isAdmin = false, sentOnly = false }: Props) {
   const [box, setBox] = useState<Box>(sentOnly ? 'sent' : 'inbox')
   const [tab, setTab] = useState<'all' | 'unread'>('all') // inbox only
@@ -56,7 +61,9 @@ export default function NotificationsList({ isAdmin = false, sentOnly = false }:
   const [loading, setLoading] = useState(false)
   const [err, setErr] = useState<string>('')
   const [selected, setSelected] = useState<Set<string>>(new Set())
-  const [audCounts, setAudCounts] = useState<{ members: number; coaches: number; assistant_coaches: number } | null>(null)
+  const [audCounts, setAudCounts] = useState<{ members: number; coaches: number; assistant_coaches: number } | null>(
+    null
+  )
 
   // Align when prop changes
   useEffect(() => {
@@ -115,10 +122,17 @@ export default function NotificationsList({ isAdmin = false, sentOnly = false }:
           body: String(r.body ?? ''),
           kind: r.kind ?? null,
           created_at: String(r.created_at ?? ''),
+          source_ids: [],
         }
         g = { item: base, recipients: [] }
         map.set(k, g)
         out.push(g.item)
+      }
+
+      // Collect underlying IDs for delete in Sent view
+      if (typeof r.id === 'string' && isUuid(r.id)) {
+        g.item.source_ids = g.item.source_ids || []
+        g.item.source_ids.push(r.id)
       }
 
       // Collect recipients from non-grouped APIs
@@ -149,7 +163,8 @@ export default function NotificationsList({ isAdmin = false, sentOnly = false }:
       } else if (n > 1) {
         if (counts.members > 0 && n === counts.members) item.recipient_name = 'All members'
         else if (counts.coaches > 0 && n === counts.coaches) item.recipient_name = 'All coaches'
-        else if (counts.assistant_coaches > 0 && n === counts.assistant_coaches) item.recipient_name = 'All assistant coaches'
+        else if (counts.assistant_coaches > 0 && n === counts.assistant_coaches)
+          item.recipient_name = 'All assistant coaches'
         else item.recipient_name = `Custom (${n})`
         item.recipient_email = null
       } else {
@@ -190,8 +205,7 @@ export default function NotificationsList({ isAdmin = false, sentOnly = false }:
 
         const raw = Array.isArray(j.items) ? j.items : []
         // If the API already returns grouped rows, keep them as-is.
-        const alreadyGrouped =
-          raw.length > 0 && typeof raw[0]?.recipient_count === 'number' && !raw[0]?.user_id
+        const alreadyGrouped = raw.length > 0 && typeof raw[0]?.recipient_count === 'number' && !raw[0]?.user_id
 
         const grouped: Item[] = alreadyGrouped ? (raw as Item[]) : groupSent(raw, counts)
 
@@ -233,7 +247,6 @@ export default function NotificationsList({ isAdmin = false, sentOnly = false }:
       setLoading(false)
     }
   }
-
 
   useEffect(() => {
     setPage(1)
@@ -321,11 +334,11 @@ export default function NotificationsList({ isAdmin = false, sentOnly = false }:
     await load(page)
   }
 
-  async function deleteIds(ids: string[]) {
+  async function deleteIds(ids: string[], scope: 'inbox' | 'sent' = 'inbox') {
     const r = await fetch('/api/notifications/delete', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ids }),
+      body: JSON.stringify({ ids, scope }),
     })
     const j: any = await safeJson(r)
     if (!r.ok || !j?.ok) {
@@ -342,7 +355,7 @@ export default function NotificationsList({ isAdmin = false, sentOnly = false }:
 
     if (!confirm(`Delete ${ids.length} notification(s)? This cannot be undone.`)) return
 
-    const ok = await deleteIds(ids)
+    const ok = await deleteIds(ids, 'inbox')
     if (!ok) return
 
     const willEmpty = ids.length >= items.length && page > 1
@@ -352,7 +365,23 @@ export default function NotificationsList({ isAdmin = false, sentOnly = false }:
   async function deleteOne(id: string) {
     if (sentOnly || box !== 'inbox') return
     if (!confirm('Delete this notification? This cannot be undone.')) return
-    const ok = await deleteIds([id])
+    const ok = await deleteIds([id], 'inbox')
+    if (!ok) return
+
+    const willEmpty = items.length === 1 && page > 1
+    await load(willEmpty ? page - 1 : page)
+  }
+
+  async function deleteSentOne(item: Item) {
+    if (sentOnly || box !== 'sent') return
+    const ids = Array.isArray(item.source_ids) && item.source_ids.length > 0 ? item.source_ids : isUuid(item.id) ? [item.id] : []
+    if (ids.length === 0) {
+      alert('Cannot delete this row (missing source ids).')
+      return
+    }
+    if (!confirm(`Delete this sent notification for you? (${ids.length} recipient${ids.length === 1 ? '' : 's'})`)) return
+
+    const ok = await deleteIds(ids, 'sent')
     if (!ok) return
 
     const willEmpty = items.length === 1 && page > 1
@@ -561,7 +590,7 @@ export default function NotificationsList({ isAdmin = false, sentOnly = false }:
                         )}
                       </td>
                       <td className="border-t border-[hsl(var(--border))] p-3">
-                        {!isSentView && (
+                        {!sentOnly && !isSentView && (
                           <div className="flex flex-col gap-2">
                             {!n.read_at && (
                               <Button
@@ -586,6 +615,14 @@ export default function NotificationsList({ isAdmin = false, sentOnly = false }:
                               </Button>
                             )}
                             <Button variant="outline" size="sm" onClick={() => deleteOne(n.id)}>
+                              Delete
+                            </Button>
+                          </div>
+                        )}
+
+                        {!sentOnly && isSentView && isAdmin && (
+                          <div className="flex flex-col gap-2">
+                            <Button variant="outline" size="sm" onClick={() => deleteSentOne(n)}>
                               Delete
                             </Button>
                           </div>
@@ -641,7 +678,10 @@ export default function NotificationsList({ isAdmin = false, sentOnly = false }:
                           <span className="text-[hsl(var(--muted))]"> · {n.recipient_email}</span>
                         ) : null}
                         {typeof n.recipient_count === 'number' ? (
-                          <span className="text-[hsl(var(--muted))]"> · {n.recipient_count} recipient{n.recipient_count == 1 ? '' : 's'}</span>
+                          <span className="text-[hsl(var(--muted))]">
+                            {' '}
+                            · {n.recipient_count} recipient{n.recipient_count == 1 ? '' : 's'}
+                          </span>
                         ) : null}
                       </>
                     ) : n.read_at ? (
@@ -651,7 +691,7 @@ export default function NotificationsList({ isAdmin = false, sentOnly = false }:
                     )}
                   </div>
 
-                  {!isSentView && (
+                  {!sentOnly && !isSentView && (
                     <div className="flex flex-wrap gap-2">
                       {!n.read_at && (
                         <Button
@@ -676,6 +716,14 @@ export default function NotificationsList({ isAdmin = false, sentOnly = false }:
                         </Button>
                       )}
                       <Button variant="outline" size="sm" onClick={() => deleteOne(n.id)}>
+                        Delete
+                      </Button>
+                    </div>
+                  )}
+
+                  {!sentOnly && isSentView && isAdmin && (
+                    <div className="flex flex-wrap gap-2">
+                      <Button variant="outline" size="sm" onClick={() => deleteSentOne(n)}>
                         Delete
                       </Button>
                     </div>

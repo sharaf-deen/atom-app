@@ -54,11 +54,7 @@ function makeAdminClient() {
   return createClient<any>(url, key, { auth: { persistSession: false } })
 }
 
-async function trySendResendEmail(args: {
-  to: string
-  subject: string
-  text: string
-}) {
+async function trySendResendEmail(args: { to: string; subject: string; text: string }) {
   const apiKey = process.env.RESEND_API_KEY
   const from = process.env.MAIL_FROM || 'noreply@example.com'
   if (!apiKey) return { sent: false, reason: 'RESEND_API_KEY_MISSING' }
@@ -80,6 +76,23 @@ async function trySendResendEmail(args: {
   }
 
   return { sent: true as const }
+}
+
+function planLabel(p?: string | null) {
+  switch (p) {
+    case '1m':
+      return '1 month'
+    case '3m':
+      return '3 months'
+    case '6m':
+      return '6 months'
+    case '12m':
+      return '12 months'
+    case 'sessions':
+      return 'Sessions'
+    default:
+      return p ? String(p) : ''
+  }
 }
 
 export async function POST(req: Request) {
@@ -120,7 +133,9 @@ export async function POST(req: Request) {
   // Read current subscription to apply safe rules (plan -> end_date, etc.)
   const { data: current, error: curErr } = await admin
     .from('subscriptions')
-    .select('id, member_id, subscription_type, start_date, end_date, plan, status, frozen_until, sessions_total, sessions_used, amount, paid_at')
+    .select(
+      'id, member_id, subscription_type, start_date, end_date, plan, status, frozen_until, sessions_total, sessions_used, amount, paid_at'
+    )
     .eq('id', id)
     .maybeSingle<{
       id: string
@@ -225,10 +240,49 @@ export async function POST(req: Request) {
     .from('subscriptions')
     .update(update)
     .eq('id', id)
-    .select('id, member_id, subscription_type, plan, status, start_date, end_date, frozen_until, sessions_total, sessions_used, amount, paid_at')
+    .select(
+      'id, member_id, subscription_type, plan, status, start_date, end_date, frozen_until, sessions_total, sessions_used, amount, paid_at'
+    )
     .maybeSingle()
 
   if (updErr) return json(500, { ok: false, error: updErr.message })
+
+  // ✅ Create an in-app notification so it shows up in:
+  // - Member Inbox (user_id = member)
+  // - Admin/Super Admin Sent (created_by = editor)
+  try {
+    const memberId = (updated as any)?.member_id ?? (current as any)?.member_id
+    if (memberId) {
+      const u: any = updated ?? current
+
+      const lines: string[] = []
+      lines.push('Your subscription has been updated by the gym.')
+      lines.push('')
+
+      if (u.subscription_type === 'time') {
+        const pl = planLabel(u.plan)
+        if (pl) lines.push(`Plan: ${pl}`)
+        if (u.start_date || u.end_date) lines.push(`Dates: ${u.start_date ?? '—'} → ${u.end_date ?? '—'}`)
+      } else if (u.subscription_type === 'sessions') {
+        const used = Number(u.sessions_used ?? 0)
+        const total = u.sessions_total ?? '—'
+        lines.push(`Sessions: ${used} / ${total}`)
+      }
+
+      if (u.status) lines.push(`Status: ${u.status}`)
+      if (u.amount != null) lines.push(`Amount: ${u.amount} EGP`)
+
+      await admin.from('notifications').insert({
+        user_id: memberId,
+        created_by: me.data.user.id,
+        title: 'Subscription updated',
+        body: lines.join('\n'),
+        kind: 'billing',
+      })
+    }
+  } catch {
+    // Non-blocking: subscription update should still succeed even if notification insert fails
+  }
 
   let invoice_ok = false
   let invoice_error: string | null = null
@@ -296,7 +350,9 @@ export async function POST(req: Request) {
 
       // 2) Upload to Storage (bucket: invoices)
       const filePath = `${memberId}/${invoice_number}.pdf`
-      const up = await admin.storage.from('invoices').upload(filePath, pdfBytes, { contentType: 'application/pdf', upsert: true })
+      const up = await admin.storage
+        .from('invoices')
+        .upload(filePath, pdfBytes, { contentType: 'application/pdf', upsert: true })
       if (up.error) throw up.error
 
       // 3) Upsert invoice row (same invoice_number can be regenerated after edits)
@@ -343,7 +399,7 @@ export async function POST(req: Request) {
               `Hi ${name},\n\n` +
               `Your updated invoice is ready.\n` +
               `Invoice: ${invoice_number}\n` +
-               `Amount: ${amount} ${currency}\n` +
+              `Amount: ${amount} ${currency}\n` +
               `Paid at: ${paid_at}\n\n` +
               (signedUrl ? `Download (valid 7 days): ${signedUrl}\n\n` : '') +
               `You can also find all your invoices in the app: My Profile → Invoices.\n\n` +
