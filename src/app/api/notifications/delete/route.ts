@@ -45,7 +45,9 @@ export async function POST(req: Request) {
       return json(400, { ok: false, error: 'NO_IDS', details: 'Provide ids: string[]' })
     }
 
-    // Use service role to bypass RLS safely, while still enforcing ownership server-side
+    // Soft-delete only for the current user:
+    // we keep the row so sender/admin can still see it in "Sent",
+    // but we hide it from this user's inbox via `deleted_for_user_at`.
     const admin = makeAdminClient()
     if (!admin) {
       return json(500, {
@@ -55,9 +57,11 @@ export async function POST(req: Request) {
       })
     }
 
+    const now = new Date().toISOString()
+
     const { data, error } = await admin
       .from('notifications')
-      .delete()
+      .update({ deleted_for_user_at: now })
       .in('id', ids)
       .eq('user_id', auth.user.id)
       .select('id')

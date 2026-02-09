@@ -1,3 +1,4 @@
+// src/app/api/notifications/list/route.ts
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
@@ -24,36 +25,10 @@ function cleanQ(v: string | null) {
   return s.slice(0, 80).replace(/[,]/g, ' ').trim()
 }
 
-type NotifRow = {
-  id: string
-  title: string | null
-  body: string
-  kind: string | null
-  created_at: string
-  read_at?: string | null
-}
-
-const STAFF_ROLES = new Set(['admin', 'super_admin', 'coach', 'assistant_coach', 'reception'])
-
-/**
- * GET /api/notifications/list
- *
- * Default: returns current user's notifications (member-friendly).
- * Optional: staff can request all notifications with ?all=1 (requires staff role).
- *
- * Query params:
- * - page (default 1)
- * - limit (default 5, max 50)
- * - kind (optional, 'all' or specific)
- * - q (optional search in title/body)
- * - unread (optional '1' to return only unread)
- * - all (optional '1' for staff to list everything; members get FORBIDDEN)
- */
 export async function GET(req: Request) {
   try {
     const supa = createSupabaseServerActionClient()
 
-    // Auth
     const { data: auth, error: authErr } = await supa.auth.getUser()
     if (authErr) return json(401, { ok: false, error: 'AUTH_ERROR', details: authErr.message })
     if (!auth.user) return json(401, { ok: false, error: 'NOT_AUTHENTICATED' })
@@ -63,40 +38,18 @@ export async function GET(req: Request) {
     const limit = intParam(url.searchParams.get('limit'), 5, 1, 50)
     const kind = (url.searchParams.get('kind') || '').trim()
     const q = cleanQ(url.searchParams.get('q'))
-    const unread = (url.searchParams.get('unread') || '').trim() === '1'
-    const wantAll = (url.searchParams.get('all') || '').trim() === '1'
-
-    // Role (only needed when wantAll=1)
-    let role: string | null = null
-    if (wantAll) {
-      const { data: me, error: meErr } = await supa
-        .from('profiles')
-        .select('role')
-        .eq('user_id', auth.user.id)
-        .maybeSingle()
-
-      if (meErr) return json(500, { ok: false, error: 'PROFILE_ERROR', details: meErr.message })
-
-      role = (me?.role ?? 'member') as string
-      if (!STAFF_ROLES.has(role)) {
-        return json(403, { ok: false, error: 'FORBIDDEN' })
-      }
-    }
+    const unread = url.searchParams.get('unread') === '1'
 
     const from = (page - 1) * limit
     const to = from + limit - 1
 
-    // Base query (RLS should enforce ownership/staff visibility)
     let qy = supa
       .from('notifications')
-      .select('id,title,body,kind,created_at,read_at', { count: 'exact' })
+      .select('id,title,body,kind,created_at,read_at,created_by', { count: 'exact' })
+      .eq('user_id', auth.user.id)
+      .is('deleted_for_user_at', null)
       .order('created_at', { ascending: false })
       .range(from, to)
-
-    // Default behavior: member sees only their notifications
-    if (!wantAll) {
-      qy = qy.eq('user_id', auth.user.id)
-    }
 
     if (unread) qy = qy.is('read_at', null)
     if (kind && kind !== 'all') qy = qy.eq('kind', kind)
@@ -107,23 +60,16 @@ export async function GET(req: Request) {
     }
 
     const { data, error, count } = await qy
-    if (error) {
-      // Most common cause: RLS / permission issue.
-      // We keep status=403 to match the UI "FORBIDDEN" banner, but include details for debugging.
-      return json(403, { ok: false, error: 'FORBIDDEN', details: error.message })
-    }
-
-    const rows = (Array.isArray(data) ? data : []) as NotifRow[]
+    if (error) return json(500, { ok: false, error: 'QUERY_FAILED', details: error.message })
 
     return json(200, {
       ok: true,
+      items: Array.isArray(data) ? data : [],
+      total: Number(count || 0),
       page,
       limit,
-      total: Number(count || 0),
-      items: rows,
     })
   } catch (e: any) {
-    console.error('notifications/list error:', e)
     return json(500, { ok: false, error: 'SERVER_ERROR', details: e?.message ?? String(e) })
   }
 }

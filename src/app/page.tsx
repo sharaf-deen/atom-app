@@ -257,6 +257,7 @@ export default async function HomePage() {
       .select('id', { count: 'exact', head: true })
       .eq('user_id', user.id)
       .is('read_at', null)
+      .is('deleted_for_user_at', null)
     unreadNotificationsCount = count ?? 0
   }
 

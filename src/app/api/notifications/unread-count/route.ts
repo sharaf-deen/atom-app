@@ -29,6 +29,7 @@ export async function GET() {
       .select('id', { count: 'exact', head: true })
       .eq('user_id', user.id)
       .is('read_at', null)
+      .is('deleted_for_user_at', null)
 
     if (error) {
       return noStore(
