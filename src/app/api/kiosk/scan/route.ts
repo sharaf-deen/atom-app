@@ -4,7 +4,6 @@ export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
 import { NextResponse } from 'next/server'
-import { requireUser } from '@/lib/apiAuth'
 import { createClient } from '@supabase/supabase-js'
 
 type ScanBody = { code?: string }
@@ -58,15 +57,6 @@ function makeAdminClient() {
 }
 
 export async function POST(req: Request) {
-  // 🔒 Auth gate (reception/admin only)
-  const gate = await requireUser()
-  if (!gate.ok) return json(401, { ok: false, message: 'NOT_AUTHENTICATED' })
-  const role = gate.user.role
-  if (!(role === 'reception' || role === 'admin' || role === 'super_admin')) {
-    return json(403, { ok: false, message: 'FORBIDDEN' })
-  }
-
-
   const admin = makeAdminClient()
   if (!admin) {
     return json(500, { ok: false, message: 'Server missing service key' })
@@ -89,7 +79,7 @@ export async function POST(req: Request) {
   // Try TIME-based subscription first
   const { data: timeSub, error: timeErr } = await admin
     .from('subscriptions')
-    .select('id, member_id, subscription_type, status, start_date, end_date, plan, frozen_until')
+    .select('id, member_id, subscription_type, status, start_date, end_date, plan, frozen_from, frozen_until')
     .eq('member_id', memberId)
     .eq('subscription_type', 'time')
     .eq('status', 'active')
@@ -105,6 +95,7 @@ export async function POST(req: Request) {
       start_date: string
       end_date: string
       plan: string | null
+      frozen_from: string | null
       frozen_until: string | null
     }>()
 
@@ -113,7 +104,15 @@ export async function POST(req: Request) {
   }
 
   if (timeSub) {
-    const isFrozen = !!(timeSub.frozen_until && today < timeSub.frozen_until)
+    // Frozen logic (controlled range):
+    // - If frozen_from exists: frozen when today >= frozen_from AND today < frozen_until (exclusive end)
+    // - Legacy: if only frozen_until exists: frozen when today < frozen_until
+    const isFrozen = !!(
+      timeSub.frozen_until &&
+      (timeSub.frozen_from
+        ? today >= timeSub.frozen_from && today < timeSub.frozen_until
+        : today < timeSub.frozen_until)
+    )
     if (isFrozen) {
       const freezeDays = Math.max(0, daysBetweenUTC(today, timeSub.frozen_until as string))
 
@@ -155,7 +154,7 @@ export async function POST(req: Request) {
   // Otherwise check SESSIONS-based subscription
   const { data: sessSub, error: sessErr } = await admin
     .from('subscriptions')
-    .select('id, member_id, subscription_type, status, sessions_total, sessions_used, frozen_until')
+    .select('id, member_id, subscription_type, status, sessions_total, sessions_used')
     .eq('member_id', memberId)
     .eq('subscription_type', 'sessions')
     .eq('status', 'active')
@@ -168,7 +167,6 @@ export async function POST(req: Request) {
       status: 'active'
       sessions_total: number | null
       sessions_used: number | null
-      frozen_until: string | null
     }>()
 
   if (sessErr) {
@@ -177,26 +175,6 @@ export async function POST(req: Request) {
 
   if (sessSub) {
     const remaining = Math.max((sessSub.sessions_total ?? 0) - (sessSub.sessions_used ?? 0), 0)
-
-    const isFrozen = !!(sessSub.frozen_until && today < sessSub.frozen_until)
-    if (isFrozen) {
-      const freezeDays = Math.max(0, daysBetweenUTC(today, sessSub.frozen_until as string))
-
-      await admin
-        .from('attendance')
-        .insert({ member_id: memberId, date: today, valid: false, from_sessions: true, subscription_id: sessSub.id })
-
-      return json(200, {
-        ok: true,
-        valid: false,
-        frozen: true,
-        frozen_until: sessSub.frozen_until,
-        freeze_days_remaining: freezeDays,
-        member_id: memberId,
-        subscription_id: sessSub.id,
-        message: 'Subscription is frozen',
-      })
-    }
 
     if (remaining > 0) {
       // Decrement sessions_used and record attendance

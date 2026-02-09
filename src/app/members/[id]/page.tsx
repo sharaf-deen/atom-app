@@ -101,16 +101,18 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
 
   const { data: subs } = await supa
     .from('subscriptions')
-    .select('id, plan, status, start_date, end_date, frozen_until, sessions_total, sessions_used, amount, paid_at')
+    .select('id, plan, subscription_type, status, start_date, end_date, frozen_from, frozen_until, sessions_total, sessions_used, amount, paid_at')
     .eq('member_id', profile.user_id)
     .order('paid_at', { ascending: false })
     .limit(500) as {
     data: Array<{
       id: string
       plan: Plan | null
+      subscription_type: 'time' | 'sessions' | null
       status: string | null
       start_date: string | null
       end_date: string | null
+      frozen_from: string | null
       frozen_until: string | null
       sessions_total: number | null
       sessions_used: number | null
@@ -291,9 +293,26 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
                     const expired = s.status === 'expired' || (isTime && (dleft ?? -999) < 0)
 
                     const today = todayDateOnlyUTC()
-                    const isFrozen = !!(s.frozen_until && today < s.frozen_until)
+                    // Freeze logic (controlled range):
+                    // - If frozen_from exists: frozen when today >= frozen_from AND today < frozen_until (exclusive end)
+                    // - Legacy: if only frozen_until exists: frozen when today < frozen_until
+                    const isFrozen =
+                      isTime &&
+                      !!(
+                        s.frozen_until &&
+                        (s.frozen_from
+                          ? today >= s.frozen_from && today < s.frozen_until
+                          : today < s.frozen_until)
+                      )
                     const freezeDays = isFrozen
-                      ? Math.max(0, Math.floor((new Date(`${s.frozen_until}T00:00:00Z`).getTime() - new Date(`${today}T00:00:00Z`).getTime()) / 86400000))
+                      ? Math.max(
+                          0,
+                          Math.floor(
+                            (new Date(`${s.frozen_until}T00:00:00Z`).getTime() -
+                              new Date(`${today}T00:00:00Z`).getTime()) /
+                              86400000,
+                          ),
+                        )
                       : null
 
                     return (

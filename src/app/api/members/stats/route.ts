@@ -5,6 +5,24 @@ import { createSupabaseRSC } from '@/lib/supabaseServer'
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
+function isISODateOnly(s?: string | null) {
+  return !!s && /^\d{4}-\d{2}-\d{2}$/.test(s)
+}
+
+function isFrozenNow(sub: {
+  subscription_type?: string | null
+  end_date?: string | null
+  frozen_from?: string | null
+  frozen_until?: string | null
+}, today: string) {
+  const st = (sub.subscription_type ?? (sub.end_date ? 'time' : 'sessions')) as 'time' | 'sessions'
+  if (st !== 'time') return false
+  const until = isISODateOnly(sub.frozen_until) ? (sub.frozen_until as string) : null
+  if (!until) return false
+  const from = isISODateOnly(sub.frozen_from) ? (sub.frozen_from as string) : null
+  return from ? today >= from && today < until : today < until
+}
+
 
 /**
  * Stats globales des membres :
@@ -51,7 +69,7 @@ export async function GET() {
     //
     const { data: subs, error: subsError } = await supabase
       .from('subscriptions')
-      .select('member_id, end_date, status')
+      .select('member_id, end_date, status, subscription_type, frozen_from, frozen_until')
       .eq('status', 'active')
       .gte('end_date', today) // end_date >= aujourd'hui
 
@@ -73,7 +91,9 @@ export async function GET() {
     for (const row of subs ?? []) {
       if (row?.member_id) {
         const mid = row.member_id as string
-        if (memberIds.has(mid)) activeMemberIds.add(mid)
+        if (!memberIds.has(mid)) continue
+        if (isFrozenNow(row as any, today)) continue
+        activeMemberIds.add(mid)
       }
     }
 

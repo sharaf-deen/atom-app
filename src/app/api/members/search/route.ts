@@ -19,6 +19,24 @@ type MemberRow = {
   is_active?: boolean | null
 }
 
+function isISODateOnly(s?: string | null) {
+  return !!s && /^\d{4}-\d{2}-\d{2}$/.test(s)
+}
+
+function isFrozenNow(sub: {
+  subscription_type?: string | null
+  end_date?: string | null
+  frozen_from?: string | null
+  frozen_until?: string | null
+}, today: string) {
+  const st = (sub.subscription_type ?? (sub.end_date ? 'time' : 'sessions')) as 'time' | 'sessions'
+  if (st !== 'time') return false
+  const until = isISODateOnly(sub.frozen_until) ? (sub.frozen_until as string) : null
+  if (!until) return false
+  const from = isISODateOnly(sub.frozen_from) ? (sub.frozen_from as string) : null
+  return from ? today >= from && today < until : today < until
+}
+
 function normalizeQ(raw: string | null): string {
   return (raw ?? '').trim()
 }
@@ -110,7 +128,7 @@ export async function GET(req: Request) {
     if (ids.length > 0) {
       const { data: subs, error: subsError } = await supabase
         .from('subscriptions')
-        .select('member_id, end_date, status')
+        .select('member_id, end_date, status, subscription_type, frozen_from, frozen_until')
         .eq('status', 'active')
         .gte('end_date', today)
         .in('member_id', ids)
@@ -119,7 +137,9 @@ export async function GET(req: Request) {
         const activeSet = new Set<string>()
         for (const s of subs ?? []) {
           const mid = (s as any)?.member_id as string | null
-          if (mid) activeSet.add(mid)
+          if (!mid) continue
+          if (isFrozenNow(s as any, today)) continue
+          activeSet.add(mid)
         }
         for (const it of items) it.is_active = activeSet.has(it.user_id)
       } else {

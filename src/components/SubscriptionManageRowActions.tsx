@@ -11,6 +11,30 @@ import Select from '@/components/ui/Select'
 // We'll render a lightweight inline message box to prevent TS prop mismatches.
 
 type Plan = '1m' | '3m' | '6m' | '12m' | 'sessions'
+type SubscriptionType = 'time' | 'sessions'
+
+type IsoDateOnly = string
+
+function isISODateOnly(s?: string | null): s is IsoDateOnly {
+  return !!s && /^\d{4}-\d{2}-\d{2}$/.test(s)
+}
+
+function todayDateOnlyUTC() {
+  return new Date().toISOString().slice(0, 10)
+}
+
+function addDays(dateOnly: string, days: number) {
+  const [y, m, d] = dateOnly.split('-').map(Number)
+  const dt = new Date(Date.UTC(y, m - 1, d))
+  dt.setUTCDate(dt.getUTCDate() + days)
+  return dt.toISOString().slice(0, 10)
+}
+
+function daysBetweenUTC(fromDateOnly: string, toDateOnly: string) {
+  const from = new Date(`${fromDateOnly}T00:00:00Z`).getTime()
+  const to = new Date(`${toDateOnly}T00:00:00Z`).getTime()
+  return Math.floor((to - from) / 86400000)
+}
 
 export default function SubscriptionManageRowActions({
   sub,
@@ -24,6 +48,7 @@ export default function SubscriptionManageRowActions({
     status: string | null
     start_date: string | null
     end_date: string | null
+    frozen_from?: string | null
     frozen_until?: string | null
     sessions_total: number | null
     sessions_used: number | null
@@ -32,7 +57,13 @@ export default function SubscriptionManageRowActions({
 }) {
   const router = useRouter()
 
-  const stype = sub.subscription_type ?? (sub.sessions_total != null ? 'sessions' : 'time')
+  // Derive type if DB field is missing (legacy rows)
+  const stype: SubscriptionType =
+    sub.subscription_type === 'time' || sub.subscription_type === 'sessions'
+      ? sub.subscription_type
+      : sub.plan === 'sessions' || sub.sessions_total != null
+        ? 'sessions'
+        : 'time'
   const isTime = stype === 'time'
 
   const [openEdit, setOpenEdit] = useState(false)
@@ -53,7 +84,28 @@ export default function SubscriptionManageRowActions({
   const [reissueInvoice, setReissueInvoice] = useState(false)
   const [emailInvoice, setEmailInvoice] = useState(true)
 
-  const [freezeDays, setFreezeDays] = useState<string>('7')
+  const initialFreezeFrom = useMemo(() => {
+    const t = todayDateOnlyUTC()
+    if (!isTime) return t
+    if (isISODateOnly(sub.frozen_from)) return sub.frozen_from
+    // Legacy freezes had no start, assume "now" as a reasonable default for editing.
+    if (isISODateOnly(sub.frozen_until) && t < sub.frozen_until) return t
+    return t
+  }, [isTime, sub.frozen_from, sub.frozen_until])
+
+  const initialFreezeTo = useMemo(() => {
+    const t = todayDateOnlyUTC()
+    if (!isTime) return t
+    if (isISODateOnly(sub.frozen_until) && t <= sub.frozen_until) {
+      // stored exclusive end -> show inclusive end
+      return addDays(sub.frozen_until, -1)
+    }
+    // default: 7 days starting today
+    return addDays(t, 6)
+  }, [isTime, sub.frozen_until])
+
+  const [freezeFrom, setFreezeFrom] = useState<string>(initialFreezeFrom)
+  const [freezeTo, setFreezeTo] = useState<string>(initialFreezeTo)
 
   const [status, setStatus] = useState<{ kind: '' | 'info' | 'success' | 'error'; msg: string }>({
     kind: '',
@@ -74,10 +126,6 @@ export default function SubscriptionManageRowActions({
       {status.msg}
     </div>
   ) : null
-
-  function isISODateOnly(s?: string | null) {
-    return !!s && /^\d{4}-\d{2}-\d{2}$/.test(s)
-  }
 
   // addMonths "safe": clamp to last day of target month if needed (handles 31st)
   function addMonthsSafe(dateOnly: string, months: number) {
@@ -104,6 +152,16 @@ export default function SubscriptionManageRowActions({
     if (months <= 0) return null
     return addMonthsSafe(startDate, months)
   }, [isTime, startDate, plan, sub.end_date])
+
+  const hasFreeze = isTime && isISODateOnly(sub.frozen_until)
+
+  const freezeDurationDays = useMemo(() => {
+    if (!isISODateOnly(freezeFrom) || !isISODateOnly(freezeTo)) return null
+    if (freezeFrom > freezeTo) return null
+    // inclusive range -> exclusive end
+    const untilExclusive = addDays(freezeTo, 1)
+    return Math.max(0, daysBetweenUTC(freezeFrom, untilExclusive))
+  }, [freezeFrom, freezeTo])
 
   const canEdit = !busy
 
@@ -181,14 +239,25 @@ export default function SubscriptionManageRowActions({
     }
   }
 
-  async function doFreeze() {
+  async function doFreezeSave() {
     setBusy(true)
-    setStatus({ kind: 'info', msg: 'Freezing…' })
+    setStatus({ kind: 'info', msg: 'Saving freeze…' })
 
     try {
-      const days = Number(freezeDays)
-      if (!Number.isFinite(days) || days <= 0) {
-        setStatus({ kind: 'error', msg: 'Please enter a valid number of days.' })
+      if (!isTime) {
+        setStatus({ kind: 'error', msg: 'Freeze is only available for time subscriptions.' })
+        toast.error('Freeze failed')
+        return
+      }
+
+      if (!isISODateOnly(freezeFrom) || !isISODateOnly(freezeTo)) {
+        setStatus({ kind: 'error', msg: 'Please choose valid dates.' })
+        toast.error('Freeze failed')
+        return
+      }
+
+      if (freezeFrom > freezeTo) {
+        setStatus({ kind: 'error', msg: 'Freeze end date must be after start date.' })
         toast.error('Freeze failed')
         return
       }
@@ -196,7 +265,8 @@ export default function SubscriptionManageRowActions({
       const r = await fetch('/api/subscriptions/freeze', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: sub.id, days: Math.floor(days) }),
+        // API accepts inclusive end date (to) and stores exclusive internally
+        body: JSON.stringify({ id: sub.id, from: freezeFrom, to: freezeTo }),
       })
 
       const j = await r.json().catch(() => ({}))
@@ -206,8 +276,8 @@ export default function SubscriptionManageRowActions({
         return
       }
 
-      setStatus({ kind: 'success', msg: 'Frozen.' })
-      toast.success('Frozen')
+      setStatus({ kind: 'success', msg: 'Freeze saved.' })
+      toast.success('Saved')
       setTimeout(() => {
         setOpenFreeze(false)
         router.refresh()
@@ -215,6 +285,38 @@ export default function SubscriptionManageRowActions({
     } catch (e: any) {
       setStatus({ kind: 'error', msg: String(e?.message || e) })
       toast.error('Freeze failed')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function doFreezeClear() {
+    setBusy(true)
+    setStatus({ kind: 'info', msg: 'Clearing freeze…' })
+
+    try {
+      const r = await fetch('/api/subscriptions/freeze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: sub.id, clear: true }),
+      })
+
+      const j = await r.json().catch(() => ({}))
+      if (!r.ok || !j?.ok) {
+        setStatus({ kind: 'error', msg: j?.details || j?.error || 'Clear failed' })
+        toast.error('Clear failed')
+        return
+      }
+
+      setStatus({ kind: 'success', msg: 'Freeze cleared.' })
+      toast.success('Cleared')
+      setTimeout(() => {
+        setOpenFreeze(false)
+        router.refresh()
+      }, 450)
+    } catch (e: any) {
+      setStatus({ kind: 'error', msg: String(e?.message || e) })
+      toast.error('Clear failed')
     } finally {
       setBusy(false)
     }
@@ -262,9 +364,13 @@ export default function SubscriptionManageRowActions({
       <Button size="sm" variant="outline" onClick={() => setOpenEdit(true)} disabled={!canEdit}>
         Edit
       </Button>
-      <Button size="sm" variant="outline" onClick={() => setOpenFreeze(true)} disabled={!canEdit}>
-        Freeze
-      </Button>
+
+      {isTime ? (
+        <Button size="sm" variant="outline" onClick={() => setOpenFreeze(true)} disabled={!canEdit}>
+          {hasFreeze ? 'Edit freeze' : 'Freeze'}
+        </Button>
+      ) : null}
+
       <Button
         size="sm"
         variant="outline"
@@ -293,11 +399,7 @@ export default function SubscriptionManageRowActions({
                 {isTime ? (
                   <div>
                     <div className="text-sm font-medium mb-1">Plan</div>
-                    <Select
-                      value={plan}
-                      onChange={(e) => setPlan(e.target.value as Plan)}
-                      disabled={busy}
-                    >
+                    <Select value={plan} onChange={(e) => setPlan(e.target.value as Plan)} disabled={busy}>
                       {planOptions.map((o) => (
                         <option key={o.value} value={o.value}>
                           {o.label}
@@ -317,7 +419,12 @@ export default function SubscriptionManageRowActions({
                 <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                   <div>
                     <div className="text-sm font-medium mb-1">Start date</div>
-                    <Input value={startDate} onChange={(e) => setStartDate(e.target.value)} disabled={busy} />
+                    <Input
+                      value={startDate}
+                      onChange={(e) => setStartDate(e.target.value)}
+                      disabled={busy}
+                      placeholder="YYYY-MM-DD"
+                    />
                     <div className="mt-1 text-xs text-[hsl(var(--muted))]">YYYY-MM-DD</div>
                   </div>
 
@@ -383,12 +490,12 @@ export default function SubscriptionManageRowActions({
         </div>
       )}
 
-      {/* Freeze modal */}
-      {openFreeze && (
+      {/* Freeze modal (time subscriptions only) */}
+      {openFreeze && isTime && (
         <div className="fixed inset-0 z-[999] flex items-center justify-center bg-black/40 p-4">
           <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-soft">
             <div className="flex items-center justify-between">
-              <h3 className="text-lg font-semibold">Freeze subscription</h3>
+              <h3 className="text-lg font-semibold">{hasFreeze ? 'Edit freeze' : 'Freeze subscription'}</h3>
               <Button variant="ghost" onClick={() => !busy && setOpenFreeze(false)}>
                 Close
               </Button>
@@ -396,23 +503,49 @@ export default function SubscriptionManageRowActions({
 
             {statusBox}
 
-            <div className="mt-4">
+            <div className="mt-4 space-y-4">
               <div className="text-sm text-[hsl(var(--muted))]">
-                This will block access immediately and extend the end date by the same number of days.
+                During the freeze period, the member will be marked inactive. The subscription end date will be adjusted by the
+                freeze duration.
               </div>
 
-              <div className="mt-4">
-                <div className="text-sm font-medium mb-1">Number of days</div>
-                <Input value={freezeDays} onChange={(e) => setFreezeDays(e.target.value)} disabled={busy} />
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <div>
+                  <div className="text-sm font-medium mb-1">Freeze start</div>
+                  <Input type="date" value={freezeFrom} onChange={(e) => setFreezeFrom(e.target.value)} disabled={busy} />
+                </div>
+                <div>
+                  <div className="text-sm font-medium mb-1">Freeze end</div>
+                  <Input type="date" value={freezeTo} onChange={(e) => setFreezeTo(e.target.value)} disabled={busy} />
+                </div>
               </div>
 
-              <div className="flex justify-end gap-2 pt-5">
-                <Button variant="outline" onClick={() => setOpenFreeze(false)} disabled={busy}>
-                  Cancel
-                </Button>
-                <Button onClick={doFreeze} disabled={busy}>
-                  Freeze
-                </Button>
+              {typeof freezeDurationDays === 'number' ? (
+                <div className="text-xs text-[hsl(var(--muted))]">Duration: {freezeDurationDays} day(s)</div>
+              ) : (
+                <div className="text-xs text-rose-700">Please choose a valid range.</div>
+              )}
+
+              <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end sm:gap-2 pt-2">
+                {hasFreeze ? (
+                  <Button
+                    variant="outline"
+                    onClick={doFreezeClear}
+                    disabled={busy}
+                    className="border-rose-300 text-rose-700 hover:bg-rose-50"
+                  >
+                    Clear freeze
+                  </Button>
+                ) : null}
+
+                <div className="flex justify-end gap-2">
+                  <Button variant="outline" onClick={() => setOpenFreeze(false)} disabled={busy}>
+                    Cancel
+                  </Button>
+                  <Button onClick={doFreezeSave} disabled={busy || freezeDurationDays === null}>
+                    Save
+                  </Button>
+                </div>
               </div>
             </div>
           </div>

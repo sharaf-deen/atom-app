@@ -1,3 +1,4 @@
+// src/app/api/members/list/route.ts
 import { NextResponse } from 'next/server'
 import { createSupabaseRSC } from '@/lib/supabaseServer'
 
@@ -22,6 +23,29 @@ type MemberRow = {
   member_id: string | null
   date_of_birth: string | null
   is_active?: boolean
+}
+
+function isISODateOnly(s?: string | null) {
+  return !!s && /^\d{4}-\d{2}-\d{2}$/.test(s)
+}
+
+/**
+ * Freeze logic (controlled):
+ * - If frozen_from exists: frozen when today >= frozen_from AND today < frozen_until (exclusive end)
+ * - Legacy: if only frozen_until exists: frozen when today < frozen_until
+ */
+function isFrozenNow(sub: {
+  subscription_type?: string | null
+  end_date?: string | null
+  frozen_from?: string | null
+  frozen_until?: string | null
+}, today: string) {
+  const st = (sub.subscription_type ?? (sub.end_date ? 'time' : 'sessions')) as 'time' | 'sessions'
+  if (st !== 'time') return false
+  const until = isISODateOnly(sub.frozen_until) ? (sub.frozen_until as string) : null
+  if (!until) return false
+  const from = isISODateOnly(sub.frozen_from) ? (sub.frozen_from as string) : null
+  return from ? today >= from && today < until : today < until
 }
 
 function intParam(raw: string | null, fallback: number, min: number, max: number) {
@@ -55,13 +79,11 @@ export async function GET(req: Request) {
     async function addActiveFlag(items: MemberRow[]) {
       const ids = items.map((i) => i.user_id).filter(Boolean)
       if (ids.length === 0) return items.map((i) => ({ ...i, is_active: false }))
-
-      // ✅ Include sessions subscriptions (often end_date is NULL) + time subscriptions not expired.
       const { data: subs, error: subsError2 } = await supabase
         .from('subscriptions')
-        .select('member_id, end_date, status')
+        .select('member_id, end_date, status, subscription_type, frozen_from, frozen_until')
         .eq('status', 'active')
-        .or(`end_date.is.null,end_date.gte.${today}`)
+        .gte('end_date', today)
         .in('member_id', ids)
 
       if (subsError2) {
@@ -73,11 +95,14 @@ export async function GET(req: Request) {
       const activeSet = new Set<string>()
       for (const s of subs ?? []) {
         const mid = (s as any)?.member_id as string | null
-        if (mid) activeSet.add(mid)
+        if (!mid) continue
+        if (isFrozenNow(s as any, today)) continue
+        activeSet.add(mid)
       }
 
       return items.map((i) => ({ ...i, is_active: activeSet.has(i.user_id) }))
     }
+
 
     // ALL members (role='member')
     if (status === 'all') {
@@ -114,9 +139,9 @@ export async function GET(req: Request) {
     // ACTIVE / INACTIVE: compute active IDs from subscriptions
     const { data: subs, error: subsError } = await supabase
       .from('subscriptions')
-      .select('member_id, end_date, status')
+      .select('member_id, end_date, status, subscription_type, frozen_from, frozen_until')
       .eq('status', 'active')
-      .or(`end_date.is.null,end_date.gte.${today}`)
+      .gte('end_date', today)
 
     if (subsError) {
       console.error('Error fetching subscriptions (list):', subsError)
@@ -126,7 +151,9 @@ export async function GET(req: Request) {
     const activeIds = new Set<string>()
     for (const row of subs ?? []) {
       const mid = (row as any)?.member_id as string | null
-      if (mid) activeIds.add(mid)
+      if (!mid) continue
+      if (isFrozenNow(row as any, today)) continue
+      activeIds.add(mid)
     }
 
     // ACTIVE list

@@ -5,6 +5,24 @@ import { createSupabaseRSC } from '@/lib/supabaseServer'
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
+function isISODateOnly(s?: string | null) {
+  return !!s && /^\d{4}-\d{2}-\d{2}$/.test(s)
+}
+
+function isFrozenNow(sub: {
+  subscription_type?: string | null
+  end_date?: string | null
+  frozen_from?: string | null
+  frozen_until?: string | null
+}, today: string) {
+  const st = (sub.subscription_type ?? (sub.end_date ? 'time' : 'sessions')) as 'time' | 'sessions'
+  if (st !== 'time') return false
+  const until = isISODateOnly(sub.frozen_until) ? (sub.frozen_until as string) : null
+  if (!until) return false
+  const from = isISODateOnly(sub.frozen_from) ? (sub.frozen_from as string) : null
+  return from ? today >= from && today < until : today < until
+}
+
 
 const DEFAULT_LIMIT = 20
 const MAX_LIMIT = 200
@@ -60,7 +78,7 @@ export async function GET(req: Request) {
     // 2) Abonnements actifs
     const { data: subs, error: subsError } = await supabase
       .from('subscriptions')
-      .select('member_id, end_date, status')
+      .select('member_id, end_date, status, subscription_type, frozen_from, frozen_until')
       .eq('status', 'active')
       .gte('end_date', today)
 
@@ -72,7 +90,9 @@ export async function GET(req: Request) {
     const activeIds = new Set<string>()
     for (const row of subs ?? []) {
       const memberId = (row as any).member_id as string | null
-      if (memberId) activeIds.add(memberId)
+      if (!memberId) continue
+      if (isFrozenNow(row as any, today)) continue
+      activeIds.add(memberId)
     }
 
     // 3) Filtrer les inactifs
