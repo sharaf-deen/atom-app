@@ -5,7 +5,7 @@ export const revalidate = 0
 import React from 'react'
 import { redirect } from 'next/navigation'
 import { getSessionUser } from '@/lib/session'
-import { createSupabaseRSC } from '@/lib/supabaseServer'
+import { createSupabaseAdminClient } from '@/lib/supabaseAdmin'
 
 import PageHeader from '@/components/layout/PageHeader'
 import Section from '@/components/layout/Section'
@@ -97,11 +97,17 @@ export default async function PackagesAndPromosPage() {
   }
 
   const role = user.role as Role
-  const canCreate = role === 'admin' || role === 'super_admin'   // New promo
+
+  // Only admin / super_admin can access this page.
+  if (role !== 'admin' && role !== 'super_admin') {
+    redirect('/')
+  }
+  // Option B: only super_admin can create/edit/delete.
+  const canCreate = role === 'super_admin'                       // New promo
   const canManageEditDelete = role === 'super_admin'             // Edit/Delete
   const canSeePast = role === 'admin' || role === 'super_admin'  // Past visibility
 
-  const supabase = createSupabaseRSC()
+  const supabase = createSupabaseAdminClient()
   const { data: promos, error } = await supabase
     .from('promotions')
     .select('*')

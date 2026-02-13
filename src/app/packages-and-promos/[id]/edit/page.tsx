@@ -5,7 +5,7 @@ export const revalidate = 0
 import React from 'react'
 import { notFound, redirect } from 'next/navigation'
 import { getSessionUser } from '@/lib/session'
-import { createSupabaseRSC } from '@/lib/supabaseServer'
+import { createSupabaseAdminClient } from '@/lib/supabaseAdmin'
 import PageHeader from '@/components/layout/PageHeader'
 import Section from '@/components/layout/Section'
 import { Card, CardContent } from '@/components/ui/Card'
@@ -59,7 +59,7 @@ export default async function EditPromoPage({ params }: { params: { id: string }
     )
   }
 
-  const supabase = createSupabaseRSC()
+  const supabase = createSupabaseAdminClient()
   const { data: promo, error } = await supabase
     .from('promotions')
     .select('*')

@@ -2,8 +2,8 @@
 'use server'
 
 import { revalidatePath } from 'next/cache'
-import { createSupabaseRSC, createSupabaseServerActionClient } from '@/lib/supabaseServer'
 import { getSessionUser } from '@/lib/session'
+import { createSupabaseAdminClient } from '@/lib/supabaseAdmin'
 
 function assertSuperAdmin(role?: string | null) {
   if (role !== 'super_admin') throw new Error('Forbidden')
@@ -18,7 +18,7 @@ function parseApplies(form: FormData): Array<'membership' | 'dropin' | 'private'
 export async function createPromo(formData: FormData) {
   const user = await getSessionUser()
   assertSuperAdmin(user?.role)
-  const supabase = createSupabaseRSC()
+  const supabase = createSupabaseAdminClient()
 
   const title = String(formData.get('title') || '').trim()
   const description = (String(formData.get('description') || '').trim() || null) as string | null
@@ -52,7 +52,7 @@ export async function createPromo(formData: FormData) {
 export async function updatePromo(id: string, formData: FormData) {
   const user = await getSessionUser()
   assertSuperAdmin(user?.role)
-  const supabase = createSupabaseRSC()
+  const supabase = createSupabaseAdminClient()
 
   const title = String(formData.get('title') || '').trim()
   const description = (String(formData.get('description') || '').trim() || null) as string | null
@@ -88,7 +88,7 @@ export async function updatePromo(id: string, formData: FormData) {
 export async function deletePromo(id: string) {
   const user = await getSessionUser()
   assertSuperAdmin(user?.role)
-  const supabase = createSupabaseServerActionClient()
+  const supabase = createSupabaseAdminClient()
   const { error } = await supabase.from('promotions').delete().eq('id', id)
   if (error) throw error
   revalidatePath('/packages-and-promos')
