@@ -62,8 +62,8 @@ export default async function NotificationsPage() {
         {/* admin / super_admin : sent only */}
         {(isAdmin || isSuper) && <NotificationsList isAdmin sentOnly />}
 
-        {/* Member messages inbox (super_admin only) */}
-        {isSuper && <NotificationsMemberInbox />}
+        {/* Member messages inbox (admin + super_admin) */}
+        {(isAdmin || isSuper) && <NotificationsMemberInbox canDelete />}
       </Section>
     </main>
   )
