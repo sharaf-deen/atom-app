@@ -373,7 +373,7 @@ export default function NotificationsList({ isAdmin = false, sentOnly = false }:
   }
 
   async function deleteSentOne(item: Item) {
-    if (sentOnly || box !== 'sent') return
+    if (box !== 'sent') return
     const ids = Array.isArray(item.source_ids) && item.source_ids.length > 0 ? item.source_ids : isUuid(item.id) ? [item.id] : []
     if (ids.length === 0) {
       alert('Cannot delete this row (missing source ids).')
@@ -620,7 +620,7 @@ export default function NotificationsList({ isAdmin = false, sentOnly = false }:
                           </div>
                         )}
 
-                        {!sentOnly && isSentView && isAdmin && (
+                        {isSentView && isAdmin && (
                           <div className="flex flex-col gap-2">
                             <Button variant="outline" size="sm" onClick={() => deleteSentOne(n)}>
                               Delete
@@ -721,7 +721,7 @@ export default function NotificationsList({ isAdmin = false, sentOnly = false }:
                     </div>
                   )}
 
-                  {!sentOnly && isSentView && isAdmin && (
+                  {isSentView && isAdmin && (
                     <div className="flex flex-wrap gap-2">
                       <Button variant="outline" size="sm" onClick={() => deleteSentOne(n)}>
                         Delete

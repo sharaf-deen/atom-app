@@ -259,15 +259,30 @@ export async function POST(req: Request) {
         `Your subscription was updated by an admin.\n` +
         (changes.length ? changes.join('\n') : 'Details were updated.')
 
-      const ins = await admin.from('notifications').insert({
+      const payloadBase = {
         user_id: recipientId,
+        member_id: recipientId,
         title,
         body: bodyText,
         kind: 'billing',
+      } as const
+
+      // First try with created_by so it appears in "Sent".
+      const ins1 = await admin.from('notifications').insert({
+        ...payloadBase,
         created_by: actorId,
       })
 
-      if (ins.error) throw ins.error
+      if (ins1.error) {
+        // If the admin doesn't have a row in profiles yet, the FK can fail.
+        // Fallback to a system notification (still delivered to member).
+        const ins2 = await admin.from('notifications').insert({
+          ...payloadBase,
+          created_by: null,
+        })
+        if (ins2.error) throw ins2.error
+      }
+
       notification_ok = true
     } else {
       notification_ok = false
