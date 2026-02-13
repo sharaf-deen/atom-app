@@ -1,4 +1,3 @@
-// src/app/api/subscriptions/update/route.ts
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
@@ -78,33 +77,18 @@ async function trySendResendEmail(args: { to: string; subject: string; text: str
   return { sent: true as const }
 }
 
-function planLabel(p?: string | null) {
-  switch (p) {
-    case '1m':
-      return '1 month'
-    case '3m':
-      return '3 months'
-    case '6m':
-      return '6 months'
-    case '12m':
-      return '12 months'
-    case 'sessions':
-      return 'Sessions'
-    default:
-      return p ? String(p) : ''
-  }
-}
-
 export async function POST(req: Request) {
   const supabase = createSupabaseServerActionClient()
   const me = await supabase.auth.getUser()
   if (!me.data.user) return json(401, { ok: false, error: 'Not authenticated' })
 
+  const actorId = me.data.user.id
+
   // Only admin / super_admin
   const { data: prof } = await supabase
     .from('profiles')
     .select('role')
-    .eq('user_id', me.data.user.id)
+    .eq('user_id', actorId)
     .maybeSingle<{ role: string | null }>()
 
   const role = prof?.role ?? 'member'
@@ -247,41 +231,51 @@ export async function POST(req: Request) {
 
   if (updErr) return json(500, { ok: false, error: updErr.message })
 
-  // ✅ Create an in-app notification so it shows up in:
-  // - Member Inbox (user_id = member)
-  // - Admin/Super Admin Sent (created_by = editor)
+  // Create a notification for the member so admins can see it in "Sent" and the member gets it in Inbox.
+  let notification_ok = false
+  let notification_error: string | null = null
+
   try {
-    const memberId = (updated as any)?.member_id ?? (current as any)?.member_id
-    if (memberId) {
-      const u: any = updated ?? current
+    const recipientId = String((updated as any)?.member_id ?? (current as any)?.member_id ?? '')
 
-      const lines: string[] = []
-      lines.push('Your subscription has been updated by the gym.')
-      lines.push('')
-
-      if (u.subscription_type === 'time') {
-        const pl = planLabel(u.plan)
-        if (pl) lines.push(`Plan: ${pl}`)
-        if (u.start_date || u.end_date) lines.push(`Dates: ${u.start_date ?? '—'} → ${u.end_date ?? '—'}`)
-      } else if (u.subscription_type === 'sessions') {
-        const used = Number(u.sessions_used ?? 0)
-        const total = u.sessions_total ?? '—'
-        lines.push(`Sessions: ${used} / ${total}`)
+    if (recipientId) {
+      const changes: string[] = []
+      const diff = (label: string, a: any, b: any) => {
+        const sa = a ?? null
+        const sb = b ?? null
+        if (sa === sb) return
+        changes.push(`${label}: ${sa ?? '—'} → ${sb ?? '—'}`)
       }
 
-      if (u.status) lines.push(`Status: ${u.status}`)
-      if (u.amount != null) lines.push(`Amount: ${u.amount} EGP`)
+      diff('Plan', (current as any)?.plan, (updated as any)?.plan)
+      diff('Start', (current as any)?.start_date, (updated as any)?.start_date)
+      diff('End', (current as any)?.end_date, (updated as any)?.end_date)
+      diff('Sessions total', (current as any)?.sessions_total, (updated as any)?.sessions_total)
+      diff('Amount', (current as any)?.amount, (updated as any)?.amount)
+      diff('Status', (current as any)?.status, (updated as any)?.status)
 
-      await admin.from('notifications').insert({
-        user_id: memberId,
-        created_by: me.data.user.id,
-        title: 'Subscription updated',
-        body: lines.join('\n'),
+      const title = 'Subscription updated'
+      const bodyText =
+        `Your subscription was updated by an admin.\n` +
+        (changes.length ? changes.join('\n') : 'Details were updated.')
+
+      const ins = await admin.from('notifications').insert({
+        user_id: recipientId,
+        title,
+        body: bodyText,
         kind: 'billing',
+        created_by: actorId,
       })
+
+      if (ins.error) throw ins.error
+      notification_ok = true
+    } else {
+      notification_ok = false
+      notification_error = 'MEMBER_ID_MISSING'
     }
-  } catch {
-    // Non-blocking: subscription update should still succeed even if notification insert fails
+  } catch (e: any) {
+    notification_ok = false
+    notification_error = e?.message ?? String(e)
   }
 
   let invoice_ok = false
@@ -387,7 +381,9 @@ export async function POST(req: Request) {
           email_sent = false
           email_error = 'MEMBER_EMAIL_MISSING'
         } else {
-          const { data: signed, error: sErr } = await admin.storage.from('invoices').createSignedUrl(filePath, 60 * 60 * 24 * 7)
+          const { data: signed, error: sErr } = await admin.storage
+            .from('invoices')
+            .createSignedUrl(filePath, 60 * 60 * 24 * 7)
           if (sErr) {
             email_sent = false
             email_error = sErr.message
@@ -424,6 +420,8 @@ export async function POST(req: Request) {
   return json(200, {
     ok: true,
     subscription: updated,
+    notification_ok,
+    ...(notification_error ? { notification_error } : {}),
     ...(invoiceRequested
       ? {
           invoice_ok,
