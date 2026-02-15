@@ -1,69 +1,118 @@
-// components/QrCard.tsx
+// src/components/QrCard.tsx
 'use client'
 
-import { useCallback, useRef } from 'react'
-import QRCode from 'react-qr-code'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 
 type Props = {
   value: string
   title?: string
-  size?: number // côté en pixels (affichage)
+  /** QR size in CSS pixels */
+  size?: number
+  /** Download filename (png) */
+  filename?: string
 }
 
-export default function QrCard({ value, title = 'Access QR Code', size = 180 }: Props) {
-  const svgRef = useRef<SVGSVGElement | null>(null)
+function errToString(err: unknown) {
+  if (typeof err === 'string') return err
+  if (err && typeof err === 'object' && 'message' in err) {
+    const m = (err as any).message
+    if (typeof m === 'string') return m
+  }
+  return 'Unable to generate QR'
+}
+
+export default function QrCard({
+  value,
+  title = 'Access QR Code',
+  size = 180,
+  filename = 'atom-qr.png',
+}: Props) {
+  const [dataUrl, setDataUrl] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  // Generate a crisp PNG (2x) then display scaled down via CSS
+  const renderWidth = useMemo(() => Math.max(64, Math.floor(size)), [size])
+  const qrWidth = useMemo(() => Math.max(128, Math.floor(renderWidth * 2)), [renderWidth])
+
+  useEffect(() => {
+    let cancelled = false
+
+    async function run() {
+      setError(null)
+      setDataUrl(null)
+      try {
+        const { default: QRCode } = await import('qrcode')
+        const url = await QRCode.toDataURL(value || '', {
+          errorCorrectionLevel: 'M',
+          margin: 1,
+          width: qrWidth,
+        })
+        if (!cancelled) setDataUrl(url)
+      } catch (e) {
+        if (!cancelled) setError(errToString(e))
+      }
+    }
+
+    run()
+    return () => {
+      cancelled = true
+    }
+  }, [value, qrWidth])
 
   const handleCopy = useCallback(async () => {
     try {
       await navigator.clipboard.writeText(value)
       alert('QR value copied to clipboard.')
     } catch {
-      alert('Unable to copy.')
+      // Fallback
+      try {
+        const t = document.createElement('textarea')
+        t.value = value
+        document.body.appendChild(t)
+        t.select()
+        document.execCommand('copy')
+        document.body.removeChild(t)
+        alert('QR value copied to clipboard.')
+      } catch {
+        alert('Unable to copy.')
+      }
     }
   }, [value])
 
   const handleDownloadPng = useCallback(() => {
-    const svg = svgRef.current
-    if (!svg) return
-
-    const serializer = new XMLSerializer()
-    const svgString = serializer.serializeToString(svg)
-
-    const svgBlob = new Blob([svgString], { type: 'image/svg+xml;charset=utf-8' })
-    const url = URL.createObjectURL(svgBlob)
-
-    const img = new Image()
-    img.onload = () => {
-      // Crée un canvas un peu plus grand pour une meilleure définition
-      const scale = 2
-      const canvas = document.createElement('canvas')
-      canvas.width = size * scale
-      canvas.height = size * scale
-      const ctx = canvas.getContext('2d')
-      if (!ctx) return
-      ctx.fillStyle = '#ffffff'
-      ctx.fillRect(0, 0, canvas.width, canvas.height)
-      ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
-
-      const pngUrl = canvas.toDataURL('image/png')
-      const a = document.createElement('a')
-      a.href = pngUrl
-      a.download = 'atom-qr.png'
-      a.click()
-      URL.revokeObjectURL(url)
-    }
-    img.onerror = () => URL.revokeObjectURL(url)
-    img.src = url
-  }, [size])
+    if (!dataUrl) return
+    const a = document.createElement('a')
+    a.href = dataUrl
+    a.download = filename
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+  }, [dataUrl, filename])
 
   return (
     <section className="rounded-xl border p-4 space-y-3">
       <div className="text-sm text-gray-600">{title}</div>
 
       <div className="inline-flex items-center justify-center rounded-lg bg-white p-3 border">
-        {/* @ts-expect-error ref est bien supporté ici */}
-        <QRCode ref={svgRef} value={value || ''} size={size} />
+        {dataUrl ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={dataUrl}
+            alt={title}
+            width={renderWidth}
+            height={renderWidth}
+            className="rounded"
+          />
+        ) : (
+          <div
+            className="animate-pulse rounded bg-gray-100"
+            style={{ width: renderWidth, height: renderWidth }}
+            aria-label="Generating QR"
+          />
+        )}
       </div>
+
+      {error ? <p className="text-sm text-red-600">{error}</p> : null}
 
       <div className="flex gap-2">
         <button
@@ -76,7 +125,11 @@ export default function QrCard({ value, title = 'Access QR Code', size = 180 }: 
         <button
           type="button"
           onClick={handleDownloadPng}
-          className="text-sm px-3 py-1.5 rounded border hover:bg-gray-50"
+          disabled={!dataUrl}
+          className={
+            'text-sm px-3 py-1.5 rounded border ' +
+            (dataUrl ? 'hover:bg-gray-50' : 'bg-gray-100 text-gray-400 cursor-not-allowed')
+          }
         >
           Download PNG
         </button>
