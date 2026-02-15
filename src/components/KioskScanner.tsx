@@ -2,8 +2,8 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type { ComponentType } from 'react'
 import { useRouter } from 'next/navigation'
-import { Scanner } from '@yudiel/react-qr-scanner'
 import { Card, CardContent } from '@/components/ui/Card'
 import Button from '@/components/ui/Button'
 import Badge from '@/components/ui/Badge'
@@ -60,6 +60,11 @@ type FacingMode = 'environment' | 'user'
 
 export default function KioskScanner({ size = 'sm', ratio = '1:1', className }: KioskScannerProps) {
   const router = useRouter()
+
+  // Lazy-load the heavy camera scanner only when this component is mounted.
+  // This keeps the main JS bundles lighter and avoids eager prefetch downloads.
+  const [ScannerComponent, setScannerComponent] = useState<ComponentType<any> | null>(null)
+
   const [paused, setPaused] = useState(false)
   const [status, setStatus] = useState<Status>('idle')
   const [msg, setMsg] = useState<string>('Ready')
@@ -85,6 +90,30 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className }: 
       window.removeEventListener('keydown', onKeyDown)
     }
   }, [fullScreen])
+
+  // Load scanner module after first render
+  useEffect(() => {
+    let cancelled = false
+
+    ;(async () => {
+      try {
+        const mod: any = await import('@yudiel/react-qr-scanner')
+        const Comp = mod?.Scanner
+        if (!Comp) throw new Error('Scanner export not found in @yudiel/react-qr-scanner')
+        if (!cancelled) setScannerComponent(() => Comp)
+      } catch (e) {
+        if (cancelled) return
+        setStatus('error')
+        setMsg('Failed to load camera scanner')
+        // Keep the real error in console for debugging.
+        console.error(e)
+      }
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   useEffect(() => {
     return () => {
@@ -186,12 +215,12 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className }: 
 
   const scannerKey = `${facingMode}-${fullScreen ? 'fs' : 'normal'}`
 
-  const scannerEl = (
-    <Scanner
+  const scannerEl = ScannerComponent ? (
+    <ScannerComponent
       key={scannerKey}
       constraints={{ facingMode }}
       onScan={handleScan}
-      onError={(err) => {
+      onError={(err: unknown) => {
         setStatus('error')
         setMsg(errToString(err))
       }}
@@ -202,6 +231,10 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className }: 
         video: { width: '100%', height: '100%', objectFit: 'cover' },
       }}
     />
+  ) : (
+    <div className="flex h-full w-full items-center justify-center">
+      <div className="text-sm text-[hsl(var(--muted))]">Loading camera…</div>
+    </div>
   )
 
   // Fullscreen overlay (works everywhere, without relying on the Fullscreen API)
