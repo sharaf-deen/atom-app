@@ -1,7 +1,6 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { Html5QrcodeScanner } from 'html5-qrcode'
 
 type Status = { kind: 'neutral' | 'ok' | 'bad' | 'info'; text: string }
 
@@ -19,57 +18,73 @@ export default function ScanClient() {
   useEffect(() => {
     if (!containerRef.current) return
 
+    let scanner: any = null
+    let cancelled = false
+
     const elementId = 'qr-reader'
 
-    const scanner = new Html5QrcodeScanner(
-      elementId,
-      { fps: 10, qrbox: 250 },
-      /* verbose */ false
-    )
+    const init = async () => {
+      // Lazy-load the scanner library (big bundle) only when this page is opened.
+      const mod = await import('html5-qrcode')
+      if (cancelled) return
 
-    const onScanSuccess = async (decodedText: string) => {
-      // anti-double scan: 2s
-      const now = Date.now()
-      if (decodedText === lastCodeRef.current && now - lastTimeRef.current < 2000) return
-      lastCodeRef.current = decodedText
-      lastTimeRef.current = now
+      const { Html5QrcodeScanner } = mod as any
 
-      setBusy(true)
-      setStatus({ kind: 'info', text: 'Checking validity…' })
+      scanner = new Html5QrcodeScanner(
+        elementId,
+        { fps: 10, qrbox: 250 },
+        /* verbose */ false
+      )
 
-      try {
-        const res = await fetch('/api/scan', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ code: decodedText }),
-        })
+      const onScanSuccess = async (decodedText: string) => {
+        // anti-double scan: 2s
+        const now = Date.now()
+        if (decodedText === lastCodeRef.current && now - lastTimeRef.current < 2000) return
+        lastCodeRef.current = decodedText
+        lastTimeRef.current = now
 
-        const json = await res.json().catch(() => ({} as any))
+        setBusy(true)
+        setStatus({ kind: 'info', text: 'Checking validity…' })
 
-        if (res.ok && json?.ok) {
-          setStatus({ kind: 'ok', text: json?.message || 'Access granted.' })
-        } else {
-          const msg =
-            json?.message ||
-            json?.error ||
-            (res.status === 401 ? 'Not authenticated.' : 'Access restricted.')
-          setStatus({ kind: 'bad', text: msg })
+        try {
+          const res = await fetch('/api/scan', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ code: decodedText }),
+          })
+
+          const json = await res.json().catch(() => ({} as any))
+
+          if (res.ok && json?.ok) {
+            setStatus({ kind: 'ok', text: json?.message || 'Access granted.' })
+          } else {
+            const msg =
+              json?.message ||
+              json?.error ||
+              (res.status === 401 ? 'Not authenticated.' : 'Access restricted.')
+            setStatus({ kind: 'bad', text: msg })
+          }
+        } catch {
+          setStatus({ kind: 'bad', text: 'Error verifying QR.' })
+        } finally {
+          setBusy(false)
         }
-      } catch {
-        setStatus({ kind: 'bad', text: 'Error verifying QR.' })
-      } finally {
-        setBusy(false)
       }
+
+      const onScanFailure = (_err: unknown) => {
+        // normal read errors -> ignore to avoid noise
+      }
+
+      scanner.render(onScanSuccess, onScanFailure)
     }
 
-    const onScanFailure = (_err: unknown) => {
-      // erreurs normales de lecture, on ignore pour éviter le spam
-    }
-
-    scanner.render(onScanSuccess, onScanFailure)
+    init().catch(() => {
+      setStatus({ kind: 'bad', text: 'Camera init failed.' })
+    })
 
     return () => {
-      scanner.clear().catch(() => {})
+      cancelled = true
+      if (scanner?.clear) scanner.clear().catch(() => {})
     }
   }, [])
 
@@ -80,25 +95,27 @@ export default function ScanClient() {
       ? 'bg-rose-50 border-rose-300 text-rose-900'
       : status.kind === 'info'
       ? 'bg-amber-50 border-amber-300 text-amber-900'
-      : 'bg-[hsl(var(--card))] border-[hsl(var(--border))] text-[hsl(var(--text))]'
+      : 'bg-white border-neutral-200 text-neutral-900'
 
   return (
-    <main className="max-w-xl mx-auto p-6 space-y-4">
-      <h1 className="text-2xl font-semibold">Entrance Scanner</h1>
+    <div className="mx-auto w-full max-w-md p-6">
+      <h1 className="text-xl font-semibold mb-3">Scan</h1>
 
-      <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4 shadow-soft">
-        <div id="qr-reader" ref={containerRef} />
+      <div className={`rounded-2xl border p-3 mb-4 ${boxClass}`}>
+        <div className="text-sm">{status.text}</div>
+        {busy ? <div className="text-xs opacity-70 mt-1">Processing…</div> : null}
       </div>
 
-      <div className={`rounded-2xl border p-3 shadow-soft ${boxClass}`}>
-        <div className="text-sm">
-          {busy ? <span className="mr-2 text-[hsl(var(--muted))]">Working…</span> : null}
-          {status.kind === 'ok' ? '✅ ' : status.kind === 'bad' ? '❌ ' : ''}
-          {status.text}
-        </div>
+      <div
+        ref={containerRef}
+        className="rounded-2xl overflow-hidden border bg-black/5"
+      >
+        <div id="qr-reader" />
       </div>
 
-      <p className="text-xs text-[hsl(var(--muted))]">If prompted, allow camera access.</p>
-    </main>
+      <p className="text-xs text-neutral-500 mt-4">
+        Tip: hold the code steady, good lighting helps.
+      </p>
+    </div>
   )
 }

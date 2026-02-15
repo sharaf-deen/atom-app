@@ -25,3 +25,27 @@ Thumbs.db
 # TypeScript incremental build
 tsconfig.tsbuildinfo
 
+# Capacitor / mobile build artifacts
+android/.gradle/
+android/app/build/
+android/build/
+android/local.properties
+android/.idea/
+android/.cxx/
+android/captures/
+
+ios/Pods/
+ios/build/
+ios/DerivedData/
+ios/App/App.xcworkspace/xcuserdata/
+ios/App/App.xcodeproj/xcuserdata/
+
+# Mobile releases
+*.apk
+*.aab
+*.ipa
+*.keystore
+*.jks
+
+# App outputs you don't want in git
+release/

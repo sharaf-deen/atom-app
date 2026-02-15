@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { requireStaff } from '@/lib/apiAuth';
+import { getAppUrl } from '@/lib/appUrl';
 import { createClient } from '@supabase/supabase-js';
 
 const admin = createClient(
@@ -24,7 +25,7 @@ export async function POST(req: Request) {
       email.toLowerCase(),
       {
         data: { first_name, last_name, phone, role: 'member' },
-        redirectTo: `${process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000'}/welcome`,
+        redirectTo: `${getAppUrl()}/auth/complete-invite`,
       }
     );
     if (inviteErr) {
