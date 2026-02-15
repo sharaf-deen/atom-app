@@ -1,28 +1,25 @@
 'use client'
 
 import { useMemo, useState } from 'react'
+import { useRouter } from 'next/navigation'
 import Button from '@/components/ui/Button'
 import Input from '@/components/ui/Input'
+import Select from '@/components/ui/Select'
 import Badge from '@/components/ui/Badge'
 
-export type PriceItem = {
+export type PackageItem = {
   id: string
-  title: string
+  name: string
+  type: 'membership' | 'private'
+  unit: 'month' | 'session'
+  qty: number
   price_egp: number
-  sort_order: number | null
-  is_active: boolean | null
+  is_active: boolean
 }
 
 type Props = {
-  /** Server-provided items (recommended). If omitted, component will render empty list. */
-  items?: PriceItem[]
-  /** Only super_admin should pass true */
-  canEdit?: boolean
-}
-
-function safeNumber(v: any, fallback = 0) {
-  const n = Number(v)
-  return Number.isFinite(n) ? n : fallback
+  items: PackageItem[]
+  canEdit: boolean
 }
 
 async function safeJson(r: Response) {
@@ -33,44 +30,65 @@ async function safeJson(r: Response) {
   }
 }
 
-export default function PricesList({ items = [], canEdit = false }: Props) {
-  const [rows, setRows] = useState<PriceItem[]>(Array.isArray(items) ? items : [])
+function toInt(v: any, def: number) {
+  const n = Number(v)
+  if (!Number.isFinite(n)) return def
+  return Math.floor(n)
+}
+
+export default function PricesList({ items, canEdit }: Props) {
+  const router = useRouter()
+
   const [editingId, setEditingId] = useState<string | null>(null)
-  const [draft, setDraft] = useState<Partial<PriceItem> | null>(null)
   const [saving, setSaving] = useState(false)
+  const [err, setErr] = useState<string>('')
 
-  const sorted = useMemo(() => {
-    const copy = [...rows]
-    copy.sort((a, b) => {
-      const ao = a.sort_order ?? 999999
-      const bo = b.sort_order ?? 999999
-      if (ao !== bo) return ao - bo
-      return String(a.title || '').localeCompare(String(b.title || ''))
-    })
-    return copy
-  }, [rows])
+  const [adding, setAdding] = useState(false)
+  const [newItem, setNewItem] = useState<Omit<PackageItem, 'id'>>({
+    name: 'New package',
+    type: 'membership',
+    unit: 'month',
+    qty: 1,
+    price_egp: 0,
+    is_active: true,
+  })
 
-  function startEdit(r: PriceItem) {
-    setEditingId(r.id)
-    setDraft({ ...r })
+  const byId = useMemo(() => {
+    const m = new Map<string, PackageItem>()
+    for (const it of items) m.set(it.id, it)
+    return m
+  }, [items])
+
+  const [draft, setDraft] = useState<Partial<PackageItem>>({})
+
+  function startEdit(id: string) {
+    const it = byId.get(id)
+    if (!it) return
+    setErr('')
+    setEditingId(id)
+    setDraft({ ...it })
   }
 
   function cancelEdit() {
     setEditingId(null)
-    setDraft(null)
+    setDraft({})
+    setErr('')
   }
 
   async function saveEdit() {
-    if (!canEdit || !editingId || !draft) return
-
-    const patch: any = {}
-    if (draft.title !== undefined) patch.title = String(draft.title || '').trim()
-    if (draft.price_egp !== undefined) patch.price_egp = Math.max(0, Math.floor(safeNumber(draft.price_egp, 0)))
-    if (draft.sort_order !== undefined) patch.sort_order = Math.floor(safeNumber(draft.sort_order, 0))
-    if (draft.is_active !== undefined) patch.is_active = !!draft.is_active
-
+    if (!editingId) return
     setSaving(true)
+    setErr('')
     try {
+      const patch = {
+        name: String(draft.name ?? ''),
+        type: draft.type,
+        unit: draft.unit,
+        qty: toInt(draft.qty, 1),
+        price_egp: toInt(draft.price_egp, 0),
+        is_active: !!draft.is_active,
+      }
+
       const r = await fetch('/api/packages-pricing/update', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -78,189 +96,378 @@ export default function PricesList({ items = [], canEdit = false }: Props) {
       })
       const j: any = await safeJson(r)
       if (!r.ok || !j?.ok) {
-        alert(j?.details || j?.error || 'Failed to save')
+        setErr(j?.details || j?.error || 'Failed to save')
         return
       }
 
-      const nextItem = j.item as PriceItem
-      setRows((prev) => prev.map((x) => (x.id === nextItem.id ? nextItem : x)))
-      cancelEdit()
+      setEditingId(null)
+      setDraft({})
+      router.refresh()
+    } catch (e: any) {
+      setErr(e?.message ?? String(e))
     } finally {
       setSaving(false)
     }
   }
 
-  if (!sorted.length) {
-    return <div className="text-sm text-[hsl(var(--muted))]">No packages.</div>
+  async function createOne() {
+    if (!canEdit) return
+    setSaving(true)
+    setErr('')
+    try {
+      const payload = {
+        name: String(newItem.name ?? '').trim(),
+        type: newItem.type,
+        unit: newItem.unit,
+        qty: toInt(newItem.qty, 1),
+        price_egp: toInt(newItem.price_egp, 0),
+        is_active: !!newItem.is_active,
+      }
+
+      if (!payload.name) {
+        setErr('Name is required')
+        return
+      }
+
+      const r = await fetch('/api/packages-pricing/create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ item: payload }),
+      })
+      const j: any = await safeJson(r)
+      if (!r.ok || !j?.ok) {
+        setErr(j?.details || j?.error || 'Failed to create')
+        return
+      }
+
+      setAdding(false)
+      setNewItem({
+        name: 'New package',
+        type: 'membership',
+        unit: 'month',
+        qty: 1,
+        price_egp: 0,
+        is_active: true,
+      })
+      router.refresh()
+    } catch (e: any) {
+      setErr(e?.message ?? String(e))
+    } finally {
+      setSaving(false)
+    }
   }
 
   return (
-    <div className="space-y-3">
-      <div className="hidden overflow-x-auto rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] shadow-soft md:block">
-        <table className="min-w-full text-sm">
-          <thead className="bg-[hsl(var(--bg))] text-left">
-            <tr>
-              <th className="border-b border-[hsl(var(--border))] p-3 font-medium">Package</th>
-              <th className="border-b border-[hsl(var(--border))] p-3 font-medium">Price</th>
-              <th className="border-b border-[hsl(var(--border))] p-3 font-medium">Order</th>
-              <th className="border-b border-[hsl(var(--border))] p-3 font-medium">Status</th>
-              <th className="border-b border-[hsl(var(--border))] p-3" />
-            </tr>
-          </thead>
-          <tbody>
-            {sorted.map((r) => {
-              const isEditing = canEdit && editingId === r.id
-              return (
-                <tr key={r.id} className="odd:bg-[hsl(var(--card))] even:bg-[hsl(var(--bg))] align-top">
-                  <td className="border-t border-[hsl(var(--border))] p-3 font-medium">
-                    {isEditing ? (
-                      <Input
-                        value={String(draft?.title ?? '')}
-                        onChange={(e) => setDraft((d) => ({ ...(d || {}), title: e.target.value }))}
-                        className="w-full"
-                      />
-                    ) : (
-                      r.title
-                    )}
-                  </td>
-                  <td className="border-t border-[hsl(var(--border))] p-3">
-                    {isEditing ? (
-                      <Input
-                        type="number"
-                        inputMode="numeric"
-                        value={String(draft?.price_egp ?? 0)}
-                        onChange={(e) => setDraft((d) => ({ ...(d || {}), price_egp: e.target.value as any }))}
-                        className="w-32"
-                      />
-                    ) : (
-                      <span>{safeNumber(r.price_egp, 0).toLocaleString()} EGP</span>
-                    )}
-                  </td>
-                  <td className="border-t border-[hsl(var(--border))] p-3">
-                    {isEditing ? (
-                      <Input
-                        type="number"
-                        inputMode="numeric"
-                        value={String(draft?.sort_order ?? 0)}
-                        onChange={(e) => setDraft((d) => ({ ...(d || {}), sort_order: e.target.value as any }))}
-                        className="w-24"
-                      />
-                    ) : (
-                      <span className="text-[hsl(var(--muted))]">{r.sort_order ?? '—'}</span>
-                    )}
-                  </td>
-                  <td className="border-t border-[hsl(var(--border))] p-3">
-                    {isEditing ? (
-                      <label className="inline-flex items-center gap-2 text-sm">
-                        <input
-                          type="checkbox"
-                          checked={!!draft?.is_active}
-                          onChange={(e) => setDraft((d) => ({ ...(d || {}), is_active: e.target.checked }))}
-                        />
-                        Active
-                      </label>
-                    ) : r.is_active ? (
-                      <Badge className="bg-black text-white border-black">Active</Badge>
-                    ) : (
-                      <Badge>Inactive</Badge>
-                    )}
-                  </td>
-                  <td className="border-t border-[hsl(var(--border))] p-3">
-                    {canEdit ? (
-                      isEditing ? (
-                        <div className="flex items-center justify-end gap-2">
-                          <Button onClick={saveEdit} disabled={saving} className="px-3 py-2">
-                            Save
-                          </Button>
-                          <Button variant="outline" onClick={cancelEdit} disabled={saving} className="px-3 py-2">
-                            Cancel
-                          </Button>
-                        </div>
-                      ) : (
-                        <div className="flex items-center justify-end">
-                          <Button variant="outline" onClick={() => startEdit(r)} className="px-3 py-2">
-                            Edit
-                          </Button>
-                        </div>
-                      )
-                    ) : null}
-                  </td>
-                </tr>
-              )
-            })}
-          </tbody>
-        </table>
-      </div>
+    <div>
+      {err ? (
+        <div className="mb-3 rounded-2xl border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-700">
+          {err}
+        </div>
+      ) : null}
 
-      {/* Mobile */}
-      <div className="md:hidden space-y-3">
-        {sorted.map((r) => {
-          const isEditing = canEdit && editingId === r.id
-          return (
-            <div key={r.id} className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4 shadow-soft">
-              <div className="flex items-start justify-between gap-3">
-                <div className="flex-1">
-                  <div className="text-sm font-semibold">
-                    {isEditing ? (
-                      <Input
-                        value={String(draft?.title ?? '')}
-                        onChange={(e) => setDraft((d) => ({ ...(d || {}), title: e.target.value }))}
-                      />
-                    ) : (
-                      r.title
-                    )}
-                  </div>
-                  <div className="mt-1 text-sm text-[hsl(var(--muted))]">
-                    {isEditing ? (
+      {items.length === 0 ? (
+        <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] p-4">
+          <div className="text-sm text-[hsl(var(--muted))]">No packages.</div>
+
+          {canEdit ? (
+            <div className="mt-3">
+              {!adding ? (
+                <Button variant="outline" onClick={() => setAdding(true)}>
+                  Add a package
+                </Button>
+              ) : (
+                <div className="mt-2 rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4 shadow-soft">
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    <div>
+                      <div className="text-xs text-[hsl(var(--muted))]">Name</div>
+                      <Input value={newItem.name} onChange={(e) => setNewItem((p) => ({ ...p, name: e.target.value }))} />
+                    </div>
+
+                    <div>
+                      <div className="text-xs text-[hsl(var(--muted))]">Type</div>
+                      <Select
+                        value={newItem.type}
+                        onChange={(e) => setNewItem((p) => ({ ...p, type: e.target.value as any }))}
+                      >
+                        <option value="membership">membership</option>
+                        <option value="private">private</option>
+                      </Select>
+                    </div>
+
+                    <div>
+                      <div className="text-xs text-[hsl(var(--muted))]">Unit</div>
+                      <Select
+                        value={newItem.unit}
+                        onChange={(e) => setNewItem((p) => ({ ...p, unit: e.target.value as any }))}
+                      >
+                        <option value="month">month</option>
+                        <option value="session">session</option>
+                      </Select>
+                    </div>
+
+                    <div>
+                      <div className="text-xs text-[hsl(var(--muted))]">Qty</div>
                       <Input
                         type="number"
-                        inputMode="numeric"
-                        value={String(draft?.price_egp ?? 0)}
-                        onChange={(e) => setDraft((d) => ({ ...(d || {}), price_egp: e.target.value as any }))}
+                        value={String(newItem.qty)}
+                        onChange={(e) => setNewItem((p) => ({ ...p, qty: toInt(e.target.value, 1) }))}
                       />
-                    ) : (
-                      `${safeNumber(r.price_egp, 0).toLocaleString()} EGP`
-                    )}
-                  </div>
-                  <div className="mt-2 flex items-center gap-2">
-                    {isEditing ? (
-                      <label className="inline-flex items-center gap-2 text-sm">
+                    </div>
+
+                    <div>
+                      <div className="text-xs text-[hsl(var(--muted))]">Price (EGP)</div>
+                      <Input
+                        type="number"
+                        value={String(newItem.price_egp)}
+                        onChange={(e) => setNewItem((p) => ({ ...p, price_egp: toInt(e.target.value, 0) }))}
+                      />
+                    </div>
+
+                    <div className="flex items-end">
+                      <label className="flex items-center gap-2 text-sm">
                         <input
                           type="checkbox"
-                          checked={!!draft?.is_active}
-                          onChange={(e) => setDraft((d) => ({ ...(d || {}), is_active: e.target.checked }))}
+                          checked={!!newItem.is_active}
+                          onChange={(e) => setNewItem((p) => ({ ...p, is_active: e.target.checked }))}
                         />
                         Active
                       </label>
-                    ) : r.is_active ? (
-                      <Badge className="bg-black text-white border-black">Active</Badge>
-                    ) : (
-                      <Badge>Inactive</Badge>
-                    )}
-                    <span className="text-xs text-[hsl(var(--muted))]">Order: {r.sort_order ?? '—'}</span>
+                    </div>
+                  </div>
+
+                  <div className="mt-4 flex items-center gap-2">
+                    <Button onClick={createOne} disabled={saving}>
+                      Save
+                    </Button>
+                    <Button
+                      variant="outline"
+                      onClick={() => {
+                        setAdding(false)
+                        setErr('')
+                      }}
+                      disabled={saving}
+                    >
+                      Cancel
+                    </Button>
                   </div>
                 </div>
-                {canEdit ? (
-                  isEditing ? (
-                    <div className="flex flex-col gap-2">
-                      <Button onClick={saveEdit} disabled={saving} className="px-3 py-2">
-                        Save
-                      </Button>
-                      <Button variant="outline" onClick={cancelEdit} disabled={saving} className="px-3 py-2">
-                        Cancel
-                      </Button>
-                    </div>
-                  ) : (
-                    <Button variant="outline" onClick={() => startEdit(r)} className="px-3 py-2">
-                      Edit
-                    </Button>
-                  )
-                ) : null}
-              </div>
+              )}
             </div>
-          )
-        })}
-      </div>
+          ) : null}
+        </div>
+      ) : (
+        <div className="overflow-x-auto rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] shadow-soft">
+          <table className="min-w-full text-sm">
+            <thead className="bg-[hsl(var(--bg))] text-left">
+              <tr>
+                <th className="border-b border-[hsl(var(--border))] p-3 font-medium">Name</th>
+                <th className="border-b border-[hsl(var(--border))] p-3 font-medium">Type</th>
+                <th className="border-b border-[hsl(var(--border))] p-3 font-medium">Qty</th>
+                <th className="border-b border-[hsl(var(--border))] p-3 font-medium">Unit</th>
+                <th className="border-b border-[hsl(var(--border))] p-3 font-medium">Price</th>
+                <th className="border-b border-[hsl(var(--border))] p-3 font-medium">Status</th>
+                <th className="border-b border-[hsl(var(--border))] p-3" />
+              </tr>
+            </thead>
+
+            <tbody>
+              {items.map((it) => {
+                const isEditing = editingId === it.id
+                const row = isEditing ? (draft as any) : it
+
+                return (
+                  <tr key={it.id} className="odd:bg-[hsl(var(--card))] even:bg-[hsl(var(--bg))] align-top">
+                    <td className="border-t border-[hsl(var(--border))] p-3">
+                      {isEditing ? (
+                        <Input
+                          value={String(row.name ?? '')}
+                          onChange={(e) => setDraft((p) => ({ ...p, name: e.target.value }))}
+                        />
+                      ) : (
+                        <div className="font-medium">{it.name}</div>
+                      )}
+                    </td>
+
+                    <td className="border-t border-[hsl(var(--border))] p-3">
+                      {isEditing ? (
+                        <Select
+                          value={String(row.type ?? 'membership')}
+                          onChange={(e) => setDraft((p) => ({ ...p, type: e.target.value as any }))}
+                        >
+                          <option value="membership">membership</option>
+                          <option value="private">private</option>
+                        </Select>
+                      ) : (
+                        <Badge>{it.type}</Badge>
+                      )}
+                    </td>
+
+                    <td className="border-t border-[hsl(var(--border))] p-3">
+                      {isEditing ? (
+                        <Input
+                          type="number"
+                          value={String(row.qty ?? 1)}
+                          onChange={(e) => setDraft((p) => ({ ...p, qty: toInt(e.target.value, 1) }))}
+                        />
+                      ) : (
+                        it.qty
+                      )}
+                    </td>
+
+                    <td className="border-t border-[hsl(var(--border))] p-3">
+                      {isEditing ? (
+                        <Select
+                          value={String(row.unit ?? 'month')}
+                          onChange={(e) => setDraft((p) => ({ ...p, unit: e.target.value as any }))}
+                        >
+                          <option value="month">month</option>
+                          <option value="session">session</option>
+                        </Select>
+                      ) : (
+                        it.unit
+                      )}
+                    </td>
+
+                    <td className="border-t border-[hsl(var(--border))] p-3">
+                      {isEditing ? (
+                        <Input
+                          type="number"
+                          value={String(row.price_egp ?? 0)}
+                          onChange={(e) => setDraft((p) => ({ ...p, price_egp: toInt(e.target.value, 0) }))}
+                        />
+                      ) : (
+                        `${it.price_egp} EGP`
+                      )}
+                    </td>
+
+                    <td className="border-t border-[hsl(var(--border))] p-3">
+                      {isEditing ? (
+                        <label className="flex items-center gap-2 text-sm">
+                          <input
+                            type="checkbox"
+                            checked={!!row.is_active}
+                            onChange={(e) => setDraft((p) => ({ ...p, is_active: e.target.checked }))}
+                          />
+                          Active
+                        </label>
+                      ) : it.is_active ? (
+                        <Badge className="bg-black text-white border-black">Active</Badge>
+                      ) : (
+                        <Badge>Inactive</Badge>
+                      )}
+                    </td>
+
+                    <td className="border-t border-[hsl(var(--border))] p-3">
+                      {canEdit ? (
+                        isEditing ? (
+                          <div className="flex flex-col gap-2">
+                            <Button onClick={saveEdit} disabled={saving}>
+                              Save
+                            </Button>
+                            <Button variant="outline" onClick={cancelEdit} disabled={saving}>
+                              Cancel
+                            </Button>
+                          </div>
+                        ) : (
+                          <Button variant="outline" onClick={() => startEdit(it.id)}>
+                            Edit
+                          </Button>
+                        )
+                      ) : null}
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+
+          {canEdit ? (
+            <div className="border-t border-[hsl(var(--border))] p-3">
+              {!adding ? (
+                <Button variant="outline" onClick={() => setAdding(true)}>
+                  Add a package
+                </Button>
+              ) : (
+                <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] p-4">
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    <div>
+                      <div className="text-xs text-[hsl(var(--muted))]">Name</div>
+                      <Input value={newItem.name} onChange={(e) => setNewItem((p) => ({ ...p, name: e.target.value }))} />
+                    </div>
+
+                    <div>
+                      <div className="text-xs text-[hsl(var(--muted))]">Type</div>
+                      <Select
+                        value={newItem.type}
+                        onChange={(e) => setNewItem((p) => ({ ...p, type: e.target.value as any }))}
+                      >
+                        <option value="membership">membership</option>
+                        <option value="private">private</option>
+                      </Select>
+                    </div>
+
+                    <div>
+                      <div className="text-xs text-[hsl(var(--muted))]">Unit</div>
+                      <Select
+                        value={newItem.unit}
+                        onChange={(e) => setNewItem((p) => ({ ...p, unit: e.target.value as any }))}
+                      >
+                        <option value="month">month</option>
+                        <option value="session">session</option>
+                      </Select>
+                    </div>
+
+                    <div>
+                      <div className="text-xs text-[hsl(var(--muted))]">Qty</div>
+                      <Input
+                        type="number"
+                        value={String(newItem.qty)}
+                        onChange={(e) => setNewItem((p) => ({ ...p, qty: toInt(e.target.value, 1) }))}
+                      />
+                    </div>
+
+                    <div>
+                      <div className="text-xs text-[hsl(var(--muted))]">Price (EGP)</div>
+                      <Input
+                        type="number"
+                        value={String(newItem.price_egp)}
+                        onChange={(e) => setNewItem((p) => ({ ...p, price_egp: toInt(e.target.value, 0) }))}
+                      />
+                    </div>
+
+                    <div className="flex items-end">
+                      <label className="flex items-center gap-2 text-sm">
+                        <input
+                          type="checkbox"
+                          checked={!!newItem.is_active}
+                          onChange={(e) => setNewItem((p) => ({ ...p, is_active: e.target.checked }))}
+                        />
+                        Active
+                      </label>
+                    </div>
+                  </div>
+
+                  <div className="mt-4 flex items-center gap-2">
+                    <Button onClick={createOne} disabled={saving}>
+                      Save
+                    </Button>
+                    <Button
+                      variant="outline"
+                      onClick={() => {
+                        setAdding(false)
+                        setErr('')
+                      }}
+                      disabled={saving}
+                    >
+                      Cancel
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </div>
+          ) : null}
+        </div>
+      )}
     </div>
   )
 }
