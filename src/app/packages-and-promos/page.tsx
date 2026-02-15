@@ -14,13 +14,13 @@ import DeletePromoButton from '@/components/packages/DeletePromoButton'
 type PromoRow = {
   id: string
   title: string
-  body: string | null
-  code: string | null
-  percent_off: number | null
-  amount_off_egp: number | null
-  starts_at: string | null
-  ends_at: string | null
-  is_active: boolean
+  description: string | null
+  discount_type: 'percent' | 'amount' | null
+  discount_value: number | null
+  applies_to: Array<'membership' | 'dropin' | 'private'> | null
+  min_months: number | null
+  start_date: string | null
+  end_date: string | null
   created_at: string
 }
 
@@ -66,8 +66,8 @@ export default async function PackagesAndPromosPage() {
   let promosError: string | null = null
   try {
     const { data, error } = await admin
-      .from('promos')
-      .select('id,title,body,code,percent_off,amount_off_egp,starts_at,ends_at,is_active,created_at')
+      .from('promotions')
+      .select('id,title,description,discount_type,discount_value,applies_to,min_months,start_date,end_date,created_at')
       .order('created_at', { ascending: false })
 
     if (error) promosError = error.message
@@ -130,13 +130,23 @@ export default async function PackagesAndPromosPage() {
             ) : (
               <div className="space-y-3">
                 {promos.map((p) => {
-                  const badgeText = p.is_active ? 'Active' : 'Inactive'
+                  const today = new Date().toISOString().slice(0, 10)
+                  const hasStarted = !p.start_date || p.start_date <= today
+                  const notEnded = !p.end_date || p.end_date >= today
+                  const isActive = hasStarted && notEnded
+
+                  const badgeText = isActive
+                    ? 'Active'
+                    : p.start_date && p.start_date > today
+                      ? 'Scheduled'
+                      : 'Expired'
+
                   const discount =
-                    typeof p.percent_off === 'number' && p.percent_off > 0
-                      ? `${p.percent_off}%`
-                      : typeof p.amount_off_egp === 'number' && p.amount_off_egp > 0
-                        ? `${p.amount_off_egp} EGP`
-                        : null
+                    typeof p.discount_value === 'number' && p.discount_value > 0
+                      ? p.discount_type === 'amount'
+                        ? `${p.discount_value} EGP`
+                        : `${p.discount_value}%`
+                      : null
 
                   return (
                     <div
@@ -147,22 +157,32 @@ export default async function PackagesAndPromosPage() {
                         <div>
                           <div className="flex items-center gap-2">
                             <div className="text-base font-semibold">{p.title}</div>
-                            <Badge className={p.is_active ? 'bg-black text-white border-black' : ''}>{badgeText}</Badge>
-                            {p.code ? <Badge>{p.code}</Badge> : null}
+                            <Badge className={isActive ? 'bg-black text-white border-black' : ''}>{badgeText}</Badge>
                             {discount ? <Badge>{discount}</Badge> : null}
+                            {(p.applies_to ?? []).slice(0, 3).map((k) => (
+                              <Badge key={k}>{k}</Badge>
+                            ))}
+                            {typeof p.min_months === 'number' && p.min_months > 0 ? (
+                              <Badge>{`Min ${p.min_months} mo`}</Badge>
+                            ) : null}
                           </div>
 
-                          {p.body ? <div className="mt-1 whitespace-pre-wrap text-sm">{p.body}</div> : null}
+                          {p.description ? <div className="mt-1 whitespace-pre-wrap text-sm">{p.description}</div> : null}
 
                           <div className="mt-2 text-xs text-[hsl(var(--muted))]">
-                            {p.starts_at ? `Starts: ${new Date(p.starts_at).toLocaleDateString()}` : 'Starts: —'}
+                            {p.start_date ? `Starts: ${new Date(p.start_date).toLocaleDateString()}` : 'Starts: —'}
                             {' · '}
-                            {p.ends_at ? `Ends: ${new Date(p.ends_at).toLocaleDateString()}` : 'Ends: —'}
+                            {p.end_date ? `Ends: ${new Date(p.end_date).toLocaleDateString()}` : 'Ends: —'}
                           </div>
                         </div>
 
                         {canEdit ? (
                           <div className="flex items-center gap-2">
+                            <Link href={`/packages-and-promos/${p.id}/edit`}>
+                              <Button variant="outline" size="sm" title="Edit promo">
+                                Edit
+                              </Button>
+                            </Link>
                             <DeletePromoButton id={p.id} />
                           </div>
                         ) : null}

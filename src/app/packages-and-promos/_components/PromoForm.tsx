@@ -17,7 +17,6 @@ export type PromoFormValues = {
   min_months?: number | null
   start_date?: string | null
   end_date?: string | null
-  is_active?: boolean
 }
 
 export default function PromoForm({
@@ -116,31 +115,6 @@ export default function PromoForm({
               })}
             </div>
           </fieldset>
-
-          {/* Switch = simple checkbox stylée pour is_active */}
-          <div className="flex items-center justify-between rounded-xl border p-4">
-            <div>
-              <div className="font-medium text-sm">Active</div>
-              <div className="text-xs text-[hsl(var(--muted))]">Décoche pour archiver.</div>
-            </div>
-            <label className="inline-flex items-center gap-2">
-              <input
-                type="checkbox"
-                name="is_active"
-                defaultChecked={d.is_active ?? true}
-                className="peer sr-only"
-              />
-              {/* Visuel du switch */}
-              <span
-                className="
-                  relative inline-block h-6 w-11 cursor-pointer rounded-full bg-gray-300
-                  after:absolute after:left-0.5 after:top-0.5 after:h-5 after:w-5 after:rounded-full after:bg-white after:transition
-                  peer-checked:bg-emerald-500 peer-checked:after:translate-x-5
-                "
-                aria-hidden="true"
-              />
-            </label>
-          </div>
 
           <div className="flex items-center gap-3">
             <Button type="submit" disabled={isPending}>
