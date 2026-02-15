@@ -77,7 +77,6 @@ const MENU_BY_ROLE: MenuByRole = {
     { label: 'Home', href: '/', icon: 'home' },
     { label: 'Dashboard', href: '/admin', icon: 'dashboard' },
     { label: 'Notifications', href: '/notifications', icon: 'bell' },
-    { label: 'My Profile', href: '/profile', icon: 'id' },
     { label: 'Schedule', href: '/schedule', icon: 'calendar' },
     { label: 'Packages & Promos', href: '/packages-and-promos', icon: 'gift' },
     { label: 'Membership', href: '/kiosk', icon: 'id' },

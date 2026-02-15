@@ -168,6 +168,7 @@ export default function RoleMenu({ items }: { items: MenuItem[] }) {
                 <Link
                   key={it.href}
                   href={it.href}
+                  prefetch={false}
                   onClick={() => setOpen(false)}
                   className={
                     'flex items-center justify-between gap-3 px-3 py-2 text-[15px] hover:bg-black/[0.03] dark:hover:bg-white/[0.06] focus:bg-black/[0.04] dark:focus:bg-white/[0.08] outline-none ' +

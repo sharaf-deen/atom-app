@@ -1,16 +1,17 @@
-'use client'
+// src/app/admin/members/page.tsx
+export const dynamic = 'force-dynamic'
+export const revalidate = 0
 
-import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
-import { useSearchParams } from 'next/navigation'
-import { createSupabaseBrowserClient } from '@/lib/supabaseBrowser'
+import { redirect } from 'next/navigation'
+import { createClient } from '@supabase/supabase-js'
 import AccessDeniedCard from '@/components/AccessDeniedCard'
-
-type Role = 'member' | 'assistant_coach' | 'coach' | 'reception' | 'admin' | 'super_admin'
+import { getSessionUser, type Role } from '@/lib/session'
+import AdminMembersFilters from './_components/AdminMembersFilters'
 
 type Member = {
   user_id: string
-  email: string
+  email: string | null
   first_name: string | null
   last_name: string | null
   phone: string | null
@@ -19,121 +20,45 @@ type Member = {
 
 const OPS: Role[] = ['reception', 'admin', 'super_admin']
 
-function safeNext(nextPath: string | null) {
-  if (!nextPath) return '/'
-  if (nextPath.startsWith('/') && !nextPath.startsWith('//')) return nextPath
-  return '/'
+function clampInt(v: number, min: number, max: number) {
+  if (!Number.isFinite(v)) return min
+  return Math.max(min, Math.min(max, Math.floor(v)))
 }
 
-export default function AdminMembersPage() {
-  const supabase = useMemo(() => createSupabaseBrowserClient(), [])
-  const searchParams = useSearchParams()
-  const nextPath = useMemo(() => safeNext(searchParams.get('next')), [searchParams])
+function normalizeRole(v: unknown): Role | null {
+  const s = typeof v === 'string' ? v : ''
+  const allowed: Role[] = ['member', 'assistant_coach', 'coach', 'reception', 'admin', 'super_admin']
+  return (allowed as string[]).includes(s) ? (s as Role) : null
+}
 
-  const [meRole, setMeRole] = useState<Role | null>(null)
-  const [meEmail, setMeEmail] = useState<string>('')
-  const [checking, setChecking] = useState(true)
+export default async function AdminMembersPage({
+  searchParams,
+}: {
+  searchParams?: { [key: string]: string | string[] | undefined }
+}) {
+  const me = await getSessionUser()
 
-  const [q, setQ] = useState('')
-  const [role, setRole] = useState<string>('')
+  // Build current path for the login redirect.
+  const current = new URLSearchParams()
+  const q = typeof searchParams?.q === 'string' ? searchParams?.q.trim() : ''
+  const role = normalizeRole(typeof searchParams?.role === 'string' ? searchParams?.role : null)
+  const page = clampInt(Number(typeof searchParams?.page === 'string' ? searchParams?.page : 1), 1, 1_000_000)
+  const pageSize = clampInt(
+    Number(typeof searchParams?.pageSize === 'string' ? searchParams?.pageSize : 10),
+    5,
+    50
+  )
 
-  const [page, setPage] = useState(1)
-  const [pageSize, setPageSize] = useState(10)
+  if (q) current.set('q', q)
+  if (role) current.set('role', role)
+  if (page > 1) current.set('page', String(page))
+  if (pageSize !== 10) current.set('pageSize', String(pageSize))
 
-  const [rows, setRows] = useState<Member[]>([])
-  const [total, setTotal] = useState<number>(0)
-  const [msg, setMsg] = useState<string>('')
+  const currentPath = `/admin/members${current.toString() ? `?${current.toString()}` : ''}`
 
-  const canView = meRole ? OPS.includes(meRole) : false
+  if (!me) redirect(`/login?next=${encodeURIComponent(currentPath)}`)
 
-  // Load session + role
-  useEffect(() => {
-    ;(async () => {
-      setChecking(true)
-
-      const { data } = await supabase.auth.getSession()
-      const u = data.session?.user
-
-      if (!u?.id) {
-        window.location.replace('/login?next=/admin/members')
-        return
-      }
-
-      setMeEmail(u.email ?? '')
-
-      const { data: prof, error } = await supabase
-        .from('profiles')
-        .select('role')
-        .eq('user_id', u.id)
-        .maybeSingle()
-
-      if (error) {
-        // fallback: treat as member
-        setMeRole('member')
-      } else {
-        setMeRole((prof?.role ?? 'member') as Role)
-      }
-
-      setChecking(false)
-    })()
-  }, [supabase])
-
-  async function fetchMembers(opts?: { resetPage?: boolean }) {
-    const targetPage = opts?.resetPage ? 1 : page
-
-    setMsg('Loading…')
-    try {
-      const res = await fetch('/api/admin/members', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          q: q || undefined,
-          role: role || undefined,
-          page: targetPage,
-          pageSize,
-        }),
-      })
-
-      const json = await res.json().catch(() => ({}))
-      if (!res.ok || !json.ok) {
-        setRows([])
-        setTotal(0)
-        setMsg(`❌ ${json?.error || 'Request failed'}`)
-        return
-      }
-
-      setRows(json.members ?? [])
-      setTotal(Number(json.total ?? 0))
-      setMsg('')
-      if (opts?.resetPage) setPage(1)
-    } catch {
-      setRows([])
-      setTotal(0)
-      setMsg('❌ Network error')
-    }
-  }
-
-  // Initial fetch after role check
-  useEffect(() => {
-    if (!checking && canView) {
-      fetchMembers({ resetPage: true })
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [checking, canView])
-
-  // Refetch on page/pageSize changes
-  useEffect(() => {
-    if (!checking && canView) fetchMembers()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page, pageSize])
-
-  if (checking) {
-    return (
-      <main className="p-6">
-        <div className="text-sm text-gray-600">Checking session…</div>
-      </main>
-    )
-  }
+  const canView = OPS.includes(me.role)
 
   if (!canView) {
     return (
@@ -145,16 +70,67 @@ export default function AdminMembersPage() {
             message="Only Reception / Admin / Super Admin can access this page."
             nextPath="/admin/members"
             showBackHome
+            signedInAs={me.email}
           />
-          <div className="mt-3 text-sm text-[hsl(var(--muted))]">
-            Signed in as: <span className="font-medium">{meEmail || 'unknown'}</span>
-          </div>
         </div>
       </main>
     )
   }
 
-  const totalPages = Math.max(1, Math.ceil((total || 0) / pageSize))
+  // Server-side query (service role) to keep this page server-first.
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL
+  const service = process.env.SUPABASE_SERVICE_ROLE_KEY
+
+  if (!url || !service) {
+    return (
+      <main className="p-6">
+        <h1 className="text-2xl font-bold">Admin · Members</h1>
+        <p className="mt-3 text-sm text-rose-700">
+          Server env missing: NEXT_PUBLIC_SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY
+        </p>
+      </main>
+    )
+  }
+
+  const admin = createClient(url, service, {
+    auth: { persistSession: false, autoRefreshToken: false },
+  })
+
+  const from = (page - 1) * pageSize
+  const to = from + pageSize - 1
+
+  let query = admin
+    .from('profiles')
+    .select('user_id,email,first_name,last_name,phone,role', { count: 'exact' })
+    .order('created_at', { ascending: false })
+    .range(from, to)
+
+  if (role) query = query.eq('role', role)
+
+  if (q) {
+    const like = `%${q}%`
+    query = query.or(
+      `email.ilike.${like},first_name.ilike.${like},last_name.ilike.${like},phone.ilike.${like}`
+    )
+  }
+
+  const { data, error, count } = await query
+
+  const rows: Member[] = (data ?? []) as any
+  const total = Number(count ?? 0)
+  const totalPages = Math.max(1, Math.ceil(total / pageSize))
+
+  const base = new URLSearchParams()
+  if (q) base.set('q', q)
+  if (role) base.set('role', role)
+  if (pageSize !== 10) base.set('pageSize', String(pageSize))
+
+  const hrefForPage = (p: number) => {
+    const sp = new URLSearchParams(base)
+    if (p > 1) sp.set('page', String(p))
+    const s = sp.toString()
+    return s ? `/admin/members?${s}` : '/admin/members'
+  }
 
   return (
     <main className="p-6 space-y-4">
@@ -162,61 +138,25 @@ export default function AdminMembersPage() {
         <div>
           <h1 className="text-2xl font-bold">Admin · Members</h1>
           <p className="text-sm text-[hsl(var(--muted))]">
-            Signed in as <span className="font-medium">{meEmail}</span>
+            Signed in as <span className="font-medium">{me.email || 'unknown'}</span>
           </p>
         </div>
 
         <div className="flex gap-2">
-          <Link href="/admin" className="border px-4 py-2 rounded-lg hover:bg-gray-50">
+          <Link prefetch={false} href="/admin" className="border px-4 py-2 rounded-lg hover:bg-gray-50">
             ← Admin
           </Link>
-          <Link href="/members" className="border px-4 py-2 rounded-lg hover:bg-gray-50">
+          <Link prefetch={false} href="/members" className="border px-4 py-2 rounded-lg hover:bg-gray-50">
             Members (public)
           </Link>
         </div>
       </div>
 
-      <div className="flex gap-2 flex-wrap items-center">
-        <input
-          className="border px-3 py-2 rounded-lg"
-          placeholder="Search name, email, phone"
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-        />
+      <AdminMembersFilters initialQ={q} initialRole={role ?? ''} initialPageSize={pageSize} />
 
-        <select className="border px-3 py-2 rounded-lg" value={role} onChange={(e) => setRole(e.target.value)}>
-          <option value="">All roles</option>
-          <option value="member">Member</option>
-          <option value="assistant_coach">Assistant Coach</option>
-          <option value="coach">Coach</option>
-          <option value="reception">Reception</option>
-          <option value="admin">Admin</option>
-          <option value="super_admin">Super Admin</option>
-        </select>
-
-        <button
-          onClick={() => fetchMembers({ resetPage: true })}
-          className="border px-4 py-2 rounded-lg hover:bg-gray-50"
-        >
-          Search
-        </button>
-
-        <div className="ml-auto flex gap-2 items-center">
-          <span className="text-sm text-[hsl(var(--muted))]">Rows:</span>
-          <select
-            className="border px-3 py-2 rounded-lg"
-            value={pageSize}
-            onChange={(e) => setPageSize(Number(e.target.value))}
-          >
-            <option value={5}>5</option>
-            <option value={10}>10</option>
-            <option value={20}>20</option>
-            <option value={50}>50</option>
-          </select>
-        </div>
-      </div>
-
-      {msg && <p className="text-sm">{msg}</p>}
+      {error && (
+        <p className="text-sm text-rose-700">❌ {error.message || 'Failed to load members'}</p>
+      )}
 
       <div className="overflow-auto border rounded-xl">
         <table className="min-w-full text-sm">
@@ -232,21 +172,19 @@ export default function AdminMembersPage() {
           <tbody>
             {rows.map((m) => (
               <tr key={m.user_id} className="hover:bg-gray-50">
-                <td className="border-b px-3 py-2">
-                  {`${m.first_name ?? ''} ${m.last_name ?? ''}`.trim() || '—'}
-                </td>
-                <td className="border-b px-3 py-2">{m.email}</td>
+                <td className="border-b px-3 py-2">{`${m.first_name ?? ''} ${m.last_name ?? ''}`.trim() || '—'}</td>
+                <td className="border-b px-3 py-2">{m.email ?? '—'}</td>
                 <td className="border-b px-3 py-2">{m.phone ?? '—'}</td>
                 <td className="border-b px-3 py-2 text-center">{m.role ?? 'member'}</td>
                 <td className="border-b px-3 py-2">
-                  <Link className="underline" href={`/members/${m.user_id}`}>
+                  <Link prefetch={false} className="underline" href={`/members/${m.user_id}`}>
                     Open
                   </Link>
                 </td>
               </tr>
             ))}
 
-            {rows.length === 0 && !msg && (
+            {rows.length === 0 && !error && (
               <tr>
                 <td className="px-3 py-6 text-center text-gray-500" colSpan={5}>
                   No members found
@@ -267,40 +205,43 @@ export default function AdminMembersPage() {
         </div>
 
         <div className="flex gap-2">
-          <button
-            className="border px-4 py-2 rounded-lg hover:bg-gray-50 disabled:opacity-50"
-            onClick={() => setPage(1)}
-            disabled={page <= 1}
+          <Link
+            prefetch={false}
+            className={`border px-4 py-2 rounded-lg hover:bg-gray-50 ${page <= 1 ? 'pointer-events-none opacity-50' : ''}`}
+            href={hrefForPage(1)}
+            aria-disabled={page <= 1}
           >
             First
-          </button>
-          <button
-            className="border px-4 py-2 rounded-lg hover:bg-gray-50 disabled:opacity-50"
-            onClick={() => setPage((p) => Math.max(1, p - 1))}
-            disabled={page <= 1}
+          </Link>
+          <Link
+            prefetch={false}
+            className={`border px-4 py-2 rounded-lg hover:bg-gray-50 ${page <= 1 ? 'pointer-events-none opacity-50' : ''}`}
+            href={hrefForPage(Math.max(1, page - 1))}
+            aria-disabled={page <= 1}
           >
             Prev
-          </button>
-          <button
-            className="border px-4 py-2 rounded-lg hover:bg-gray-50 disabled:opacity-50"
-            onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-            disabled={page >= totalPages}
+          </Link>
+          <Link
+            prefetch={false}
+            className={`border px-4 py-2 rounded-lg hover:bg-gray-50 ${page >= totalPages ? 'pointer-events-none opacity-50' : ''}`}
+            href={hrefForPage(Math.min(totalPages, page + 1))}
+            aria-disabled={page >= totalPages}
           >
             Next
-          </button>
-          <button
-            className="border px-4 py-2 rounded-lg hover:bg-gray-50 disabled:opacity-50"
-            onClick={() => setPage(totalPages)}
-            disabled={page >= totalPages}
+          </Link>
+          <Link
+            prefetch={false}
+            className={`border px-4 py-2 rounded-lg hover:bg-gray-50 ${page >= totalPages ? 'pointer-events-none opacity-50' : ''}`}
+            href={hrefForPage(totalPages)}
+            aria-disabled={page >= totalPages}
           >
             Last
-          </button>
+          </Link>
         </div>
       </div>
 
-      {/* Small note */}
       <p className="text-xs text-[hsl(var(--muted))]">
-        This page uses <code>/api/admin/members</code> (POST) with your current session.
+        Server-first page. Only the filter bar is client-side.
       </p>
     </main>
   )

@@ -99,6 +99,7 @@ export default function NotificationsBell({
   return (
     <Link
       href={href}
+      prefetch={false}
       aria-label={label}
       title={label}
       className={

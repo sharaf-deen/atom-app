@@ -8,6 +8,8 @@ const nextConfig = {
     serverActions: {
       bodySizeLimit: '2mb',
     },
+    // Reduce client bundle size for icon imports
+    optimizePackageImports: ['lucide-react'],
   },
   eslint: { ignoreDuringBuilds: true },
   typescript: { ignoreBuildErrors: false },

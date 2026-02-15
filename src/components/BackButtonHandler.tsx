@@ -2,7 +2,7 @@
 'use client'
 
 import { useEffect } from 'react'
-import { App } from '@capacitor/app'
+import { Capacitor } from '@capacitor/core'
 import type { PluginListenerHandle } from '@capacitor/core'
 
 // 🔁 Routes considérées comme "home"
@@ -13,10 +13,16 @@ const HOME_ROUTES = ['/', '/profile']
 export default function BackButtonHandler({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (typeof window === 'undefined') return
+    // 🧠 Sur le web, on ne charge pas le plugin Capacitor App (bundle + compat)
+    if (!Capacitor.isNativePlatform()) return
 
     let listener: PluginListenerHandle | undefined
+    let cancelled = false
 
     const register = async () => {
+      const { App } = await import('@capacitor/app')
+      if (cancelled) return
+
       listener = await App.addListener('backButton', (event: any) => {
         const path = window.location.pathname
         const isHome = HOME_ROUTES.includes(path)
@@ -41,9 +47,8 @@ export default function BackButtonHandler({ children }: { children: React.ReactN
     })
 
     return () => {
-      if (listener) {
-        listener.remove()
-      }
+      cancelled = true
+      if (listener) listener.remove()
     }
   }, [])
 

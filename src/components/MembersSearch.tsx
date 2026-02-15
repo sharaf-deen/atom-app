@@ -344,7 +344,7 @@ export default function MembersSearch({ isStaff = false }: { isStaff?: boolean }
   }
 
   return (
-    <Card hover>
+    <Card hover={true}>
       <CardHeader className="items-start">
         <CardTitle>Search members</CardTitle>
       </CardHeader>
@@ -504,7 +504,7 @@ export default function MembersSearch({ isStaff = false }: { isStaff?: boolean }
                         <td className="border-t border-[hsl(var(--border))] px-4 py-3">
                           <div className="flex flex-wrap items-center gap-2">
                             <Button asChild variant="outline" size="sm" className="px-2">
-                              <Link href={`/members/${m.user_id}`}>View</Link>
+                              <Link prefetch={false} href={`/members/${m.user_id}`}>View</Link>
                             </Button>
 
                             {canSubscribe && (
@@ -576,7 +576,7 @@ export default function MembersSearch({ isStaff = false }: { isStaff?: boolean }
 
                     <div className="flex flex-wrap items-center gap-2">
                       <Button asChild variant="outline" size="sm" className="px-2">
-                        <Link href={`/members/${m.user_id}`}>View</Link>
+                        <Link prefetch={false} href={`/members/${m.user_id}`}>View</Link>
                       </Button>
 
                       {canSubscribe && (
