@@ -2,14 +2,21 @@
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
+import Link from 'next/link'
+import dynamicImport from 'next/dynamic'
 import { getSessionUser } from '@/lib/session'
 import PageHeader from '@/components/layout/PageHeader'
 import Section from '@/components/layout/Section'
 import { Card, CardContent } from '@/components/ui/Card'
 import StoreCatalog from '@/components/StoreCatalog'
 import StoreCart from '@/components/StoreCart'
-import StoreOrdersList from '@/components/StoreOrdersList'
-import StoreProductForm from '@/components/StoreProductForm'
+
+const StoreProductForm = dynamicImport(() => import('@/components/StoreProductForm'), {
+  loading: () => <div className="text-sm text-gray-500">Loading catalog management…</div>,
+})
+const StoreOrdersList = dynamicImport(() => import('@/components/StoreOrdersList'), {
+  loading: () => <div className="text-sm text-gray-500">Loading orders…</div>,
+})
 
 const BUYER_ROLES = new Set(['member', 'assistant_coach', 'coach'])
 
@@ -32,18 +39,17 @@ export default async function StorePage() {
 
   const role = me.role
   const isSuperAdmin = role === 'super_admin'
-  const isAdmin = role === 'admin'
   const isBuyer = BUYER_ROLES.has(role)
 
   // Règles :
-  // - member/assistant_coach/coach : Cart + "My orders"
+  // - member/assistant_coach/coach : Cart + lien vers /orders
   // - reception : catalogue uniquement
   // - admin : catalogue uniquement (pas de gestion, pas de commandes)
   // - super_admin : gestion du catalogue + "All orders" (pas de Cart)
 
   const showCart = isBuyer
   const canManageCatalog = isSuperAdmin
-  const showMyOrders = isBuyer
+  const showOrdersLink = isBuyer
   const showAllOrders = isSuperAdmin
 
   return (
@@ -54,7 +60,7 @@ export default async function StorePage() {
           canManageCatalog
             ? 'Manage catalog and view all orders'
             : isBuyer
-            ? 'Browse products, manage your cart and orders'
+            ? 'Browse products and manage your cart'
             : 'Browse the catalog'
         }
       />
@@ -88,12 +94,21 @@ export default async function StorePage() {
           </Card>
         )}
 
-        {/* Mes commandes (uniquement member/assistant_coach/coach) */}
-        {showMyOrders && (
+        {/* Lien vers la page dédiée aux commandes (évite de charger la liste dans /store) */}
+        {showOrdersLink && (
           <Card>
-            <CardContent>
-              <h2 className="text-base font-semibold mb-3">My orders</h2>
-              <StoreOrdersList mode="mine" />
+            <CardContent className="flex flex-wrap items-center gap-3">
+              <div>
+                <h2 className="text-base font-semibold">My orders</h2>
+                <p className="text-sm text-gray-600">Open your orders history and statuses.</p>
+              </div>
+              <Link
+                prefetch={false}
+                href="/orders"
+                className="ml-auto inline-flex items-center rounded-xl border px-4 py-2 text-sm font-medium hover:bg-gray-50"
+              >
+                View my orders
+              </Link>
             </CardContent>
           </Card>
         )}
