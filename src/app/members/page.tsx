@@ -29,6 +29,8 @@ type MemberRow = {
   is_active?: boolean | null
 }
 
+type MemberRowWithTotal = MemberRow & { total_count?: number | string | null }
+
 function clampInt(n: number, min: number, max: number) {
   if (!Number.isFinite(n)) return min
   return Math.max(min, Math.min(max, Math.floor(n)))
@@ -114,11 +116,7 @@ export default async function MembersPage({
     ? (statusRaw as Status)
     : 'all'
   const page = clampInt(Number(typeof searchParams?.page === 'string' ? searchParams.page : 1), 1, 1_000_000)
-  const pageSize = clampInt(
-    Number(typeof searchParams?.pageSize === 'string' ? searchParams.pageSize : 20),
-    5,
-    200,
-  )
+  const pageSize = clampInt(Number(typeof searchParams?.pageSize === 'string' ? searchParams.pageSize : 20), 5, 200)
 
   // Build current path for the login redirect.
   const current = new URLSearchParams()
@@ -161,77 +159,28 @@ export default async function MembersPage({
   const active = Number(stats?.active ?? 0)
   const inactive = Number(stats?.inactive ?? Math.max(total - active, 0))
 
-  const from = (page - 1) * pageSize
-  const to = from + pageSize - 1
-
   let rows: MemberRow[] = []
   let totalResults = 0
-  let mode: 'search' | 'list' = q ? 'search' : 'list'
+  const mode: 'search' | 'list' = q ? 'search' : 'list'
   let errorMsg: string | null = null
 
-  // SEARCH mode (like the previous client component): ignores status.
-  if (q) {
-    const like = `%${q}%`
-    let query = admin
-      .from('members_with_activity')
-      .select('user_id,email,first_name,last_name,phone,role,created_at,member_id,date_of_birth,is_active', {
-        count: 'exact',
-      })
-      .order('created_at', { ascending: false })
-      .range(from, to)
-      .or(
-        `first_name.ilike.${like},last_name.ilike.${like},email.ilike.${like},member_id.ilike.${like},phone.ilike.${like}`,
-      )
+  // Pro search (FTS + trigram + pagination) via RPC.
+  // Note: when q is set, we force status='all' to match the previous UX.
+  const { data, error } = await admin.rpc('search_members', {
+    q: q || null,
+    status: q ? 'all' : status,
+    page,
+    page_size: pageSize,
+  })
 
-    const { data, error, count } = await query
-    if (error) {
-      errorMsg = error.message
-      rows = []
-      totalResults = 0
-    } else {
-      rows = (data ?? []) as MemberRow[]
-      totalResults = Number(count ?? rows.length)
-    }
+  if (error) {
+    errorMsg = error.message
+    rows = []
+    totalResults = 0
   } else {
-    // LIST mode
-    if (status === 'all') {
-      const { data, error, count } = await admin
-        .from('members_with_activity')
-        .select('user_id,email,first_name,last_name,phone,role,created_at,member_id,date_of_birth,is_active', {
-          count: 'exact',
-        })
-        .order('created_at', { ascending: false })
-        .range(from, to)
-
-      if (error) {
-        errorMsg = error.message
-        rows = []
-        totalResults = 0
-      } else {
-        rows = (data ?? []) as MemberRow[]
-        totalResults = Number(count ?? rows.length)
-      }
-    } else {
-      // Active / Inactive list (server-first, handled by view):
-      const wantActive = status === 'active'
-      const { data, error, count } = await admin
-        .from('members_with_activity')
-        .select('user_id,email,first_name,last_name,phone,role,created_at,member_id,date_of_birth,is_active', {
-          count: 'exact',
-        })
-        .eq('is_active', wantActive)
-        .order('created_at', { ascending: false })
-        .range(from, to)
-
-      if (error) {
-        errorMsg = error.message
-        rows = []
-        totalResults = 0
-      } else {
-        rows = (data ?? []) as MemberRow[]
-        totalResults = Number(count ?? rows.length)
-      }
-    }
+    const list = (data ?? []) as MemberRowWithTotal[]
+    totalResults = list.length ? Number(list[0]?.total_count ?? 0) : 0
+    rows = list.map(({ total_count: _t, ...rest }) => rest)
   }
 
   const totalPages = Math.max(1, Math.ceil(totalResults / pageSize))
@@ -364,9 +313,10 @@ export default async function MembersPage({
               <div className="text-[hsl(var(--muted))]">
                 {totalResults > 0 ? (
                   <span>
-                    Showing <span className="font-medium">{from + 1}</span>-
-                    <span className="font-medium">{Math.min(to + 1, totalResults)}</span> of{' '}
-                    <span className="font-medium">{totalResults}</span>
+                    Showing <span className="font-medium">{(page - 1) * pageSize + 1}</span>-<span className="font-medium">
+                      {Math.min(page * pageSize, totalResults)}
+                    </span>{' '}
+                    of <span className="font-medium">{totalResults}</span>
                   </span>
                 ) : (
                   <span>—</span>

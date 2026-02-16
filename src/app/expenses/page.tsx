@@ -4,14 +4,112 @@ export const revalidate = 0
 
 import { redirect } from 'next/navigation'
 import { getSessionUser } from '@/lib/session'
-import ExpensesPageClient from '@/components/ExpensesPageClient'
+import { createSupabaseAdminClient } from '@/lib/supabaseAdmin'
 import AccessDeniedPage from '@/components/AccessDeniedPage'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card'
+import InlineAlert from '@/components/ui/InlineAlert'
+
+type RangePreset = 'today' | '7d' | 'month' | 'custom'
 
 function isAdmin(role?: string | null) {
   return role === 'admin' || role === 'super_admin'
 }
 
-export default async function ExpensesPage() {
+function toISODate(d: Date) {
+  // YYYY-MM-DD in local time (not UTC) to match typical date columns
+  const year = d.getFullYear()
+  const month = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
+function addDays(d: Date, days: number) {
+  const x = new Date(d)
+  x.setDate(x.getDate() + days)
+  return x
+}
+
+function startOfMonth(d: Date) {
+  return new Date(d.getFullYear(), d.getMonth(), 1)
+}
+
+function endOfMonth(d: Date) {
+  return new Date(d.getFullYear(), d.getMonth() + 1, 0)
+}
+
+function parsePreset(v: unknown): RangePreset {
+  return v === 'today' || v === '7d' || v === 'month' || v === 'custom' ? v : 'month'
+}
+
+function safeStr(v: unknown) {
+  return typeof v === 'string' ? v : ''
+}
+
+function formatEGP(n: number) {
+  const safe = Number.isFinite(n) ? n : 0
+  return new Intl.NumberFormat('en-EG', {
+    style: 'currency',
+    currency: 'EGP',
+    maximumFractionDigits: 2,
+  }).format(safe)
+}
+
+function buildQS(params: Record<string, string>) {
+  const sp = new URLSearchParams()
+  for (const [k, v] of Object.entries(params)) {
+    if (v !== undefined && v !== null && String(v).length) sp.set(k, String(v))
+  }
+  return sp.toString()
+}
+
+async function addExpenseAction(formData: FormData) {
+  'use server'
+
+  const me = await getSessionUser()
+  if (!me) redirect('/login?next=/expenses')
+  if (!isAdmin(me.role)) redirect('/expenses?error=Access%20denied')
+
+  const return_qs = safeStr(formData.get('return_qs'))
+
+  const category_key = safeStr(formData.get('category_key')).trim()
+  const description = safeStr(formData.get('description')).trim()
+  const dateRaw = safeStr(formData.get('date')).trim()
+  const amountRaw = safeStr(formData.get('amount')).trim()
+
+  if (!category_key) {
+    redirect(`/expenses?${return_qs}&error=${encodeURIComponent('Please choose a category.')}`)
+  }
+
+  const amount = Number(amountRaw)
+  if (!Number.isFinite(amount)) {
+    redirect(`/expenses?${return_qs}&error=${encodeURIComponent('Invalid amount.')}`)
+  }
+
+  const today = toISODate(new Date())
+  const date = dateRaw || today
+
+  const admin = createSupabaseAdminClient()
+  const { error } = await admin.from('expenses').insert([
+    {
+      date,
+      category_key,
+      description: description || null,
+      amount,
+    },
+  ])
+
+  if (error) {
+    redirect(`/expenses?${return_qs}&error=${encodeURIComponent(error.message || 'Save failed.')}`)
+  }
+
+  redirect(`/expenses?${return_qs}&saved=1`)
+}
+
+export default async function ExpensesPage({
+  searchParams,
+}: {
+  searchParams: Record<string, string | string[] | undefined>
+}) {
   const user = await getSessionUser()
   if (!user) redirect('/login?next=/expenses')
 
@@ -30,10 +128,300 @@ export default async function ExpensesPage() {
     )
   }
 
+  const now = new Date()
+  const preset = parsePreset(typeof searchParams.preset === 'string' ? searchParams.preset : 'month')
+
+  // Compute range
+  let from = safeStr(searchParams.from)
+  let to = safeStr(searchParams.to)
+
+  if (preset === 'today') {
+    from = toISODate(now)
+    to = from
+  } else if (preset === '7d') {
+    to = toISODate(now)
+    from = toISODate(addDays(now, -6))
+  } else if (preset === 'month') {
+    from = toISODate(startOfMonth(now))
+    to = toISODate(endOfMonth(now))
+  } else {
+    // custom: fallback to current month if empty/invalid-ish
+    if (!from) from = toISODate(startOfMonth(now))
+    if (!to) to = toISODate(endOfMonth(now))
+  }
+
+  const category = typeof searchParams.category === 'string' ? searchParams.category : 'all'
+  const saved = typeof searchParams.saved === 'string' ? searchParams.saved : ''
+  const errorMsg = typeof searchParams.error === 'string' ? searchParams.error : ''
+
+  const admin = createSupabaseAdminClient()
+
+  const { data: cats, error: catsError } = await admin
+    .from('expense_categories')
+    .select('key,label,group_name,sort_order,is_active')
+    .eq('is_active', true)
+    .order('group_name', { ascending: true })
+    .order('sort_order', { ascending: true })
+    .order('label', { ascending: true })
+
+  const categories = (cats || []) as Array<{
+    key: string
+    label: string
+    group_name: string
+    sort_order: number
+    is_active: boolean
+  }>
+
+  const labelByKey = new Map<string, string>()
+  categories.forEach((c) => labelByKey.set(c.key, c.label))
+
+  let q = admin
+    .from('expenses')
+    .select('id,date,category_key,description,amount')
+    .order('date', { ascending: false })
+
+  if (from) q = q.gte('date', from)
+  if (to) q = q.lte('date', to)
+  if (category && category !== 'all') q = q.eq('category_key', category)
+
+  const { data: rows, error: rowsError } = await q
+
+  const expenses =
+    (rows || []) as Array<{
+      id: string
+      date: string
+      category_key: string | null
+      description: string | null
+      amount: number
+    }>
+
+  const total = expenses.reduce((sum, e) => sum + (Number.isFinite(e.amount) ? e.amount : 0), 0)
+
+  const returnQS = buildQS({ preset, from, to, category })
+
   return (
-    <main className="p-6 max-w-3xl mx-auto space-y-6">
+    <main className="p-6 max-w-4xl mx-auto space-y-6">
       <h1 className="text-2xl font-semibold text-center">Atom Expenses</h1>
-      <ExpensesPageClient userRole={user.role} />
+
+      {errorMsg ? (
+        <InlineAlert variant="error" title="Error">
+          {errorMsg}
+        </InlineAlert>
+      ) : null}
+
+      {catsError ? (
+        <InlineAlert variant="warning" title="Categories">
+          {catsError.message || 'Failed to load categories.'}
+        </InlineAlert>
+      ) : null}
+
+      {rowsError ? (
+        <InlineAlert variant="warning" title="Expenses">
+          {rowsError.message || 'Failed to load expenses.'}
+        </InlineAlert>
+      ) : null}
+
+      {saved ? (
+        <InlineAlert variant="success" title="Saved">
+          Expense added.
+        </InlineAlert>
+      ) : null}
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Filters</CardTitle>
+          <div className="text-sm text-[hsl(var(--muted))]">
+            Total: <span className="font-medium text-[hsl(var(--fg))]">{formatEGP(total)}</span>
+          </div>
+        </CardHeader>
+
+        <CardContent>
+          <form method="get" className="grid gap-3 sm:grid-cols-4">
+            <label className="block">
+              <span className="mb-1 block text-sm font-medium">Preset</span>
+              <select
+                name="preset"
+                defaultValue={preset}
+                className="w-full rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-[hsl(var(--bg))]"
+              >
+                <option value="today">Today</option>
+                <option value="7d">Last 7 days</option>
+                <option value="month">This month</option>
+                <option value="custom">Custom</option>
+              </select>
+            </label>
+
+            <label className="block">
+              <span className="mb-1 block text-sm font-medium">From</span>
+              <input
+                type="date"
+                name="from"
+                defaultValue={from}
+                className="w-full rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm placeholder:text-[hsl(var(--muted))] outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-[hsl(var(--bg))]"
+              />
+            </label>
+
+            <label className="block">
+              <span className="mb-1 block text-sm font-medium">To</span>
+              <input
+                type="date"
+                name="to"
+                defaultValue={to}
+                className="w-full rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm placeholder:text-[hsl(var(--muted))] outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-[hsl(var(--bg))]"
+              />
+            </label>
+
+            <label className="block">
+              <span className="mb-1 block text-sm font-medium">Category</span>
+              <select
+                name="category"
+                defaultValue={category}
+                className="w-full rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-[hsl(var(--bg))]"
+              >
+                <option value="all">All</option>
+                {categories.map((c) => (
+                  <option key={c.key} value={c.key}>
+                    {c.group_name} · {c.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <div className="sm:col-span-4 flex flex-wrap items-center gap-2 pt-2">
+              <button
+                type="submit"
+                className="inline-flex items-center justify-center rounded-2xl shadow-soft transition ease-soft focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-[hsl(var(--bg))] bg-black text-white hover:opacity-95 px-4 py-2 text-sm"
+              >
+                Apply
+              </button>
+
+              <a
+                href="/expenses"
+                className="inline-flex items-center justify-center rounded-2xl shadow-soft transition ease-soft focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-[hsl(var(--bg))] bg-white text-black border border-[hsl(var(--border))] hover:bg-[hsl(var(--bg))]/80 px-4 py-2 text-sm"
+              >
+                Reset
+              </a>
+
+              <span className="text-xs text-[hsl(var(--muted))]">
+                Tip: choose “Custom” if you want manual dates.
+              </span>
+            </div>
+          </form>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Expenses</CardTitle>
+          <div className="text-xs text-[hsl(var(--muted))]">
+            Showing {expenses.length} item{expenses.length === 1 ? '' : 's'}
+          </div>
+        </CardHeader>
+
+        <CardContent>
+          {expenses.length === 0 ? (
+            <p className="text-sm text-[hsl(var(--muted))]">No expenses in this range.</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-left border-b border-[hsl(var(--border))]">
+                    <th className="py-2 pr-3">Date</th>
+                    <th className="py-2 pr-3">Category</th>
+                    <th className="py-2 pr-3">Description</th>
+                    <th className="py-2 text-right">Amount</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {expenses.map((e) => (
+                    <tr key={e.id} className="border-b border-[hsl(var(--border))]/60">
+                      <td className="py-2 pr-3 whitespace-nowrap">{e.date}</td>
+                      <td className="py-2 pr-3">
+                        {e.category_key ? labelByKey.get(e.category_key) ?? e.category_key : '—'}
+                      </td>
+                      <td className="py-2 pr-3 text-[hsl(var(--muted))]">{e.description ?? '—'}</td>
+                      <td className="py-2 text-right font-medium">{formatEGP(e.amount)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Add expense</CardTitle>
+          <div className="text-xs text-[hsl(var(--muted))]">Admin / Super Admin</div>
+        </CardHeader>
+        <CardContent>
+          <form action={addExpenseAction} className="grid gap-3 sm:grid-cols-4">
+            <input type="hidden" name="return_qs" value={returnQS} />
+            <label className="block">
+              <span className="mb-1 block text-sm font-medium">Date</span>
+              <input
+                type="date"
+                name="date"
+                defaultValue=""
+                className="w-full rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm placeholder:text-[hsl(var(--muted))] outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-[hsl(var(--bg))]"
+              />
+              <span className="mt-1 block text-xs text-[hsl(var(--muted))]">Leave empty for today.</span>
+            </label>
+
+            <label className="block sm:col-span-2">
+              <span className="mb-1 block text-sm font-medium">Category</span>
+              <select
+                name="category_key"
+                defaultValue=""
+                className="w-full rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-[hsl(var(--bg))]"
+                required
+              >
+                <option value="" disabled>
+                  Choose…
+                </option>
+                {categories.map((c) => (
+                  <option key={c.key} value={c.key}>
+                    {c.group_name} · {c.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="block">
+              <span className="mb-1 block text-sm font-medium">Amount (EGP)</span>
+              <input
+                name="amount"
+                inputMode="decimal"
+                placeholder="e.g. 250"
+                className="w-full rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm placeholder:text-[hsl(var(--muted))] outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-[hsl(var(--bg))]"
+                required
+              />
+            </label>
+
+            <label className="block sm:col-span-4">
+              <span className="mb-1 block text-sm font-medium">Description</span>
+              <input
+                name="description"
+                placeholder="Optional…"
+                className="w-full rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm placeholder:text-[hsl(var(--muted))] outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-[hsl(var(--bg))]"
+              />
+            </label>
+
+            <div className="sm:col-span-4 flex items-center gap-2 pt-2">
+              <button
+                type="submit"
+                className="inline-flex items-center justify-center rounded-2xl shadow-soft transition ease-soft focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-[hsl(var(--bg))] bg-black text-white hover:opacity-95 px-4 py-2 text-sm"
+              >
+                Save
+              </button>
+              <span className="text-xs text-[hsl(var(--muted))]">
+                After saving, you’ll stay on the same filtered view.
+              </span>
+            </div>
+          </form>
+        </CardContent>
+      </Card>
     </main>
   )
 }
