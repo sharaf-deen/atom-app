@@ -49,7 +49,7 @@ export async function PATCH(req: Request) {
   try {
     const supa = createSupabaseServerActionClient()
 
-    // 1) Auth + role (user session)
+    // 1) Auth + role using user session
     const { data: auth, error: authErr } = await supa.auth.getUser()
     if (authErr) {
       return noStore(NextResponse.json({ ok: false, error: 'AUTH_ERROR', details: authErr.message }, { status: 401 }))
@@ -77,21 +77,15 @@ export async function PATCH(req: Request) {
     const status = normalizeStatusLocal(b?.status)
     const note = (b?.note || '').trim() || null
 
-    if (!order_id) {
-      return noStore(NextResponse.json({ ok: false, error: 'MISSING_ORDER_ID' }, { status: 400 }))
-    }
-    if (!status) {
-      return noStore(NextResponse.json({ ok: false, error: 'INVALID_STATUS' }, { status: 400 }))
-    }
+    if (!order_id) return noStore(NextResponse.json({ ok: false, error: 'MISSING_ORDER_ID' }, { status: 400 }))
+    if (!status) return noStore(NextResponse.json({ ok: false, error: 'INVALID_STATUS' }, { status: 400 }))
 
-    // 3) Use service-role client for store_orders (bypass RLS)
+    // 3) service_role client to bypass RLS on store_orders
     let admin
     try {
       admin = adminClientOrThrow()
     } catch (e: any) {
-      return noStore(
-        NextResponse.json({ ok: false, error: 'SERVER_MISCONFIG', details: e?.message || String(e) }, { status: 500 })
-      )
+      return noStore(NextResponse.json({ ok: false, error: 'SERVER_MISCONFIG', details: e?.message || String(e) }, { status: 500 }))
     }
 
     const { data: ord, error: getErr } = await admin
@@ -103,19 +97,17 @@ export async function PATCH(req: Request) {
       return noStore(NextResponse.json({ ok: false, error: 'ORDER_NOT_FOUND', details: getErr?.message }, { status: 404 }))
     }
 
-    // Prefer member_id for notifications (your schema uses member_id FK -> profiles.user_id)
     const memberId = ord.member_id || ord.user_id
     if (!memberId) {
       return noStore(NextResponse.json({ ok: false, error: 'ORDER_MISSING_MEMBER' }, { status: 500 }))
     }
 
-    // 4) Update (service role)
     const { error: updErr } = await admin.from('store_orders').update({ status, note }).eq('id', order_id)
     if (updErr) {
       return noStore(NextResponse.json({ ok: false, error: 'UPDATE_FAILED', details: updErr.message }, { status: 500 }))
     }
 
-    // 5) Notify (service role; non-blocking)
+    // 4) Notify (service role; non-blocking)
     if (NOTIFY_ON.includes(status)) {
       const title = `Order ${status}`
       const body =

@@ -13,9 +13,16 @@ import AccessDeniedPage from '@/components/AccessDeniedPage'
 import { Card, CardContent } from '@/components/ui/Card'
 import StoreCatalog from '@/components/StoreCatalog'
 import { formatCurrency } from '@/lib/money'
+import type { OrderStatus } from '@/lib/order'
+import { humanStatus } from '@/lib/order'
 
 const StoreProductForm = dynamicImport(() => import('@/components/StoreProductForm'), {
   loading: () => <div className="text-sm text-gray-500">Loading catalog management…</div>,
+})
+
+const AdminOrderStatusEditor = dynamicImport(() => import('@/components/store/AdminOrderStatusEditor'), {
+  ssr: false,
+  loading: () => <div className="text-xs text-gray-500">Loading status editor…</div>,
 })
 
 type ProfileMini = {
@@ -38,7 +45,7 @@ type OrderItem = {
 
 type OrderRow = {
   id: string
-  status: string
+  status: OrderStatus
   total_cents: number
   discount_percent?: number | null
   discount_pct?: number | null
@@ -165,7 +172,6 @@ export default async function AdminStorePage({
       if (!perr) {
         qOwnerIds = (people ?? []).map((p: any) => p.user_id).filter((x: any) => typeof x === 'string' && isUuid(x))
       } else {
-        // If profile search fails, we keep null and fall back to no q filter.
         qOwnerIds = null
       }
     } else {
@@ -217,11 +223,9 @@ export default async function AdminStorePage({
 
   if (q) {
     if (isUuid(q)) {
-      // UUID could be an order id OR a user id. Match both.
       qry = qry.or([`id.eq.${q}`, `owner_uid.eq.${q}`, `created_by.eq.${q}`, `user_id.eq.${q}`, `member_id.eq.${q}`].join(','))
     } else if (Array.isArray(qOwnerIds)) {
       if (qOwnerIds.length === 0) {
-        // Force empty result
         qry = qry.eq('id', '00000000-0000-0000-0000-000000000000')
       } else {
         qry = qry.in('owner_uid', qOwnerIds)
@@ -295,7 +299,7 @@ export default async function AdminStorePage({
         <section className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-5 shadow-soft space-y-4">
           <div className="flex flex-wrap items-center gap-3">
             <h2 className="text-base font-semibold">All orders</h2>
-            <div className="text-xs text-[hsl(var(--muted))]">Server-first list (no client Supabase bundle).</div>
+            <div className="text-xs text-[hsl(var(--muted))]">Server-first list + tiny client editor for status.</div>
             <div className="ml-auto text-xs text-[hsl(var(--muted))]">
               {total > 0 ? (
                 <>
@@ -325,7 +329,7 @@ export default async function AdminStorePage({
                   <select name="status" defaultValue={status} className="rounded-xl border px-3 py-2 text-sm bg-white">
                     {ALLOWED_STATUSES.map((s) => (
                       <option key={s} value={s}>
-                        {s}
+                        {s === 'all' ? 'all' : humanStatus(s as any)}
                       </option>
                     ))}
                   </select>
@@ -384,7 +388,7 @@ export default async function AdminStorePage({
                       <div className="flex flex-wrap items-center gap-3">
                         <div className="font-semibold">#{shortId(o.id)}</div>
                         <div className="text-sm text-gray-600">
-                          Status: <b>{o.status}</b>
+                          Status: <b>{humanStatus(o.status)}</b>
                         </div>
                         <div className="text-sm text-gray-600">
                           Total: <b>{totalTxt}</b>
@@ -399,17 +403,12 @@ export default async function AdminStorePage({
                         {buyer?.member_id ? <span className="text-xs text-[hsl(var(--muted))]"> · {buyer.member_id}</span> : null}
                       </div>
 
-                      {noteTxt ? (
-                        <div className="text-sm">
-                          <span className="font-medium">Note:</span> {noteTxt}
-                        </div>
-                      ) : null}
+                      {/* Status editor (tiny client component) */}
+                      <AdminOrderStatusEditor orderId={o.id} currentStatus={o.status} currentNote={noteTxt} />
 
-                      <div className="text-sm">
-                        <div className="font-medium mb-1">Items</div>
-                        {items.length === 0 ? (
-                          <div className="text-gray-500 text-sm">No items.</div>
-                        ) : (
+                      {items.length ? (
+                        <div className="text-sm">
+                          <div className="font-medium mb-1">Items</div>
                           <ul className="list-disc ml-5 space-y-1">
                             {items.map((it) => (
                               <li key={it.id}>
@@ -417,8 +416,10 @@ export default async function AdminStorePage({
                               </li>
                             ))}
                           </ul>
-                        )}
-                      </div>
+                        </div>
+                      ) : (
+                        <div className="text-sm text-gray-500">No items.</div>
+                      )}
                     </CardContent>
                   </Card>
                 )
