@@ -40,18 +40,24 @@ type OrderRow = {
   id: string
   status: string
   total_cents: number
-  discount_pct: number
-  preferred_payment: string | null
-  note: string | null
+  discount_percent?: number | null
+  discount_pct?: number | null
+  payment_method?: string | null
+  preferred_payment?: string | null
+  notes?: string | null
+  note?: string | null
   created_at: string
-  user_id?: string | null
-  member_id?: string | null
-  created_by?: string | null
+  updated_at?: string | null
+  member_id: string
+  user_id: string
+  created_by: string
+  owner_uid?: string | null
   store_order_items?: OrderItem[] | null
 }
 
 const DEFAULT_PAGE_SIZE = 20
 const MAX_PAGE_SIZE = 100
+const ALLOWED_STATUSES = ['all', 'pending', 'confirmed', 'ready', 'delivered', 'canceled'] as const
 
 function clampInt(v: unknown, def: number, min: number, max: number) {
   const raw = Array.isArray(v) ? v[0] : v
@@ -77,7 +83,13 @@ function fmtDateTime(iso?: string | null) {
   if (!iso) return '—'
   const d = new Date(iso)
   if (Number.isNaN(d.getTime())) return iso
-  return d.toLocaleString('en-GB', { year: 'numeric', month: 'short', day: '2-digit', hour: '2-digit', minute: '2-digit' })
+  return d.toLocaleString('en-GB', {
+    year: 'numeric',
+    month: 'short',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
 }
 
 function displayName(p?: ProfileMini | null) {
@@ -93,6 +105,11 @@ function buildUrl(base: string, params: Record<string, string>) {
   }
   const s = qs.toString()
   return s ? `${base}?${s}` : base
+}
+
+function normalizeStatus(v: string) {
+  const s = (v || '').trim()
+  return (ALLOWED_STATUSES as readonly string[]).includes(s) ? s : 'all'
 }
 
 export default async function AdminStorePage({
@@ -120,12 +137,41 @@ export default async function AdminStorePage({
 
   const page = clampInt(searchParams?.page, 1, 1, 9999)
   const pageSize = clampInt(searchParams?.page_size, DEFAULT_PAGE_SIZE, 10, MAX_PAGE_SIZE)
-  const status = strParam(searchParams?.status).trim()
-  const q = strParam(searchParams?.q).trim() // order id prefix or buyer uuid
+  const status = normalizeStatus(strParam(searchParams?.status))
+  const q = strParam(searchParams?.q).trim() // buyer name/email/member code or UUID
   const from = strParam(searchParams?.from).trim() // YYYY-MM-DD
   const to = strParam(searchParams?.to).trim() // YYYY-MM-DD
 
   const supa = createSupabaseAdminClient()
+
+  // If q is not UUID, resolve it to matching profile IDs first (server-side).
+  let qOwnerIds: string[] | null = null
+  if (q && !isUuid(q)) {
+    const safe = q.replace(/,/g, ' ').trim()
+    if (safe.length >= 2) {
+      const { data: people, error: perr } = await supa
+        .from('profiles')
+        .select('user_id')
+        .or(
+          [
+            `first_name.ilike.%${safe}%`,
+            `last_name.ilike.%${safe}%`,
+            `email.ilike.%${safe}%`,
+            `member_id.ilike.%${safe}%`,
+          ].join(',')
+        )
+        .limit(200)
+
+      if (!perr) {
+        qOwnerIds = (people ?? []).map((p: any) => p.user_id).filter((x: any) => typeof x === 'string' && isUuid(x))
+      } else {
+        // If profile search fails, we keep null and fall back to no q filter.
+        qOwnerIds = null
+      }
+    } else {
+      qOwnerIds = []
+    }
+  }
 
   const fromRow = (page - 1) * pageSize
   const toRow = fromRow + pageSize - 1
@@ -137,13 +183,18 @@ export default async function AdminStorePage({
         id,
         status,
         total_cents,
+        discount_percent,
         discount_pct,
+        payment_method,
         preferred_payment,
+        notes,
         note,
         created_at,
-        user_id,
+        updated_at,
         member_id,
+        user_id,
         created_by,
+        owner_uid,
         store_order_items (
           id,
           product_id,
@@ -159,20 +210,22 @@ export default async function AdminStorePage({
     .order('created_at', { ascending: false })
     .range(fromRow, toRow)
 
-  if (status && status !== 'all') qry = qry.eq('status', status)
+  if (status !== 'all') qry = qry.eq('status', status)
 
   if (from) qry = qry.gte('created_at', `${from}T00:00:00.000Z`)
   if (to) qry = qry.lte('created_at', `${to}T23:59:59.999Z`)
 
-  // Search:
-  // - if q is UUID -> match buyer id (user_id/member_id/created_by)
-  // - else -> try order id prefix (first 8 chars) or full id equality
   if (q) {
     if (isUuid(q)) {
-      qry = qry.or(`user_id.eq.${q},member_id.eq.${q},created_by.eq.${q}`)
-    } else {
-      const safe = q.replace(/[%_]/g, ' ').trim()
-      if (safe) qry = qry.ilike('id', `${safe}%`)
+      // UUID could be an order id OR a user id. Match both.
+      qry = qry.or([`id.eq.${q}`, `owner_uid.eq.${q}`, `created_by.eq.${q}`, `user_id.eq.${q}`, `member_id.eq.${q}`].join(','))
+    } else if (Array.isArray(qOwnerIds)) {
+      if (qOwnerIds.length === 0) {
+        // Force empty result
+        qry = qry.eq('id', '00000000-0000-0000-0000-000000000000')
+      } else {
+        qry = qry.in('owner_uid', qOwnerIds)
+      }
     }
   }
 
@@ -181,11 +234,11 @@ export default async function AdminStorePage({
   const total = Number(count ?? 0)
   const totalPages = Math.max(1, Math.ceil(total / pageSize))
 
-  // Fetch buyer profiles
+  // Fetch buyer profiles (owner_uid preferred)
   const buyerIds = Array.from(
     new Set(
       orders
-        .flatMap((o) => [o.user_id, o.member_id, o.created_by])
+        .map((o) => o.owner_uid || o.created_by || o.user_id || o.member_id)
         .filter((x): x is string => typeof x === 'string' && isUuid(x))
     )
   )
@@ -242,9 +295,7 @@ export default async function AdminStorePage({
         <section className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-5 shadow-soft space-y-4">
           <div className="flex flex-wrap items-center gap-3">
             <h2 className="text-base font-semibold">All orders</h2>
-            <div className="text-xs text-[hsl(var(--muted))]">
-              Server-first list (no client Supabase bundle).
-            </div>
+            <div className="text-xs text-[hsl(var(--muted))]">Server-first list (no client Supabase bundle).</div>
             <div className="ml-auto text-xs text-[hsl(var(--muted))]">
               {total > 0 ? (
                 <>
@@ -265,14 +316,14 @@ export default async function AdminStorePage({
                     name="q"
                     defaultValue={q}
                     className="rounded-xl border px-3 py-2 text-sm bg-white"
-                    placeholder="Order id prefix or buyer UUID"
+                    placeholder="Buyer name/email/member code or UUID"
                   />
                 </div>
 
                 <div className="flex flex-col gap-1">
                   <label className="text-xs text-[hsl(var(--muted))]">Status</label>
-                  <select name="status" defaultValue={status || 'all'} className="rounded-xl border px-3 py-2 text-sm bg-white">
-                    {['all', 'pending', 'processing', 'paid', 'completed', 'cancelled'].map((s) => (
+                  <select name="status" defaultValue={status} className="rounded-xl border px-3 py-2 text-sm bg-white">
+                    {ALLOWED_STATUSES.map((s) => (
                       <option key={s} value={s}>
                         {s}
                       </option>
@@ -319,10 +370,14 @@ export default async function AdminStorePage({
           ) : (
             <div className="space-y-3">
               {orders.map((o) => {
-                const buyerId = (o.user_id || o.member_id || o.created_by || '') as string
+                const buyerId = (o.owner_uid || o.created_by || o.user_id || o.member_id) as string
                 const buyer = buyerId && profiles.get(buyerId) ? profiles.get(buyerId)! : null
                 const items = Array.isArray(o.store_order_items) ? o.store_order_items : []
+                const discount = Number(o.discount_pct ?? o.discount_percent ?? 0)
+                const payment = o.preferred_payment || o.payment_method || 'cash'
+                const noteTxt = o.note || o.notes || ''
                 const totalTxt = formatCurrency(o.total_cents ?? 0, 'en-EG', 'EGP')
+
                 return (
                   <Card key={o.id} hover={true}>
                     <CardContent className="py-4 space-y-2">
@@ -333,9 +388,9 @@ export default async function AdminStorePage({
                         </div>
                         <div className="text-sm text-gray-600">
                           Total: <b>{totalTxt}</b>
-                          {o.discount_pct ? ` (−${o.discount_pct}%)` : ''}
+                          {discount ? ` (−${discount}%)` : ''}
                         </div>
-                        <div className="text-sm text-gray-600">Payment: {o.preferred_payment || 'cash'}</div>
+                        <div className="text-sm text-gray-600">Payment: {payment}</div>
                         <div className="ml-auto text-xs text-[hsl(var(--muted))]">{fmtDateTime(o.created_at)}</div>
                       </div>
 
@@ -344,9 +399,9 @@ export default async function AdminStorePage({
                         {buyer?.member_id ? <span className="text-xs text-[hsl(var(--muted))]"> · {buyer.member_id}</span> : null}
                       </div>
 
-                      {o.note ? (
+                      {noteTxt ? (
                         <div className="text-sm">
-                          <span className="font-medium">Note:</span> {o.note}
+                          <span className="font-medium">Note:</span> {noteTxt}
                         </div>
                       ) : null}
 

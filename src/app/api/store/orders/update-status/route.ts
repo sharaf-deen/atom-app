@@ -36,11 +36,20 @@ function normalizeStatusLocal(input: string | null | undefined): OrderStatus | n
   return isOrderStatus(candidate) ? candidate : null
 }
 
+function adminClientOrThrow() {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL
+  const service = process.env.SUPABASE_SERVICE_ROLE_KEY
+  if (!url || !service) {
+    throw new Error('Missing NEXT_PUBLIC_SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY')
+  }
+  return createClient(url, service, { auth: { autoRefreshToken: false, persistSession: false } })
+}
+
 export async function PATCH(req: Request) {
   try {
     const supa = createSupabaseServerActionClient()
 
-    // 1) Auth + role
+    // 1) Auth + role (user session)
     const { data: auth, error: authErr } = await supa.auth.getUser()
     if (authErr) {
       return noStore(NextResponse.json({ ok: false, error: 'AUTH_ERROR', details: authErr.message }, { status: 401 }))
@@ -75,8 +84,17 @@ export async function PATCH(req: Request) {
       return noStore(NextResponse.json({ ok: false, error: 'INVALID_STATUS' }, { status: 400 }))
     }
 
-    // 3) Load order
-    const { data: ord, error: getErr } = await supa
+    // 3) Use service-role client for store_orders (bypass RLS)
+    let admin
+    try {
+      admin = adminClientOrThrow()
+    } catch (e: any) {
+      return noStore(
+        NextResponse.json({ ok: false, error: 'SERVER_MISCONFIG', details: e?.message || String(e) }, { status: 500 })
+      )
+    }
+
+    const { data: ord, error: getErr } = await admin
       .from('store_orders')
       .select('id, member_id, user_id, status')
       .eq('id', order_id)
@@ -85,29 +103,20 @@ export async function PATCH(req: Request) {
       return noStore(NextResponse.json({ ok: false, error: 'ORDER_NOT_FOUND', details: getErr?.message }, { status: 404 }))
     }
 
+    // Prefer member_id for notifications (your schema uses member_id FK -> profiles.user_id)
     const memberId = ord.member_id || ord.user_id
     if (!memberId) {
       return noStore(NextResponse.json({ ok: false, error: 'ORDER_MISSING_MEMBER' }, { status: 500 }))
     }
 
-    // 4) Update
-    const { error: updErr } = await supa
-      .from('store_orders')
-      .update({ status, note })
-      .eq('id', order_id)
+    // 4) Update (service role)
+    const { error: updErr } = await admin.from('store_orders').update({ status, note }).eq('id', order_id)
     if (updErr) {
       return noStore(NextResponse.json({ ok: false, error: 'UPDATE_FAILED', details: updErr.message }, { status: 500 }))
     }
 
-    // 5) Notify (non-blocking)
+    // 5) Notify (service role; non-blocking)
     if (NOTIFY_ON.includes(status)) {
-      const url = process.env.NEXT_PUBLIC_SUPABASE_URL
-      const service = process.env.SUPABASE_SERVICE_ROLE_KEY
-      const client =
-        url && service
-          ? createClient(url, service, { auth: { autoRefreshToken: false, persistSession: false } })
-          : supa
-
       const title = `Order ${status}`
       const body =
         status === 'confirmed'
@@ -125,7 +134,7 @@ export async function PATCH(req: Request) {
         body,
       }
 
-      const { error: insErr } = await client.from('notifications').insert(notifRow)
+      const { error: insErr } = await admin.from('notifications').insert(notifRow as any)
       if (insErr) {
         return noStore(
           NextResponse.json({

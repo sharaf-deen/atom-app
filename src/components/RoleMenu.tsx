@@ -45,7 +45,21 @@ export default function RoleMenu({ items }: { items: MenuItem[] }) {
   const btnRef = useRef<HTMLButtonElement | null>(null)
   const panelRef = useRef<HTMLDivElement | null>(null)
 
-  const hasNotifications = useMemo(() => items.some((it) => it.href === '/notifications'), [items])
+  // Normalize legacy routes: remove /store/admin from the menu (use /admin/store instead)
+  // Also de-duplicate by href in case both exist.
+  const menuItems = useMemo(() => {
+    const mapped = items.map((it) => (it.href === '/store/admin' ? { ...it, href: '/admin/store' } : it))
+    const out: MenuItem[] = []
+    const seen = new Set<string>()
+    for (const it of mapped) {
+      if (seen.has(it.href)) continue
+      seen.add(it.href)
+      out.push(it)
+    }
+    return out
+  }, [items])
+
+  const hasNotifications = useMemo(() => menuItems.some((it) => it.href === '/notifications'), [menuItems])
 
   const [unreadCount, setUnreadCount] = useState<number>(0)
   const timerRef = useRef<number | null>(null)
@@ -160,7 +174,7 @@ export default function RoleMenu({ items }: { items: MenuItem[] }) {
           className="absolute z-50 mt-3 w-60 sm:w-72 rounded-2xl border border-black/10 bg-white dark:bg-black shadow-xl"
         >
           <nav className="py-2">
-            {items.map((it) => {
+            {menuItems.map((it) => {
               const Icon = ICONS[it.icon] ?? Circle
               const isNotifUnread = it.href === '/notifications' && unreadCount > 0
 
@@ -168,7 +182,6 @@ export default function RoleMenu({ items }: { items: MenuItem[] }) {
                 <Link
                   key={it.href}
                   href={it.href}
-                  prefetch={false}
                   onClick={() => setOpen(false)}
                   className={
                     'flex items-center justify-between gap-3 px-3 py-2 text-[15px] hover:bg-black/[0.03] dark:hover:bg-white/[0.06] focus:bg-black/[0.04] dark:focus:bg-white/[0.08] outline-none ' +
