@@ -92,15 +92,21 @@ export default async function StorePage({
   if (category !== 'all') qry = qry.eq('category', category)
 
   if (q) {
-    const safe = q.replace(/,/g, ' ').trim()
-    qry = qry.or(
-      [
-        `name.ilike.%${safe}%`,
-        `color.ilike.%${safe}%`,
-        `size.ilike.%${safe}%`,
-        `category.ilike.%${safe}%`,
-      ].join(',')
-    )
+    if (q.length >= 3) {
+      // Fast search using FTS (GIN) on generated tsvector column
+      qry = qry.textSearch('search_tsv', q, { type: 'websearch', config: 'simple' })
+    } else {
+      // Short queries: substring search (trigram index helps)
+      const safe = q.replace(/,/g, ' ').trim()
+      qry = qry.or(
+        [
+          `name.ilike.%${safe}%`,
+          `color.ilike.%${safe}%`,
+          `size.ilike.%${safe}%`,
+          `category.ilike.%${safe}%`,
+        ].join(',')
+      )
+    }
   }
 
   const { data, error, count } = await qry

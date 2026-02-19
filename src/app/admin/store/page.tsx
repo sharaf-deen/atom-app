@@ -11,13 +11,14 @@ import PageHeader from '@/components/layout/PageHeader'
 import Section from '@/components/layout/Section'
 import AccessDeniedPage from '@/components/AccessDeniedPage'
 import { Card, CardContent } from '@/components/ui/Card'
-import StoreCatalog from '@/components/StoreCatalog'
 import { formatCurrency } from '@/lib/money'
 import type { OrderStatus } from '@/lib/order'
 import { humanStatus } from '@/lib/order'
+import AdminProductQuickEdit from '@/components/store/AdminProductQuickEdit'
 
 const StoreProductForm = dynamicImport(() => import('@/components/StoreProductForm'), {
-  loading: () => <div className="text-sm text-gray-500">Loading catalog management…</div>,
+  ssr: false,
+  loading: () => <div className="text-sm text-gray-500">Loading product form…</div>,
 })
 
 const AdminOrderStatusEditor = dynamicImport(() => import('@/components/store/AdminOrderStatusEditor'), {
@@ -25,46 +26,44 @@ const AdminOrderStatusEditor = dynamicImport(() => import('@/components/store/Ad
   loading: () => <div className="text-xs text-gray-500">Loading status editor…</div>,
 })
 
-type ProfileMini = {
-  user_id: string
-  first_name: string | null
-  last_name: string | null
-  email: string | null
-  member_id: string | null
-}
-
-type OrderItem = {
+type OrderItemLite = {
   id: string
   product_id: string
-  name: string | null
+  name: string
   qty: number
   unit_price_cents: number
-  final_price_cents: number
-  currency: string | null
+  currency: string
 }
 
-type OrderRow = {
+type AdminOrderRow = {
   id: string
   status: OrderStatus
   total_cents: number
-  discount_percent?: number | null
-  discount_pct?: number | null
-  payment_method?: string | null
-  preferred_payment?: string | null
-  notes?: string | null
-  note?: string | null
+  discount_pct: number
+  payment: string
+  note: string | null
   created_at: string
-  updated_at?: string | null
-  member_id: string
-  user_id: string
-  created_by: string
-  owner_uid?: string | null
-  store_order_items?: OrderItem[] | null
+  buyer_user_id: string | null
+  buyer_member_id: string | null
+  buyer_email: string | null
+  buyer_first_name: string | null
+  buyer_last_name: string | null
+  items: OrderItemLite[] | any
+  total_count: number
 }
 
-const DEFAULT_PAGE_SIZE = 20
-const MAX_PAGE_SIZE = 100
-const ALLOWED_STATUSES = ['all', 'pending', 'confirmed', 'ready', 'delivered', 'canceled'] as const
+type Category = 'kimono' | 'rashguard' | 'short' | 'belt'
+const PRODUCT_CATS: Array<{ v: 'all' | Category; label: string }> = [
+  { v: 'all', label: 'All' },
+  { v: 'kimono', label: 'Kimono' },
+  { v: 'rashguard', label: 'Rashguard' },
+  { v: 'short', label: 'Short' },
+  { v: 'belt', label: 'Belt' },
+]
+const PRODUCT_ACTIVE = ['all', 'active', 'inactive'] as const
+
+const ORDER_STATUSES = ['all', 'pending', 'confirmed', 'ready', 'delivered', 'canceled'] as const
+const TABS = ['orders', 'products'] as const
 
 function clampInt(v: unknown, def: number, min: number, max: number) {
   const raw = Array.isArray(v) ? v[0] : v
@@ -72,20 +71,16 @@ function clampInt(v: unknown, def: number, min: number, max: number) {
   if (!Number.isFinite(n)) return def
   return Math.min(max, Math.max(min, Math.floor(n)))
 }
-
 function strParam(v: unknown) {
   const s = Array.isArray(v) ? v[0] : v
   return typeof s === 'string' ? s : ''
 }
-
 function isUuid(v: string) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(v)
 }
-
 function shortId(id: string) {
   return (id || '').slice(0, 8)
 }
-
 function fmtDateTime(iso?: string | null) {
   if (!iso) return '—'
   const d = new Date(iso)
@@ -98,25 +93,15 @@ function fmtDateTime(iso?: string | null) {
     minute: '2-digit',
   })
 }
-
-function displayName(p?: ProfileMini | null) {
-  if (!p) return '—'
-  const n = `${p.first_name ?? ''} ${p.last_name ?? ''}`.trim()
-  return n || p.email || '—'
+function displayName(o: AdminOrderRow) {
+  const n = `${o.buyer_first_name ?? ''} ${o.buyer_last_name ?? ''}`.trim()
+  return n || o.buyer_email || '—'
 }
-
 function buildUrl(base: string, params: Record<string, string>) {
   const qs = new URLSearchParams()
-  for (const [k, v] of Object.entries(params)) {
-    if (v) qs.set(k, v)
-  }
+  for (const [k, v] of Object.entries(params)) if (v) qs.set(k, v)
   const s = qs.toString()
   return s ? `${base}?${s}` : base
-}
-
-function normalizeStatus(v: string) {
-  const s = (v || '').trim()
-  return (ALLOWED_STATUSES as readonly string[]).includes(s) ? s : 'all'
 }
 
 export default async function AdminStorePage({
@@ -142,316 +127,478 @@ export default async function AdminStorePage({
     )
   }
 
-  const page = clampInt(searchParams?.page, 1, 1, 9999)
-  const pageSize = clampInt(searchParams?.page_size, DEFAULT_PAGE_SIZE, 10, MAX_PAGE_SIZE)
-  const status = normalizeStatus(strParam(searchParams?.status))
-  const q = strParam(searchParams?.q).trim() // buyer name/email/member code or UUID
-  const from = strParam(searchParams?.from).trim() // YYYY-MM-DD
-  const to = strParam(searchParams?.to).trim() // YYYY-MM-DD
+  const tabRaw = strParam(searchParams?.tab)
+  const tab = (TABS as readonly string[]).includes(tabRaw) ? (tabRaw as (typeof TABS)[number]) : 'orders'
 
   const supa = createSupabaseAdminClient()
 
-  // If q is not UUID, resolve it to matching profile IDs first (server-side).
-  let qOwnerIds: string[] | null = null
-  if (q && !isUuid(q)) {
-    const safe = q.replace(/,/g, ' ').trim()
-    if (safe.length >= 2) {
-      const { data: people, error: perr } = await supa
-        .from('profiles')
-        .select('user_id')
-        .or(
-          [
-            `first_name.ilike.%${safe}%`,
-            `last_name.ilike.%${safe}%`,
-            `email.ilike.%${safe}%`,
-            `member_id.ilike.%${safe}%`,
-          ].join(',')
-        )
-        .limit(200)
+  // ----- Orders tab params -----
+  const page = clampInt(searchParams?.page, 1, 1, 9999)
+  const pageSize = clampInt(searchParams?.page_size, 20, 10, 200)
+  const statusRaw = strParam(searchParams?.status)
+  const status = (ORDER_STATUSES as readonly string[]).includes(statusRaw) ? statusRaw : 'all'
+  const q = strParam(searchParams?.q).trim()
+  const from = strParam(searchParams?.from).trim() // YYYY-MM-DD
+  const to = strParam(searchParams?.to).trim() // YYYY-MM-DD
 
-      if (!perr) {
-        qOwnerIds = (people ?? []).map((p: any) => p.user_id).filter((x: any) => typeof x === 'string' && isUuid(x))
-      } else {
-        qOwnerIds = null
-      }
+  // ----- Products tab params -----
+  const pPage = clampInt(searchParams?.p_page, 1, 1, 9999)
+  const pPageSize = clampInt(searchParams?.p_page_size, 12, 6, 100)
+  const pQ = strParam(searchParams?.p_q).trim()
+  const pCatRaw = strParam(searchParams?.p_category)
+  const pCategory = (['all', 'kimono', 'rashguard', 'short', 'belt'] as const).includes(pCatRaw as any) ? (pCatRaw as any) : 'all'
+  const pActiveRaw = strParam(searchParams?.p_active)
+  const pActive = (PRODUCT_ACTIVE as readonly string[]).includes(pActiveRaw) ? pActiveRaw : 'all'
+
+  // ----- Data -----
+  let orders: AdminOrderRow[] = []
+  let ordersError: string | null = null
+  let ordersTotal = 0
+  let ordersTotalPages = 1
+
+  if (tab === 'orders') {
+    const { data, error } = await supa.rpc('admin_list_store_orders', {
+      _q: q,
+      _status: status,
+      _from_date: from || null,
+      _to_date: to || null,
+      _page: page,
+      _page_size: pageSize,
+    })
+
+    if (error) {
+      ordersError = error.message
     } else {
-      qOwnerIds = []
+      orders = Array.isArray(data) ? (data as any) : []
+      ordersTotal = Number((orders[0] as any)?.total_count ?? 0)
+      ordersTotalPages = Math.max(1, Math.ceil(ordersTotal / pageSize))
     }
   }
 
-  const fromRow = (page - 1) * pageSize
-  const toRow = fromRow + pageSize - 1
+  type ProductRow = {
+    id: string
+    category: Category
+    name: string
+    color: string | null
+    size: string | null
+    price_cents: number
+    currency: string | null
+    inventory_qty: number
+    is_active: boolean
+    created_at: string
+  }
 
-  let qry = supa
-    .from('store_orders')
-    .select(
-      `
-        id,
-        status,
-        total_cents,
-        discount_percent,
-        discount_pct,
-        payment_method,
-        preferred_payment,
-        notes,
-        note,
-        created_at,
-        updated_at,
-        member_id,
-        user_id,
-        created_by,
-        owner_uid,
-        store_order_items (
-          id,
-          product_id,
-          name,
-          qty,
-          unit_price_cents,
-          final_price_cents,
-          currency
-        )
-      `,
-      { count: 'exact' }
-    )
-    .order('created_at', { ascending: false })
-    .range(fromRow, toRow)
+  let products: ProductRow[] = []
+  let productsError: string | null = null
+  let productsTotal = 0
+  let productsTotalPages = 1
 
-  if (status !== 'all') qry = qry.eq('status', status)
+  if (tab === 'products') {
+    const fromRow = (pPage - 1) * pPageSize
+    const toRow = fromRow + pPageSize - 1
 
-  if (from) qry = qry.gte('created_at', `${from}T00:00:00.000Z`)
-  if (to) qry = qry.lte('created_at', `${to}T23:59:59.999Z`)
+    let pqry = supa
+      .from('store_products')
+      .select('id, category, name, color, size, price_cents, currency, inventory_qty, is_active, created_at', { count: 'exact' })
+      .order('created_at', { ascending: false })
+      .range(fromRow, toRow)
 
-  if (q) {
-    if (isUuid(q)) {
-      qry = qry.or([`id.eq.${q}`, `owner_uid.eq.${q}`, `created_by.eq.${q}`, `user_id.eq.${q}`, `member_id.eq.${q}`].join(','))
-    } else if (Array.isArray(qOwnerIds)) {
-      if (qOwnerIds.length === 0) {
-        qry = qry.eq('id', '00000000-0000-0000-0000-000000000000')
+    if (pCategory !== 'all') pqry = pqry.eq('category', pCategory)
+    if (pActive === 'active') pqry = pqry.eq('is_active', true)
+    if (pActive === 'inactive') pqry = pqry.eq('is_active', false)
+
+    if (pQ) {
+      if (isUuid(pQ)) {
+        pqry = pqry.eq('id', pQ)
       } else {
-        qry = qry.in('owner_uid', qOwnerIds)
+        if (pQ.length >= 3) {
+          // Fast search using FTS (GIN) on generated tsvector column
+          pqry = pqry.textSearch('search_tsv', pQ, { type: 'websearch', config: 'simple' })
+        } else {
+          // Short queries: substring search (trigram index helps)
+          const safe = pQ.replace(/,/g, ' ').trim()
+          pqry = pqry.or([`name.ilike.%${safe}%`, `color.ilike.%${safe}%`, `size.ilike.%${safe}%`].join(','))
+        }
       }
     }
+
+    const { data, error, count } = await pqry
+    if (error) {
+      productsError = error.message
+    } else {
+      products = Array.isArray(data) ? (data as any) : []
+      productsTotal = Number(count ?? 0)
+      productsTotalPages = Math.max(1, Math.ceil(productsTotal / pPageSize))
+    }
   }
 
-  const { data, error, count } = await qry
-  const orders: OrderRow[] = Array.isArray(data) ? (data as any) : []
-  const total = Number(count ?? 0)
-  const totalPages = Math.max(1, Math.ceil(total / pageSize))
-
-  // Fetch buyer profiles (owner_uid preferred)
-  const buyerIds = Array.from(
-    new Set(
-      orders
-        .map((o) => o.owner_uid || o.created_by || o.user_id || o.member_id)
-        .filter((x): x is string => typeof x === 'string' && isUuid(x))
-    )
-  )
-
-  const profiles = new Map<string, ProfileMini>()
-  if (buyerIds.length) {
-    const { data: people } = (await supa
-      .from('profiles')
-      .select('user_id, first_name, last_name, email, member_id')
-      .in('user_id', buyerIds)) as { data: ProfileMini[] | null }
-    for (const p of people ?? []) profiles.set(p.user_id, p)
+  const ordersBaseParams = {
+    tab: 'orders',
+    q,
+    status,
+    from,
+    to,
+    page_size: String(pageSize),
   }
 
-  const baseParams = { q, status, from, to, page_size: String(pageSize) }
+  const productsBaseParams = {
+    tab: 'products',
+    p_q: pQ,
+    p_category: pCategory,
+    p_active: pActive,
+    p_page_size: String(pPageSize),
+  }
 
   return (
     <main>
-      <PageHeader title="Store Admin" subtitle="Manage catalog and view all orders" />
+      <PageHeader title="Store Admin" subtitle="Server-first (fast) admin + RPC orders list" />
 
       <Section className="space-y-6">
+        {/* Tabs */}
         <Card>
-          <CardContent className="flex flex-wrap items-center gap-3">
-            <div>
-              <h2 className="text-base font-semibold">Client Store</h2>
-              <p className="text-sm text-gray-600">Open the client-facing shop view.</p>
-            </div>
+          <CardContent className="flex flex-wrap items-center gap-2">
             <Link
               prefetch={false}
-              href="/store"
-              className="ml-auto inline-flex items-center rounded-xl border px-4 py-2 text-sm font-medium hover:bg-gray-50"
+              href={buildUrl('/admin/store', { tab: 'orders' })}
+              className={`rounded-xl border px-4 py-2 text-sm font-medium hover:bg-gray-50 ${tab === 'orders' ? 'bg-gray-50' : ''}`}
             >
-              Open /store
+              Orders
             </Link>
-          </CardContent>
-        </Card>
+            <Link
+              prefetch={false}
+              href={buildUrl('/admin/store', { tab: 'products' })}
+              className={`rounded-xl border px-4 py-2 text-sm font-medium hover:bg-gray-50 ${tab === 'products' ? 'bg-gray-50' : ''}`}
+            >
+              Products
+            </Link>
 
-        {/* Catalog management */}
-        <Card>
-          <CardContent>
-            <h2 className="text-base font-semibold mb-3">Catalog management</h2>
-            <StoreProductForm />
-          </CardContent>
-        </Card>
-
-        {/* Catalog */}
-        <Card>
-          <CardContent>
-            <h2 className="text-base font-semibold mb-3">Catalog</h2>
-            <StoreCatalog showAdd={false} canManage={true} />
-          </CardContent>
-        </Card>
-
-        {/* All orders - server-first */}
-        <section className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-5 shadow-soft space-y-4">
-          <div className="flex flex-wrap items-center gap-3">
-            <h2 className="text-base font-semibold">All orders</h2>
-            <div className="text-xs text-[hsl(var(--muted))]">Server-first list + tiny client editor for status.</div>
-            <div className="ml-auto text-xs text-[hsl(var(--muted))]">
-              {total > 0 ? (
-                <>
-                  Showing <b>{fromRow + 1}</b>–<b>{Math.min(fromRow + orders.length, total)}</b> of <b>{total}</b>
-                </>
-              ) : (
-                <>No orders.</>
-              )}
+            <div className="ml-auto flex items-center gap-2">
+              <Link
+                prefetch={false}
+                href="/store"
+                className="inline-flex items-center rounded-xl border px-4 py-2 text-sm font-medium hover:bg-gray-50"
+              >
+                Open /store
+              </Link>
             </div>
-          </div>
+          </CardContent>
+        </Card>
 
-          <Card>
-            <CardContent>
-              <form action="/admin/store" method="get" className="flex flex-wrap items-end gap-3">
-                <div className="flex flex-col gap-1">
-                  <label className="text-xs text-[hsl(var(--muted))]">Search</label>
-                  <input
-                    name="q"
-                    defaultValue={q}
-                    className="rounded-xl border px-3 py-2 text-sm bg-white"
-                    placeholder="Buyer name/email/member code or UUID"
-                  />
-                </div>
+        {tab === 'orders' ? (
+          <section className="space-y-4">
+            <Card>
+              <CardContent>
+                <form action="/admin/store" method="get" className="flex flex-wrap items-end gap-3">
+                  <input type="hidden" name="tab" value="orders" />
 
-                <div className="flex flex-col gap-1">
-                  <label className="text-xs text-[hsl(var(--muted))]">Status</label>
-                  <select name="status" defaultValue={status} className="rounded-xl border px-3 py-2 text-sm bg-white">
-                    {ALLOWED_STATUSES.map((s) => (
-                      <option key={s} value={s}>
-                        {s === 'all' ? 'all' : humanStatus(s as any)}
-                      </option>
-                    ))}
-                  </select>
-                </div>
+                  <div className="flex flex-col gap-1">
+                    <label className="text-xs text-[hsl(var(--muted))]">Search</label>
+                    <input
+                      name="q"
+                      defaultValue={q}
+                      className="rounded-xl border px-3 py-2 text-sm bg-white"
+                      placeholder="Buyer name/email/member code or UUID"
+                    />
+                  </div>
 
-                <div className="flex flex-col gap-1">
-                  <label className="text-xs text-[hsl(var(--muted))]">From</label>
-                  <input name="from" type="date" defaultValue={from} className="rounded-xl border px-3 py-2 text-sm bg-white" />
-                </div>
+                  <div className="flex flex-col gap-1">
+                    <label className="text-xs text-[hsl(var(--muted))]">Status</label>
+                    <select name="status" defaultValue={status} className="rounded-xl border px-3 py-2 text-sm bg-white">
+                      {ORDER_STATUSES.map((s) => (
+                        <option key={s} value={s}>
+                          {s === 'all' ? 'all' : humanStatus(s as any)}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
 
-                <div className="flex flex-col gap-1">
-                  <label className="text-xs text-[hsl(var(--muted))]">To</label>
-                  <input name="to" type="date" defaultValue={to} className="rounded-xl border px-3 py-2 text-sm bg-white" />
-                </div>
+                  <div className="flex flex-col gap-1">
+                    <label className="text-xs text-[hsl(var(--muted))]">From</label>
+                    <input name="from" type="date" defaultValue={from} className="rounded-xl border px-3 py-2 text-sm bg-white" />
+                  </div>
 
-                <div className="flex flex-col gap-1">
-                  <label className="text-xs text-[hsl(var(--muted))]">Page size</label>
-                  <select name="page_size" defaultValue={String(pageSize)} className="rounded-xl border px-3 py-2 text-sm bg-white">
-                    {[10, 20, 50, 100].map((n) => (
-                      <option key={n} value={n}>
-                        {n}
-                      </option>
-                    ))}
-                  </select>
-                </div>
+                  <div className="flex flex-col gap-1">
+                    <label className="text-xs text-[hsl(var(--muted))]">To</label>
+                    <input name="to" type="date" defaultValue={to} className="rounded-xl border px-3 py-2 text-sm bg-white" />
+                  </div>
 
-                <button className="rounded-xl px-4 py-2 text-sm font-medium border hover:bg-gray-50" type="submit">
-                  Apply
-                </button>
+                  <div className="flex flex-col gap-1">
+                    <label className="text-xs text-[hsl(var(--muted))]">Page size</label>
+                    <select name="page_size" defaultValue={String(pageSize)} className="rounded-xl border px-3 py-2 text-sm bg-white">
+                      {[10, 20, 50, 100, 200].map((n) => (
+                        <option key={n} value={n}>
+                          {n}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
 
-                <Link prefetch={false} href="/admin/store" className="text-sm underline text-gray-700 hover:text-black">
-                  Clear
-                </Link>
-              </form>
-            </CardContent>
-          </Card>
+                  <button className="rounded-xl px-4 py-2 text-sm font-medium border hover:bg-gray-50" type="submit">
+                    Apply
+                  </button>
 
-          {error ? (
-            <div className="text-sm text-red-600">Failed to load orders: {error.message}</div>
-          ) : orders.length === 0 ? (
-            <div className="text-sm text-[hsl(var(--muted))]">No orders found.</div>
-          ) : (
-            <div className="space-y-3">
-              {orders.map((o) => {
-                const buyerId = (o.owner_uid || o.created_by || o.user_id || o.member_id) as string
-                const buyer = buyerId && profiles.get(buyerId) ? profiles.get(buyerId)! : null
-                const items = Array.isArray(o.store_order_items) ? o.store_order_items : []
-                const discount = Number(o.discount_pct ?? o.discount_percent ?? 0)
-                const payment = o.preferred_payment || o.payment_method || 'cash'
-                const noteTxt = o.note || o.notes || ''
-                const totalTxt = formatCurrency(o.total_cents ?? 0, 'en-EG', 'EGP')
+                  <Link prefetch={false} href={buildUrl('/admin/store', { tab: 'orders' })} className="text-sm underline text-gray-700 hover:text-black">
+                    Clear
+                  </Link>
 
-                return (
-                  <Card key={o.id} hover={true}>
-                    <CardContent className="py-4 space-y-2">
-                      <div className="flex flex-wrap items-center gap-3">
-                        <div className="font-semibold">#{shortId(o.id)}</div>
-                        <div className="text-sm text-gray-600">
-                          Status: <b>{humanStatus(o.status)}</b>
+                  <div className="ml-auto text-xs text-[hsl(var(--muted))]">
+                    {ordersTotal > 0 ? (
+                      <>
+                        Page <b>{page}</b> / {ordersTotalPages} · Total <b>{ordersTotal}</b>
+                      </>
+                    ) : (
+                      <>No orders.</>
+                    )}
+                  </div>
+                </form>
+              </CardContent>
+            </Card>
+
+            {ordersError ? (
+              <Card>
+                <CardContent>
+                  <div className="text-sm text-red-600">Failed to load orders: {ordersError}</div>
+                </CardContent>
+              </Card>
+            ) : orders.length === 0 ? (
+              <Card>
+                <CardContent>
+                  <div className="text-sm text-[hsl(var(--muted))]">No orders found.</div>
+                </CardContent>
+              </Card>
+            ) : (
+              <div className="space-y-3">
+                {orders.map((o) => {
+                  const items: OrderItemLite[] = Array.isArray(o.items) ? (o.items as any) : []
+                  const totalTxt = formatCurrency(o.total_cents ?? 0, 'en-EG', 'EGP')
+                  const discount = Number(o.discount_pct ?? 0)
+
+                  return (
+                    <Card key={o.id} hover={true}>
+                      <CardContent className="py-4 space-y-2">
+                        <div className="flex flex-wrap items-center gap-3">
+                          <div className="font-semibold">#{shortId(o.id)}</div>
+                          <div className="text-sm text-gray-600">
+                            Status: <b>{humanStatus(o.status)}</b>
+                          </div>
+                          <div className="text-sm text-gray-600">
+                            Total: <b>{totalTxt}</b>
+                            {discount ? ` (−${discount}%)` : ''}
+                          </div>
+                          <div className="text-sm text-gray-600">Payment: {o.payment || 'cash'}</div>
+                          <div className="ml-auto text-xs text-[hsl(var(--muted))]">{fmtDateTime(o.created_at)}</div>
                         </div>
-                        <div className="text-sm text-gray-600">
-                          Total: <b>{totalTxt}</b>
-                          {discount ? ` (−${discount}%)` : ''}
-                        </div>
-                        <div className="text-sm text-gray-600">Payment: {payment}</div>
-                        <div className="ml-auto text-xs text-[hsl(var(--muted))]">{fmtDateTime(o.created_at)}</div>
-                      </div>
 
-                      <div className="text-sm">
-                        <span className="font-medium">Buyer:</span> {displayName(buyer)}
-                        {buyer?.member_id ? <span className="text-xs text-[hsl(var(--muted))]"> · {buyer.member_id}</span> : null}
-                      </div>
-
-                      {/* Status editor (tiny client component) */}
-                      <AdminOrderStatusEditor orderId={o.id} currentStatus={o.status} currentNote={noteTxt} />
-
-                      {items.length ? (
                         <div className="text-sm">
-                          <div className="font-medium mb-1">Items</div>
-                          <ul className="list-disc ml-5 space-y-1">
-                            {items.map((it) => (
-                              <li key={it.id}>
-                                {it.name || 'Item'} × {it.qty} — {formatCurrency(it.unit_price_cents, 'en-EG', it.currency || 'EGP')}
-                              </li>
-                            ))}
-                          </ul>
+                          <span className="font-medium">Buyer:</span> {displayName(o)}
+                          {o.buyer_member_id ? <span className="text-xs text-[hsl(var(--muted))]"> · {o.buyer_member_id}</span> : null}
                         </div>
-                      ) : (
-                        <div className="text-sm text-gray-500">No items.</div>
-                      )}
-                    </CardContent>
-                  </Card>
-                )
-              })}
-            </div>
-          )}
 
-          {/* Pagination */}
-          {!error && total > 0 && totalPages > 1 && (
-            <div className="flex items-center gap-2 pt-2">
-              <Link
-                prefetch={false}
-                href={buildUrl('/admin/store', { ...baseParams, page: String(Math.max(1, page - 1)) })}
-                aria-disabled={page <= 1}
-                className={`px-2 py-1 rounded border ${page <= 1 ? 'opacity-50 pointer-events-none' : 'hover:bg-gray-50'}`}
-              >
-                Prev
-              </Link>
-              <div className="text-sm">
-                Page <b>{page}</b> / {totalPages}
+                        {/* Status editor (tiny client component) */}
+                        <AdminOrderStatusEditor orderId={o.id} currentStatus={o.status} currentNote={o.note || ''} />
+
+                        {o.note ? <div className="text-sm">Note: {o.note}</div> : null}
+
+                        {items.length ? (
+                          <div className="text-sm">
+                            <div className="font-medium mb-1">Items</div>
+                            <ul className="list-disc ml-5 space-y-1">
+                              {items.map((it) => (
+                                <li key={it.id}>
+                                  {it.name || 'Item'} × {it.qty} — {formatCurrency(it.unit_price_cents, 'en-EG', it.currency || 'EGP')}
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        ) : (
+                          <div className="text-sm text-gray-500">No items.</div>
+                        )}
+                      </CardContent>
+                    </Card>
+                  )
+                })}
               </div>
-              <Link
-                prefetch={false}
-                href={buildUrl('/admin/store', { ...baseParams, page: String(Math.min(totalPages, page + 1)) })}
-                aria-disabled={page >= totalPages}
-                className={`px-2 py-1 rounded border ${page >= totalPages ? 'opacity-50 pointer-events-none' : 'hover:bg-gray-50'}`}
-              >
-                Next
-              </Link>
-            </div>
-          )}
-        </section>
+            )}
+
+            {/* Pagination */}
+            {!ordersError && ordersTotal > 0 && ordersTotalPages > 1 ? (
+              <div className="flex items-center gap-2">
+                <Link
+                  prefetch={false}
+                  href={buildUrl('/admin/store', { ...ordersBaseParams, page: String(Math.max(1, page - 1)) })}
+                  aria-disabled={page <= 1}
+                  className={`px-2 py-1 rounded border ${page <= 1 ? 'opacity-50 pointer-events-none' : 'hover:bg-gray-50'}`}
+                >
+                  Prev
+                </Link>
+                <div className="text-sm">
+                  Page <b>{page}</b> / {ordersTotalPages}
+                </div>
+                <Link
+                  prefetch={false}
+                  href={buildUrl('/admin/store', { ...ordersBaseParams, page: String(Math.min(ordersTotalPages, page + 1)) })}
+                  aria-disabled={page >= ordersTotalPages}
+                  className={`px-2 py-1 rounded border ${page >= ordersTotalPages ? 'opacity-50 pointer-events-none' : 'hover:bg-gray-50'}`}
+                >
+                  Next
+                </Link>
+              </div>
+            ) : null}
+          </section>
+        ) : null}
+
+        {tab === 'products' ? (
+          <section className="space-y-4">
+            <Card>
+              <CardContent className="space-y-3">
+                <div className="flex flex-wrap items-center gap-3">
+                  <div>
+                    <h2 className="text-base font-semibold">Add product</h2>
+                    <p className="text-sm text-gray-600">Client form is lazy-loaded. Listing below is server-first.</p>
+                  </div>
+                </div>
+                <StoreProductForm />
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardContent>
+                <form action="/admin/store" method="get" className="flex flex-wrap items-end gap-3">
+                  <input type="hidden" name="tab" value="products" />
+
+                  <div className="flex flex-col gap-1">
+                    <label className="text-xs text-[hsl(var(--muted))]">Search</label>
+                    <input
+                      name="p_q"
+                      defaultValue={pQ}
+                      className="rounded-xl border px-3 py-2 text-sm bg-white"
+                      placeholder="Name, color, size or UUID"
+                    />
+                  </div>
+
+                  <div className="flex flex-col gap-1">
+                    <label className="text-xs text-[hsl(var(--muted))]">Category</label>
+                    <select name="p_category" defaultValue={pCategory} className="rounded-xl border px-3 py-2 text-sm bg-white">
+                      {PRODUCT_CATS.map((c) => (
+                        <option key={c.v} value={c.v}>
+                          {c.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="flex flex-col gap-1">
+                    <label className="text-xs text-[hsl(var(--muted))]">Active</label>
+                    <select name="p_active" defaultValue={pActive} className="rounded-xl border px-3 py-2 text-sm bg-white">
+                      {PRODUCT_ACTIVE.map((v) => (
+                        <option key={v} value={v}>
+                          {v}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="flex flex-col gap-1">
+                    <label className="text-xs text-[hsl(var(--muted))]">Page size</label>
+                    <select name="p_page_size" defaultValue={String(pPageSize)} className="rounded-xl border px-3 py-2 text-sm bg-white">
+                      {[12, 24, 48, 100].map((n) => (
+                        <option key={n} value={n}>
+                          {n}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <button className="rounded-xl px-4 py-2 text-sm font-medium border hover:bg-gray-50" type="submit">
+                    Apply
+                  </button>
+
+                  <Link prefetch={false} href={buildUrl('/admin/store', { tab: 'products' })} className="text-sm underline text-gray-700 hover:text-black">
+                    Clear
+                  </Link>
+
+                  <div className="ml-auto text-xs text-[hsl(var(--muted))]">
+                    {productsTotal > 0 ? (
+                      <>
+                        Page <b>{pPage}</b> / {productsTotalPages} · Total <b>{productsTotal}</b>
+                      </>
+                    ) : (
+                      <>No products.</>
+                    )}
+                  </div>
+                </form>
+              </CardContent>
+            </Card>
+
+            {productsError ? (
+              <Card>
+                <CardContent>
+                  <div className="text-sm text-red-600">Failed to load products: {productsError}</div>
+                </CardContent>
+              </Card>
+            ) : products.length === 0 ? (
+              <Card>
+                <CardContent>
+                  <div className="text-sm text-[hsl(var(--muted))]">No products found.</div>
+                </CardContent>
+              </Card>
+            ) : (
+              <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
+                {products.map((p) => {
+                  const price = formatCurrency(p.price_cents ?? 0, 'en-EG', p.currency ?? 'EGP')
+                  return (
+                    <Card key={p.id} hover>
+                      <CardContent className="py-4 space-y-2">
+                        <div className="flex items-start gap-2">
+                          <div className="flex-1">
+                            <div className="font-semibold">{p.name}</div>
+                            <div className="text-xs text-[hsl(var(--muted))]">
+                              {p.category}
+                              {p.color ? ` · ${p.color}` : ''}
+                              {p.size ? ` · ${p.size}` : ''}
+                            </div>
+                          </div>
+                          <div className="text-sm font-semibold">{price}</div>
+                        </div>
+
+                        <div className="text-xs text-[hsl(var(--muted))]">
+                          Created: {fmtDateTime(p.created_at)} · ID: {shortId(p.id)}
+                        </div>
+
+                        <AdminProductQuickEdit id={p.id} inventoryQty={p.inventory_qty ?? 0} isActive={!!p.is_active} />
+                      </CardContent>
+                    </Card>
+                  )
+                })}
+              </div>
+            )}
+
+            {/* Pagination */}
+            {!productsError && productsTotal > 0 && productsTotalPages > 1 ? (
+              <div className="flex items-center gap-2">
+                <Link
+                  prefetch={false}
+                  href={buildUrl('/admin/store', { ...productsBaseParams, p_page: String(Math.max(1, pPage - 1)) })}
+                  aria-disabled={pPage <= 1}
+                  className={`px-2 py-1 rounded border ${pPage <= 1 ? 'opacity-50 pointer-events-none' : 'hover:bg-gray-50'}`}
+                >
+                  Prev
+                </Link>
+                <div className="text-sm">
+                  Page <b>{pPage}</b> / {productsTotalPages}
+                </div>
+                <Link
+                  prefetch={false}
+                  href={buildUrl('/admin/store', { ...productsBaseParams, p_page: String(Math.min(productsTotalPages, pPage + 1)) })}
+                  aria-disabled={pPage >= productsTotalPages}
+                  className={`px-2 py-1 rounded border ${pPage >= productsTotalPages ? 'opacity-50 pointer-events-none' : 'hover:bg-gray-50'}`}
+                >
+                  Next
+                </Link>
+              </div>
+            ) : null}
+          </section>
+        ) : null}
       </Section>
     </main>
   )
