@@ -1,6 +1,8 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
+import { useRouter } from 'next/navigation'
+import { toast } from 'sonner'
 import { formatCurrency } from '@/lib/money'
 import Button from '@/components/ui/Button'
 import Select from '@/components/ui/Select'
@@ -46,6 +48,7 @@ const PAYMENT_METHODS = [
 ] as const
 
 export default function StoreCart() {
+  const router = useRouter()
   const [lines, setLines] = useState<CartLine[]>([])
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState<string>('')
@@ -175,6 +178,15 @@ export default function StoreCart() {
       const disc = Number(j.discount_pct ?? 0)
       setMsg(`Order placed. ${disc ? `Discount ${disc}% applied. ` : ''}Total = ${totalStr}.`)
       clear()
+      // Mark orders as dirty so orders pages can auto-refresh when user navigates back
+      try { sessionStorage.setItem('store:orders_dirty', String(Date.now())) } catch {}
+      try {
+        window.dispatchEvent(new CustomEvent('store:orders-refresh', { detail: { order_id: j?.id || null } }))
+      } catch {}
+      toast.success('Order placed')
+      // Refresh current route (server components). Some setups benefit from a second refresh shortly after.
+      router.refresh()
+      setTimeout(() => router.refresh(), 250)
     } catch (e: any) {
       setMsg(String(e?.message || e))
     } finally {

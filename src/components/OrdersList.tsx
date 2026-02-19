@@ -1,7 +1,7 @@
 // src/components/OrdersList.tsx
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { formatCurrency } from '@/lib/money'
 import type { OrderStatus } from '@/lib/order'
 
@@ -39,6 +39,15 @@ export default function OrdersList({
   const [total, setTotal] = useState(0)
   const [busy, setBusy] = useState(false)
 
+  // Auto-refresh when an order was just placed (set by StoreCart)
+  const lastDirtyRef = useRef<string | null>(null)
+  function getDirtyMark() {
+    try { return sessionStorage.getItem('store:orders_dirty') } catch { return null }
+  }
+  function clearDirtyMark() {
+    try { sessionStorage.removeItem('store:orders_dirty') } catch {}
+  }
+
   async function load(p = page) {
     setBusy(true)
     setErr('')
@@ -65,7 +74,44 @@ export default function OrdersList({
   }
 
   useEffect(() => {
+    const mark = getDirtyMark()
+    if (mark) {
+      lastDirtyRef.current = mark
+      clearDirtyMark()
+    }
     load(1)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode])
+
+  useEffect(() => {
+    const onEvent = () => {
+      load(1)
+    }
+    const onFocus = () => {
+      const mark = getDirtyMark()
+      if (mark && mark !== lastDirtyRef.current) {
+        lastDirtyRef.current = mark
+        clearDirtyMark()
+        load(1)
+      }
+    }
+    const onVis = () => {
+      if (document.visibilityState === 'visible') onFocus()
+    }
+    const onPageShow = (e: PageTransitionEvent) => {
+      if ((e as any).persisted) onFocus()
+    }
+
+    window.addEventListener('store:orders-refresh', onEvent as EventListener)
+    window.addEventListener('focus', onFocus)
+    document.addEventListener('visibilitychange', onVis)
+    window.addEventListener('pageshow', onPageShow as any)
+    return () => {
+      window.removeEventListener('store:orders-refresh', onEvent as EventListener)
+      window.removeEventListener('focus', onFocus)
+      document.removeEventListener('visibilitychange', onVis)
+      window.removeEventListener('pageshow', onPageShow as any)
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mode])
 
