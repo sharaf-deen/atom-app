@@ -184,8 +184,8 @@ export default function StoreCart() {
         window.dispatchEvent(new CustomEvent('store:orders-refresh', { detail: { order_id: j?.id || null } }))
       } catch {}
       toast.success('Order placed')
-      // Refresh current route (server components). Some setups benefit from a second refresh shortly after.
-      router.refresh()
+      // Redirect to Orders and refresh server components list
+      router.push('/orders')
       setTimeout(() => router.refresh(), 250)
     } catch (e: any) {
       setMsg(String(e?.message || e))
