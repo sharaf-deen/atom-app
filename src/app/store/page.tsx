@@ -3,104 +3,315 @@ export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
 import Link from 'next/link'
-import dynamicImport from 'next/dynamic'
+import { redirect } from 'next/navigation'
 import { getSessionUser } from '@/lib/session'
+import { createSupabaseRSC } from '@/lib/supabaseServer'
 import PageHeader from '@/components/layout/PageHeader'
 import Section from '@/components/layout/Section'
 import { Card, CardContent } from '@/components/ui/Card'
-import StoreCatalog from '@/components/StoreCatalog'
+import { formatCurrency } from '@/lib/money'
+import AddToCartButton from '@/components/store/AddToCartButton'
+import StoreCartPanel from '@/components/store/StoreCartPanel'
 
-const StoreCart = dynamicImport(() => import('@/components/StoreCart'), {
-  loading: () => <div className="text-sm text-gray-500">Loading cart…</div>,
-})
+type Category = 'kimono' | 'rashguard' | 'short' | 'belt'
+const CATEGORIES: Array<{ v: 'all' | Category; label: string }> = [
+  { v: 'all', label: 'All' },
+  { v: 'kimono', label: 'Kimono' },
+  { v: 'rashguard', label: 'Rashguard' },
+  { v: 'short', label: 'Short' },
+  { v: 'belt', label: 'Belt' },
+]
 
 const BUYER_ROLES = new Set(['member', 'assistant_coach', 'coach'])
 
-export default async function StorePage() {
+type ProductRow = {
+  id: string
+  category: Category
+  name: string
+  color: string | null
+  size: string | null
+  price_cents: number
+  currency: string | null
+  inventory_qty: number
+  is_active: boolean
+  created_at?: string | null
+}
+
+function clampInt(v: unknown, def: number, min: number, max: number) {
+  const raw = Array.isArray(v) ? v[0] : v
+  const n = Number(raw)
+  if (!Number.isFinite(n)) return def
+  return Math.min(max, Math.max(min, Math.floor(n)))
+}
+function strParam(v: unknown) {
+  const s = Array.isArray(v) ? v[0] : v
+  return typeof s === 'string' ? s : ''
+}
+function normalizeCat(v: string): 'all' | Category {
+  return v === 'kimono' || v === 'rashguard' || v === 'short' || v === 'belt' ? v : 'all'
+}
+function buildUrl(base: string, params: Record<string, string>) {
+  const qs = new URLSearchParams()
+  for (const [k, v] of Object.entries(params)) if (v) qs.set(k, v)
+  const s = qs.toString()
+  return s ? `${base}?${s}` : base
+}
+
+export default async function StorePage({
+  searchParams,
+}: {
+  searchParams?: Record<string, string | string[] | undefined>
+}) {
   const me = await getSessionUser()
-  if (!me) {
-    return (
-      <main>
-        <PageHeader title="Store" subtitle="Please sign in to access the shop" />
-        <Section>
-          <Card>
-            <CardContent>
-              <p className="text-[hsl(var(--muted))] text-sm">Authentication required.</p>
-            </CardContent>
-          </Card>
-        </Section>
-      </main>
+  if (!me) redirect('/login?next=/store')
+
+  const role = me.role
+  const isBuyer = BUYER_ROLES.has(role)
+  const isSuperAdmin = role === 'super_admin'
+
+  // Filters (server-side)
+  const page = clampInt(searchParams?.page, 1, 1, 9999)
+  const pageSize = clampInt(searchParams?.page_size, 12, 6, 48)
+  const category = normalizeCat(strParam(searchParams?.category))
+  const q = strParam(searchParams?.q).trim()
+
+  const fromRow = (page - 1) * pageSize
+  const toRow = fromRow + pageSize - 1
+
+  const supa = createSupabaseRSC()
+
+  let qry = supa
+    .from('store_products')
+    .select('id, category, name, color, size, price_cents, currency, inventory_qty, is_active, created_at', { count: 'exact' })
+    .order('created_at', { ascending: false })
+    .range(fromRow, toRow)
+
+  // Buyers & reception/admin: show active products only
+  if (!isSuperAdmin) qry = qry.eq('is_active', true)
+
+  if (category !== 'all') qry = qry.eq('category', category)
+
+  if (q) {
+    const safe = q.replace(/,/g, ' ').trim()
+    qry = qry.or(
+      [
+        `name.ilike.%${safe}%`,
+        `color.ilike.%${safe}%`,
+        `size.ilike.%${safe}%`,
+        `category.ilike.%${safe}%`,
+      ].join(',')
     )
   }
 
-  const role = me.role
-  const isSuperAdmin = role === 'super_admin'
-  const isBuyer = BUYER_ROLES.has(role)
+  const { data, error, count } = await qry
+  const items: ProductRow[] = Array.isArray(data) ? (data as any) : []
+  const total = Number(count ?? 0)
+  const totalPages = Math.max(1, Math.ceil(total / pageSize))
 
-  // /store is the "client shop" view.
-  // Admin management lives in /admin/store.
-  const showCart = isBuyer
-  const showOrdersLink = isBuyer
+  const baseParams = {
+    category: category === 'all' ? '' : category,
+    q,
+    page_size: String(pageSize),
+  }
 
   return (
     <main>
-      <PageHeader title="Store" subtitle={isBuyer ? 'Browse products and manage your cart' : 'Browse the catalog'} />
+      <PageHeader
+        title="Store"
+        subtitle={isBuyer ? 'Server-first catalog (fast) + cart' : 'Server-first catalog (fast)'}
+      />
 
       <Section className="space-y-6">
-        {/* Super admin: shortcut to the admin store */}
-        {isSuperAdmin && (
+        {isSuperAdmin ? (
           <Card>
             <CardContent className="flex flex-wrap items-center gap-3">
               <div>
-                <h2 className="text-base font-semibold">Store Admin</h2>
-                <p className="text-sm text-gray-600">Manage catalog and view all orders.</p>
+                <div className="font-semibold">Admin management</div>
+                <div className="text-sm text-gray-600">Catalog & orders management is now in /admin/store.</div>
               </div>
               <Link
                 prefetch={false}
                 href="/admin/store"
                 className="ml-auto inline-flex items-center rounded-xl border px-4 py-2 text-sm font-medium hover:bg-gray-50"
               >
-                Open admin store
+                Open /admin/store
               </Link>
             </CardContent>
           </Card>
-        )}
+        ) : null}
 
-        {/* Catalog (Add to cart only for buyer roles) */}
         <Card>
           <CardContent>
-            <StoreCatalog showAdd={showCart} canManage={false} />
+            <form action="/store" method="get" className="flex flex-wrap items-end gap-3">
+              <div className="flex flex-col gap-1">
+                <label className="text-xs text-[hsl(var(--muted))]">Search</label>
+                <input
+                  name="q"
+                  defaultValue={q}
+                  className="rounded-xl border px-3 py-2 text-sm bg-white"
+                  placeholder="Name, color, size…"
+                />
+              </div>
+
+              <div className="flex flex-col gap-1">
+                <label className="text-xs text-[hsl(var(--muted))]">Category</label>
+                <select
+                  name="category"
+                  defaultValue={category}
+                  className="rounded-xl border px-3 py-2 text-sm bg-white"
+                >
+                  {CATEGORIES.map((c) => (
+                    <option key={c.v} value={c.v}>
+                      {c.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="flex flex-col gap-1">
+                <label className="text-xs text-[hsl(var(--muted))]">Page size</label>
+                <select
+                  name="page_size"
+                  defaultValue={String(pageSize)}
+                  className="rounded-xl border px-3 py-2 text-sm bg-white"
+                >
+                  {[12, 24, 48].map((n) => (
+                    <option key={n} value={n}>
+                      {n}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <button className="rounded-xl px-4 py-2 text-sm font-medium border hover:bg-gray-50" type="submit">
+                Apply
+              </button>
+
+              <Link prefetch={false} href="/store" className="text-sm underline text-gray-700 hover:text-black">
+                Clear
+              </Link>
+
+              <div className="ml-auto text-xs text-[hsl(var(--muted))]">
+                {total > 0 ? (
+                  <>
+                    Showing <b>{fromRow + 1}</b>–<b>{Math.min(fromRow + items.length, total)}</b> of <b>{total}</b>
+                  </>
+                ) : (
+                  <>No products.</>
+                )}
+              </div>
+            </form>
           </CardContent>
         </Card>
 
-        {/* Cart (buyer roles only) */}
-        {showCart && (
+        {error ? (
           <Card>
             <CardContent>
-              <h2 className="text-base font-semibold mb-3">Cart</h2>
-              <StoreCart />
+              <div className="text-sm text-red-600">Failed to load products: {error.message}</div>
             </CardContent>
           </Card>
+        ) : items.length === 0 ? (
+          <Card>
+            <CardContent>
+              <div className="text-sm text-[hsl(var(--muted))]">No products match your filters.</div>
+            </CardContent>
+          </Card>
+        ) : (
+          <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
+            {items.map((p) => {
+              const price = formatCurrency(p.price_cents ?? 0, 'en-EG', p.currency ?? 'EGP')
+              const stock = Number(p.inventory_qty ?? 0)
+              return (
+                <Card key={p.id} hover>
+                  <CardContent className="py-4 space-y-2">
+                    <div className="flex items-start gap-2">
+                      <div className="flex-1">
+                        <div className="font-semibold">{p.name}</div>
+                        <div className="text-xs text-[hsl(var(--muted))]">
+                          {p.category}
+                          {p.color ? ` · ${p.color}` : ''}
+                          {p.size ? ` · ${p.size}` : ''}
+                        </div>
+                      </div>
+                      <div className="text-sm font-semibold">{price}</div>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <div className="text-xs text-[hsl(var(--muted))]">
+                        Stock: <b>{stock}</b>
+                        {!p.is_active ? <span className="ml-2 text-red-600">Inactive</span> : null}
+                      </div>
+                      <div className="ml-auto">
+                        {isBuyer ? (
+                          <AddToCartButton
+                            product={{
+                              id: p.id,
+                              name: p.name,
+                              price_cents: p.price_cents,
+                              currency: p.currency ?? 'EGP',
+                              inventory_qty: p.inventory_qty,
+                              color: p.color,
+                              size: p.size,
+                            }}
+                          />
+                        ) : (
+                          <div className="text-xs text-[hsl(var(--muted))]">Sign-in as member to order</div>
+                        )}
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              )
+            })}
+          </div>
         )}
 
-        {/* Link to dedicated orders page (buyer roles only) */}
-        {showOrdersLink && (
+        {/* Pagination */}
+        {!error && total > 0 && totalPages > 1 ? (
+          <div className="flex items-center gap-2">
+            <Link
+              prefetch={false}
+              href={buildUrl('/store', { ...baseParams, page: String(Math.max(1, page - 1)) })}
+              aria-disabled={page <= 1}
+              className={`px-2 py-1 rounded border ${page <= 1 ? 'opacity-50 pointer-events-none' : 'hover:bg-gray-50'}`}
+            >
+              Prev
+            </Link>
+            <div className="text-sm">
+              Page <b>{page}</b> / {totalPages}
+            </div>
+            <Link
+              prefetch={false}
+              href={buildUrl('/store', { ...baseParams, page: String(Math.min(totalPages, page + 1)) })}
+              aria-disabled={page >= totalPages}
+              className={`px-2 py-1 rounded border ${page >= totalPages ? 'opacity-50 pointer-events-none' : 'hover:bg-gray-50'}`}
+            >
+              Next
+            </Link>
+          </div>
+        ) : null}
+
+        {/* Cart + quick link to orders (buyers only) */}
+        {isBuyer ? (
           <Card>
-            <CardContent className="flex flex-wrap items-center gap-3">
-              <div>
-                <h2 className="text-base font-semibold">My orders</h2>
-                <p className="text-sm text-gray-600">Open your orders history and statuses.</p>
+            <CardContent className="space-y-3">
+              <div className="flex flex-wrap items-center gap-3">
+                <div>
+                  <h2 className="text-base font-semibold">Cart</h2>
+                  <p className="text-sm text-gray-600">Place your order then you will be redirected to /orders.</p>
+                </div>
+                <Link
+                  prefetch={false}
+                  href="/orders"
+                  className="ml-auto inline-flex items-center rounded-xl border px-4 py-2 text-sm font-medium hover:bg-gray-50"
+                >
+                  View my orders
+                </Link>
               </div>
-              <Link
-                prefetch={false}
-                href="/orders"
-                className="ml-auto inline-flex items-center rounded-xl border px-4 py-2 text-sm font-medium hover:bg-gray-50"
-              >
-                View my orders
-              </Link>
+              <StoreCartPanel />
             </CardContent>
           </Card>
-        )}
+        ) : null}
       </Section>
     </main>
   )
