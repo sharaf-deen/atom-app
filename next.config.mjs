@@ -3,34 +3,20 @@ const SUPABASE_HOST = SUPABASE_URL ? new URL(SUPABASE_URL).host : undefined
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  reactStrictMode: true,
   experimental: {
     serverActions: {
       bodySizeLimit: '2mb',
     },
-    // Reduce client bundle size for icon imports
-    optimizePackageImports: ['lucide-react'],
+    // Reduce client bundles by rewriting imports to per-module where supported.
+    // Works especially well for icon libraries and utility libs.
+    optimizePackageImports: ['lucide-react', 'date-fns'],
+  },
+  // Remove console.* from production client bundles (keep console.error)
+  compiler: {
+    removeConsole: process.env.NODE_ENV === 'production' ? { exclude: ['error'] } : false,
   },
   eslint: { ignoreDuringBuilds: true },
   typescript: { ignoreBuildErrors: false },
-
-  async headers() {
-    return [
-      {
-        source: '/(.*)',
-        headers: [
-          { key: 'X-Content-Type-Options', value: 'nosniff' },
-          { key: 'X-Frame-Options', value: 'SAMEORIGIN' },
-          { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
-          // Needed for QR scanner pages
-          { key: 'Permissions-Policy', value: 'camera=(self), microphone=(), geolocation=()' },
-          // Only effective on HTTPS
-          { key: 'Strict-Transport-Security', value: 'max-age=31536000; includeSubDomains; preload' },
-        ],
-      },
-    ]
-  },
-
   images: {
     remotePatterns: SUPABASE_HOST
       ? [

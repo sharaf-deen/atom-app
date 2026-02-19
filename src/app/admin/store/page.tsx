@@ -177,7 +177,7 @@ export default async function AdminStorePage({
 
   type ProductRow = {
     id: string
-    category: Category
+    category: any
     name: string
     color: string | null
     size: string | null
@@ -194,43 +194,24 @@ export default async function AdminStorePage({
   let productsTotalPages = 1
 
   if (tab === 'products') {
-    const fromRow = (pPage - 1) * pPageSize
-    const toRow = fromRow + pPageSize - 1
+  const { data, error } = await supa.rpc('admin_search_store_products', {
+    _q: pQ,
+    _category: pCategory,
+    _active: pActive,
+    _page: pPage,
+    _page_size: pPageSize,
+  })
 
-    let pqry = supa
-      .from('store_products')
-      .select('id, category, name, color, size, price_cents, currency, inventory_qty, is_active, created_at', { count: 'exact' })
-      .order('created_at', { ascending: false })
-      .range(fromRow, toRow)
-
-    if (pCategory !== 'all') pqry = pqry.eq('category', pCategory)
-    if (pActive === 'active') pqry = pqry.eq('is_active', true)
-    if (pActive === 'inactive') pqry = pqry.eq('is_active', false)
-
-    if (pQ) {
-      if (isUuid(pQ)) {
-        pqry = pqry.eq('id', pQ)
-      } else {
-        if (pQ.length >= 3) {
-          // Fast search using FTS (GIN) on generated tsvector column
-          pqry = pqry.textSearch('search_tsv', pQ, { type: 'websearch', config: 'simple' })
-        } else {
-          // Short queries: substring search (trigram index helps)
-          const safe = pQ.replace(/,/g, ' ').trim()
-          pqry = pqry.or([`name.ilike.%${safe}%`, `color.ilike.%${safe}%`, `size.ilike.%${safe}%`].join(','))
-        }
-      }
-    }
-
-    const { data, error, count } = await pqry
-    if (error) {
-      productsError = error.message
-    } else {
-      products = Array.isArray(data) ? (data as any) : []
-      productsTotal = Number(count ?? 0)
-      productsTotalPages = Math.max(1, Math.ceil(productsTotal / pPageSize))
-    }
+  if (error) {
+    productsError = error.message
+  } else {
+    products = Array.isArray(data) ? (data as any) : []
+    productsTotal = Number((products[0] as any)?.total_count ?? 0)
+    productsTotalPages = Math.max(1, Math.ceil(productsTotal / pPageSize))
   }
+}
+
+
 
   const ordersBaseParams = {
     tab: 'orders',
@@ -297,7 +278,7 @@ export default async function AdminStorePage({
                       name="q"
                       defaultValue={q}
                       className="rounded-xl border px-3 py-2 text-sm bg-white"
-                      placeholder="Buyer name/email/member code or UUID"
+                      placeholder="Buyer / Order / Product (name/email/member code/UUID)"
                     />
                   </div>
 
