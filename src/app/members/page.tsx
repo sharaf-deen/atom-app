@@ -7,8 +7,8 @@ import { unstable_cache } from 'next/cache'
 import PageHeader from '@/components/layout/PageHeader'
 import Section from '@/components/layout/Section'
 import AccessDeniedPage from '@/components/AccessDeniedPage'
-import { getSessionUser, type Role } from '@/lib/session'
-import { createSupabaseAdminClient } from '@/lib/supabaseAdmin'
+import { getSessionUserCached, getSupabaseAdminClientCached } from '@/lib/requestCache'
+import { type Role } from '@/lib/session'
 import Link from 'next/link'
 import { Card } from '@/components/ui/Card'
 import MembersFilters from './_components/MembersFilters'
@@ -33,23 +33,23 @@ type MemberRow = {
 type MemberRowWithTotal = MemberRow & { total_count?: number | string | null }
 const membersStatsCached = unstable_cache(
   async () => {
-    const admin = createSupabaseAdminClient()
+    const admin = getSupabaseAdminClientCached()
     const { data, error } = await admin.rpc('members_activity_stats')
     if (error) throw new Error(error.message)
     return data
   },
-  ['members_activity_stats_v1'],
+  ['members_activity_stats_v2'],
   { revalidate: 60, tags: ['members'] }
 )
 
 const searchMembersCached = unstable_cache(
   async (params: { q: string | null; status: Status; page: number; page_size: number }) => {
-    const admin = createSupabaseAdminClient()
+    const admin = getSupabaseAdminClientCached()
     const { data, error } = await admin.rpc('search_members', params)
     if (error) throw new Error(error.message)
     return (data ?? []) as MemberRowWithTotal[]
   },
-  ['search_members_v1'],
+  ['search_members_v2'],
   { revalidate: 30, tags: ['members'] }
 )
 
@@ -130,7 +130,7 @@ export default async function MembersPage({
 }: {
   searchParams?: { [key: string]: string | string[] | undefined }
 }) {
-  const me = await getSessionUser()
+  const me = await getSessionUserCached()
 
   const q = typeof searchParams?.q === 'string' ? searchParams.q.trim() : ''
   const statusRaw = typeof searchParams?.status === 'string' ? searchParams.status.toLowerCase() : 'all'

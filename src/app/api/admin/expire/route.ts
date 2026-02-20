@@ -3,6 +3,7 @@ export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
 import { NextResponse } from 'next/server'
+import { revalidateTag, revalidatePath } from 'next/cache'
 import { createSupabaseServerActionClient } from '@/lib/supabaseServer'
 
 
@@ -35,6 +36,12 @@ async function handle() {
   // Run the expiration function
   const { data, error } = await supa.rpc('expire_subscriptions')
   if (error) return json(500, { ok: false, error: 'RPC_FAILED', details: error.message })
+
+
+// Invalidate members cache after batch expiration
+try { revalidateTag('members') } catch {}
+try { revalidatePath('/members') } catch {}
+try { revalidatePath('/invoices') } catch {}
 
   return json(200, data ?? { ok: true })
 }

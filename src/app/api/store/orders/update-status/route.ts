@@ -4,7 +4,7 @@ export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
 import { NextResponse } from 'next/server'
-import { revalidateTag } from 'next/cache'
+import { revalidateTag, revalidatePath } from 'next/cache'
 import { createSupabaseServerActionClient } from '@/lib/supabaseServer'
 import { createClient } from '@supabase/supabase-js'
 import { isOrderStatus, type OrderStatus } from '@/lib/order'
@@ -119,6 +119,8 @@ export async function PATCH(req: Request) {
     // Invalidate server cache (admin store + user orders)
     revalidateTag('admin-store-orders')
     revalidateTag('orders')
+    try { revalidatePath('/orders') } catch {}
+    try { revalidatePath('/admin/store') } catch {}
 
     // 5) Notify (service role; non-blocking)
     if (NOTIFY_ON.includes(status)) {

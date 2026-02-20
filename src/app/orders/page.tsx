@@ -5,8 +5,7 @@ export const revalidate = 0
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { unstable_cache } from 'next/cache'
-import { getSessionUser } from '@/lib/session'
-import { createSupabaseAdminClient } from '@/lib/supabaseAdmin'
+import { getSessionUserCached, getSupabaseAdminClientCached } from '@/lib/requestCache'
 import PageHeader from '@/components/layout/PageHeader'
 import Section from '@/components/layout/Section'
 import { Card, CardContent } from '@/components/ui/Card'
@@ -41,16 +40,15 @@ type OrderRow = {
 }
 
 const listMyOrdersCached = unstable_cache(
-  async (params: {
-    user_id: string
-    status: string
-    from: string
-    to: string
-    fromRow: number
+  async (
+    user_id: string,
+    status: string,
+    from: string,
+    to: string,
+    fromRow: number,
     toRow: number
-  }) => {
-    const supa = createSupabaseAdminClient()
-    const { user_id, status, from, to, fromRow, toRow } = params
+  ) => {
+    const supa = getSupabaseAdminClientCached()
 
     let qry = supa
       .from('store_orders')
@@ -90,7 +88,7 @@ const listMyOrdersCached = unstable_cache(
 
     return { orders: (data ?? []) as any, total: Number(count ?? 0) }
   },
-  ['my_orders_v1'],
+  ['my_orders_v2'],
   { revalidate: 60, tags: ['orders'] }
 )
 
@@ -143,7 +141,7 @@ export default async function OrdersPage({
 }: {
   searchParams?: Record<string, string | string[] | undefined>
 }) {
-  const me = await getSessionUser()
+  const me = await getSessionUserCached()
   if (!me) redirect('/login?next=/orders')
 
   if (!ALLOWED.includes(me.role as any)) {

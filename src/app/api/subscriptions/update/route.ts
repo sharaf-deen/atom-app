@@ -3,6 +3,7 @@ export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
 import { NextResponse } from 'next/server'
+import { revalidateTag, revalidatePath } from 'next/cache'
 import { createClient } from '@supabase/supabase-js'
 import { createSupabaseServerActionClient } from '@/lib/supabaseServer'
 import { generateInvoicePdfBytes, makeInvoiceNumber, type InvoiceSnapshot } from '@/lib/invoices'
@@ -431,6 +432,15 @@ export async function POST(req: Request) {
       invoice_error = e?.message ?? String(e)
     }
   }
+
+
+// Invalidate Next.js caches for server-first pages
+try { revalidateTag('members') } catch {}
+if (invoice_ok) {
+  try { revalidateTag('invoices') } catch {}
+  try { revalidatePath('/members') } catch {}
+  try { revalidatePath('/invoices') } catch {}
+}
 
   return json(200, {
     ok: true,

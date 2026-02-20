@@ -6,8 +6,7 @@ import Link from 'next/link'
 import dynamicImport from 'next/dynamic'
 import { redirect } from 'next/navigation'
 import { unstable_cache } from 'next/cache'
-import { getSessionUser } from '@/lib/session'
-import { createSupabaseAdminClient } from '@/lib/supabaseAdmin'
+import { getSessionUserCached, getSupabaseAdminClientCached } from '@/lib/requestCache'
 import PageHeader from '@/components/layout/PageHeader'
 import Section from '@/components/layout/Section'
 import AccessDeniedPage from '@/components/AccessDeniedPage'
@@ -27,34 +26,42 @@ const AdminOrderStatusEditor = dynamicImport(() => import('@/components/store/Ad
   loading: () => <div className="text-xs text-gray-500">Loading status editor…</div>,
 })
 
+
 const adminListStoreOrdersCached = unstable_cache(
-  async (params: {
-    _q: string
-    _status: string
-    _from_date: string | null
-    _to_date: string | null
-    _page: number
-    _page_size: number
-  }) => {
-    const supa = createSupabaseAdminClient()
-    const { data, error } = await supa.rpc('admin_list_store_orders', params as any)
+  async (q: string, status: string, from_date: string | null, to_date: string | null, page: number, page_size: number) => {
+    const supa = getSupabaseAdminClientCached()
+    const { data, error } = await supa.rpc('admin_list_store_orders', {
+      _q: q,
+      _status: status,
+      _from_date: from_date,
+      _to_date: to_date,
+      _page: page,
+      _page_size: page_size,
+    } as any)
     if (error) throw new Error(error.message)
     return (data ?? []) as any[]
   },
-  ['admin_list_store_orders_v2'],
+  ['admin_list_store_orders_v3'],
   { revalidate: 20, tags: ['admin-store-orders', 'orders'] }
 )
 
 const adminSearchStoreProductsCached = unstable_cache(
-  async (params: { _q: string; _category: string | null; _active: string; _page: number; _page_size: number }) => {
-    const supa = createSupabaseAdminClient()
-    const { data, error } = await supa.rpc('admin_search_store_products', params as any)
+  async (q: string, category: string, active: string, page: number, page_size: number) => {
+    const supa = getSupabaseAdminClientCached()
+    const { data, error } = await supa.rpc('admin_search_store_products', {
+      _q: q,
+      _category: category,
+      _active: active,
+      _page: page,
+      _page_size: page_size,
+    } as any)
     if (error) throw new Error(error.message)
     return (data ?? []) as any[]
   },
-  ['admin_search_store_products_v1'],
+  ['admin_search_store_products_v2'],
   { revalidate: 120, tags: ['admin-store-products', 'store-products'] }
 )
+
 type OrderItemLite = {
   id: string
   product_id: string
@@ -138,7 +145,7 @@ export default async function AdminStorePage({
 }: {
   searchParams?: Record<string, string | string[] | undefined>
 }) {
-  const me = await getSessionUser()
+  const me = await getSessionUserCached()
   if (!me) redirect('/login?next=/admin/store')
 
   if (me.role !== 'super_admin') {
@@ -159,7 +166,7 @@ export default async function AdminStorePage({
   const tabRaw = strParam(searchParams?.tab)
   const tab = (TABS as readonly string[]).includes(tabRaw) ? (tabRaw as (typeof TABS)[number]) : 'orders'
 
-  const supa = createSupabaseAdminClient()
+  const supa = getSupabaseAdminClientCached()
 
   // ----- Orders tab params -----
   const page = clampInt(searchParams?.page, 1, 1, 9999)
@@ -187,15 +194,7 @@ export default async function AdminStorePage({
 
   if (tab === 'orders') {
     try {
-      const data = await adminListStoreOrdersCached({
-        _q: q,
-        _status: status,
-        _from_date: from || null,
-        _to_date: to || null,
-        _page: page,
-        _page_size: pageSize,
-      })
-
+      const data = await adminListStoreOrdersCached(q, status, from || null, to || null, page, pageSize)
       orders = Array.isArray(data) ? (data as any) : []
       ordersTotal = Number((orders[0] as any)?.total_count ?? 0)
       ordersTotalPages = Math.max(1, Math.ceil(ordersTotal / pageSize))
@@ -222,17 +221,9 @@ export default async function AdminStorePage({
   let productsTotal = 0
   let productsTotalPages = 1
 
-  
-if (tab === 'products') {
+  if (tab === 'products') {
     try {
-      const data = await adminSearchStoreProductsCached({
-        _q: pQ,
-        _category: pCategory,
-        _active: pActive,
-        _page: pPage,
-        _page_size: pPageSize,
-      })
-
+      const data = await adminSearchStoreProductsCached(pQ, pCategory, pActive, pPage, pPageSize)
       products = Array.isArray(data) ? (data as any) : []
       productsTotal = Number((products[0] as any)?.total_count ?? 0)
       productsTotalPages = Math.max(1, Math.ceil(productsTotal / pPageSize))
@@ -241,9 +232,7 @@ if (tab === 'products') {
     }
   }
 
-
-
-  const ordersBaseParams = {
+const ordersBaseParams = {
     tab: 'orders',
     q,
     status,

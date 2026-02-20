@@ -4,7 +4,7 @@ export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
 import { NextResponse } from 'next/server'
-import { revalidateTag } from 'next/cache'
+import { revalidateTag, revalidatePath } from 'next/cache'
 import { createSupabaseServerActionClient } from '@/lib/supabaseServer'
 
 
@@ -213,6 +213,9 @@ export async function POST(req: Request) {
     // 9) Invalidate server cache (orders + admin store)
     revalidateTag('orders')
     revalidateTag('admin-store-orders')
+    try { revalidatePath('/orders') } catch {}
+    try { revalidatePath('/admin/store') } catch {}
+    try { revalidatePath('/store') } catch {}
 
     // 10) Retour
     return noStore(

@@ -2,8 +2,16 @@
 export const runtime = 'nodejs';
 
 import { NextRequest, NextResponse } from 'next/server';
+import { revalidateTag, revalidatePath } from 'next/cache'
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { requireAdmin } from '@/lib/apiAuth'
+
+function invalidateMembersCache() {
+  try { revalidateTag('members') } catch {}
+  try { revalidatePath('/members') } catch {}
+  try { revalidatePath('/invoices') } catch {}
+}
+
 
 type Action = 'renew' | 'pause' | 'resume' | 'add_dropin';
 type Plan = 'monthly' | 'quarterly' | 'yearly';
@@ -154,7 +162,8 @@ export async function POST(req: NextRequest) {
           });
         }
 
-        return NextResponse.json({ ok: true, action, mode: 'insert', start_date: start, end_date: end });
+    invalidateMembersCache();
+      return NextResponse.json({ ok: true, action, mode: 'insert', start_date: start, end_date: end });
       }
 
       // Cas 2 : standard existe → on étend depuis max(end_date existante, start saisi)
@@ -189,6 +198,7 @@ export async function POST(req: NextRequest) {
         });
       }
 
+  invalidateMembersCache();
       return NextResponse.json({ ok: true, action, mode: 'extend', start_base: base, end_date: newEnd });
     }
 
@@ -200,6 +210,7 @@ export async function POST(req: NextRequest) {
       if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 400 });
 
       await writeAudit(admin, gate.user.id, user_id, 'pause', { sub_id: sub.id });
+  invalidateMembersCache();
       return NextResponse.json({ ok: true, action, status: 'suspended' });
     }
 
@@ -211,6 +222,7 @@ export async function POST(req: NextRequest) {
       if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 400 });
 
       await writeAudit(admin, gate.user.id, user_id, 'resume', { sub_id: sub.id });
+  invalidateMembersCache();
       return NextResponse.json({ ok: true, action, status: 'active' });
     }
 
@@ -253,7 +265,8 @@ export async function POST(req: NextRequest) {
           });
         }
 
-        return NextResponse.json({ ok: true, action, mode: 'increment', remaining_classes: newRemaining });
+    invalidateMembersCache();
+      return NextResponse.json({ ok: true, action, mode: 'increment', remaining_classes: newRemaining });
       }
 
       // Sinon, créer un nouveau drop-in avec start_date choisi (ou aujourd’hui)
@@ -289,6 +302,7 @@ export async function POST(req: NextRequest) {
         });
       }
 
+  invalidateMembersCache();
       return NextResponse.json({ ok: true, action, mode: 'insert', remaining_classes: add, start_date: dropStart });
     }
 

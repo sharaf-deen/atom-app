@@ -9,8 +9,8 @@ import PageHeader from '@/components/layout/PageHeader'
 import Section from '@/components/layout/Section'
 import AccessDeniedPage from '@/components/AccessDeniedPage'
 import { Card, CardContent } from '@/components/ui/Card'
-import { createSupabaseAdminClient } from '@/lib/supabaseAdmin'
-import { getSessionUser, type Role } from '@/lib/session'
+import { getSessionUserCached, getSupabaseAdminClientCached } from '@/lib/requestCache'
+import { type Role } from '@/lib/session'
 
 type InvoiceRow = {
   id: string
@@ -27,13 +27,13 @@ type InvoiceRow = {
 }
 
 const searchInvoicesCached = unstable_cache(
-  async (params: { q: string; from_date: string | null; to_date: string | null; page: number; page_size: number }) => {
-    const supa = createSupabaseAdminClient()
-    const { data, error } = await supa.rpc('search_invoices', params)
+  async (q: string, from_date: string | null, to_date: string | null, page: number, page_size: number) => {
+    const supa = getSupabaseAdminClientCached()
+    const { data, error } = await supa.rpc('search_invoices', { q, from_date, to_date, page, page_size } as any)
     if (error) throw new Error(error.message)
     return (data ?? []) as InvoiceRow[]
   },
-  ['search_invoices_v1'],
+  ['search_invoices_v2'],
   { revalidate: 60, tags: ['invoices'] }
 )
 
@@ -79,7 +79,7 @@ export default async function InvoicesPage({
 }: {
   searchParams?: Record<string, string | string[] | undefined>
 }) {
-  const me = await getSessionUser()
+  const me = await getSessionUserCached()
   const nextPath = '/invoices'
   if (!me) redirect(`/login?next=${encodeURIComponent(nextPath)}`)
 
@@ -112,8 +112,8 @@ export default async function InvoicesPage({
   let rows: InvoiceRow[] = []
   let errorMsg: string | null = null
   try {
-    rows = await searchInvoicesCached({ q, from_date, to_date, page, page_size: pageSize })
-  } catch (e: any) {
+    rows = await searchInvoicesCached(q, from_date, to_date, page, pageSize)
+} catch (e: any) {
     errorMsg = e?.message || String(e)
   }
 
@@ -171,7 +171,7 @@ export default async function InvoicesPage({
               </Link>
 
               <div className="ml-auto text-xs text-[hsl(var(--muted))]">
-                {!error && total > 0 ? (
+                {!errorMsg && total > 0 ? (
                   <>
                     Showing <b>{(page - 1) * pageSize + 1}</b>–<b>{Math.min((page - 1) * pageSize + rows.length, total)}</b> of <b>{total}</b>
                   </>
@@ -230,7 +230,7 @@ export default async function InvoicesPage({
           )}
 
           {/* Pagination */}
-          {!error && total > 0 && totalPages > 1 && (
+          {!errorMsg && total > 0 && totalPages > 1 && (
             <div className="flex items-center gap-2 pt-2">
               <Link
                 prefetch={false}

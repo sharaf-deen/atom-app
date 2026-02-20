@@ -1,5 +1,6 @@
 export const runtime = 'nodejs';
 import { NextRequest, NextResponse } from 'next/server';
+import { revalidateTag, revalidatePath } from 'next/cache'
 import { createClient } from '@supabase/supabase-js';
 import { requireAdmin } from '@/lib/apiAuth'
 
@@ -44,6 +45,12 @@ export async function POST(req: NextRequest) {
 
   const { error } = await admin.from('subscriptions').insert(payload);
   if (error) return NextResponse.json({ ok:false, error:error.message }, { status:400 });
+
+
+  // Invalidate members cache
+  try { revalidateTag('members') } catch {}
+  try { revalidatePath('/members') } catch {}
+  try { revalidatePath('/invoices') } catch {}
 
   return NextResponse.json({ ok:true });
 }

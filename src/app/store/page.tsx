@@ -5,8 +5,7 @@ export const revalidate = 0
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { unstable_cache } from 'next/cache'
-import { getSessionUser } from '@/lib/session'
-import { createSupabaseAdminClient } from '@/lib/supabaseAdmin'
+import { getSessionUserCached, getSupabaseAdminClientCached } from '@/lib/requestCache'
 import PageHeader from '@/components/layout/PageHeader'
 import Section from '@/components/layout/Section'
 import { Card, CardContent } from '@/components/ui/Card'
@@ -39,15 +38,14 @@ type ProductRow = {
 }
 
 const listStoreProductsCached = unstable_cache(
-  async (params: {
-    isSuperAdmin: boolean
-    category: string
-    q: string
-    fromRow: number
+  async (
+    isSuperAdmin: boolean,
+    category: string,
+    q: string,
+    fromRow: number,
     toRow: number
-  }) => {
-    const supa = createSupabaseAdminClient()
-    const { isSuperAdmin, category, q, fromRow, toRow } = params
+  ) => {
+    const supa = getSupabaseAdminClientCached()
 
     let qry = supa
       .from('store_products')
@@ -83,7 +81,7 @@ const listStoreProductsCached = unstable_cache(
 
     return { items: (data ?? []) as any, total: Number(count ?? 0) }
   },
-  ['store_products_v1'],
+  ['store_products_v2'],
   { revalidate: 120, tags: ['store-products'] }
 )
 
@@ -113,7 +111,7 @@ export default async function StorePage({
 }: {
   searchParams?: Record<string, string | string[] | undefined>
 }) {
-  const me = await getSessionUser()
+  const me = await getSessionUserCached()
   if (!me) redirect('/login?next=/store')
 
   const role = me.role

@@ -4,6 +4,7 @@ export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
 import { NextResponse } from 'next/server'
+import { revalidateTag, revalidatePath } from 'next/cache'
 import type { Role } from '@/lib/session'
 import { createSupabaseServerActionClient } from '@/lib/supabaseServer'
 import { createClient } from '@supabase/supabase-js'
@@ -54,7 +55,12 @@ export async function POST(req: Request) {
     // 1) Auth de l’acteur (staff uniquement)
     const { data: authData, error: authErr } = await supa.auth.getUser()
     if (authErr) {
-      return noStore(
+  
+// Invalidate members cache so the list reflects the new profile immediately
+try { revalidateTag('members') } catch {}
+try { revalidatePath('/members') } catch {}
+
+    return noStore(
         NextResponse.json(
           { ok: false, error: `AUTH_ERROR: ${authErr.message}` },
           { status: 401 },
