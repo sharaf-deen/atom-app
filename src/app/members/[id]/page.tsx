@@ -120,6 +120,28 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
       paid_at: string | null
     }> | null
   }
+// Prevent creating a new subscription when there's already an active one
+const today = new Date().toISOString().slice(0, 10) // YYYY-MM-DD (UTC)
+const hasActiveSubscription = (subs ?? []).some((s) => {
+  const status = String(s.status ?? '').toLowerCase()
+  if (status !== 'active') return false
+
+  const end = s.end_date
+  if (end && today > end) return false
+
+  if (s.subscription_type === 'sessions') {
+    const total = Number(s.sessions_total ?? 0)
+    const used = Number(s.sessions_used ?? 0)
+    if (Number.isFinite(total) && total > 0) return total - used > 0
+  }
+
+  return true
+})
+const subscribeDisabledReason = hasActiveSubscription
+  ? 'This member already has an active subscription. Please expire/edit it first.'
+  : undefined
+
+
 
   // Attendance is a staff-only view.
   // Members / coaches can see their own profile + subscriptions, but not attendance.
@@ -260,6 +282,8 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
                   buttonLabel="New subscription"
                   defaultPlan="1m"
                   defaultSessions={10}
+                  disabled={hasActiveSubscription}
+                  disabledReason={subscribeDisabledReason}
                 />
               </div>
             )}

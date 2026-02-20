@@ -70,6 +70,8 @@ export default function SubscribeDialog({
   defaultSessions,
   buttonLabel = 'Subscribe',
   onCreated,
+  disabled = false,
+  disabledReason,
 }: {
   member: { user_id: string; email: string | null; first_name: string | null; last_name: string | null }
   defaultPlan?: Plan
@@ -77,6 +79,8 @@ export default function SubscribeDialog({
   defaultSessions?: number // 1..10
   buttonLabel?: string
   onCreated?: (payload: any) => void
+  disabled?: boolean
+  disabledReason?: string
 }) {
   const router = useRouter()
 
@@ -219,9 +223,14 @@ export default function SubscribeDialog({
 
   return (
     <>
-      <Button variant="outline" onClick={() => setOpen(true)}>
+      <Button variant="outline" onClick={() => !disabled && setOpen(true)} disabled={disabled} title={disabled ? (disabledReason ?? "Disabled") : undefined}>
         {buttonLabel}
       </Button>
+      {disabled && disabledReason ? (
+        <div className="mt-1 text-[11px] text-[hsl(var(--muted))]" title={disabledReason}>
+          {disabledReason}
+        </div>
+      ) : null}
 
       {open && (
         <>
