@@ -72,21 +72,24 @@ const listMyOrdersCached = unstable_cache(
           currency
         )
       `,
-        { count: 'exact' }
+        
       )
       // Mine: match both columns to be safe (some setups use member_id; others use user_id)
       .or(`user_id.eq.${user_id},member_id.eq.${user_id}`)
       .order('created_at', { ascending: false })
-      .range(fromRow, toRow)
+      .range(fromRow, toRow + 1)
 
     if (status && status !== 'all') qry = qry.eq('status', status)
     if (from) qry = qry.gte('created_at', `${from}T00:00:00.000Z`)
     if (to) qry = qry.lte('created_at', `${to}T23:59:59.999Z`)
 
-    const { data, error, count } = await qry
-    if (error) throw new Error(errorMsg)
+    const { data, error } = await qry
+    if (error) throw new Error(error.message)
 
-    return { orders: (data ?? []) as any, total: Number(count ?? 0) }
+    const rows = (data ?? []) as any[]
+    const hasMore = rows.length > (toRow - fromRow + 1)
+    const sliced = hasMore ? rows.slice(0, (toRow - fromRow + 1)) : rows
+    return { orders: sliced as any, hasMore }
   },
   ['my_orders_v2'],
   { revalidate: 60, tags: ['orders'] }
@@ -164,34 +167,22 @@ export default async function OrdersPage({
   const status = normalizeStatus(strParam(searchParams?.status))
   const from = strParam(searchParams?.from).trim() // YYYY-MM-DD
   const to = strParam(searchParams?.to).trim() // YYYY-MM-DD
-
   const fromRow = (page - 1) * pageSize
   const toRow = fromRow + pageSize - 1
-const fromRow = (page - 1) * pageSize
-const toRow = fromRow + pageSize - 1
 
 let orders: OrderRow[] = []
 let errorMsg: string | null = null
-let total = 0
+let hasMore = false
 
 try {
-  const res = await listMyOrdersCached({
-    user_id: me.id,
-    status,
-    from,
-    to,
-    fromRow,
-    toRow,
-  })
+  const res = await listMyOrdersCached(me.id, status, from, to, fromRow, toRow)
   orders = res.orders as any
-  total = res.total
+  hasMore = Boolean((res as any).hasMore)
 } catch (e: any) {
   errorMsg = e?.message || String(e)
 }
 
-const totalPages = Math.max(1, Math.ceil(total / pageSize))
-
-  const baseParams = { status, from, to, page_size: String(pageSize) }
+const baseParams = { status, from, to, page_size: String(pageSize) }
 
   return (
     <main>
@@ -201,9 +192,9 @@ const totalPages = Math.max(1, Math.ceil(total / pageSize))
         <Card>
           <CardContent className="flex flex-wrap items-center gap-3">
             <div className="text-sm text-gray-600">
-              {total > 0 ? (
+              {orders.length > 0 ? (
                 <>
-                  Showing <b>{fromRow + 1}</b>–<b>{Math.min(fromRow + orders.length, total)}</b> of <b>{total}</b>
+                  Showing <b>{fromRow + 1}</b>–<b>{fromRow + orders.length}</b> of <b>{fromRow + orders.length}</b>
                 </>
               ) : (
                 <>No orders yet.</>
@@ -336,7 +327,7 @@ const totalPages = Math.max(1, Math.ceil(total / pageSize))
         )}
 
         {/* Pagination */}
-        {!errorMsg && total > 0 && totalPages > 1 && (
+        {!errorMsg && (page > 1 || hasMore) && (
           <div className="flex items-center gap-2">
             <Link
               prefetch={false}
@@ -347,13 +338,13 @@ const totalPages = Math.max(1, Math.ceil(total / pageSize))
               Prev
             </Link>
             <div className="text-sm">
-              Page <b>{page}</b> / {totalPages}
+              Page <b>{page}</b>
             </div>
             <Link
               prefetch={false}
-              href={buildUrl('/orders', { ...baseParams, page: String(Math.min(totalPages, page + 1)) })}
-              aria-disabled={page >= totalPages}
-              className={`px-2 py-1 rounded border ${page >= totalPages ? 'opacity-50 pointer-events-none' : 'hover:bg-gray-50'}`}
+              href={buildUrl('/orders', { ...baseParams, page: String(page + 1) })}
+              aria-disabled={!hasMore}
+              className={`px-2 py-1 rounded border ${!hasMore ? 'opacity-50 pointer-events-none' : 'hover:bg-gray-50'}`}
             >
               Next
             </Link>

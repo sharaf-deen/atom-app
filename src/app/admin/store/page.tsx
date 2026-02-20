@@ -30,7 +30,7 @@ const AdminOrderStatusEditor = dynamicImport(() => import('@/components/store/Ad
 const adminListStoreOrdersCached = unstable_cache(
   async (q: string, status: string, from_date: string | null, to_date: string | null, page: number, page_size: number) => {
     const supa = getSupabaseAdminClientCached()
-    const { data, error } = await supa.rpc('admin_list_store_orders', {
+    const { data, error } = await supa.rpc('admin_list_store_orders_lite', {
       _q: q,
       _status: status,
       _from_date: from_date,
@@ -41,14 +41,14 @@ const adminListStoreOrdersCached = unstable_cache(
     if (error) throw new Error(error.message)
     return (data ?? []) as any[]
   },
-  ['admin_list_store_orders_v3'],
+  ['admin_list_store_orders_lite_v3'],
   { revalidate: 20, tags: ['admin-store-orders', 'orders'] }
 )
 
 const adminSearchStoreProductsCached = unstable_cache(
   async (q: string, category: string, active: string, page: number, page_size: number) => {
     const supa = getSupabaseAdminClientCached()
-    const { data, error } = await supa.rpc('admin_search_store_products', {
+    const { data, error } = await supa.rpc('admin_search_store_products_lite', {
       _q: q,
       _category: category,
       _active: active,
@@ -58,7 +58,7 @@ const adminSearchStoreProductsCached = unstable_cache(
     if (error) throw new Error(error.message)
     return (data ?? []) as any[]
   },
-  ['admin_search_store_products_v2'],
+  ['admin_search_store_products_lite_v2'],
   { revalidate: 120, tags: ['admin-store-products', 'store-products'] }
 )
 
@@ -189,16 +189,14 @@ export default async function AdminStorePage({
   // ----- Data -----
   let orders: AdminOrderRow[] = []
   let ordersError: string | null = null
-  let ordersTotal = 0
-  let ordersTotalPages = 1
+  let ordersHasMore = false
 
   if (tab === 'orders') {
     try {
       const data = await adminListStoreOrdersCached(q, status, from || null, to || null, page, pageSize)
       orders = Array.isArray(data) ? (data as any) : []
-      ordersTotal = Number((orders[0] as any)?.total_count ?? 0)
-      ordersTotalPages = Math.max(1, Math.ceil(ordersTotal / pageSize))
-    } catch (e: any) {
+      ordersHasMore = Boolean((orders[0] as any)?.has_more ?? false)
+} catch (e: any) {
       ordersError = e?.message || String(e)
     }
   }
@@ -218,16 +216,14 @@ export default async function AdminStorePage({
 
   let products: ProductRow[] = []
   let productsError: string | null = null
-  let productsTotal = 0
-  let productsTotalPages = 1
+  let productsHasMore = false
 
   if (tab === 'products') {
     try {
       const data = await adminSearchStoreProductsCached(pQ, pCategory, pActive, pPage, pPageSize)
       products = Array.isArray(data) ? (data as any) : []
-      productsTotal = Number((products[0] as any)?.total_count ?? 0)
-      productsTotalPages = Math.max(1, Math.ceil(productsTotal / pPageSize))
-    } catch (e: any) {
+      productsHasMore = Boolean((products[0] as any)?.has_more ?? false)
+} catch (e: any) {
       productsError = e?.message || String(e)
     }
   }
@@ -342,9 +338,9 @@ const ordersBaseParams = {
                   </Link>
 
                   <div className="ml-auto text-xs text-[hsl(var(--muted))]">
-                    {ordersTotal > 0 ? (
+                    {orders.length > 0 ? (
                       <>
-                        Page <b>{page}</b> / {ordersTotalPages} · Total <b>{ordersTotal}</b>
+                        Page <b>{page}</b>{ordersHasMore ? (<> · More</>) : null}
                       </>
                     ) : (
                       <>No orders.</>
@@ -421,7 +417,7 @@ const ordersBaseParams = {
             )}
 
             {/* Pagination */}
-            {!ordersError && ordersTotal > 0 && ordersTotalPages > 1 ? (
+            {!ordersError && orders.length > 0 && (page > 1 || ordersHasMore) ? (
               <div className="flex items-center gap-2">
                 <Link
                   prefetch={false}
@@ -432,13 +428,13 @@ const ordersBaseParams = {
                   Prev
                 </Link>
                 <div className="text-sm">
-                  Page <b>{page}</b> / {ordersTotalPages}
+                  Page <b>{page}</b>
                 </div>
                 <Link
                   prefetch={false}
-                  href={buildUrl('/admin/store', { ...ordersBaseParams, page: String(Math.min(ordersTotalPages, page + 1)) })}
-                  aria-disabled={page >= ordersTotalPages}
-                  className={`px-2 py-1 rounded border ${page >= ordersTotalPages ? 'opacity-50 pointer-events-none' : 'hover:bg-gray-50'}`}
+                  href={buildUrl('/admin/store', { ...ordersBaseParams, page: String(page + 1) })}
+                  aria-disabled={!ordersHasMore}
+                  className={`px-2 py-1 rounded border ${!ordersHasMore ? 'opacity-50 pointer-events-none' : 'hover:bg-gray-50'}`}
                 >
                   Next
                 </Link>
@@ -518,9 +514,9 @@ const ordersBaseParams = {
                   </Link>
 
                   <div className="ml-auto text-xs text-[hsl(var(--muted))]">
-                    {productsTotal > 0 ? (
+                    {products.length > 0 ? (
                       <>
-                        Page <b>{pPage}</b> / {productsTotalPages} · Total <b>{productsTotal}</b>
+                        Page <b>{pPage}</b>{productsHasMore ? (<> · More</>) : null}
                       </>
                     ) : (
                       <>No products.</>
@@ -574,7 +570,7 @@ const ordersBaseParams = {
             )}
 
             {/* Pagination */}
-            {!productsError && productsTotal > 0 && productsTotalPages > 1 ? (
+            {!productsError && products.length > 0 && (pPage > 1 || productsHasMore) ? (
               <div className="flex items-center gap-2">
                 <Link
                   prefetch={false}
@@ -585,13 +581,13 @@ const ordersBaseParams = {
                   Prev
                 </Link>
                 <div className="text-sm">
-                  Page <b>{pPage}</b> / {productsTotalPages}
+                  Page <b>{pPage}</b>
                 </div>
                 <Link
                   prefetch={false}
-                  href={buildUrl('/admin/store', { ...productsBaseParams, p_page: String(Math.min(productsTotalPages, pPage + 1)) })}
-                  aria-disabled={pPage >= productsTotalPages}
-                  className={`px-2 py-1 rounded border ${pPage >= productsTotalPages ? 'opacity-50 pointer-events-none' : 'hover:bg-gray-50'}`}
+                  href={buildUrl('/admin/store', { ...productsBaseParams, p_page: String(pPage + 1) })}
+                  aria-disabled={!productsHasMore}
+                  className={`px-2 py-1 rounded border ${!productsHasMore ? 'opacity-50 pointer-events-none' : 'hover:bg-gray-50'}`}
                 >
                   Next
                 </Link>

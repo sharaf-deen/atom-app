@@ -49,9 +49,9 @@ const listStoreProductsCached = unstable_cache(
 
     let qry = supa
       .from('store_products')
-      .select('id, category, name, color, size, price_cents, currency, inventory_qty, is_active, created_at', { count: 'exact' })
+      .select('id, category, name, color, size, price_cents, currency, inventory_qty, is_active, created_at', )
       .order('created_at', { ascending: false })
-      .range(fromRow, toRow)
+      .range(fromRow, toRow + 1)
 
     // Buyers & reception/admin: show active products only
     if (!isSuperAdmin) qry = qry.eq('is_active', true)
@@ -76,10 +76,13 @@ const listStoreProductsCached = unstable_cache(
       }
     }
 
-    const { data, error, count } = await qry
-    if (error) throw new Error(errorMsg)
+    const { data, error } = await qry
+    if (error) throw new Error(error.message)
 
-    return { items: (data ?? []) as any, total: Number(count ?? 0) }
+    const rows = (data ?? []) as any[]
+    const hasMore = rows.length > (toRow - fromRow + 1)
+    const sliced = hasMore ? rows.slice(0, (toRow - fromRow + 1)) : rows
+    return { items: sliced as any, hasMore }
   },
   ['store_products_v2'],
   { revalidate: 120, tags: ['store-products'] }
@@ -129,18 +132,17 @@ export default async function StorePage({
 
 let items: ProductRow[] = []
 let errorMsg: string | null = null
-let total = 0
+let hasMore = false
+
 try {
-  const res = await listStoreProductsCached({ isSuperAdmin, category, q, fromRow, toRow })
+  const res = await listStoreProductsCached(isSuperAdmin, category, q, fromRow, toRow)
   items = res.items as any
-  total = res.total
+  hasMore = Boolean((res as any).hasMore)
 } catch (e: any) {
   errorMsg = e?.message || String(e)
 }
 
-const totalPages = Math.max(1, Math.ceil(total / pageSize))
-
-  const baseParams = {
+const baseParams = {
     category: category === 'all' ? '' : category,
     q,
     page_size: String(pageSize),
@@ -224,9 +226,9 @@ const totalPages = Math.max(1, Math.ceil(total / pageSize))
               </Link>
 
               <div className="ml-auto text-xs text-[hsl(var(--muted))]">
-                {total > 0 ? (
+                {items.length > 0 ? (
                   <>
-                    Showing <b>{fromRow + 1}</b>–<b>{Math.min(fromRow + items.length, total)}</b> of <b>{total}</b>
+                    Showing <b>{fromRow + 1}</b>–<b>{fromRow + items.length}</b>
                   </>
                 ) : (
                   <>No products.</>
@@ -299,7 +301,7 @@ const totalPages = Math.max(1, Math.ceil(total / pageSize))
         )}
 
         {/* Pagination */}
-        {!errorMsg && total > 0 && totalPages > 1 ? (
+        {!errorMsg && (page > 1 || hasMore) ? (
           <div className="flex items-center gap-2">
             <Link
               prefetch={false}
@@ -310,13 +312,13 @@ const totalPages = Math.max(1, Math.ceil(total / pageSize))
               Prev
             </Link>
             <div className="text-sm">
-              Page <b>{page}</b> / {totalPages}
+              Page <b>{page}</b>
             </div>
             <Link
               prefetch={false}
-              href={buildUrl('/store', { ...baseParams, page: String(Math.min(totalPages, page + 1)) })}
-              aria-disabled={page >= totalPages}
-              className={`px-2 py-1 rounded border ${page >= totalPages ? 'opacity-50 pointer-events-none' : 'hover:bg-gray-50'}`}
+              href={buildUrl('/store', { ...baseParams, page: String(page + 1) })}
+              aria-disabled={!hasMore}
+              className={`px-2 py-1 rounded border ${!hasMore ? 'opacity-50 pointer-events-none' : 'hover:bg-gray-50'}`}
             >
               Next
             </Link>
