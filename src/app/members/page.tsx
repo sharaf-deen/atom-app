@@ -3,6 +3,7 @@ export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
 import { redirect } from 'next/navigation'
+import { unstable_cache } from 'next/cache'
 import PageHeader from '@/components/layout/PageHeader'
 import Section from '@/components/layout/Section'
 import AccessDeniedPage from '@/components/AccessDeniedPage'
@@ -30,6 +31,27 @@ type MemberRow = {
 }
 
 type MemberRowWithTotal = MemberRow & { total_count?: number | string | null }
+const membersStatsCached = unstable_cache(
+  async () => {
+    const admin = createSupabaseAdminClient()
+    const { data, error } = await admin.rpc('members_activity_stats')
+    if (error) throw new Error(error.message)
+    return data
+  },
+  ['members_activity_stats_v1'],
+  { revalidate: 60, tags: ['members'] }
+)
+
+const searchMembersCached = unstable_cache(
+  async (params: { q: string | null; status: Status; page: number; page_size: number }) => {
+    const admin = createSupabaseAdminClient()
+    const { data, error } = await admin.rpc('search_members', params)
+    if (error) throw new Error(error.message)
+    return (data ?? []) as MemberRowWithTotal[]
+  },
+  ['search_members_v1'],
+  { revalidate: 30, tags: ['members'] }
+)
 
 function clampInt(n: number, min: number, max: number) {
   if (!Number.isFinite(n)) return min
@@ -145,11 +167,13 @@ export default async function MembersPage({
     )
   }
 
-  const admin = createSupabaseAdminClient()
-
-  // Stats (server rendered) via RPC (Postgres does the heavy lifting).
-  const { data: statsData, error: statsError } = await admin.rpc('members_activity_stats')
-  if (statsError) console.error('Error fetching members stats (RPC):', statsError)
+  // Stats (cached) via RPC (Postgres does the heavy lifting).
+  let statsData: any = null
+  try {
+    statsData = await membersStatsCached()
+  } catch (e: any) {
+    console.error('Error fetching members stats (RPC):', e?.message || e)
+  }
 
   const stats = (Array.isArray(statsData) ? statsData[0] : statsData) as
     | { total?: number | string | null; active?: number | string | null; inactive?: number | string | null }
@@ -166,21 +190,22 @@ export default async function MembersPage({
 
   // Pro search (FTS + trigram + pagination) via RPC.
   // Note: when q is set, we force status='all' to match the previous UX.
-  const { data, error } = await admin.rpc('search_members', {
-    q: q || null,
-    status: q ? 'all' : status,
-    page,
-    page_size: pageSize,
-  })
+  try {
+    const data = await searchMembersCached({
+      q: q || null,
+      status: q ? 'all' : status,
+      page,
+      page_size: pageSize,
+    })
 
-  if (error) {
-    errorMsg = error.message
-    rows = []
-    totalResults = 0
-  } else {
     const list = (data ?? []) as MemberRowWithTotal[]
     totalResults = list.length ? Number(list[0]?.total_count ?? 0) : 0
     rows = list.map(({ total_count: _t, ...rest }) => rest)
+  }
+  catch (e: any) {
+    errorMsg = e?.message || String(e)
+    rows = []
+    totalResults = 0
   }
 
   const totalPages = Math.max(1, Math.ceil(totalResults / pageSize))

@@ -4,8 +4,9 @@ export const revalidate = 0
 
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
+import { unstable_cache } from 'next/cache'
 import { getSessionUser } from '@/lib/session'
-import { createSupabaseRSC } from '@/lib/supabaseServer'
+import { createSupabaseAdminClient } from '@/lib/supabaseAdmin'
 import PageHeader from '@/components/layout/PageHeader'
 import Section from '@/components/layout/Section'
 import { Card, CardContent } from '@/components/ui/Card'
@@ -38,6 +39,61 @@ type OrderRow = {
   created_at: string
   store_order_items?: Item[] | null
 }
+
+const listMyOrdersCached = unstable_cache(
+  async (params: {
+    user_id: string
+    status: string
+    from: string
+    to: string
+    fromRow: number
+    toRow: number
+  }) => {
+    const supa = createSupabaseAdminClient()
+    const { user_id, status, from, to, fromRow, toRow } = params
+
+    let qry = supa
+      .from('store_orders')
+      .select(
+        `
+        id,
+        status,
+        total_cents,
+        discount_pct,
+        discount_percent,
+        preferred_payment,
+        payment_method,
+        note,
+        notes,
+        created_at,
+        store_order_items (
+          id,
+          name,
+          qty,
+          unit_price_cents,
+          currency
+        )
+      `,
+        { count: 'exact' }
+      )
+      // Mine: match both columns to be safe (some setups use member_id; others use user_id)
+      .or(`user_id.eq.${user_id},member_id.eq.${user_id}`)
+      .order('created_at', { ascending: false })
+      .range(fromRow, toRow)
+
+    if (status && status !== 'all') qry = qry.eq('status', status)
+    if (from) qry = qry.gte('created_at', `${from}T00:00:00.000Z`)
+    if (to) qry = qry.lte('created_at', `${to}T23:59:59.999Z`)
+
+    const { data, error, count } = await qry
+    if (error) throw new Error(errorMsg)
+
+    return { orders: (data ?? []) as any, total: Number(count ?? 0) }
+  },
+  ['my_orders_v1'],
+  { revalidate: 60, tags: ['orders'] }
+)
+
 
 function clampInt(v: unknown, def: number, min: number, max: number) {
   const raw = Array.isArray(v) ? v[0] : v
@@ -113,52 +169,35 @@ export default async function OrdersPage({
 
   const fromRow = (page - 1) * pageSize
   const toRow = fromRow + pageSize - 1
+const fromRow = (page - 1) * pageSize
+const toRow = fromRow + pageSize - 1
 
-  const supa = createSupabaseRSC()
+let orders: OrderRow[] = []
+let errorMsg: string | null = null
+let total = 0
 
-  let qry = supa
-    .from('store_orders')
-    .select(
-      `
-      id,
-      status,
-      total_cents,
-      discount_pct,
-      discount_percent,
-      preferred_payment,
-      payment_method,
-      note,
-      notes,
-      created_at,
-      store_order_items (
-        id,
-        name,
-        qty,
-        unit_price_cents,
-        currency
-      )
-    `,
-      { count: 'exact' }
-    )
-    // Mine: match both columns to be safe (some setups use member_id; others use user_id)
-    .or(`user_id.eq.${me.id},member_id.eq.${me.id}`)
-    .order('created_at', { ascending: false })
-    .range(fromRow, toRow)
+try {
+  const res = await listMyOrdersCached({
+    user_id: me.id,
+    status,
+    from,
+    to,
+    fromRow,
+    toRow,
+  })
+  orders = res.orders as any
+  total = res.total
+} catch (e: any) {
+  errorMsg = e?.message || String(e)
+}
 
-  if (status !== 'all') qry = qry.eq('status', status)
-  if (from) qry = qry.gte('created_at', `${from}T00:00:00.000Z`)
-  if (to) qry = qry.lte('created_at', `${to}T23:59:59.999Z`)
-
-  const { data, error, count } = await qry
-  const orders: OrderRow[] = Array.isArray(data) ? (data as any) : []
-  const total = Number(count ?? 0)
-  const totalPages = Math.max(1, Math.ceil(total / pageSize))
+const totalPages = Math.max(1, Math.ceil(total / pageSize))
 
   const baseParams = { status, from, to, page_size: String(pageSize) }
 
   return (
     <main>
-      <PageHeader title="My orders" subtitle="View of your orders." />
+      <PageHeader title="My orders" subtitle="Server-first (fast) view of your orders." />
 
       <Section className="space-y-6">
         <Card>
@@ -238,10 +277,10 @@ export default async function OrdersPage({
           </CardContent>
         </Card>
 
-        {error ? (
+        {errorMsg ? (
           <Card>
             <CardContent>
-              <div className="text-sm text-red-600">Failed to load orders: {error.message}</div>
+              <div className="text-sm text-red-600">Failed to load orders: {errorMsg}</div>
             </CardContent>
           </Card>
         ) : orders.length === 0 ? (
@@ -299,7 +338,7 @@ export default async function OrdersPage({
         )}
 
         {/* Pagination */}
-        {!error && total > 0 && totalPages > 1 && (
+        {!errorMsg && total > 0 && totalPages > 1 && (
           <div className="flex items-center gap-2">
             <Link
               prefetch={false}

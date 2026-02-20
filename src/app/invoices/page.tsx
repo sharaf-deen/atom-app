@@ -4,6 +4,7 @@ export const revalidate = 0
 
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
+import { unstable_cache } from 'next/cache'
 import PageHeader from '@/components/layout/PageHeader'
 import Section from '@/components/layout/Section'
 import AccessDeniedPage from '@/components/AccessDeniedPage'
@@ -24,6 +25,18 @@ type InvoiceRow = {
   member_code: string | null
   total_count: number | null
 }
+
+const searchInvoicesCached = unstable_cache(
+  async (params: { q: string; from_date: string | null; to_date: string | null; page: number; page_size: number }) => {
+    const supa = createSupabaseAdminClient()
+    const { data, error } = await supa.rpc('search_invoices', params)
+    if (error) throw new Error(error.message)
+    return (data ?? []) as InvoiceRow[]
+  },
+  ['search_invoices_v1'],
+  { revalidate: 60, tags: ['invoices'] }
+)
+
 
 const STAFF: Role[] = ['reception', 'admin', 'super_admin']
 const DEFAULT_PAGE_SIZE = 50
@@ -92,21 +105,18 @@ export default async function InvoicesPage({
   const from = strParam(searchParams?.from).trim() // YYYY-MM-DD
   const to = strParam(searchParams?.to).trim() // YYYY-MM-DD
 
-  const supa = createSupabaseAdminClient()
-
   // RPC expects from_date/to_date (date). Passing '' will fail casts, so pass null.
   const from_date = from || null
   const to_date = to || null
 
-  const { data, error } = await supa.rpc('search_invoices', {
-    q,
-    from_date,
-    to_date,
-    page,
-    page_size: pageSize,
-  })
+  let rows: InvoiceRow[] = []
+  let errorMsg: string | null = null
+  try {
+    rows = await searchInvoicesCached({ q, from_date, to_date, page, page_size: pageSize })
+  } catch (e: any) {
+    errorMsg = e?.message || String(e)
+  }
 
-  const rows: InvoiceRow[] = Array.isArray(data) ? (data as any) : []
   const total = rows.length ? Number(rows[0].total_count ?? 0) : 0
   const totalPages = Math.max(1, Math.ceil(total / pageSize))
 
@@ -175,8 +185,8 @@ export default async function InvoicesPage({
 
         {/* Table */}
         <section className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-5 shadow-soft space-y-3">
-          {error ? (
-            <div className="text-sm text-red-600">Failed to load invoices: {error.message}</div>
+          {errorMsg ? (
+            <div className="text-sm text-red-600">Failed to load invoices: {errorMsg}</div>
           ) : rows.length === 0 ? (
             <div className="text-sm text-[hsl(var(--muted))]">No invoices yet.</div>
           ) : (

@@ -4,8 +4,9 @@ export const revalidate = 0
 
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
+import { unstable_cache } from 'next/cache'
 import { getSessionUser } from '@/lib/session'
-import { createSupabaseRSC } from '@/lib/supabaseServer'
+import { createSupabaseAdminClient } from '@/lib/supabaseAdmin'
 import PageHeader from '@/components/layout/PageHeader'
 import Section from '@/components/layout/Section'
 import { Card, CardContent } from '@/components/ui/Card'
@@ -36,6 +37,56 @@ type ProductRow = {
   is_active: boolean
   created_at?: string | null
 }
+
+const listStoreProductsCached = unstable_cache(
+  async (params: {
+    isSuperAdmin: boolean
+    category: string
+    q: string
+    fromRow: number
+    toRow: number
+  }) => {
+    const supa = createSupabaseAdminClient()
+    const { isSuperAdmin, category, q, fromRow, toRow } = params
+
+    let qry = supa
+      .from('store_products')
+      .select('id, category, name, color, size, price_cents, currency, inventory_qty, is_active, created_at', { count: 'exact' })
+      .order('created_at', { ascending: false })
+      .range(fromRow, toRow)
+
+    // Buyers & reception/admin: show active products only
+    if (!isSuperAdmin) qry = qry.eq('is_active', true)
+
+    if (category && category !== 'all') qry = qry.eq('category', category)
+
+    if (q) {
+      if (q.length >= 3) {
+        // Fast search using FTS (GIN) on generated tsvector column
+        qry = qry.textSearch('search_tsv', q, { type: 'websearch', config: 'simple' })
+      } else {
+        // Short queries: substring search (trigram index helps)
+        const safe = q.replace(/,/g, ' ').trim()
+        qry = qry.or(
+          [
+            `name.ilike.%${safe}%`,
+            `color.ilike.%${safe}%`,
+            `size.ilike.%${safe}%`,
+            `category.ilike.%${safe}%`,
+          ].join(',')
+        )
+      }
+    }
+
+    const { data, error, count } = await qry
+    if (error) throw new Error(errorMsg)
+
+    return { items: (data ?? []) as any, total: Number(count ?? 0) }
+  },
+  ['store_products_v1'],
+  { revalidate: 120, tags: ['store-products'] }
+)
+
 
 function clampInt(v: unknown, def: number, min: number, max: number) {
   const raw = Array.isArray(v) ? v[0] : v
@@ -78,41 +129,18 @@ export default async function StorePage({
   const fromRow = (page - 1) * pageSize
   const toRow = fromRow + pageSize - 1
 
-  const supa = createSupabaseRSC()
+let items: ProductRow[] = []
+let errorMsg: string | null = null
+let total = 0
+try {
+  const res = await listStoreProductsCached({ isSuperAdmin, category, q, fromRow, toRow })
+  items = res.items as any
+  total = res.total
+} catch (e: any) {
+  errorMsg = e?.message || String(e)
+}
 
-  let qry = supa
-    .from('store_products')
-    .select('id, category, name, color, size, price_cents, currency, inventory_qty, is_active, created_at', { count: 'exact' })
-    .order('created_at', { ascending: false })
-    .range(fromRow, toRow)
-
-  // Buyers & reception/admin: show active products only
-  if (!isSuperAdmin) qry = qry.eq('is_active', true)
-
-  if (category !== 'all') qry = qry.eq('category', category)
-
-  if (q) {
-    if (q.length >= 3) {
-      // Fast search using FTS (GIN) on generated tsvector column
-      qry = qry.textSearch('search_tsv', q, { type: 'websearch', config: 'simple' })
-    } else {
-      // Short queries: substring search (trigram index helps)
-      const safe = q.replace(/,/g, ' ').trim()
-      qry = qry.or(
-        [
-          `name.ilike.%${safe}%`,
-          `color.ilike.%${safe}%`,
-          `size.ilike.%${safe}%`,
-          `category.ilike.%${safe}%`,
-        ].join(',')
-      )
-    }
-  }
-
-  const { data, error, count } = await qry
-  const items: ProductRow[] = Array.isArray(data) ? (data as any) : []
-  const total = Number(count ?? 0)
-  const totalPages = Math.max(1, Math.ceil(total / pageSize))
+const totalPages = Math.max(1, Math.ceil(total / pageSize))
 
   const baseParams = {
     category: category === 'all' ? '' : category,
@@ -210,10 +238,10 @@ export default async function StorePage({
           </CardContent>
         </Card>
 
-        {error ? (
+        {errorMsg ? (
           <Card>
             <CardContent>
-              <div className="text-sm text-red-600">Failed to load products: {error.message}</div>
+              <div className="text-sm text-red-600">Failed to load products: {errorMsg}</div>
             </CardContent>
           </Card>
         ) : items.length === 0 ? (
@@ -273,7 +301,7 @@ export default async function StorePage({
         )}
 
         {/* Pagination */}
-        {!error && total > 0 && totalPages > 1 ? (
+        {!errorMsg && total > 0 && totalPages > 1 ? (
           <div className="flex items-center gap-2">
             <Link
               prefetch={false}
