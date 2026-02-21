@@ -20,7 +20,10 @@ export default function AdminOrderStatusEditor({ orderId, currentStatus, current
   const [note, setNote] = useState<string>(currentNote || '')
   const [loading, setLoading] = useState(false)
 
-  const dirty = useMemo(() => status !== currentStatus || (note || '') !== (currentNote || ''), [status, currentStatus, note, currentNote])
+  const dirty = useMemo(
+    () => status !== currentStatus || (note || '') !== (currentNote || ''),
+    [status, currentStatus, note, currentNote]
+  )
 
   async function save() {
     if (loading) return
@@ -41,8 +44,14 @@ export default function AdminOrderStatusEditor({ orderId, currentStatus, current
       }
 
       toast.success('Order updated')
-      // Refresh server components (re-fetch orders list)
+
+      // ✅ Auto-refresh the server components list
       router.refresh()
+
+      // Some setups (edge caches / rapid consecutive updates) benefit from a second refresh shortly after.
+      setTimeout(() => {
+        router.refresh()
+      }, 250)
     } catch (e: any) {
       toast.error(e?.message || 'Network error')
     } finally {
