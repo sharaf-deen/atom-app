@@ -148,6 +148,7 @@ const MENU_BY_ROLE: GroupedMenuByRole = {
       items: [
         { label: 'Store', href: '/store', icon: ShoppingBag },
         { label: 'Invoices', href: '/invoices', icon: FileText },
+        { label: 'Outstanding Dues', href: '/admin/outstanding-dues', icon: Wallet },
         { label: 'Expenses', href: '/expenses', icon: Wallet },
       ],
     },
@@ -181,6 +182,7 @@ const MENU_BY_ROLE: GroupedMenuByRole = {
       items: [
         { label: 'Store', href: '/store/admin', icon: ShoppingBag },
         { label: 'Invoices', href: '/invoices', icon: FileText },
+        { label: 'Outstanding Dues', href: '/admin/outstanding-dues', icon: Wallet },
         { label: 'Expenses', href: '/expenses', icon: Wallet },
       ],
     },
