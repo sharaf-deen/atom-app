@@ -72,6 +72,7 @@ const MENU_BY_ROLE: MenuByRole = {
     { label: 'Store', href: '/store', icon: 'bag' },
     { label: 'Invoices', href: '/invoices', icon: 'file-text' },
     { label: 'Outstanding Dues', href: '/admin/outstanding-dues', icon: 'wallet' },
+    { label: 'Membership Activity', href: '/admin/membership-activity', icon: 'file-text' },
     { label: 'Expenses', href: '/expenses', icon: 'wallet' },
   ],
   super_admin: [
@@ -89,6 +90,7 @@ const MENU_BY_ROLE: MenuByRole = {
     { label: 'Store Admin', href: '/admin/store', icon: 'bag' },
     { label: 'Invoices', href: '/invoices', icon: 'file-text' },
     { label: 'Outstanding Dues', href: '/admin/outstanding-dues', icon: 'wallet' },
+    { label: 'Membership Activity', href: '/admin/membership-activity', icon: 'file-text' },
     { label: 'Expenses', href: '/expenses', icon: 'wallet' },
   ],
 }
