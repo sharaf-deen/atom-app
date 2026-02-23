@@ -152,7 +152,6 @@ const baseParams = {
     <main>
       <PageHeader
         title="Store"
-        subtitle={isBuyer ? 'Server-first catalog (fast) + cart' : 'Server-first catalog (fast)'}
       />
 
       <Section className="space-y-6">

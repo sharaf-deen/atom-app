@@ -243,13 +243,6 @@ export async function POST(req: Request) {
     if (!Number.isFinite(amountDueNum) || amountDueNum < 0) {
       return json(400, { ok: false, error: 'INVALID_AMOUNT_DUE', details: 'amount_due must be a positive number.' })
     }
-    if (amountDueNum > amount) {
-      return json(400, {
-        ok: false,
-        error: 'AMOUNT_DUE_TOO_HIGH',
-        details: 'amount_due cannot be greater than amount.',
-      })
-    }
     const amount_due = amountDueNum
 
     let memberId: string | null = typeof body?.memberId === 'string' ? body.memberId.trim() : null

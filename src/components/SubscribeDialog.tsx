@@ -157,9 +157,7 @@ export default function SubscribeDialog({
   const amountDueOk =
     amountDue !== '' &&
     Number.isFinite(amountDueNum) &&
-    amountDueNum >= 0 &&
-    // If amount is valid, enforce due <= amount
-    (!amountOk || amountDueNum <= amountNum)
+    amountDueNum >= 0
 
   const dateOk = isISODateOnly(startDate)
   const sessionsOk = Number.isFinite(sessions) && sessions >= 1 && sessions <= 10
@@ -352,7 +350,7 @@ export default function SubscribeDialog({
                   )}
 
                   <Input
-                    label="Amount (EGP)"
+                    label="Paid now (EGP)"
                     type="number"
                     min={0}
                     step="1"
@@ -383,9 +381,6 @@ export default function SubscribeDialog({
                     onChange={(e) => setAmountDue(e.target.value)}
                     disabled={busy || status.kind === 'success'}
                   />
-                  <p className="text-xs text-[hsl(var(--muted))] -mt-2">
-                    If the member paid in full, set <b>0</b>. If they still owe money, enter the remaining amount.
-                  </p>
                 </div>
 
                 <div className="mt-4 flex flex-wrap items-center gap-2">

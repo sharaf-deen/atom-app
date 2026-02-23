@@ -151,6 +151,24 @@ export async function POST(req: Request) {
     update.amount = amount
   }
 
+  // Remaining due
+  if (patch.amount_due !== undefined || patch.amountDue !== undefined) {
+    const raw = patch.amount_due !== undefined ? patch.amount_due : patch.amountDue
+    const amount_due = Number(raw)
+    if (!Number.isFinite(amount_due) || amount_due < 0) return json(400, { ok: false, error: 'Invalid amount_due' })
+    update.amount_due = amount_due
+  }
+
+  // Payment method
+  if (patch.payment_method !== undefined || patch.paymentMethod !== undefined) {
+    const raw = patch.payment_method !== undefined ? patch.payment_method : patch.paymentMethod
+    const pm = String(raw ?? '').trim().toLowerCase()
+    if (pm && !['cash', 'instapay', 'card', 'bank_transfer'].includes(pm)) {
+      return json(400, { ok: false, error: 'Invalid payment_method' })
+    }
+    update.payment_method = pm || null
+  }
+
   // Status (optional) — only allow existing DB values (prevents "suspended")
   if (patch.status !== undefined) {
     const s = String(patch.status)
@@ -255,6 +273,8 @@ export async function POST(req: Request) {
       diff('End', (current as any)?.end_date, (updated as any)?.end_date)
       diff('Sessions total', (current as any)?.sessions_total, (updated as any)?.sessions_total)
       diff('Amount', (current as any)?.amount, (updated as any)?.amount)
+      diff('Due', (current as any)?.amount_due, (updated as any)?.amount_due)
+      diff('Payment', (current as any)?.payment_method, (updated as any)?.payment_method)
       diff('Status', (current as any)?.status, (updated as any)?.status)
 
       const title = 'Subscription updated'
@@ -414,11 +434,13 @@ export async function POST(req: Request) {
             const signedUrl = (signed as any)?.signedUrl as string | undefined
             const name = ([member.first_name ?? '', member.last_name ?? ''].join(' ').trim() || to) as string
             const subject = `ATOM Invoice ${invoice_number}`
+            const total = (Number.isFinite(amount) ? amount : 0) + (Number.isFinite(amount_due) ? amount_due : 0)
             const text =
               `Hi ${name},\n\n` +
               `Your updated invoice is ready.\n` +
               `Invoice: ${invoice_number}\n` +
-              `Amount: ${amount} ${currency}\n` +
+              `Total: ${total} ${currency}\n` +
+              `Paid: ${amount} ${currency}\n` +
               (Number.isFinite(amount_due) && amount_due > 0 ? `Remaining due: ${amount_due} ${currency}\n` : '') +
               (payment_method ? `Payment method: ${payment_method}\n` : '') +
               `Paid at: ${paid_at}\n\n` +

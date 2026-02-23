@@ -26,6 +26,8 @@ export type InvoiceSnapshot = {
     start_date: string | null
     end_date: string | null
     sessions_total: number | null
+    // Amount paid so far (EGP)
+    // Total is derived as: amount (paid) + amount_due (remaining due)
     amount: number
     amount_due?: number | null
     payment_method?: string | null
@@ -150,12 +152,16 @@ export async function generateInvoicePdfBytes(snapshot: InvoiceSnapshot) {
   y -= 16
   row('Paid at:', fmtDate(snapshot.transaction.paid_at), 'left')
 
-  const amount = Number(snapshot.transaction.amount ?? 0)
-  const safeAmount = Number.isFinite(amount) && amount > 0 ? amount : 0
-  const due = Number(snapshot.transaction.amount_due ?? 0)
-  const safeDue = Number.isFinite(due) && due > 0 ? Math.min(due, safeAmount) : 0
-  const paid = Math.max(0, safeAmount - safeDue)
-  const total = paid + safeDue // explicitly: total = paid + due
+  // Business rule:
+  // - transaction.amount = paid so far
+  // - transaction.amount_due = remaining due
+  // - total = paid + due
+  const paidRaw = Number(snapshot.transaction.amount ?? 0)
+  const dueRaw = Number(snapshot.transaction.amount_due ?? 0)
+
+  const paid = Number.isFinite(paidRaw) && paidRaw > 0 ? paidRaw : 0
+  const safeDue = Number.isFinite(dueRaw) && dueRaw > 0 ? dueRaw : 0
+  const total = paid + safeDue
 
   row('Total:', money(total, snapshot.transaction.currency), 'right')
 

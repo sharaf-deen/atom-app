@@ -28,7 +28,6 @@ export default function StoreCartPanel() {
         >
           {open ? 'Hide cart' : 'Open cart'}
         </button>
-        <div className="text-xs text-[hsl(var(--muted))]">Cart is lazy-loaded to reduce initial bundle.</div>
       </div>
 
       {open ? <StoreCart /> : null}

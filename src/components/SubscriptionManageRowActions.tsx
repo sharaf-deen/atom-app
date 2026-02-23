@@ -7,6 +7,7 @@ import { toast } from 'sonner'
 import Button from '@/components/ui/Button'
 import Input from '@/components/ui/Input'
 import Select from '@/components/ui/Select'
+import SettleDueDialog from '@/components/SettleDueDialog'
 // Note: we intentionally avoid depending on a specific Alert component API here.
 // We'll render a lightweight inline message box to prevent TS prop mismatches.
 
@@ -53,6 +54,8 @@ export default function SubscriptionManageRowActions({
     sessions_total: number | null
     sessions_used: number | null
     amount: number | null
+    amount_due?: number | null
+    payment_method?: string | null
   }
 }) {
   const router = useRouter()
@@ -364,6 +367,20 @@ export default function SubscriptionManageRowActions({
       <Button size="sm" variant="outline" onClick={() => setOpenEdit(true)} disabled={!canEdit}>
         Edit
       </Button>
+
+      {Number(sub.amount_due ?? 0) > 0 ? (
+        <SettleDueDialog
+          sub={{
+            id: sub.id,
+            amount: sub.amount ?? 0,
+            amount_due: sub.amount_due ?? 0,
+            payment_method: sub.payment_method ?? null,
+          }}
+          buttonLabel="Payment"
+          size="sm"
+          allowEmailOption
+        />
+      ) : null}
 
       {isTime ? (
         <Button size="sm" variant="outline" onClick={() => setOpenFreeze(true)} disabled={!canEdit}>
