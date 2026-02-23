@@ -401,6 +401,14 @@ export default async function ExpensesPage({
                 Export CSV
               </a>
 
+
+
+              <a
+                href={`/api/expenses/export-pdf?${exportQS}`}
+                className="inline-flex items-center justify-center rounded-2xl shadow-soft transition ease-soft focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-[hsl(var(--bg))] bg-white text-black border border-[hsl(var(--border))] hover:bg-[hsl(var(--bg))]/80 px-4 py-2 text-sm"
+              >
+                Export PDF
+              </a>
               <span className="text-xs text-[hsl(var(--muted))]">Tip: choose “Custom” if you want manual dates.</span>
             </div>
           </form>
