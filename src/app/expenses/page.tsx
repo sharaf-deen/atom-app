@@ -75,6 +75,9 @@ async function addExpenseAction(formData: FormData) {
   const description = safeStr(formData.get('description')).trim()
   const dateRaw = safeStr(formData.get('date')).trim()
   const amountRaw = safeStr(formData.get('amount')).trim()
+  const payment_method = safeStr(formData.get('payment_method')).trim()
+
+  const receipt = formData.get('receipt')
 
   if (!category_key) {
     redirect(`/expenses?${return_qs}&error=${encodeURIComponent('Please choose a category.')}`)
@@ -89,12 +92,63 @@ async function addExpenseAction(formData: FormData) {
   const date = dateRaw || today
 
   const admin = createSupabaseAdminClient()
+
+  // Validate payment method
+  const allowedMethods = new Set(['cash', 'visa', 'instapay', 'bank_transfer'])
+  if (!allowedMethods.has(payment_method)) {
+    redirect(`/expenses?${return_qs}&error=${encodeURIComponent('Please choose a payment method.')}`)
+  }
+
+  // Optional receipt upload
+  let receipt_path: string | null = null
+  let receipt_mime: string | null = null
+  let receipt_filename: string | null = null
+
+  if (receipt && typeof (receipt as any)?.arrayBuffer === 'function') {
+    const file = receipt as File
+    if (file.size > 0) {
+      const max = 8 * 1024 * 1024 // 8MB
+      if (file.size > max) {
+        redirect(`/expenses?${return_qs}&error=${encodeURIComponent('Receipt file is too large (max 8MB).')}`)
+      }
+
+      const mime = (file.type || '').toLowerCase()
+      const ok = mime.startsWith('image/') || mime === 'application/pdf'
+      if (!ok) {
+        redirect(
+          `/expenses?${return_qs}&error=${encodeURIComponent('Receipt must be an image (JPG/PNG/WEBP) or PDF.')}`
+        )
+      }
+
+      const originalName = (file.name || 'receipt').replace(/[^a-zA-Z0-9._-]+/g, '_')
+      const uuid = (globalThis as any)?.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`
+      const path = `expenses/${date}/${uuid}-${originalName}`
+
+      const ab = await file.arrayBuffer()
+      const up = await admin.storage.from('expense-receipts').upload(path, ab, {
+        contentType: mime || 'application/octet-stream',
+        upsert: false,
+      })
+
+      if (up.error) {
+        redirect(`/expenses?${return_qs}&error=${encodeURIComponent(up.error.message || 'Receipt upload failed.')}`)
+      }
+
+      receipt_path = path
+      receipt_mime = mime || null
+      receipt_filename = file.name || null
+    }
+  }
   const { error } = await admin.from('expenses').insert([
     {
       date,
       category_key,
       description: description || null,
       amount,
+      payment_method,
+      receipt_path,
+      receipt_mime,
+      receipt_filename,
     },
   ])
 
@@ -177,7 +231,7 @@ export default async function ExpensesPage({
 
   let q = admin
     .from('expenses')
-    .select('id,date,category_key,description,amount')
+    .select('id,date,category_key,description,amount,payment_method,receipt_path')
     .order('date', { ascending: false })
 
   if (from) q = q.gte('date', from)
@@ -193,6 +247,8 @@ export default async function ExpensesPage({
       category_key: string | null
       description: string | null
       amount: number
+      payment_method?: string | null
+      receipt_path?: string | null
     }>
 
   const total = expenses.reduce((sum, e) => sum + (Number.isFinite(e.amount) ? e.amount : 0), 0)
@@ -329,6 +385,8 @@ export default async function ExpensesPage({
                     <th className="py-2 pr-3">Date</th>
                     <th className="py-2 pr-3">Category</th>
                     <th className="py-2 pr-3">Description</th>
+                    <th className="py-2 pr-3">Payment</th>
+                    <th className="py-2 pr-3">Receipt</th>
                     <th className="py-2 text-right">Amount</th>
                   </tr>
                 </thead>
@@ -340,6 +398,23 @@ export default async function ExpensesPage({
                         {e.category_key ? labelByKey.get(e.category_key) ?? e.category_key : '—'}
                       </td>
                       <td className="py-2 pr-3 text-[hsl(var(--muted))]">{e.description ?? '—'}</td>
+                      <td className="py-2 pr-3 whitespace-nowrap">
+                        {e.payment_method ? e.payment_method.replace('_', ' ') : '—'}
+                      </td>
+                      <td className="py-2 pr-3 whitespace-nowrap">
+                        {e.receipt_path ? (
+                          <a
+                            className="text-xs underline"
+                            href={`/api/expenses/${e.id}/receipt`}
+                            target="_blank"
+                            rel="noreferrer"
+                          >
+                            View
+                          </a>
+                        ) : (
+                          <span className="text-[hsl(var(--muted))]">—</span>
+                        )}
+                      </td>
                       <td className="py-2 text-right font-medium">{formatEGP(e.amount)}</td>
                     </tr>
                   ))}
@@ -399,6 +474,21 @@ export default async function ExpensesPage({
               />
             </label>
 
+            <label className="block">
+              <span className="mb-1 block text-sm font-medium">Payment method</span>
+              <select
+                name="payment_method"
+                defaultValue="cash"
+                className="w-full rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-[hsl(var(--bg))]"
+                required
+              >
+                <option value="cash">Cash</option>
+                <option value="visa">Visa card</option>
+                <option value="instapay">Instapay</option>
+                <option value="bank_transfer">Bank transfer</option>
+              </select>
+            </label>
+
             <label className="block sm:col-span-4">
               <span className="mb-1 block text-sm font-medium">Description</span>
               <input
@@ -406,6 +496,17 @@ export default async function ExpensesPage({
                 placeholder="Optional…"
                 className="w-full rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm placeholder:text-[hsl(var(--muted))] outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-[hsl(var(--bg))]"
               />
+            </label>
+
+            <label className="block sm:col-span-4">
+              <span className="mb-1 block text-sm font-medium">Receipt (optional)</span>
+              <input
+                type="file"
+                name="receipt"
+                accept="image/*,application/pdf"
+                className="w-full rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm"
+              />
+              <span className="mt-1 block text-xs text-[hsl(var(--muted))]">Max 8MB. JPG/PNG/WEBP or PDF.</span>
             </label>
 
             <div className="sm:col-span-4 flex items-center gap-2 pt-2">
