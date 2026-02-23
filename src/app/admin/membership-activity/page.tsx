@@ -361,18 +361,6 @@ export default async function MembershipActivityLogPage({
             </Link>
           </div>
         </div>
-
-        <Card>
-          <CardContent className="p-4 text-xs text-[hsl(var(--muted-foreground))] space-y-1">
-            <div>
-              Tip: use <span className="font-medium">Action</span> filter with keywords like <span className="font-medium">renew</span>,{' '}
-              <span className="font-medium">pause</span>, <span className="font-medium">resume</span>, <span className="font-medium">invite</span>.
-            </div>
-            <div>
-              Note: timestamps are displayed as UTC here (stable across environments). If you want Cairo local time display, tell me and I’ll switch it.
-            </div>
-          </CardContent>
-        </Card>
       </Section>
     </main>
   )

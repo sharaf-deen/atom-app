@@ -54,6 +54,16 @@ function makeAdminClient() {
   return createClient<any>(url, key, { auth: { persistSession: false } })
 }
 
+const ACTION_SUB_UPDATE = 'subscription_update'
+
+async function safeAudit(admin: any, row: any) {
+  try {
+    await admin.from('audit_logs').insert(row)
+  } catch {
+    // audit must never break the flow
+  }
+}
+
 async function trySendResendEmail(args: { to: string; subject: string; text: string }) {
   const apiKey = process.env.RESEND_API_KEY
   const from = process.env.MAIL_FROM || 'noreply@example.com'
@@ -251,6 +261,20 @@ export async function POST(req: Request) {
     .maybeSingle()
 
   if (updErr) return json(500, { ok: false, error: updErr.message })
+
+
+// Audit log (best-effort)
+await safeAudit(admin, {
+  actor_user_id: me.data.user.id,
+  target_user_id: String((updated as any)?.member_id ?? ''),
+  action: ACTION_SUB_UPDATE,
+  action_details: {
+    subscription_id: id,
+    update: update ?? null,
+    invoice_requested: invoiceRequested,
+    invoice_email_requested: invoiceEmailRequested,
+  },
+})
 
   // Create a notification for the member so admins can see it in "Sent" and the member gets it in Inbox.
   let notification_ok = false

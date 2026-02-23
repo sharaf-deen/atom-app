@@ -99,6 +99,16 @@ function makeAdminClient(): SupabaseClient<any, any, any, any, any> | null {
   })
 }
 
+const ACTION_SUB_CREATE = 'subscription_create'
+
+async function safeAudit(admin: SupabaseClient<any, any, any, any, any>, row: any) {
+  try {
+    await admin.from('audit_logs').insert(row)
+  } catch {
+    // audit must never break the flow
+  }
+}
+
 async function resolveSubscriptionId(args: {
   admin: SupabaseClient<any, any, any, any, any>
   memberId: string
@@ -377,6 +387,27 @@ export async function POST(req: Request) {
     if (insErr) {
       return json(500, { ok: false, error: 'INSERT_FAILED', details: insErr.message })
     }
+
+
+// 5bis) Audit log (best-effort, never blocks)
+await safeAudit(admin, {
+  actor_user_id: auth.user.id,
+  target_user_id: memberId,
+  action: ACTION_SUB_CREATE,
+  action_details: {
+    subscription_id: inserted?.id ?? null,
+    plan,
+    subscription_type,
+    status,
+    start_date: payload.start_date ?? null,
+    end_date: payload.end_date ?? null,
+    sessions_total: sessions_total,
+    amount_paid: amount,
+    amount_due,
+    payment_method,
+    currency: 'EGP',
+  },
+})
 
     // 6) Try to create a notification for the member (do NOT block subscription if this fails)
     // Notifications insert:

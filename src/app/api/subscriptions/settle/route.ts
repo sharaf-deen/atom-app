@@ -26,6 +26,16 @@ function makeAdminClient() {
   return createClient<any>(url, key, { auth: { persistSession: false } })
 }
 
+const ACTION_SUB_DUE_SETTLE = 'subscription_due_settle'
+
+async function safeAudit(admin: any, row: any) {
+  try {
+    await admin.from('audit_logs').insert(row)
+  } catch {
+    // audit must never break the flow
+  }
+}
+
 function isAllowedPaymentMethod(v: any) {
   return v === 'cash' || v === 'instapay' || v === 'card' || v === 'bank_transfer'
 }
@@ -180,7 +190,25 @@ export async function POST(req: Request) {
     )
     .maybeSingle()
 
-  if (updErr) return json(500, { ok: false, error: updErr.message })
+  
+
+// Audit log (best-effort)
+await safeAudit(admin, {
+  actor_user_id: actorId,
+  target_user_id: current.member_id,
+  action: ACTION_SUB_DUE_SETTLE,
+  action_details: {
+    subscription_id: id,
+    paid_now: paidNow ?? null,
+    old_due: due,
+    new_due: newDue,
+    payment_method: payment_method ?? current.payment_method ?? null,
+    invoice_requested: invoiceRequested,
+    invoice_email_requested: invoiceEmailRequested,
+  },
+})
+
+if (updErr) return json(500, { ok: false, error: updErr.message })
 
   // Optional invoice generation (re-issue / overwrite)
   let invoice_ok = false
