@@ -31,6 +31,11 @@ function makeAdminClient() {
   return createClient(url, key, { auth: { autoRefreshToken: false, persistSession: false } })
 }
 
+function sanitizeSearch(v: string) {
+  // Keep it compatible with Supabase .or() string syntax
+  return (v || '').replace(/[%,_]/g, ' ').replace(/\s+/g, ' ').trim()
+}
+
 export async function GET(req: Request) {
   try {
     const supa = createSupabaseServerActionClient()
@@ -59,6 +64,8 @@ export async function GET(req: Request) {
     const to = searchParams.get('to') ?? ''
     const category = searchParams.get('category') ?? 'all'
     const payment_method = searchParams.get('payment_method') ?? 'all'
+    const qRaw = searchParams.get('q') ?? ''
+    const qText = sanitizeSearch(qRaw)
 
     if (!isISODateOnly(from) || !isISODateOnly(to) || from > to) {
       return json(400, {
@@ -74,10 +81,7 @@ export async function GET(req: Request) {
     }
 
     // Category labels
-    const { data: cats } = await admin
-      .from('expense_categories')
-      .select('key,label')
-      .eq('is_active', true)
+    const { data: cats } = await admin.from('expense_categories').select('key,label').eq('is_active', true)
 
     const labelByKey = new Map<string, string>()
     for (const c of cats ?? []) labelByKey.set(c.key, c.label)
@@ -92,6 +96,11 @@ export async function GET(req: Request) {
 
     if (category && category !== 'all') q = q.eq('category_key', category)
     if (payment_method && payment_method !== 'all') q = q.eq('payment_method', payment_method)
+
+    if (qText) {
+      const like = `%${qText}%`
+      q = q.or(`description.ilike.${like},category_key.ilike.${like},payment_method.ilike.${like}`)
+    }
 
     const { data: rows, error: qErr } = await q
     if (qErr) return json(500, { ok: false, error: 'QUERY_FAILED', details: qErr.message })
@@ -109,9 +118,14 @@ export async function GET(req: Request) {
     ]
 
     const lines: string[] = [header.map(csvCell).join(',')]
+
+    let total = 0
     for (const r of rows ?? []) {
       const key = r.category_key ?? ''
       const label = key ? labelByKey.get(key) ?? '' : ''
+      const amt = Number(r.amount)
+      if (Number.isFinite(amt)) total += amt
+
       lines.push(
         [
           r.id,
@@ -127,11 +141,29 @@ export async function GET(req: Request) {
       )
     }
 
+    // ✅ Total on last line (as requested)
+    lines.push(
+      [
+        'TOTAL',
+        '',
+        '',
+        '',
+        '',
+        total.toFixed(2),
+        '',
+        '',
+        '',
+      ].map(csvCell).join(',')
+    )
+
     const csv = lines.join('\r\n')
+
     const suffix = [
       payment_method && payment_method !== 'all' ? `_${payment_method}` : '',
       category && category !== 'all' ? `_${category}` : '',
+      qText ? `_search` : '',
     ].join('')
+
     const filename = `expenses_${from}_to_${to}${suffix}.csv`
 
     return new NextResponse(csv, {

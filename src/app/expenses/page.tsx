@@ -8,6 +8,7 @@ import { createSupabaseAdminClient } from '@/lib/supabaseAdmin'
 import AccessDeniedPage from '@/components/AccessDeniedPage'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card'
 import InlineAlert from '@/components/ui/InlineAlert'
+import ExpensesTableClient, { type ExpenseRow } from '@/components/ExpensesTableClient'
 
 type RangePreset = 'today' | '7d' | 'month' | 'custom'
 
@@ -54,19 +55,17 @@ function formatEGP(n: number) {
   }).format(safe)
 }
 
-function isImageReceipt(mime?: string | null, path?: string | null) {
-  const m = (mime || '').toLowerCase()
-  if (m.startsWith('image/')) return true
-  const p = (path || '').toLowerCase()
-  return p.endsWith('.png') || p.endsWith('.jpg') || p.endsWith('.jpeg') || p.endsWith('.webp') || p.endsWith('.gif')
-}
-
 function buildQS(params: Record<string, string>) {
   const sp = new URLSearchParams()
   for (const [k, v] of Object.entries(params)) {
     if (v !== undefined && v !== null && String(v).length) sp.set(k, String(v))
   }
   return sp.toString()
+}
+
+function sanitizeSearch(v: string) {
+  // Keep it simple & safe for Supabase .or() syntax
+  return (v || '').replace(/[%,_]/g, ' ').replace(/\s+/g, ' ').trim()
 }
 
 async function addExpenseAction(formData: FormData) {
@@ -146,6 +145,7 @@ async function addExpenseAction(formData: FormData) {
       receipt_filename = file.name || null
     }
   }
+
   const { error } = await admin.from('expenses').insert([
     {
       date,
@@ -213,6 +213,9 @@ export default async function ExpensesPage({
 
   const category = typeof searchParams.category === 'string' ? searchParams.category : 'all'
   const paymentFilter = typeof searchParams.payment_method === 'string' ? searchParams.payment_method : 'all'
+  const qTextRaw = typeof searchParams.q === 'string' ? searchParams.q : ''
+  const qText = sanitizeSearch(qTextRaw)
+
   const saved = typeof searchParams.saved === 'string' ? searchParams.saved : ''
   const errorMsg = typeof searchParams.error === 'string' ? searchParams.error : ''
 
@@ -236,39 +239,34 @@ export default async function ExpensesPage({
 
   const labelByKey = new Map<string, string>()
   categories.forEach((c) => labelByKey.set(c.key, c.label))
+  const labelByKeyObj = Object.fromEntries(labelByKey.entries())
 
-  let q = admin
+  let query = admin
     .from('expenses')
     .select('id,date,category_key,description,amount,payment_method,receipt_path,receipt_mime,receipt_filename')
     .order('date', { ascending: false })
 
-  if (from) q = q.gte('date', from)
-  if (to) q = q.lte('date', to)
-  if (category && category !== 'all') q = q.eq('category_key', category)
-  if (paymentFilter && paymentFilter !== 'all') q = q.eq('payment_method', paymentFilter)
+  if (from) query = query.gte('date', from)
+  if (to) query = query.lte('date', to)
+  if (category && category !== 'all') query = query.eq('category_key', category)
+  if (paymentFilter && paymentFilter !== 'all') query = query.eq('payment_method', paymentFilter)
 
-  const { data: rows, error: rowsError } = await q
+  // Server-side text search (fast, no client filtering)
+  if (qText) {
+    const like = `%${qText}%`
+    query = query.or(`description.ilike.${like},category_key.ilike.${like},payment_method.ilike.${like}`)
+  }
 
-  const expenses =
-    (rows || []) as Array<{
-      id: string
-      date: string
-      category_key: string | null
-      description: string | null
-      amount: number
-      payment_method?: string | null
-      receipt_path?: string | null
-      receipt_mime?: string | null
-      receipt_filename?: string | null
-    }>
+  const { data: rows, error: rowsError } = await query
 
+  const expenses = (rows || []) as ExpenseRow[]
   const total = expenses.reduce((sum, e) => sum + (Number.isFinite(e.amount) ? e.amount : 0), 0)
 
-  const returnQS = buildQS({ preset, from, to, category, payment_method: paymentFilter })
-  const exportQS = buildQS({ from, to, category, payment_method: paymentFilter })
+  const returnQS = buildQS({ preset, from, to, category, payment_method: paymentFilter, q: qTextRaw })
+  const exportQS = buildQS({ from, to, category, payment_method: paymentFilter, q: qTextRaw })
 
   return (
-    <main className="p-6 max-w-4xl mx-auto space-y-6">
+    <main className="p-6 max-w-5xl mx-auto space-y-6">
       <h1 className="text-2xl font-semibold text-center">Atom Expenses</h1>
 
       {errorMsg ? (
@@ -304,7 +302,7 @@ export default async function ExpensesPage({
         </CardHeader>
 
         <CardContent>
-          <form method="get" className="grid gap-3 sm:grid-cols-5">
+          <form method="get" className="grid gap-3 sm:grid-cols-6">
             <label className="block">
               <span className="mb-1 block text-sm font-medium">Preset</span>
               <select
@@ -370,7 +368,18 @@ export default async function ExpensesPage({
               </select>
             </label>
 
-            <div className="sm:col-span-5 flex flex-wrap items-center gap-2 pt-2">
+            <label className="block sm:col-span-2">
+              <span className="mb-1 block text-sm font-medium">Search</span>
+              <input
+                name="q"
+                defaultValue={qTextRaw}
+                placeholder="description, category key, payment…"
+                className="w-full rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm placeholder:text-[hsl(var(--muted))] outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-[hsl(var(--bg))]"
+              />
+              <span className="mt-1 block text-[11px] text-[hsl(var(--muted))]">Server-side filter (fast).</span>
+            </label>
+
+            <div className="sm:col-span-6 flex flex-wrap items-center gap-2 pt-2">
               <button
                 type="submit"
                 className="inline-flex items-center justify-center rounded-2xl shadow-soft transition ease-soft focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-[hsl(var(--bg))] bg-black text-white hover:opacity-95 px-4 py-2 text-sm"
@@ -392,9 +401,7 @@ export default async function ExpensesPage({
                 Export CSV
               </a>
 
-              <span className="text-xs text-[hsl(var(--muted))]">
-                Tip: choose “Custom” if you want manual dates.
-              </span>
+              <span className="text-xs text-[hsl(var(--muted))]">Tip: choose “Custom” if you want manual dates.</span>
             </div>
           </form>
         </CardContent>
@@ -409,76 +416,7 @@ export default async function ExpensesPage({
         </CardHeader>
 
         <CardContent>
-          {expenses.length === 0 ? (
-            <p className="text-sm text-[hsl(var(--muted))]">No expenses in this range.</p>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="text-left border-b border-[hsl(var(--border))]">
-                    <th className="py-2 pr-3">Date</th>
-                    <th className="py-2 pr-3">Category</th>
-                    <th className="py-2 pr-3">Description</th>
-                    <th className="py-2 pr-3">Payment</th>
-                    <th className="py-2 pr-3">Receipt</th>
-                    <th className="py-2 text-right">Amount</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {expenses.map((e) => (
-                    <tr key={e.id} className="border-b border-[hsl(var(--border))]/60">
-                      <td className="py-2 pr-3 whitespace-nowrap">{e.date}</td>
-                      <td className="py-2 pr-3">
-                        {e.category_key ? labelByKey.get(e.category_key) ?? e.category_key : '—'}
-                      </td>
-                      <td className="py-2 pr-3 text-[hsl(var(--muted))]">{e.description ?? '—'}</td>
-                      <td className="py-2 pr-3 whitespace-nowrap">
-                        {e.payment_method ? e.payment_method.replace('_', ' ') : '—'}
-                      </td>
-                      <td className="py-2 pr-3 whitespace-nowrap">
-                        {e.receipt_path ? (
-                          <div className="flex items-center gap-2">
-                            {isImageReceipt(e.receipt_mime, e.receipt_path) ? (
-                              <a href={`/api/expenses/${e.id}/receipt`} target="_blank" rel="noreferrer" title="Open receipt">
-                                <img
-                                  src={`/api/expenses/${e.id}/receipt`}
-                                  alt={e.receipt_filename ? `Receipt ${e.receipt_filename}` : 'Receipt'}
-                                  className="h-8 w-8 rounded-lg object-cover border border-[hsl(var(--border))]"
-                                  loading="lazy"
-                                />
-                              </a>
-                            ) : (
-                              <a
-                                href={`/api/expenses/${e.id}/receipt`}
-                                target="_blank"
-                                rel="noreferrer"
-                                className="text-[11px] px-2 py-1 rounded-xl border border-[hsl(var(--border))] bg-white"
-                                title="Open receipt (PDF)"
-                              >
-                                PDF
-                              </a>
-                            )}
-
-                            <a
-                              className="text-xs underline"
-                              href={`/api/expenses/${e.id}/receipt`}
-                              target="_blank"
-                              rel="noreferrer"
-                            >
-                              View
-                            </a>
-                          </div>
-                        ) : (
-                          <span className="text-[hsl(var(--muted))]">—</span>
-                        )}
-                      </td>
-                      <td className="py-2 text-right font-medium">{formatEGP(e.amount)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
+          <ExpensesTableClient expenses={expenses} labelByKey={labelByKeyObj} />
         </CardContent>
       </Card>
 
@@ -573,9 +511,7 @@ export default async function ExpensesPage({
               >
                 Save
               </button>
-              <span className="text-xs text-[hsl(var(--muted))]">
-                After saving, you’ll stay on the same filtered view.
-              </span>
+              <span className="text-xs text-[hsl(var(--muted))]">After saving, you’ll stay on the same filtered view.</span>
             </div>
           </form>
         </CardContent>

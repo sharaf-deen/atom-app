@@ -7,9 +7,11 @@ type ModalProps = {
   onClose: () => void
   title?: string
   children: React.ReactNode
+  /** Optional extra classes for the dialog container */
+  className?: string
 }
 
-export default function Modal({ open, onClose, title, children }: ModalProps) {
+export default function Modal({ open, onClose, title, children, className = '' }: ModalProps) {
   // ✅ Hooks must always run in the same order
   React.useEffect(() => {
     if (!open) return
@@ -32,7 +34,11 @@ export default function Modal({ open, onClose, title, children }: ModalProps) {
       aria-label={title || 'Dialog'}
     >
       <div className="absolute inset-0 bg-black/70" onClick={onClose} />
-      <div className="relative z-[2001] w-[min(90vw,32rem)] rounded-2xl border border-[hsl(var(--border))] bg-white p-5 shadow-lg">
+      <div
+        className={
+          `relative z-[2001] w-[min(90vw,32rem)] rounded-2xl border border-[hsl(var(--border))] bg-white p-5 shadow-lg ${className}`
+        }
+      >
         {title && <h3 className="mb-3 text-lg font-semibold">{title}</h3>}
         {children}
       </div>
