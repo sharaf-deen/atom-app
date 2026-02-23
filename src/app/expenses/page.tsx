@@ -54,6 +54,13 @@ function formatEGP(n: number) {
   }).format(safe)
 }
 
+function isImageReceipt(mime?: string | null, path?: string | null) {
+  const m = (mime || '').toLowerCase()
+  if (m.startsWith('image/')) return true
+  const p = (path || '').toLowerCase()
+  return p.endsWith('.png') || p.endsWith('.jpg') || p.endsWith('.jpeg') || p.endsWith('.webp') || p.endsWith('.gif')
+}
+
 function buildQS(params: Record<string, string>) {
   const sp = new URLSearchParams()
   for (const [k, v] of Object.entries(params)) {
@@ -205,6 +212,7 @@ export default async function ExpensesPage({
   }
 
   const category = typeof searchParams.category === 'string' ? searchParams.category : 'all'
+  const paymentFilter = typeof searchParams.payment_method === 'string' ? searchParams.payment_method : 'all'
   const saved = typeof searchParams.saved === 'string' ? searchParams.saved : ''
   const errorMsg = typeof searchParams.error === 'string' ? searchParams.error : ''
 
@@ -231,12 +239,13 @@ export default async function ExpensesPage({
 
   let q = admin
     .from('expenses')
-    .select('id,date,category_key,description,amount,payment_method,receipt_path')
+    .select('id,date,category_key,description,amount,payment_method,receipt_path,receipt_mime,receipt_filename')
     .order('date', { ascending: false })
 
   if (from) q = q.gte('date', from)
   if (to) q = q.lte('date', to)
   if (category && category !== 'all') q = q.eq('category_key', category)
+  if (paymentFilter && paymentFilter !== 'all') q = q.eq('payment_method', paymentFilter)
 
   const { data: rows, error: rowsError } = await q
 
@@ -249,11 +258,14 @@ export default async function ExpensesPage({
       amount: number
       payment_method?: string | null
       receipt_path?: string | null
+      receipt_mime?: string | null
+      receipt_filename?: string | null
     }>
 
   const total = expenses.reduce((sum, e) => sum + (Number.isFinite(e.amount) ? e.amount : 0), 0)
 
-  const returnQS = buildQS({ preset, from, to, category })
+  const returnQS = buildQS({ preset, from, to, category, payment_method: paymentFilter })
+  const exportQS = buildQS({ from, to, category, payment_method: paymentFilter })
 
   return (
     <main className="p-6 max-w-4xl mx-auto space-y-6">
@@ -292,7 +304,7 @@ export default async function ExpensesPage({
         </CardHeader>
 
         <CardContent>
-          <form method="get" className="grid gap-3 sm:grid-cols-4">
+          <form method="get" className="grid gap-3 sm:grid-cols-5">
             <label className="block">
               <span className="mb-1 block text-sm font-medium">Preset</span>
               <select
@@ -343,7 +355,22 @@ export default async function ExpensesPage({
               </select>
             </label>
 
-            <div className="sm:col-span-4 flex flex-wrap items-center gap-2 pt-2">
+            <label className="block">
+              <span className="mb-1 block text-sm font-medium">Payment</span>
+              <select
+                name="payment_method"
+                defaultValue={paymentFilter}
+                className="w-full rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-[hsl(var(--bg))]"
+              >
+                <option value="all">All</option>
+                <option value="cash">Cash</option>
+                <option value="visa">Visa card</option>
+                <option value="instapay">Instapay</option>
+                <option value="bank_transfer">Bank transfer</option>
+              </select>
+            </label>
+
+            <div className="sm:col-span-5 flex flex-wrap items-center gap-2 pt-2">
               <button
                 type="submit"
                 className="inline-flex items-center justify-center rounded-2xl shadow-soft transition ease-soft focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-[hsl(var(--bg))] bg-black text-white hover:opacity-95 px-4 py-2 text-sm"
@@ -356,6 +383,13 @@ export default async function ExpensesPage({
                 className="inline-flex items-center justify-center rounded-2xl shadow-soft transition ease-soft focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-[hsl(var(--bg))] bg-white text-black border border-[hsl(var(--border))] hover:bg-[hsl(var(--bg))]/80 px-4 py-2 text-sm"
               >
                 Reset
+              </a>
+
+              <a
+                href={`/api/expenses/export?${exportQS}`}
+                className="inline-flex items-center justify-center rounded-2xl shadow-soft transition ease-soft focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-[hsl(var(--bg))] bg-white text-black border border-[hsl(var(--border))] hover:bg-[hsl(var(--bg))]/80 px-4 py-2 text-sm"
+              >
+                Export CSV
               </a>
 
               <span className="text-xs text-[hsl(var(--muted))]">
@@ -403,14 +437,37 @@ export default async function ExpensesPage({
                       </td>
                       <td className="py-2 pr-3 whitespace-nowrap">
                         {e.receipt_path ? (
-                          <a
-                            className="text-xs underline"
-                            href={`/api/expenses/${e.id}/receipt`}
-                            target="_blank"
-                            rel="noreferrer"
-                          >
-                            View
-                          </a>
+                          <div className="flex items-center gap-2">
+                            {isImageReceipt(e.receipt_mime, e.receipt_path) ? (
+                              <a href={`/api/expenses/${e.id}/receipt`} target="_blank" rel="noreferrer" title="Open receipt">
+                                <img
+                                  src={`/api/expenses/${e.id}/receipt`}
+                                  alt={e.receipt_filename ? `Receipt ${e.receipt_filename}` : 'Receipt'}
+                                  className="h-8 w-8 rounded-lg object-cover border border-[hsl(var(--border))]"
+                                  loading="lazy"
+                                />
+                              </a>
+                            ) : (
+                              <a
+                                href={`/api/expenses/${e.id}/receipt`}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="text-[11px] px-2 py-1 rounded-xl border border-[hsl(var(--border))] bg-white"
+                                title="Open receipt (PDF)"
+                              >
+                                PDF
+                              </a>
+                            )}
+
+                            <a
+                              className="text-xs underline"
+                              href={`/api/expenses/${e.id}/receipt`}
+                              target="_blank"
+                              rel="noreferrer"
+                            >
+                              View
+                            </a>
+                          </div>
                         ) : (
                           <span className="text-[hsl(var(--muted))]">—</span>
                         )}
