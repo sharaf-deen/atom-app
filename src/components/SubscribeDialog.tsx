@@ -12,6 +12,20 @@ import { Card, CardContent } from '@/components/ui/Card'
 import InlineAlert from '@/components/ui/InlineAlert'
 
 export type Plan = '1m' | '3m' | '6m' | '12m' | 'sessions'
+export type SubscriptionPaymentMethod = 'cash' | 'instapay' | 'card' | 'bank_transfer'
+
+function humanPaymentMethod(m: SubscriptionPaymentMethod) {
+  switch (m) {
+    case 'cash':
+      return 'Cash'
+    case 'instapay':
+      return 'InstaPay'
+    case 'card':
+      return 'Card (in gym)'
+    case 'bank_transfer':
+      return 'Bank transfer'
+  }
+}
 
 function todayLocalDateStr() {
   const d = new Date()
@@ -88,6 +102,8 @@ export default function SubscribeDialog({
   const [plan, setPlan] = useState<Plan>(defaultPlan ?? '1m')
   const [sessions, setSessions] = useState<number>(Math.min(Math.max(defaultSessions ?? 10, 1), 10))
   const [amount, setAmount] = useState<string>('0')
+  const [paymentMethod, setPaymentMethod] = useState<SubscriptionPaymentMethod>('cash')
+  const [amountDue, setAmountDue] = useState<string>('0')
   const [startDate, setStartDate] = useState<string>(defaultStartDate ?? todayLocalDateStr())
   const [busy, setBusy] = useState(false)
 
@@ -100,6 +116,8 @@ export default function SubscribeDialog({
     setSessions(Math.min(Math.max(defaultSessions ?? 10, 1), 10))
     setStartDate(defaultStartDate ?? todayLocalDateStr())
     setAmount('0')
+    setPaymentMethod('cash')
+    setAmountDue('0')
     setBusy(false)
     setStatus({ kind: '', msg: '' })
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -135,6 +153,14 @@ export default function SubscribeDialog({
   const amountNum = Number(amount)
   const amountOk = amount !== '' && Number.isFinite(amountNum) && amountNum >= 0
 
+  const amountDueNum = Number(amountDue)
+  const amountDueOk =
+    amountDue !== '' &&
+    Number.isFinite(amountDueNum) &&
+    amountDueNum >= 0 &&
+    // If amount is valid, enforce due <= amount
+    (!amountOk || amountDueNum <= amountNum)
+
   const dateOk = isISODateOnly(startDate)
   const sessionsOk = Number.isFinite(sessions) && sessions >= 1 && sessions <= 10
 
@@ -151,6 +177,7 @@ export default function SubscribeDialog({
   const canSubmit =
     !busy &&
     amountOk &&
+    amountDueOk &&
     (isTimePlan ? dateOk : sessionsOk)
 
   function explainServerError(j: any) {
@@ -174,6 +201,8 @@ export default function SubscribeDialog({
         memberId: member.user_id,
         plan,
         amount: amountNum,
+        payment_method: paymentMethod,
+        amount_due: amountDueNum,
       }
       if (isTimePlan) body.start_date = startDate
       else {
@@ -331,6 +360,32 @@ export default function SubscribeDialog({
                     onChange={(e) => setAmount(e.target.value)}
                     disabled={busy || status.kind === 'success'}
                   />
+
+                  <Select
+                    label="Payment method"
+                    value={paymentMethod}
+                    onChange={(e) => setPaymentMethod(e.target.value as SubscriptionPaymentMethod)}
+                    disabled={busy || status.kind === 'success'}
+                    aria-label="Payment method"
+                  >
+                    <option value="cash">{humanPaymentMethod('cash')}</option>
+                    <option value="instapay">{humanPaymentMethod('instapay')}</option>
+                    <option value="card">{humanPaymentMethod('card')}</option>
+                    <option value="bank_transfer">{humanPaymentMethod('bank_transfer')}</option>
+                  </Select>
+
+                  <Input
+                    label="Remaining due (EGP)"
+                    type="number"
+                    min={0}
+                    step="1"
+                    value={amountDue}
+                    onChange={(e) => setAmountDue(e.target.value)}
+                    disabled={busy || status.kind === 'success'}
+                  />
+                  <p className="text-xs text-[hsl(var(--muted))] -mt-2">
+                    If the member paid in full, set <b>0</b>. If they still owe money, enter the remaining amount.
+                  </p>
                 </div>
 
                 <div className="mt-4 flex flex-wrap items-center gap-2">

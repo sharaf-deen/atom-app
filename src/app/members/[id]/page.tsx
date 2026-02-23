@@ -101,7 +101,7 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
 
   const { data: subs } = await supa
     .from('subscriptions')
-    .select('id, plan, subscription_type, status, start_date, end_date, frozen_from, frozen_until, sessions_total, sessions_used, amount, paid_at')
+    .select('id, plan, subscription_type, status, start_date, end_date, frozen_from, frozen_until, sessions_total, sessions_used, amount, amount_due, payment_method, paid_at')
     .eq('member_id', profile.user_id)
     .order('paid_at', { ascending: false })
     .limit(500) as {
@@ -117,8 +117,25 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
       sessions_total: number | null
       sessions_used: number | null
       amount: number | null
+      amount_due: number | null
+      payment_method: string | null
       paid_at: string | null
     }> | null
+  }
+
+  function humanPayment(m?: string | null) {
+    switch (m) {
+      case 'cash':
+        return 'Cash'
+      case 'instapay':
+        return 'InstaPay'
+      case 'card':
+        return 'Card'
+      case 'bank_transfer':
+        return 'Bank transfer'
+      default:
+        return '—'
+    }
   }
 // Prevent creating a new subscription when there's already an active one
 const today = new Date().toISOString().slice(0, 10) // YYYY-MM-DD (UTC)
@@ -302,6 +319,8 @@ const subscribeDisabledReason = hasActiveSubscription
                     <th className="text-left px-3 py-2">End</th>
                     <th className="text-left px-3 py-2">Sessions</th>
                     <th className="text-left px-3 py-2">Amount</th>
+                    <th className="text-left px-3 py-2">Payment</th>
+                    <th className="text-left px-3 py-2">Due</th>
                     <th className="text-left px-3 py-2">Paid at</th>
                     <th className="text-left px-3 py-2">Badges</th>
 	                    {canManageSubscriptions && <th className="text-left px-3 py-2">Actions</th>}
@@ -351,6 +370,8 @@ const subscribeDisabledReason = hasActiveSubscription
                             : '—'}
                         </td>
                         <td className="px-3 py-2">{s.amount ?? 0}</td>
+                        <td className="px-3 py-2">{humanPayment(s.payment_method)}</td>
+                        <td className="px-3 py-2">{Number(s.amount_due ?? 0) || 0}</td>
                         <td className="px-3 py-2">{fmtDate(s.paid_at)}</td>
                         <td className="px-3 py-2">
                           <div className="flex flex-wrap gap-1">

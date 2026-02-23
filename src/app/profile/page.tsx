@@ -34,7 +34,24 @@ type SubRow = {
   sessions_total: number | null
   sessions_used: number | null
   amount: number | null
+  amount_due: number | null
+  payment_method: string | null
   paid_at: string | null
+}
+
+function humanPaymentMethod(m?: string | null) {
+  switch (m) {
+    case 'cash':
+      return 'Cash'
+    case 'instapay':
+      return 'InstaPay'
+    case 'card':
+      return 'Card'
+    case 'bank_transfer':
+      return 'Bank transfer'
+    default:
+      return m ? String(m) : '—'
+  }
 }
 
 function ageYears(dob?: string | null) {
@@ -123,7 +140,7 @@ export default async function ProfilePage() {
 
   const { data: subs } = (await supa
     .from('subscriptions')
-    .select('id, plan, status, start_date, end_date, sessions_total, sessions_used, amount, paid_at')
+    .select('id, plan, status, start_date, end_date, sessions_total, sessions_used, amount, amount_due, payment_method, paid_at')
     .eq('member_id', me.id)
     .order('paid_at', { ascending: false })
     .limit(500)) as { data: SubRow[] | null }
@@ -218,6 +235,8 @@ export default async function ProfilePage() {
                     <th className="text-left px-3 py-2">End</th>
                     <th className="text-left px-3 py-2">Sessions</th>
                     <th className="text-left px-3 py-2">Amount</th>
+                    <th className="text-left px-3 py-2">Payment</th>
+                    <th className="text-left px-3 py-2">Due</th>
                     <th className="text-left px-3 py-2">Paid at</th>
                     <th className="text-left px-3 py-2">Badges</th>
                   </tr>
@@ -241,6 +260,8 @@ export default async function ProfilePage() {
                             : '—'}
                         </td>
                         <td className="px-3 py-2">{s.amount ?? 0}</td>
+                        <td className="px-3 py-2">{humanPaymentMethod(s.payment_method)}</td>
+                        <td className="px-3 py-2">{Number(s.amount_due ?? 0) || 0}</td>
                         <td className="px-3 py-2">{fmtDate(s.paid_at)}</td>
                         <td className="px-3 py-2">
                           <div className="flex flex-wrap gap-1">

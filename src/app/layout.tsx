@@ -6,6 +6,7 @@ import AppNav from '@/components/AppNav'
 import ThemeProvider from '@/components/ThemeProvider'
 import { Toaster } from 'sonner'
 import BackButtonHandler from '@/components/BackButtonHandler'
+import SplashScreen from '@/components/SplashScreen'
 
 const poppins = Poppins({
   subsets: ['latin'],
@@ -23,6 +24,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="en" suppressHydrationWarning>
       <body className={poppins.className}>
         <ThemeProvider>
+          <SplashScreen />
           <BackButtonHandler>
             <AppNav />
             {children}

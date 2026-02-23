@@ -119,7 +119,7 @@ export async function POST(req: Request) {
   const { data: current, error: curErr } = await admin
     .from('subscriptions')
     .select(
-      'id, member_id, subscription_type, start_date, end_date, plan, status, frozen_until, sessions_total, sessions_used, amount, paid_at'
+      'id, member_id, subscription_type, start_date, end_date, plan, status, frozen_until, sessions_total, sessions_used, amount, amount_due, payment_method, paid_at'
     )
     .eq('id', id)
     .maybeSingle<{
@@ -134,6 +134,8 @@ export async function POST(req: Request) {
       sessions_total: number | null
       sessions_used: number | null
       amount: number | null
+      amount_due: number | null
+      payment_method: string | null
       paid_at: string | null
     }>()
 
@@ -226,7 +228,7 @@ export async function POST(req: Request) {
     .update(update)
     .eq('id', id)
     .select(
-      'id, member_id, subscription_type, plan, status, start_date, end_date, frozen_until, sessions_total, sessions_used, amount, paid_at'
+      'id, member_id, subscription_type, plan, status, start_date, end_date, frozen_until, sessions_total, sessions_used, amount, amount_due, payment_method, paid_at'
     )
     .maybeSingle()
 
@@ -325,6 +327,9 @@ export async function POST(req: Request) {
       const invoice_number = makeInvoiceNumber({ paidAtISO: paid_at, subscriptionId: id })
 
       const amount = Number((updated as any)?.amount ?? (current as any)?.amount ?? 0)
+      const amount_due = Number((updated as any)?.amount_due ?? (current as any)?.amount_due ?? 0)
+      const payment_method =
+        ((updated as any)?.payment_method ?? (current as any)?.payment_method ?? null) as string | null
       const currency = 'EGP' as const
 
       // Use `any` here to avoid tight coupling to the InvoiceSnapshot type shape
@@ -336,6 +341,8 @@ export async function POST(req: Request) {
         end_date: (updated as any)?.end_date ?? (current as any)?.end_date ?? null,
         sessions_total: (updated as any)?.sessions_total ?? (current as any)?.sessions_total ?? null,
         amount,
+        amount_due,
+        payment_method,
         currency,
         paid_at,
       }
@@ -412,6 +419,8 @@ export async function POST(req: Request) {
               `Your updated invoice is ready.\n` +
               `Invoice: ${invoice_number}\n` +
               `Amount: ${amount} ${currency}\n` +
+              (Number.isFinite(amount_due) && amount_due > 0 ? `Remaining due: ${amount_due} ${currency}\n` : '') +
+              (payment_method ? `Payment method: ${payment_method}\n` : '') +
               `Paid at: ${paid_at}\n\n` +
               (signedUrl ? `Download (valid 7 days): ${signedUrl}\n\n` : '') +
               `You can also find all your invoices in the app: My Profile → Invoices.\n\n` +

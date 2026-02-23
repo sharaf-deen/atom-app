@@ -10,6 +10,14 @@ import { createSupabaseServerActionClient } from '@/lib/supabaseServer'
 import { generateInvoicePdfBytes, makeInvoiceNumber, type InvoiceSnapshot } from '@/lib/invoices'
 
 type Plan = '1m' | '3m' | '6m' | '12m' | 'sessions'
+type SubscriptionPaymentMethod = 'cash' | 'instapay' | 'card' | 'bank_transfer'
+
+const ALLOWED_PAYMENT_METHODS = new Set<SubscriptionPaymentMethod>([
+  'cash',
+  'instapay',
+  'card',
+  'bank_transfer',
+])
 
 function json(status: number, body: any) {
   const res = NextResponse.json(body, { status })
@@ -19,6 +27,11 @@ function json(status: number, body: any) {
 
 function isPlan(v: unknown): v is Plan {
   return v === '1m' || v === '3m' || v === '6m' || v === '12m' || v === 'sessions'
+}
+
+function parsePaymentMethod(v: unknown): SubscriptionPaymentMethod {
+  const s = typeof v === 'string' ? (v.trim() as SubscriptionPaymentMethod) : 'cash'
+  return (ALLOWED_PAYMENT_METHODS.has(s) ? s : 'cash') as SubscriptionPaymentMethod
 }
 
 function isISODateOnly(s?: string | null) {
@@ -224,6 +237,21 @@ export async function POST(req: Request) {
     }
     const amount = amountNum
 
+    const payment_method = parsePaymentMethod(body?.payment_method ?? body?.paymentMethod)
+
+    const amountDueNum = Number(body?.amount_due ?? body?.amountDue ?? 0)
+    if (!Number.isFinite(amountDueNum) || amountDueNum < 0) {
+      return json(400, { ok: false, error: 'INVALID_AMOUNT_DUE', details: 'amount_due must be a positive number.' })
+    }
+    if (amountDueNum > amount) {
+      return json(400, {
+        ok: false,
+        error: 'AMOUNT_DUE_TOO_HIGH',
+        details: 'amount_due cannot be greater than amount.',
+      })
+    }
+    const amount_due = amountDueNum
+
     let memberId: string | null = typeof body?.memberId === 'string' ? body.memberId.trim() : null
     const member_qr = normQR(body?.member_qr ?? body?.qr ?? body?.code)
     const member_email = typeof body?.member_email === 'string' ? body.member_email.trim().toLowerCase() : null
@@ -311,6 +339,8 @@ export async function POST(req: Request) {
       subscription_type,
       status,
       amount,
+      amount_due,
+      payment_method,
       paid_at,
     }
 
@@ -391,6 +421,8 @@ export async function POST(req: Request) {
           end_date: payload.end_date ?? null,
           sessions_total: sessions_total,
           amount,
+          amount_due,
+          payment_method,
           currency: 'EGP',
           paid_at,
         },
