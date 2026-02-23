@@ -53,6 +53,11 @@ export default function SettleDueDialog({
   // Safety: if caller passed nothing, do not crash.
   if (!sub) return null
 
+  // Capture stable primitives so TypeScript knows they're defined inside callbacks
+  // (props can change between renders).
+  const subId = sub.id
+  const initialMethod = (sub.payment_method as PaymentMethod) || 'cash'
+
   const due = Number(sub.amount_due ?? 0)
   const paidSoFar = Number(sub.amount ?? 0)
   const totalNow = (Number.isFinite(paidSoFar) ? paidSoFar : 0) + (Number.isFinite(due) ? due : 0)
@@ -64,7 +69,7 @@ export default function SettleDueDialog({
   const [busy, setBusy] = useState(false)
 
   const [amountPaid, setAmountPaid] = useState<string>(String(due))
-  const [method, setMethod] = useState<PaymentMethod>((sub.payment_method as PaymentMethod) || 'cash')
+  const [method, setMethod] = useState<PaymentMethod>(initialMethod)
   const [genInvoice, setGenInvoice] = useState(true)
   const [emailInvoice, setEmailInvoice] = useState(false)
   const [status, setStatus] = useState<{ kind: StatusKind; msg: string }>({ kind: '', msg: '' })
@@ -74,12 +79,12 @@ export default function SettleDueDialog({
     if (!open) return
     setBusy(false)
     setAmountPaid(String(due))
-    setMethod((sub.payment_method as PaymentMethod) || 'cash')
+    setMethod(initialMethod)
     setGenInvoice(true)
     setEmailInvoice(false)
     setStatus({ kind: '', msg: '' })
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, sub.id])
+  }, [open, subId])
 
   // Lock scroll + ESC
   useEffect(() => {
@@ -116,7 +121,7 @@ export default function SettleDueDialog({
 
     try {
       const payload: any = {
-        id: sub.id,
+        id: subId,
         amount_paid: paidNum,
         payment_method: method,
       }
@@ -190,7 +195,7 @@ export default function SettleDueDialog({
 
                 {status.kind ? (
                   <div className="mt-4">
-                    <InlineAlert kind={status.kind === 'error' ? 'error' : status.kind === 'success' ? 'success' : 'info'}>
+                    <InlineAlert variant={status.kind === 'error' ? 'error' : status.kind === 'success' ? 'success' : 'info'}>
                       {status.msg}
                     </InlineAlert>
                   </div>
