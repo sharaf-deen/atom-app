@@ -35,6 +35,16 @@ type ProfileMini = {
 
 const OPS: Role[] = ['admin', 'super_admin']
 
+type ActionTone = 'success' | 'info' | 'warning' | 'danger' | 'neutral'
+
+const TONE_CLS: Record<ActionTone, string> = {
+  success: 'bg-emerald-50 text-emerald-800 border-emerald-200',
+  info: 'bg-sky-50 text-sky-800 border-sky-200',
+  warning: 'bg-amber-50 text-amber-900 border-amber-200',
+  danger: 'bg-rose-50 text-rose-800 border-rose-200',
+  neutral: 'bg-gray-50 text-gray-800 border-gray-200',
+}
+
 function clampInt(v: number, min: number, max: number) {
   if (!Number.isFinite(v)) return min
   return Math.max(min, Math.min(max, Math.floor(v)))
@@ -78,6 +88,76 @@ function shortJSON(v: any) {
   } catch {
     return String(v)
   }
+}
+
+function titleFromKey(key: string) {
+  const clean = (key || '').replace(/[_-]+/g, ' ').trim()
+  if (!clean) return 'Activity'
+  return clean
+    .split(' ')
+    .filter(Boolean)
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(' ')
+}
+
+function fmtNum(v: any) {
+  const n = typeof v === 'number' ? v : Number(v)
+  if (!Number.isFinite(n)) return ''
+  // Avoid decimals in EGP by default (your app uses integer EGP values)
+  return Math.round(n).toLocaleString('en-US')
+}
+
+function actionMeta(actionRaw: string, details: any): { label: string; tone: ActionTone; subtitle?: string; known: boolean } {
+  const action = (actionRaw || '').trim().toLowerCase()
+
+  // Known, human-friendly labels
+  const MAP: Record<string, { label: string; tone: ActionTone }> = {
+    subscription_create: { label: 'Subscription created', tone: 'success' },
+    subscription_update: { label: 'Subscription updated', tone: 'info' },
+    subscription_due_settle: { label: 'Payment received', tone: 'success' },
+
+    invite_sent: { label: 'Invite sent', tone: 'info' },
+    invite_resent: { label: 'Invite resent', tone: 'info' },
+    invite_cancelled: { label: 'Invite cancelled', tone: 'warning' },
+
+    subscription_freeze: { label: 'Subscription frozen', tone: 'warning' },
+    subscription_resume: { label: 'Subscription resumed', tone: 'success' },
+
+    member_created: { label: 'Member created', tone: 'success' },
+    member_updated: { label: 'Member updated', tone: 'info' },
+    member_deleted: { label: 'Member deleted', tone: 'danger' },
+  }
+
+  const known = !!MAP[action]
+  const base = MAP[action] ?? { label: titleFromKey(actionRaw), tone: 'neutral' as ActionTone }
+
+  // Small helpful subtitle (optional) for the most common membership events
+  let subtitle = ''
+  try {
+    if (action === 'subscription_create') {
+      const paid = fmtNum(details?.amount_paid)
+      const due = fmtNum(details?.amount_due)
+      const plan = details?.plan ? String(details.plan) : ''
+      const pm = details?.payment_method ? String(details.payment_method) : ''
+      subtitle = [plan ? `Plan: ${plan}` : '', paid ? `Paid: ${paid}` : '', due ? `Due: ${due}` : '', pm ? `Method: ${pm}` : '']
+        .filter(Boolean)
+        .join(' · ')
+    } else if (action === 'subscription_due_settle') {
+      const paidNow = fmtNum(details?.paid_now)
+      const newDue = fmtNum(details?.new_due)
+      const pm = details?.payment_method ? String(details.payment_method) : ''
+      subtitle = [paidNow ? `Paid now: ${paidNow}` : '', newDue ? `New due: ${newDue}` : '', pm ? `Method: ${pm}` : '']
+        .filter(Boolean)
+        .join(' · ')
+    } else if (action.includes('invite')) {
+      const email = details?.email ? String(details.email) : ''
+      subtitle = email ? `Email: ${email}` : ''
+    }
+  } catch {
+    subtitle = ''
+  }
+
+  return { label: base.label, tone: base.tone, subtitle: subtitle || undefined, known }
 }
 
 export default async function MembershipActivityLogPage({
@@ -160,7 +240,14 @@ export default async function MembershipActivityLogPage({
     const { data: matches, error } = await admin
       .from('profiles')
       .select('user_id')
-      .or([`email.ilike.%${actor}%`, `first_name.ilike.%${actor}%`, `last_name.ilike.%${actor}%`, `phone.ilike.%${actor}%`].join(','))
+      .or(
+        [
+          `email.ilike.%${actor}%`,
+          `first_name.ilike.%${actor}%`,
+          `last_name.ilike.%${actor}%`,
+          `phone.ilike.%${actor}%`,
+        ].join(',')
+      )
       .limit(200)
 
     if (error) {
@@ -219,6 +306,7 @@ export default async function MembershipActivityLogPage({
       rows
         .flatMap((r) => [r.target_user_id, r.actor_user_id ?? ''])
         .filter(Boolean)
+        .filter(Boolean)
     )
   )
 
@@ -268,7 +356,7 @@ export default async function MembershipActivityLogPage({
                 defaultValue={q}
                 className="md:col-span-2"
               />
-              <Input label="Action" placeholder="renew, pause, invite…" name="action" defaultValue={action} className="md:col-span-1" />
+              <Input label="Action" placeholder="subscription, invite, freeze…" name="action" defaultValue={action} className="md:col-span-1" />
               <Input label="Actor" placeholder="admin name/email…" name="actor" defaultValue={actor} className="md:col-span-1" />
               <Input label="From" type="date" name="from" defaultValue={from} className="md:col-span-1" />
               <Input label="To" type="date" name="to" defaultValue={to} className="md:col-span-1" />
@@ -300,7 +388,7 @@ export default async function MembershipActivityLogPage({
                 <tr className="text-left">
                   <th className="px-4 py-3 w-[170px]">When</th>
                   <th className="px-4 py-3 w-[220px]">Member</th>
-                  <th className="px-4 py-3 w-[200px]">Action</th>
+                  <th className="px-4 py-3 w-[240px]">Action</th>
                   <th className="px-4 py-3 w-[220px]">Actor</th>
                   <th className="px-4 py-3">Details</th>
                   <th className="px-4 py-3 w-[110px]">Open</th>
@@ -318,6 +406,8 @@ export default async function MembershipActivityLogPage({
                 {rows.map((r) => {
                   const member = profilesById.get(r.target_user_id) ?? null
                   const actorP = r.actor_user_id ? profilesById.get(r.actor_user_id) ?? null : null
+                  const meta = actionMeta(r.action, r.action_details)
+                  const badgeCls = `${TONE_CLS[meta.tone]} text-[11px]`
                   return (
                     <tr key={r.id} className="border-b border-[hsl(var(--border))] hover:bg-[hsl(var(--card))]">
                       <td className="px-4 py-3 whitespace-nowrap">{fmtWhen(r.created_at)}</td>
@@ -326,10 +416,18 @@ export default async function MembershipActivityLogPage({
                         <div className="text-xs text-[hsl(var(--muted-foreground))]">{member?.email ?? r.target_user_id}</div>
                       </td>
                       <td className="px-4 py-3">
-                        <Badge className="text-[11px]">{r.action}</Badge>
+                        <Badge className={badgeCls}>{meta.label}</Badge>
+                        {meta.subtitle ? (
+                          <div className="mt-1 text-[11px] text-[hsl(var(--muted-foreground))]">{meta.subtitle}</div>
+                        ) : null}
+                        {!meta.known ? (
+                          <div className="mt-1 text-[11px] text-[hsl(var(--muted-foreground))]">Key: {r.action}</div>
+                        ) : null}
                       </td>
                       <td className="px-4 py-3">
-                        <div className="font-medium">{actorP ? displayName(actorP) : r.actor_user_id ? r.actor_user_id.slice(0, 8) : 'system'}</div>
+                        <div className="font-medium">
+                          {actorP ? displayName(actorP) : r.actor_user_id ? r.actor_user_id.slice(0, 8) : 'system'}
+                        </div>
                         <div className="text-xs text-[hsl(var(--muted-foreground))]">{actorP?.email ?? ''}</div>
                       </td>
                       <td className="px-4 py-3 text-xs text-[hsl(var(--muted-foreground))]">{shortJSON(r.action_details)}</td>
