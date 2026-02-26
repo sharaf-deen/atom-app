@@ -151,29 +151,10 @@ export default async function ExpiringSoonPage({
 
       <div className="w-full md:w-44">
         <label className="block text-xs font-medium text-[hsl(var(--muted))] mb-1">Days window</label>
-        <Select
-          name="days"
-          defaultValue={String(daysWindow)}
-          options={[
-            { label: '3 days', value: '3' },
-            { label: '7 days', value: '7' },
-            { label: '14 days', value: '14' },
-            { label: '30 days', value: '30' },
-            { label: '60 days', value: '60' },
-          ]}
-        />
-      </div>
-
-      <div className="w-full md:w-52">
-        <label className="block text-xs font-medium text-[hsl(var(--muted))] mb-1">Frozen</label>
-        <Select
-          name="includeFrozen"
-          defaultValue={includeFrozen ? '1' : '0'}
-          options={[
-            { label: 'Hide frozen', value: '0' },
-            { label: 'Include frozen', value: '1' },
-          ]}
-        />
+        <Select name="includeFrozen" defaultValue={includeFrozen ? '1' : '0'}>
+          <option value="0">Hide frozen</option>
+          <option value="1">Include frozen</option>
+        </Select>
       </div>
 
       <div className="flex gap-2">
@@ -234,7 +215,7 @@ export default async function ExpiringSoonPage({
       <Section className="space-y-5">
         {loadError ? (
           <InlineAlert
-            variant="danger"
+            variant="error"
             title="Failed to load"
             className="max-w-3xl"
           >
