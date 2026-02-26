@@ -39,10 +39,20 @@ function parseMemberIdFromCode(code: string): string | null {
   return null
 }
 
-function todayDateOnlyUTC() {
-  return new Date().toISOString().slice(0, 10)
-}
+const CAIRO_TZ = 'Africa/Cairo'
 
+function todayDateOnlyCairo() {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: CAIRO_TZ,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(new Date())
+  const y = parts.find((p) => p.type === 'year')?.value ?? '1970'
+  const m = parts.find((p) => p.type === 'month')?.value ?? '01'
+  const d = parts.find((p) => p.type === 'day')?.value ?? '01'
+  return `${y}-${m}-${d}`
+}
 function daysBetweenUTC(fromDateOnly: string, toDateOnly: string) {
   const from = new Date(`${fromDateOnly}T00:00:00Z`).getTime()
   const to = new Date(`${toDateOnly}T00:00:00Z`).getTime()
@@ -74,7 +84,7 @@ export async function POST(req: Request) {
     return json(400, { ok: false, message: 'Invalid QR code' })
   }
 
-  const today = todayDateOnlyUTC()
+  const today = todayDateOnlyCairo() // Cairo date-only to avoid midnight UTC drift
 
   // Try TIME-based subscription first
   const { data: timeSub, error: timeErr } = await admin
