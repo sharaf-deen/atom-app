@@ -277,7 +277,7 @@ export default function SubscribeDialog({
             <Card className="w-[92vw] max-w-md">
               <CardContent>
                 <div className="flex items-center gap-2">
-                  <h3 className="text-lg font-semibold">New subscription</h3>
+                  <h3 className="text-lg font-semibold">{mode === 'renew' ? 'Renew / Extend' : 'New subscription'}</h3>
                   <div className="ml-auto">
                     <Button variant="ghost" size="sm" onClick={() => !busy && setOpen(false)}>
                       Close
@@ -310,7 +310,7 @@ export default function SubscribeDialog({
                     label="Plan"
                     value={plan}
                     onChange={(e) => setPlan(e.target.value as Plan)}
-                    disabled={busy || status.kind === 'success' || lockStartDate}
+                    disabled={busy || status.kind === 'success'}
                     aria-label="Plan"
                   >
                     <option value="1m">1 month</option>
@@ -352,7 +352,7 @@ export default function SubscribeDialog({
                         onChange={(e) =>
                           setSessions(Math.max(1, Math.min(10, Number(e.target.value || 1))))
                         }
-                        disabled={busy || status.kind === 'success' || lockStartDate}
+                        disabled={busy || status.kind === 'success'}
                       />
                       <p className="text-xs text-[hsl(var(--muted))] -mt-2">
                         Validity preview (45 days): <span className="font-medium">{previewEnd ?? '—'}</span>
@@ -367,14 +367,14 @@ export default function SubscribeDialog({
                     step="1"
                     value={amount}
                     onChange={(e) => setAmount(e.target.value)}
-                    disabled={busy || status.kind === 'success' || lockStartDate}
+                    disabled={busy || status.kind === 'success'}
                   />
 
                   <Select
                     label="Payment method"
                     value={paymentMethod}
                     onChange={(e) => setPaymentMethod(e.target.value as SubscriptionPaymentMethod)}
-                    disabled={busy || status.kind === 'success' || lockStartDate}
+                    disabled={busy || status.kind === 'success'}
                     aria-label="Payment method"
                   >
                     <option value="cash">{humanPaymentMethod('cash')}</option>
@@ -390,7 +390,7 @@ export default function SubscribeDialog({
                     step="1"
                     value={amountDue}
                     onChange={(e) => setAmountDue(e.target.value)}
-                    disabled={busy || status.kind === 'success' || lockStartDate}
+                    disabled={busy || status.kind === 'success'}
                   />
                   <p className="text-xs text-[hsl(var(--muted))] -mt-2">
                     Total will be <b>Paid + Due</b>. If the member paid in full, set <b>0</b>.
@@ -402,7 +402,7 @@ export default function SubscribeDialog({
                     Cancel
                   </Button>
                   <Button onClick={submit} disabled={!canSubmit || status.kind === 'success'}>
-                    {busy ? 'Saving…' : 'Create subscription'}
+                    {busy ? 'Saving…' : mode === 'renew' ? 'Renew / Extend' : 'Create subscription'}
                   </Button>
                 </div>
               </CardContent>
