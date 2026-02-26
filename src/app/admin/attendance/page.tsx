@@ -12,6 +12,8 @@ import Select from '@/components/ui/Select'
 import Input from '@/components/ui/Input'
 import { Table } from '@/components/ui/Table'
 
+import InactiveNotifyClient from './inactive-notify-client'
+
 import { getSessionUser } from '@/lib/session'
 import { createSupabaseAdminClient } from '@/lib/supabaseAdmin'
 
@@ -359,34 +361,21 @@ export default async function AttendanceDashboard({
     }
   })
 
-  const inactCols = [
-    { key: 'member', header: 'Member' },
-    { key: 'hint', header: `No valid check-in in last ${inactiveDays} days` },
-    { key: 'open', header: '' },
-  ]
-  const inactiveRows = inactiveMemberIds.map((mid) => {
+  const inactiveMembers = inactiveMemberIds.map((mid) => {
     const p = profiles.get(mid)
     return {
-      id: mid,
-      member: (
-        <div className="space-y-0.5">
-          <div className="font-medium">{fmtName(p)}</div>
-          {p?.email ? <div className="text-xs text-[hsl(var(--muted))]">{p.email}</div> : null}
-        </div>
-      ),
-      hint: '—',
-      open: (
-        <Link className="underline" href={`/members/${mid}`}>
-          Open
-        </Link>
-      ),
+      member_id: mid,
+      name: fmtName(p),
+      email: p?.email ?? null,
+      phone: p?.phone ?? null,
+      member_code: p?.member_id ?? null,
     }
   })
 
   const headerRight = (
     <div className="flex items-center gap-2">
-      <Button asChild variant="outline" size="sm" href={exportHref}>
-        Export CSV
+      <Button asChild variant="outline" size="sm">
+                <a href={exportHref}>Export CSV</a>
       </Button>
     </div>
   )
@@ -426,17 +415,17 @@ export default async function AttendanceDashboard({
         </div>
 
         <div className="space-y-3">
-          <h2 className="text-sm font-semibold tracking-wide text-[hsl(var(--muted))]">Inactive members (active subscription)</h2>
+          <h2 className="text-sm font-semibold tracking-wide text-[hsl(var(--muted))]">Inactive members</h2>
           <div className="text-xs text-[hsl(var(--muted))]">
             Members who currently have an active subscription but have <b>no valid attendance</b> in the last{' '}
-            <b>{inactiveDays}</b> day(s).
+            <b>{inactiveDays}</b> day(s). Use <b>Notify</b> to send a reminder (or an offer) and track it in logs.
           </div>
-          <Table columns={inactCols} rows={inactiveRows} keyField="id" />
+          <InactiveNotifyClient members={inactiveMembers} inactiveDays={inactiveDays} />
         </div>
 
         <div className="text-xs text-[hsl(var(--muted))]">
           Note: attendance is recorded when staff uses Scan / Kiosk. If you want “today” to match Cairo midnight exactly,
-          we can also adjust the scan route to save attendance date in Cairo time.
+          keep scan date in Cairo time (already patched).
         </div>
       </Section>
     </main>
