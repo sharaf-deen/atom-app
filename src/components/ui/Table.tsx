@@ -16,8 +16,11 @@ type Props = {
   rows: Record<string, any>[]
   keyField: string
   /**
-   * If true, use the legacy mobile card layout.
-   * Default is false because the app is mobile-first and we want sticky headers everywhere.
+   * Mobile layout:
+   * - true  => render compact cards on mobile + table on sm+
+   * - false => render table on all breakpoints
+   *
+   * Default = true (no horizontal scrolling on mobile).
    */
   mobileCards?: boolean
   /**
@@ -27,43 +30,145 @@ type Props = {
   stickyTopClassName?: string
 }
 
+function isActionCol(col: Column) {
+  const k = (col.key ?? '').toLowerCase()
+  const h = (col.header ?? '').trim()
+  if (!h) return true
+  return k === 'actions' || k === 'action' || k === 'open' || k === 'more'
+}
+
+function visibleColsMobile(columns: Column[]) {
+  return columns.filter((c) => !c.hideOnMobile)
+}
+
 export function Table({
   columns,
   rows,
   keyField,
-  mobileCards = false,
+  mobileCards = true,
   stickyTopClassName = 'top-12',
 }: Props) {
-  const visibleCols = React.useMemo(() => {
-    if (!mobileCards) return columns
-    // In card mode we still display all columns (label/value pairs)
-    return columns
-  }, [columns, mobileCards])
+  const mobileCols = React.useMemo(() => visibleColsMobile(columns), [columns])
 
+  // Mobile-first: by default we render a card list on mobile to avoid any horizontal scrolling.
   if (mobileCards) {
-    // Compact card layout (legacy)
+    const infoCols = mobileCols.filter((c) => !isActionCol(c))
+    const actionCols = mobileCols.filter((c) => isActionCol(c))
+
     return (
-      <div className="space-y-3">
-        {rows.map((row) => (
-          <div
-            key={row[keyField]}
-            className="rounded-2xl border border-[hsl(var(--border))] bg-white dark:bg-black p-3 shadow-soft"
-          >
-            {visibleCols.map((col) => (
-              <div key={col.key} className="flex justify-between gap-3 py-1 text-sm">
-                <span className="text-[12px] text-[hsl(var(--muted))]">{col.header}</span>
-                <span className="min-w-0 text-right font-medium truncate">{row[col.key]}</span>
+      <>
+        {/* Mobile cards */}
+        <div className="space-y-3 sm:hidden">
+          {rows.map((row) => {
+            const rowKey = row[keyField]
+            return (
+              <div
+                key={rowKey}
+                className="rounded-2xl border border-[hsl(var(--border))] bg-white dark:bg-black p-3 shadow-soft"
+              >
+                {/* Info */}
+                <div className="space-y-2">
+                  {infoCols.map((col) => (
+                    <div key={col.key} className="flex items-start justify-between gap-3">
+                      <div className="text-[11px] font-medium text-[hsl(var(--muted))] shrink-0">
+                        {col.header}
+                      </div>
+                      <div className="min-w-0 text-right text-[13px] font-medium break-words whitespace-normal">
+                        {row[col.key]}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Actions */}
+                {actionCols.length ? (
+                  <div className="mt-3 flex flex-wrap items-center justify-end gap-2 border-t border-[hsl(var(--border))] pt-3">
+                    {actionCols.map((col) => (
+                      <React.Fragment key={col.key}>{row[col.key]}</React.Fragment>
+                    ))}
+                  </div>
+                ) : null}
               </div>
-            ))}
+            )
+          })}
+
+          {!rows.length ? (
+            <div className="rounded-2xl border border-[hsl(var(--border))] bg-white dark:bg-black p-4 text-center text-sm text-[hsl(var(--muted))] shadow-soft">
+              No results
+            </div>
+          ) : null}
+        </div>
+
+        {/* Desktop / tablet table */}
+        <div className="hidden sm:block rounded-2xl border border-[hsl(var(--border))] bg-white dark:bg-black shadow-soft overflow-hidden">
+          <div className="max-w-full overflow-x-auto">
+            <table className="w-full text-[13px] leading-5">
+              <thead className="text-left">
+                <tr>
+                  {columns.map((col) => (
+                    <th
+                      key={col.key}
+                      className={[
+                        'sticky',
+                        stickyTopClassName,
+                        'z-10',
+                        'bg-white dark:bg-black',
+                        'border-b border-[hsl(var(--border))]',
+                        'px-3 py-2',
+                        'font-semibold',
+                        'whitespace-nowrap',
+                        col.thClassName ?? '',
+                      ]
+                        .filter(Boolean)
+                        .join(' ')}
+                    >
+                      {col.header}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+
+              <tbody>
+                {rows.map((row) => (
+                  <tr
+                    key={row[keyField]}
+                    className="odd:bg-white even:bg-[hsl(var(--bg))] dark:odd:bg-black dark:even:bg-white/[0.04]"
+                  >
+                    {columns.map((col) => (
+                      <td
+                        key={col.key}
+                        className={[
+                          'px-3 py-2',
+                          'border-t border-[hsl(var(--border))]',
+                          'align-top',
+                          'whitespace-nowrap',
+                          col.tdClassName ?? '',
+                        ]
+                          .filter(Boolean)
+                          .join(' ')}
+                      >
+                        <div className="max-w-[60vw] lg:max-w-none truncate">{row[col.key]}</div>
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+
+                {!rows.length ? (
+                  <tr>
+                    <td colSpan={columns.length} className="px-3 py-6 text-center text-sm text-[hsl(var(--muted))]">
+                      No results
+                    </td>
+                  </tr>
+                ) : null}
+              </tbody>
+            </table>
           </div>
-        ))}
-      </div>
+        </div>
+      </>
     )
   }
 
-  // Mobile-first table (compact + sticky header on all breakpoints)
-  // - Sticky header sits below the sticky AppNav (h-12).
-  // - Horizontal scroll is enabled for narrow screens.
+  // Table on all breakpoints (use sparingly; may overflow on mobile depending on columns).
   return (
     <div className="rounded-2xl border border-[hsl(var(--border))] bg-white dark:bg-black shadow-soft overflow-hidden">
       <div className="max-w-full overflow-x-auto">
@@ -122,10 +227,7 @@ export function Table({
 
             {!rows.length ? (
               <tr>
-                <td
-                  colSpan={columns.length}
-                  className="px-3 py-6 text-center text-sm text-[hsl(var(--muted))]"
-                >
+                <td colSpan={columns.length} className="px-3 py-6 text-center text-sm text-[hsl(var(--muted))]">
                   No results
                 </td>
               </tr>
