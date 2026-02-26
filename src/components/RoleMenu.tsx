@@ -337,7 +337,7 @@ export default function RoleMenu({ items }: { items: MenuItem[] }) {
                   className="text-xs font-semibold underline"
                   title="Open the Home dashboard"
                 >
-                  Home dashboard
+                  Home
                 </Link>
 
                 <button
