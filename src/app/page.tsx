@@ -126,6 +126,7 @@ const MENU_BY_ROLE: GroupedMenuByRole = {
         { label: 'Dashboard', href: '/admin', icon: LayoutDashboard },
         { label: 'Notifications', href: '/notifications', icon: Bell },
         { label: 'Schedule', href: '/schedule', icon: CalendarDays },
+        { label: 'Attendance', href: '/admin/attendance', icon: CalendarDays },
       ],
     },
     {
@@ -164,6 +165,7 @@ const MENU_BY_ROLE: GroupedMenuByRole = {
         { label: 'Dashboard', href: '/admin', icon: LayoutDashboard },
         { label: 'Notifications', href: '/notifications', icon: Bell },
         { label: 'Schedule', href: '/schedule', icon: CalendarDays },
+        { label: 'Attendance', href: '/admin/attendance', icon: CalendarDays },
       ],
     },
     {
