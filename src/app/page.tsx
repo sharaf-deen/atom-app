@@ -135,6 +135,7 @@ const MENU_BY_ROLE: GroupedMenuByRole = {
         { label: 'Membership', href: '/kiosk', icon: IdCard },
         { label: 'Scan', href: '/scan', icon: ScanLine },
         { label: 'Membership Activity', href: '/admin/membership-activity', icon: FileText },
+        { label: 'Expiring Soon', href: '/admin/expiring-soon', icon: Bell },
       ],
     },
     {
@@ -172,6 +173,7 @@ const MENU_BY_ROLE: GroupedMenuByRole = {
         { label: 'Membership', href: '/kiosk', icon: IdCard },
         { label: 'Scan', href: '/scan', icon: ScanLine },
         { label: 'Membership Activity', href: '/admin/membership-activity', icon: FileText },
+        { label: 'Expiring Soon', href: '/admin/expiring-soon', icon: Bell },
       ],
     },
     {

@@ -75,6 +75,7 @@ const MENU_BY_ROLE: MenuByRole = {
     { label: 'Cash Report', href: '/admin/cash-report', icon: 'wallet' },
     { label: 'Outstanding Dues', href: '/admin/outstanding-dues', icon: 'wallet' },
     { label: 'Membership Activity', href: '/admin/membership-activity', icon: 'file-text' },
+    { label: 'Expiring Soon', href: '/admin/expiring-soon', icon: 'bell' },
     { label: 'Expenses', href: '/expenses', icon: 'wallet' },
   ],
   super_admin: [
@@ -95,6 +96,7 @@ const MENU_BY_ROLE: MenuByRole = {
     { label: 'Cash Report', href: '/admin/cash-report', icon: 'wallet' },
     { label: 'Outstanding Dues', href: '/admin/outstanding-dues', icon: 'wallet' },
     { label: 'Membership Activity', href: '/admin/membership-activity', icon: 'file-text' },
+    { label: 'Expiring Soon', href: '/admin/expiring-soon', icon: 'bell' },
     { label: 'Expenses', href: '/expenses', icon: 'wallet' },
   ],
 }
