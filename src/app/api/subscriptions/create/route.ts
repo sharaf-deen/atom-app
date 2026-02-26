@@ -388,6 +388,24 @@ export async function POST(req: Request) {
       return json(500, { ok: false, error: 'INSERT_FAILED', details: insErr.message })
     }
 
+// 5.5) Insert initial payment history (best-effort)
+// In this app: amount = paid now, amount_due = remaining due, total = amount + amount_due
+if (inserted?.id && amount > 0) {
+  try {
+    await admin.from('subscription_payments').insert({
+      subscription_id: inserted.id,
+      member_id: memberId,
+      amount,
+      payment_method,
+      note: 'Initial payment',
+      created_by: auth.user.id,
+    })
+  } catch {
+    // payments history must never break subscription creation
+  }
+}
+
+
 
 // 5bis) Audit log (best-effort, never blocks)
 await safeAudit(admin, {

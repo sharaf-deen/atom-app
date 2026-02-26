@@ -86,6 +86,7 @@ export async function POST(req: Request) {
   const paymentMethodRaw = body?.payment_method
   const invoiceRequested = body?.invoice?.generate === true
   const invoiceEmailRequested = body?.invoice?.email === true
+  const noteRaw = body?.note
 
   // Role (to allow staff to settle for any member)
   const { data: prof } = await supabase
@@ -208,7 +209,29 @@ await safeAudit(admin, {
   },
 })
 
+
+
 if (updErr) return json(500, { ok: false, error: updErr.message })
+
+
+// Record payment in history (best-effort)
+if (paidNow && paidNow > 0) {
+  try {
+    const note = typeof noteRaw === 'string' ? noteRaw.trim().slice(0, 500) : null
+    const pm = String(payment_method ?? current.payment_method ?? 'cash')
+    await admin.from('subscription_payments').insert({
+      subscription_id: id,
+      member_id: current.member_id,
+      amount: paidNow,
+      payment_method: pm,
+      note: note || null,
+      created_by: actorId,
+    })
+  } catch {
+    // history must never break settlement
+  }
+}
+
 
   // Optional invoice generation (re-issue / overwrite)
   let invoice_ok = false
