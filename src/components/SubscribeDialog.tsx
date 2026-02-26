@@ -86,6 +86,8 @@ export default function SubscribeDialog({
   onCreated,
   disabled = false,
   disabledReason,
+  mode = 'create',
+  lockStartDate = false,
 }: {
   member: { user_id: string; email: string | null; first_name: string | null; last_name: string | null }
   defaultPlan?: Plan
@@ -95,6 +97,8 @@ export default function SubscribeDialog({
   onCreated?: (payload: any) => void
   disabled?: boolean
   disabledReason?: string
+  mode?: 'create' | 'renew'
+  lockStartDate?: boolean
 }) {
   const router = useRouter()
 
@@ -179,7 +183,7 @@ export default function SubscribeDialog({
     (isTimePlan ? dateOk : sessionsOk)
 
   function explainServerError(j: any) {
-    const base = j?.details || j?.error || 'Failed to create subscription'
+    const base = j?.details || j?.error || 'Failed to save subscription'
     const hint = j?.hint ? ` (${String(j.hint)})` : ''
     return String(base) + hint
   }
@@ -209,7 +213,9 @@ export default function SubscribeDialog({
         body.start_date = dateOk ? startDate : todayLocalDateStr()
       }
 
-      const r = await fetch('/api/subscriptions/create', {
+      const endpoint = mode === 'renew' ? '/api/subscriptions/renew' : '/api/subscriptions/create'
+
+      const r = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
@@ -304,7 +310,7 @@ export default function SubscribeDialog({
                     label="Plan"
                     value={plan}
                     onChange={(e) => setPlan(e.target.value as Plan)}
-                    disabled={busy || status.kind === 'success'}
+                    disabled={busy || status.kind === 'success' || lockStartDate}
                     aria-label="Plan"
                   >
                     <option value="1m">1 month</option>
@@ -317,12 +323,17 @@ export default function SubscribeDialog({
                   {plan !== 'sessions' && (
                     <>
                       <Input
-                        label="Start date (required)"
+                        label={lockStartDate ? "Start date (auto)" : "Start date (required)"}
                         type="date"
                         value={startDate}
                         onChange={(e) => setStartDate(e.target.value)}
-                        disabled={busy || status.kind === 'success'}
+                        disabled={busy || status.kind === 'success' || lockStartDate}
                       />
+                      {lockStartDate ? (
+                        <p className="text-xs text-[hsl(var(--muted))] -mt-2">
+                          This renewal will start automatically on this date (after the current plan ends).
+                        </p>
+                      ) : null}
                       <p className="text-xs text-[hsl(var(--muted))] -mt-2">
                         End date preview: <span className="font-medium">{previewEnd ?? '—'}</span>
                       </p>
@@ -341,7 +352,7 @@ export default function SubscribeDialog({
                         onChange={(e) =>
                           setSessions(Math.max(1, Math.min(10, Number(e.target.value || 1))))
                         }
-                        disabled={busy || status.kind === 'success'}
+                        disabled={busy || status.kind === 'success' || lockStartDate}
                       />
                       <p className="text-xs text-[hsl(var(--muted))] -mt-2">
                         Validity preview (45 days): <span className="font-medium">{previewEnd ?? '—'}</span>
@@ -356,14 +367,14 @@ export default function SubscribeDialog({
                     step="1"
                     value={amount}
                     onChange={(e) => setAmount(e.target.value)}
-                    disabled={busy || status.kind === 'success'}
+                    disabled={busy || status.kind === 'success' || lockStartDate}
                   />
 
                   <Select
                     label="Payment method"
                     value={paymentMethod}
                     onChange={(e) => setPaymentMethod(e.target.value as SubscriptionPaymentMethod)}
-                    disabled={busy || status.kind === 'success'}
+                    disabled={busy || status.kind === 'success' || lockStartDate}
                     aria-label="Payment method"
                   >
                     <option value="cash">{humanPaymentMethod('cash')}</option>
@@ -379,8 +390,11 @@ export default function SubscribeDialog({
                     step="1"
                     value={amountDue}
                     onChange={(e) => setAmountDue(e.target.value)}
-                    disabled={busy || status.kind === 'success'}
+                    disabled={busy || status.kind === 'success' || lockStartDate}
                   />
+                  <p className="text-xs text-[hsl(var(--muted))] -mt-2">
+                    Total will be <b>Paid + Due</b>. If the member paid in full, set <b>0</b>.
+                  </p>
                 </div>
 
                 <div className="mt-4 flex flex-wrap items-center gap-2">

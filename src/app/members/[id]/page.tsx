@@ -159,6 +159,24 @@ const subscribeDisabledReason = hasActiveSubscription
   : undefined
 
 
+// Renewal: allow stacking a future time subscription that starts after the active one ends
+const activeTimeEnds = (subs ?? [])
+  .filter((s) => {
+    const status = String(s.status ?? '').toLowerCase()
+    if (status !== 'active') return false
+    if (s.plan === 'sessions') return false
+    const end = s.end_date
+    if (!end) return false
+    return today <= end
+  })
+  .map((s) => s.end_date as string)
+
+const maxActiveTimeEnd = activeTimeEnds.length ? activeTimeEnds.sort().slice(-1)[0] : null
+const renewStartDate = maxActiveTimeEnd ? addDays(maxActiveTimeEnd, 1) : today
+const defaultRenewPlan: Plan =
+  ((subs ?? []).find((s) => String(s.status ?? '').toLowerCase() === 'active' && s.plan !== 'sessions')?.plan as Plan) ?? '1m'
+
+
 
   // Attendance is a staff-only view.
   // Members / coaches can see their own profile + subscriptions, but not attendance.
@@ -302,6 +320,25 @@ const subscribeDisabledReason = hasActiveSubscription
                   disabled={hasActiveSubscription}
                   disabledReason={subscribeDisabledReason}
                 />
+                {canManageSubscriptions && maxActiveTimeEnd ? (
+                  <div className="ml-2 inline-block">
+                    <SubscribeDialog
+                      member={{
+                        user_id: profile.user_id,
+                        email: profile.email,
+                        first_name: profile.first_name,
+                        last_name: profile.last_name,
+                      }}
+                      buttonLabel="Renew / Extend"
+                      defaultPlan={defaultRenewPlan}
+                      defaultStartDate={renewStartDate}
+                      defaultSessions={10}
+                      mode="renew"
+                      lockStartDate
+                    />
+                  </div>
+                ) : null}
+
               </div>
             )}
           </div>
