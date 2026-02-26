@@ -89,3 +89,48 @@ export function cairoDayBoundsUTC(dateOnly: string): { startISO: string; endISO:
   const end = cairoLocalToUTC({ dateOnly: next, hour: 0, minute: 0, second: 0 })
   return { startISO: start.toISOString(), endISO: end.toISOString() }
 }
+
+/**
+ * Get UTC ISO bounds [start, end) for a Cairo date range (inclusive).
+ * Example: from=2026-02-01, to=2026-02-07 -> bounds cover 7 Cairo calendar days.
+ */
+export function cairoRangeBoundsUTC(fromDateOnly: string, toDateOnly: string): { startISO: string; endISO: string } {
+  const start = cairoLocalToUTC({ dateOnly: fromDateOnly, hour: 0, minute: 0, second: 0 })
+  const afterTo = addDaysDateOnly(toDateOnly, 1)
+  const end = cairoLocalToUTC({ dateOnly: afterTo, hour: 0, minute: 0, second: 0 })
+  return { startISO: start.toISOString(), endISO: end.toISOString() }
+}
+
+function dayOfWeekISO(dateOnly: string): number {
+  // 1..7 (Mon..Sun)
+  const [y, m, d] = dateOnly.split('-').map(Number)
+  const dt = new Date(Date.UTC(y, (m || 1) - 1, d || 1))
+  // JS: 0=Sun..6=Sat
+  const js = dt.getUTCDay()
+  return js === 0 ? 7 : js
+}
+
+/**
+ * Returns Cairo week bounds (Mon..Sun) for the week containing the given date.
+ */
+export function cairoWeekBoundsDateOnly(anchorDateOnly: string): { from: string; to: string } {
+  const isoDow = dayOfWeekISO(anchorDateOnly) // 1..7
+  const deltaToMonday = isoDow - 1
+  const from = addDaysDateOnly(anchorDateOnly, -deltaToMonday)
+  const to = addDaysDateOnly(from, 6)
+  return { from, to }
+}
+
+/**
+ * Returns Cairo month bounds for the month containing the given date.
+ */
+export function cairoMonthBoundsDateOnly(anchorDateOnly: string): { from: string; to: string } {
+  const ym = anchorDateOnly.slice(0, 7) // YYYY-MM
+  const from = `${ym}-01`
+  const [y, m] = ym.split('-').map(Number)
+  const nextMonthY = m === 12 ? y + 1 : y
+  const nextMonthM = m === 12 ? 1 : m + 1
+  const nextMonthStart = `${String(nextMonthY).padStart(4, '0')}-${String(nextMonthM).padStart(2, '0')}-01`
+  const to = addDaysDateOnly(nextMonthStart, -1)
+  return { from, to }
+}

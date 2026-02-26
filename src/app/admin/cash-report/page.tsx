@@ -10,7 +10,13 @@ import AccessDeniedCard from '@/components/AccessDeniedCard'
 import Badge from '@/components/ui/Badge'
 import { Card } from '@/components/ui/Card'
 import { Table } from '@/components/ui/Table'
-import { cairoDayBoundsUTC, cairoTodayDateOnly, isISODateOnly } from '@/lib/cairoTime'
+import {
+  cairoMonthBoundsDateOnly,
+  cairoRangeBoundsUTC,
+  cairoTodayDateOnly,
+  cairoWeekBoundsDateOnly,
+  isISODateOnly,
+} from '@/lib/cairoTime'
 
 type Role = 'member' | 'assistant_coach' | 'coach' | 'reception' | 'admin' | 'super_admin'
 const ALLOWED: Role[] = ['admin', 'super_admin']
@@ -77,12 +83,43 @@ export default async function AdminCashReportPage({
   }
 
   const today = cairoTodayDateOnly()
-  const date = isISODateOnly(typeof searchParams.date === 'string' ? searchParams.date : null)
+
+  const modeRaw = typeof searchParams.mode === 'string' ? searchParams.mode : 'day'
+  const mode: 'day' | 'week' | 'month' | 'range' =
+    modeRaw === 'week' || modeRaw === 'month' || modeRaw === 'range' ? modeRaw : 'day'
+
+  const anchorDate = isISODateOnly(typeof searchParams.date === 'string' ? searchParams.date : null)
     ? (searchParams.date as string)
     : today
 
+  const rangeFromParam = isISODateOnly(typeof searchParams.from === 'string' ? searchParams.from : null)
+    ? (searchParams.from as string)
+    : today
+  const rangeToParam = isISODateOnly(typeof searchParams.to === 'string' ? searchParams.to : null)
+    ? (searchParams.to as string)
+    : rangeFromParam
+
+  const { from: weekFrom, to: weekTo } = cairoWeekBoundsDateOnly(anchorDate)
+  const { from: monthFrom, to: monthTo } = cairoMonthBoundsDateOnly(anchorDate)
+
+  const rangeFrom = mode === 'week' ? weekFrom : mode === 'month' ? monthFrom : mode === 'range' ? rangeFromParam : anchorDate
+  const rangeTo = mode === 'week' ? weekTo : mode === 'month' ? monthTo : mode === 'range' ? rangeToParam : anchorDate
+
+  const safeFrom = rangeFrom <= rangeTo ? rangeFrom : rangeTo
+  const safeTo = rangeFrom <= rangeTo ? rangeTo : rangeFrom
+
+  const rangeLabel =
+    mode === 'day'
+      ? `Day: ${safeFrom}`
+      : mode === 'week'
+      ? `Week (Mon–Sun): ${safeFrom} → ${safeTo}`
+      : mode === 'month'
+      ? `Month: ${safeFrom.slice(0, 7)}`
+      : `Range: ${safeFrom} → ${safeTo}`
+
   const admin = createSupabaseAdminClient()
-  const { startISO, endISO } = cairoDayBoundsUTC(date)
+
+  const { startISO, endISO } = cairoRangeBoundsUTC(safeFrom, safeTo)
 
   // Income from subscription_payments (created_at in UTC bounds for Cairo day)
   const { data: pays, error: payErr } = await admin
@@ -99,11 +136,12 @@ export default async function AdminCashReportPage({
     incomeBy[normMethod(r.payment_method)] += amt
   }
 
-  // Expenses for the same Cairo date (expenses.date is YYYY-MM-DD)
+  // Expenses for the same Cairo date range (expenses.date is YYYY-MM-DD)
   const { data: exps, error: expErr } = await admin
     .from('expenses')
     .select('id, date, category_key, description, amount, payment_method')
-    .eq('date', date)
+    .gte('date', safeFrom)
+    .lte('date', safeTo)
     .limit(10000)
 
   const expenseBy: Record<Method, number> = { cash: 0, instapay: 0, card: 0, bank_transfer: 0 }
@@ -128,11 +166,17 @@ export default async function AdminCashReportPage({
     .order('created_at', { ascending: false })
     .limit(10)
 
-  // "Recent" expenses for the day: highest 10 amounts (safer than relying on created_at)
+  // "Recent" expenses for the range: highest 10 amounts
   const topExpenses = (exps ?? [])
     .slice()
     .sort((a: any, b: any) => Number(b.amount ?? 0) - Number(a.amount ?? 0))
     .slice(0, 10)
+
+  const exportQuery = new URLSearchParams()
+  exportQuery.set('mode', mode)
+  exportQuery.set('date', anchorDate)
+  exportQuery.set('from', safeFrom)
+  exportQuery.set('to', safeTo)
 
   const breakdownColumns = [
     { key: 'method', header: 'Method' },
@@ -197,7 +241,7 @@ export default async function AdminCashReportPage({
         <div>
           <h1 className="text-2xl font-bold">Admin · Cash Report</h1>
           <p className="text-sm text-[hsl(var(--muted))]">
-            Today means <span className="font-medium">Egypt time (Africa/Cairo)</span>.
+            {rangeLabel}. Uses <span className="font-medium">Egypt time (Africa/Cairo)</span> for day boundaries.
           </p>
         </div>
 
@@ -208,22 +252,94 @@ export default async function AdminCashReportPage({
           <Link prefetch={false} href="/admin/payments" className="border px-4 py-2 rounded-lg hover:bg-gray-50">
             Payments
           </Link>
+          <Link
+            prefetch={false}
+            href={`/api/admin/cash-report/export-pdf?${exportQuery.toString()}`}
+            className="border px-4 py-2 rounded-lg hover:bg-gray-50"
+          >
+            Export PDF
+          </Link>
         </div>
       </div>
 
       <Card className="p-5">
         <form method="get" className="flex flex-wrap items-end gap-3">
           <label className="block">
-            <span className="mb-1 block text-sm font-medium">Date (Egypt)</span>
-            <input
-              type="date"
-              name="date"
-              defaultValue={date}
+            <span className="mb-1 block text-sm font-medium">Period</span>
+            <select
+              name="mode"
+              defaultValue={mode}
               className="w-56 rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            />
+            >
+              <option value="day">Day</option>
+              <option value="week">Week (Mon–Sun)</option>
+              <option value="month">Month</option>
+              <option value="range">Custom range</option>
+            </select>
           </label>
+
+          {mode === 'range' ? (
+            <>
+              <label className="block">
+                <span className="mb-1 block text-sm font-medium">From (Egypt)</span>
+                <input
+                  type="date"
+                  name="from"
+                  defaultValue={safeFrom}
+                  className="w-44 rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                />
+              </label>
+              <label className="block">
+                <span className="mb-1 block text-sm font-medium">To (Egypt)</span>
+                <input
+                  type="date"
+                  name="to"
+                  defaultValue={safeTo}
+                  className="w-44 rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                />
+              </label>
+            </>
+          ) : (
+            <label className="block">
+              <span className="mb-1 block text-sm font-medium">Anchor date (Egypt)</span>
+              <input
+                type="date"
+                name="date"
+                defaultValue={anchorDate}
+                className="w-56 rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              />
+            </label>
+          )}
+
           <button className="rounded-xl bg-black text-white px-4 py-2 text-sm font-medium">Load</button>
-          <div className="text-xs text-[hsl(var(--muted))]">Tip: choose any day to review income vs expenses.</div>
+
+          <div className="flex gap-2">
+            <Link
+              prefetch={false}
+              href={`/admin/cash-report?mode=day&date=${today}`}
+              className="border px-3 py-2 rounded-lg text-sm hover:bg-gray-50"
+            >
+              Today
+            </Link>
+            <Link
+              prefetch={false}
+              href={`/admin/cash-report?mode=week&date=${today}`}
+              className="border px-3 py-2 rounded-lg text-sm hover:bg-gray-50"
+            >
+              This week
+            </Link>
+            <Link
+              prefetch={false}
+              href={`/admin/cash-report?mode=month&date=${today}`}
+              className="border px-3 py-2 rounded-lg text-sm hover:bg-gray-50"
+            >
+              This month
+            </Link>
+          </div>
+
+          <div className="text-xs text-[hsl(var(--muted))]">
+            Tip: use Week/Month for quick reporting, or Custom range for accounting.
+          </div>
         </form>
       </Card>
 
