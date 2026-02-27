@@ -17,14 +17,19 @@ export default function DeletePromoButton({ id, label = 'Delete' }: Props) {
     if (!confirm('Supprimer définitivement cette promotion ? Cette action est irréversible.')) {
       return
     }
-    startTransition(async () => {
-      try {
-        await deletePromo(id)
-        toast.success('Promotion supprimée')
-      } catch (e) {
-        console.error(e)
-        toast.error('Erreur lors de la suppression')
-      }
+
+    // startTransition expects a synchronous callback (void).
+    // Wrap the async work in an IIFE so TS is happy.
+    startTransition(() => {
+      void (async () => {
+        try {
+          await deletePromo(id)
+          toast.success('Promotion supprimée')
+        } catch (e) {
+          console.error(e)
+          toast.error('Erreur lors de la suppression')
+        }
+      })()
     })
   }
 
