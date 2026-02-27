@@ -38,6 +38,11 @@ a {
   box-shadow: var(--focus-shadow, 0 0 0 2px hsl(var(--bg)), 0 0 0 4px hsl(var(--ring)));
 }
 
+/* Tap feedback (subtle) */
+:where(button:not(:disabled), [role="button"], a):active {
+  transform: translateY(1px);
+}
+
 /* Comportements hover génériques (cards, items) */
 .hoverable {
   transition: transform .16s ease, box-shadow .16s ease, background-color .16s ease, color .16s ease, opacity .16s ease;

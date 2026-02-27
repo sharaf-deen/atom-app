@@ -110,9 +110,6 @@ export default async function AdminPage() {
         subtitle="Overview and operations"
         right={
           <div className="flex items-center gap-2">
-            <Button asChild variant="outline" href="/admin">
-              Reload
-            </Button>
             <Button asChild variant="outline" href="/members">
               Members
             </Button>

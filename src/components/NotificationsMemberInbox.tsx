@@ -161,11 +161,6 @@ export default function NotificationsMemberInbox({ canDelete = false }: Props) {
             <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search…" aria-label="Search messages" />
           </div>
 
-          <div className="sm:ml-auto flex items-center gap-2">
-            <Button variant="outline" onClick={() => load(page)} disabled={loading} className="px-3 py-2">
-              Reload
-            </Button>
-          </div>
         </div>
 
         {err && (

@@ -166,7 +166,7 @@ export default function ExpenseCategoriesClient() {
   return (
     <div className="space-y-6">
       {/* Barre outils */}
-      <div className="flex flex-col sm:flex-row gap-3 sm:items-center sm:justify-between">
+      <div className="flex flex-col sm:flex-row gap-3 sm:items-center">
         <input
           type="search"
           placeholder="Search key/label/group…"
@@ -174,9 +174,6 @@ export default function ExpenseCategoriesClient() {
           onChange={(e) => setQ(e.target.value)}
           className="border p-2 rounded w-full sm:w-80"
         />
-        <button onClick={load} className="border px-3 py-2 rounded">
-          Reload
-        </button>
       </div>
 
       {/* Form d'ajout */}

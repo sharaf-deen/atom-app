@@ -144,16 +144,6 @@ export default function ExpensesPageClient({ userRole }: { userRole: string }) {
     applyPreset('month')
   }
 
-  async function reloadAll() {
-    setStatus({ kind: 'info', msg: 'Reloading…' })
-    try {
-      await Promise.all([loadCategories(), loadExpenses(from, to)])
-      setStatus({ kind: '', msg: '' })
-    } catch (e: any) {
-      setStatus({ kind: 'error', msg: String(e?.message || e) })
-    }
-  }
-
   async function addExpense(e: React.FormEvent) {
     e.preventDefault()
     setStatus({ kind: '', msg: '' })
@@ -293,12 +283,7 @@ export default function ExpensesPageClient({ userRole }: { userRole: string }) {
       {canAdd && (
         <Card>
           <CardContent>
-            <div className="flex items-center justify-between gap-3">
-              <h2 className="text-lg font-semibold">Add expense</h2>
-              <Button type="button" variant="outline" size="sm" onClick={reloadAll} disabled={loading || loadingCats || saving}>
-                Reload
-              </Button>
-            </div>
+            <h2 className="text-lg font-semibold">Add expense</h2>
 
             <form onSubmit={addExpense} className="mt-3 grid gap-3">
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -450,12 +435,7 @@ export default function ExpensesPageClient({ userRole }: { userRole: string }) {
       {/* History */}
       <Card>
         <CardContent>
-          <div className="flex items-center justify-between gap-3">
-            <h2 className="text-lg font-semibold">History</h2>
-            <Button type="button" variant="outline" size="sm" onClick={() => loadExpenses(from, to)} disabled={loading}>
-              Reload
-            </Button>
-          </div>
+          <h2 className="text-lg font-semibold">History</h2>
 
           {loading ? (
             <p className="mt-3 text-sm text-[hsl(var(--muted))]">Loading…</p>

@@ -3,7 +3,6 @@
 
 import { useRouter } from 'next/navigation'
 import { useTransition } from 'react'
-import { RotateCw } from 'lucide-react'
 import Button from '@/components/ui/Button'
 
 export default function ReloadButton({
@@ -22,7 +21,8 @@ export default function ReloadButton({
       variant="outline"
       size="sm"
       className={'gap-2 ' + className}
-      disabled={isPending}
+      loading={isPending}
+      loadingText="Reloading"
       onClick={() => {
         startTransition(() => {
           // router.refresh() = re-fetch RSC data (best for dashboards)
@@ -37,7 +37,6 @@ export default function ReloadButton({
       aria-label={label}
       title={label}
     >
-      <RotateCw className={'h-4 w-4 ' + (isPending ? 'animate-spin' : '')} />
       {label}
     </Button>
   )

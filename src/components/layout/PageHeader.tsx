@@ -6,7 +6,7 @@ export default function PageHeader({
   title,
   subtitle,
   right,
-  showReload = true,
+  showReload = false,
 }: {
   title: string
   subtitle?: string
