@@ -225,8 +225,96 @@ export default async function ProfilePage() {
           {(subs ?? []).length === 0 ? (
             <div className="text-sm text-[hsl(var(--muted))]">No subscriptions yet.</div>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
+            <>
+              {/* Mobile cards (no horizontal scroll) */}
+              <div className="grid gap-3 sm:hidden">
+                {(subs ?? []).map((s) => {
+                  const isSessions = s.plan === 'sessions'
+                  const remaining = Math.max((s.sessions_total ?? 0) - (s.sessions_used ?? 0), 0)
+                  const dleft = !isSessions ? daysLeft(s.end_date) : null
+                  const expired = s.status === 'expired' || (dleft !== null && dleft < 0)
+
+                  return (
+                    <div
+                      key={s.id}
+                      className="rounded-2xl border border-[hsl(var(--border))] bg-white p-4 shadow-soft space-y-3"
+                    >
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="inline-flex items-center rounded-full border px-2 py-0.5 text-xs bg-gray-50">
+                          {humanPlan(s.plan)}
+                        </span>
+                        <span className="text-xs text-[hsl(var(--muted))]">
+                          {fmtDate(s.start_date)} → {fmtDate(s.end_date)}
+                        </span>
+                        <span className="ml-auto text-[11px] px-2 py-0.5 rounded-full border bg-gray-50">
+                          {s.status ?? '—'}
+                        </span>
+                      </div>
+
+                      <div className="grid gap-2 text-sm">
+                        {isSessions ? (
+                          <div className="flex items-center justify-between gap-3">
+                            <div className="text-xs text-[hsl(var(--muted))]">Sessions</div>
+                            <div className="font-medium">
+                              {s.sessions_used ?? 0}/{s.sessions_total ?? 0} (left {remaining})
+                            </div>
+                          </div>
+                        ) : null}
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="text-xs text-[hsl(var(--muted))]">Paid</div>
+                          <div className="font-medium">{s.amount ?? 0}</div>
+                        </div>
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="text-xs text-[hsl(var(--muted))]">Payment</div>
+                          <div className="font-medium">{humanPaymentMethod(s.payment_method)}</div>
+                        </div>
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="text-xs text-[hsl(var(--muted))]">Due</div>
+                          <div className="font-medium">{Number(s.amount_due ?? 0) || 0}</div>
+                        </div>
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="text-xs text-[hsl(var(--muted))]">Paid at</div>
+                          <div className="font-medium">{fmtDate(s.paid_at)}</div>
+                        </div>
+                      </div>
+
+                      <div className="flex flex-wrap gap-1">
+                        {!isSessions && dleft !== null && dleft >= 0 && (
+                          <span
+                            className={`text-[11px] px-2 py-0.5 rounded-2xl border ${
+                              dleft <= 7
+                                ? 'bg-amber-50 border-amber-300 text-amber-900'
+                                : 'bg-emerald-50 border-emerald-300 text-emerald-900'
+                            }`}
+                          >
+                            {dleft} day(s) left
+                          </span>
+                        )}
+                        {expired && (
+                          <span className="text-[11px] px-2 py-0.5 rounded-2xl border bg-rose-50 border-rose-300 text-rose-900">
+                            expired
+                          </span>
+                        )}
+                        {isSessions && (
+                          <span
+                            className={`text-[11px] px-2 py-0.5 rounded-2xl border ${
+                              remaining <= 2
+                                ? 'bg-amber-50 border-amber-300 text-amber-900'
+                                : 'bg-emerald-50 border-emerald-300 text-emerald-900'
+                            }`}
+                          >
+                            {remaining} left
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+
+              {/* Desktop table */}
+              <div className="hidden sm:block overflow-x-auto">
+                <table className="w-full text-sm">
                 <thead className="text-[hsl(var(--muted))]">
                   <tr className="border-b border-[hsl(var(--border))]">
                     <th className="text-left px-3 py-2">Plan</th>
@@ -298,8 +386,9 @@ export default async function ProfilePage() {
                     )
                   })}
                 </tbody>
-              </table>
-            </div>
+                </table>
+              </div>
+            </>
           )}
         </section>
       </Section>

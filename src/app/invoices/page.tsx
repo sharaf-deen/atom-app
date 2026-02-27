@@ -131,27 +131,27 @@ export default async function InvoicesPage({
         <Card>
           <CardContent>
             <form action="/invoices" method="get" className="flex flex-wrap items-end gap-3">
-              <div className="flex flex-col gap-1">
+              <div className="flex flex-col gap-1 flex-1 min-w-[260px]">
                 <label className="text-xs text-[hsl(var(--muted))]">Search (invoice #, name, email, member code, or UUID)</label>
                 <input
                   name="q"
                   defaultValue={q}
-                  className="rounded-xl border px-3 py-2 text-sm bg-white"
+                  className="w-full min-w-0 rounded-xl border px-3 py-2 text-sm bg-white"
                   placeholder="e.g. INV-123, Nazim, ATOM-000123, email, or UUID"
                 />
               </div>
 
-              <div className="flex flex-col gap-1">
+              <div className="flex flex-col gap-1 w-full sm:w-[160px]">
                 <label className="text-xs text-[hsl(var(--muted))]">From</label>
                 <input name="from" type="date" defaultValue={from} className="rounded-xl border px-3 py-2 text-sm bg-white" />
               </div>
 
-              <div className="flex flex-col gap-1">
+              <div className="flex flex-col gap-1 w-full sm:w-[160px]">
                 <label className="text-xs text-[hsl(var(--muted))]">To</label>
                 <input name="to" type="date" defaultValue={to} className="rounded-xl border px-3 py-2 text-sm bg-white" />
               </div>
 
-              <div className="flex flex-col gap-1">
+              <div className="flex flex-col gap-1 w-full sm:w-[140px]">
                 <label className="text-xs text-[hsl(var(--muted))]">Page size</label>
                 <select name="page_size" defaultValue={String(pageSize)} className="rounded-xl border px-3 py-2 text-sm bg-white">
                   {[20, 50, 100, 200].map((n) => (
@@ -170,7 +170,7 @@ export default async function InvoicesPage({
                 Clear
               </Link>
 
-              <div className="ml-auto text-xs text-[hsl(var(--muted))]">
+              <div className="w-full md:w-auto md:ml-auto text-xs text-[hsl(var(--muted))]">
                 {!errorMsg && total > 0 ? (
                   <>
                     Showing <b>{(page - 1) * pageSize + 1}</b>–<b>{Math.min((page - 1) * pageSize + rows.length, total)}</b> of <b>{total}</b>
@@ -190,8 +190,58 @@ export default async function InvoicesPage({
           ) : rows.length === 0 ? (
             <div className="text-sm text-[hsl(var(--muted))]">No invoices yet.</div>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
+            <>
+              {/* Mobile cards (no horizontal scroll) */}
+              <div className="grid gap-3 sm:hidden">
+                {rows.map((row) => (
+                  <div
+                    key={row.id}
+                    className="rounded-2xl border border-[hsl(var(--border))] bg-white p-4 shadow-soft space-y-3"
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="text-xs text-[hsl(var(--muted))]">Invoice</div>
+                        <div className="font-medium truncate">
+                          <code className="text-xs">{row.invoice_number ?? '—'}</code>
+                        </div>
+                      </div>
+                      <a
+                        className="text-sm underline hover:opacity-80 shrink-0"
+                        href={`/api/invoices/${row.id}/download`}
+                      >
+                        PDF
+                      </a>
+                    </div>
+
+                    <div className="grid gap-2 text-sm">
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="text-xs text-[hsl(var(--muted))]">Member</div>
+                        <div className="font-medium text-right break-words">{displayName(row)}</div>
+                      </div>
+                      {row.member_code ? (
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="text-xs text-[hsl(var(--muted))]">Member ID</div>
+                          <div className="font-medium text-right">{row.member_code}</div>
+                        </div>
+                      ) : null}
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="text-xs text-[hsl(var(--muted))]">Paid at</div>
+                        <div className="font-medium text-right">{fmtDate(row.paid_at)}</div>
+                      </div>
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="text-xs text-[hsl(var(--muted))]">Amount</div>
+                        <div className="font-medium text-right">
+                          {row.amount ?? 0} {row.currency ?? 'EGP'}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Desktop table */}
+              <div className="hidden sm:block overflow-x-auto">
+                <table className="w-full text-sm">
                 <thead className="text-[hsl(var(--muted))]">
                   <tr className="border-b border-[hsl(var(--border))]">
                     <th className="text-left px-3 py-2">Invoice</th>
@@ -225,8 +275,9 @@ export default async function InvoicesPage({
                     </tr>
                   ))}
                 </tbody>
-              </table>
-            </div>
+                </table>
+              </div>
+            </>
           )}
 
           {/* Pagination */}
