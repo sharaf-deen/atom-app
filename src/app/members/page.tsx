@@ -275,8 +275,71 @@ export default async function MembersPage({
         )}
 
         {/* Results */}
-        <Card className="p-0 overflow-hidden">
-          <div className="overflow-x-auto">
+        <div className="space-y-3">
+          {/* Mobile (no horizontal scroll) */}
+          <div className="space-y-3 sm:hidden">
+            {(rows ?? []).map((m) => {
+              const name = `${m.first_name ?? ''} ${m.last_name ?? ''}`.trim() || '—'
+              return (
+                <div
+                  key={m.user_id}
+                  className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-3 shadow-soft"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="font-semibold text-[15px] leading-5 truncate">{name}</div>
+                      <div className="mt-1 text-[12px] text-[hsl(var(--muted))]">
+                        ID: <code className="text-[11px]">{m.member_id?.trim() || '—'}</code>
+                      </div>
+                    </div>
+
+                    <div className="flex shrink-0 flex-col items-end gap-1">
+                      <StatusBadge active={m.is_active} />
+                      <AgeBadge dob={m.date_of_birth} />
+                    </div>
+                  </div>
+
+                  <div className="mt-3 space-y-1 text-[13px]">
+                    <div className="flex items-start justify-between gap-3">
+                      <span className="text-[11px] font-medium text-[hsl(var(--muted))]">Email</span>
+                      <span className="min-w-0 text-right font-medium break-words whitespace-normal">
+                        {m.email ?? '—'}
+                      </span>
+                    </div>
+                    <div className="flex items-start justify-between gap-3">
+                      <span className="text-[11px] font-medium text-[hsl(var(--muted))]">Phone</span>
+                      <span className="min-w-0 text-right font-medium break-words whitespace-normal">
+                        {m.phone ?? '—'}
+                      </span>
+                    </div>
+                    <div className="flex items-start justify-between gap-3">
+                      <span className="text-[11px] font-medium text-[hsl(var(--muted))]">Joined</span>
+                      <span className="min-w-0 text-right font-medium">{fmtDate(m.created_at)}</span>
+                    </div>
+                  </div>
+
+                  <div className="mt-3 flex items-center justify-end gap-2 border-t border-[hsl(var(--border))] pt-3">
+                    <Link
+                      prefetch={false}
+                      href={`/members/${m.user_id}`}
+                      className="inline-flex items-center rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm font-semibold hover:bg-[hsl(var(--bg))]"
+                    >
+                      View
+                    </Link>
+                  </div>
+                </div>
+              )
+            })}
+
+            {rows.length === 0 && !errorMsg && (
+              <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4 text-center text-sm text-[hsl(var(--muted))] shadow-soft">
+                {mode === 'search' ? 'No members found.' : 'No members to show.'}
+              </div>
+            )}
+          </div>
+
+          {/* Tablet/Desktop */}
+          <Card className="hidden sm:block p-0 overflow-hidden">
             <table className="w-full text-sm">
               <thead className="bg-[hsl(var(--bg))] text-left">
                 <tr>
@@ -330,18 +393,53 @@ export default async function MembersPage({
                 )}
               </tbody>
             </table>
-          </div>
 
-          {/* Footer summary + pagination */}
-          <div className="flex flex-col gap-2 border-t border-[hsl(var(--border))] bg-[hsl(var(--bg))] px-4 py-3 text-sm">
-            <div className="flex items-center justify-between gap-3 flex-wrap">
-              <div className="text-[hsl(var(--muted))]">
+            {/* Footer summary + pagination */}
+            <div className="flex flex-col gap-2 border-t border-[hsl(var(--border))] bg-[hsl(var(--bg))] px-4 py-3 text-sm">
+              <div className="flex items-center justify-between gap-3 flex-wrap">
+                <div className="text-[hsl(var(--muted))]">
+                  {totalResults > 0 ? (
+                    <span>
+                      Showing <span className="font-medium">{(page - 1) * pageSize + 1}</span>-<span className="font-medium">
+                        {Math.min(page * pageSize, totalResults)}
+                      </span>{' '}
+                      of <span className="font-medium">{totalResults}</span>
+                    </span>
+                  ) : (
+                    <span>—</span>
+                  )}
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <Link
+                    prefetch={false}
+                    href={hrefForPage(Math.max(1, page - 1))}
+                    className={`rounded-xl border px-3 py-1.5 hover:bg-white ${page <= 1 ? 'pointer-events-none opacity-50' : ''}`}
+                  >
+                    Prev
+                  </Link>
+                  <span className="text-[hsl(var(--muted))]">
+                    Page <span className="font-medium">{page}</span> / <span className="font-medium">{totalPages}</span>
+                  </span>
+                  <Link
+                    prefetch={false}
+                    href={hrefForPage(Math.min(totalPages, page + 1))}
+                    className={`rounded-xl border px-3 py-1.5 hover:bg-white ${page >= totalPages ? 'pointer-events-none opacity-50' : ''}`}
+                  >
+                    Next
+                  </Link>
+                </div>
+              </div>
+            </div>
+          </Card>
+
+          {/* Mobile pagination (below cards) */}
+          <div className="sm:hidden rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] px-3 py-3 shadow-soft">
+            <div className="flex items-center justify-between gap-3">
+              <div className="text-[12px] text-[hsl(var(--muted))]">
                 {totalResults > 0 ? (
                   <span>
-                    Showing <span className="font-medium">{(page - 1) * pageSize + 1}</span>-<span className="font-medium">
-                      {Math.min(page * pageSize, totalResults)}
-                    </span>{' '}
-                    of <span className="font-medium">{totalResults}</span>
+                    Page <span className="font-semibold">{page}</span> / <span className="font-semibold">{totalPages}</span>
                   </span>
                 ) : (
                   <span>—</span>
@@ -352,24 +450,30 @@ export default async function MembersPage({
                 <Link
                   prefetch={false}
                   href={hrefForPage(Math.max(1, page - 1))}
-                  className={`rounded-xl border px-3 py-1.5 hover:bg-white ${page <= 1 ? 'pointer-events-none opacity-50' : ''}`}
+                  className={`rounded-xl border px-3 py-2 text-sm font-semibold ${page <= 1 ? 'pointer-events-none opacity-50' : ''}`}
                 >
                   Prev
                 </Link>
-                <span className="text-[hsl(var(--muted))]">
-                  Page <span className="font-medium">{page}</span> / <span className="font-medium">{totalPages}</span>
-                </span>
                 <Link
                   prefetch={false}
                   href={hrefForPage(Math.min(totalPages, page + 1))}
-                  className={`rounded-xl border px-3 py-1.5 hover:bg-white ${page >= totalPages ? 'pointer-events-none opacity-50' : ''}`}
+                  className={`rounded-xl border px-3 py-2 text-sm font-semibold ${page >= totalPages ? 'pointer-events-none opacity-50' : ''}`}
                 >
                   Next
                 </Link>
               </div>
             </div>
+
+            {totalResults > 0 ? (
+              <div className="mt-2 text-[11px] text-[hsl(var(--muted))]">
+                Showing <span className="font-semibold">{(page - 1) * pageSize + 1}</span>-<span className="font-semibold">
+                  {Math.min(page * pageSize, totalResults)}
+                </span>{' '}
+                of <span className="font-semibold">{totalResults}</span>
+              </div>
+            ) : null}
           </div>
-        </Card>
+        </div>
       </Section>
     </main>
   )
