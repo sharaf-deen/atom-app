@@ -16,18 +16,15 @@ type Props = {
   rows: Record<string, any>[]
   keyField: string
   /**
-   * Mobile layout:
-   * - true  => render compact cards on mobile + table on sm+
-   * - false => render table on all breakpoints
-   *
-   * Default = true (no horizontal scrolling on mobile).
-   */
-  mobileCards?: boolean
-  /**
    * Sticky offset below the app nav (h-12).
    * If you ever change AppNav height, adjust here.
    */
   stickyTopClassName?: string
+  /**
+   * Force table even on mobile (NOT recommended). Default false.
+   * We keep this only for rare pages that truly need a table on mobile.
+   */
+  forceTableOnMobile?: boolean
 }
 
 function isActionCol(col: Column) {
@@ -45,13 +42,13 @@ export function Table({
   columns,
   rows,
   keyField,
-  mobileCards = true,
   stickyTopClassName = 'top-12',
+  forceTableOnMobile = false,
 }: Props) {
   const mobileCols = React.useMemo(() => visibleColsMobile(columns), [columns])
 
-  // Mobile-first: by default we render a card list on mobile to avoid any horizontal scrolling.
-  if (mobileCards) {
+  // Always use cards on mobile (no horizontal scroll).
+  if (!forceTableOnMobile) {
     const infoCols = mobileCols.filter((c) => !isActionCol(c))
     const actionCols = mobileCols.filter((c) => isActionCol(c))
 
@@ -70,9 +67,7 @@ export function Table({
                 <div className="space-y-2">
                   {infoCols.map((col) => (
                     <div key={col.key} className="flex items-start justify-between gap-3">
-                      <div className="text-[11px] font-medium text-[hsl(var(--muted))] shrink-0">
-                        {col.header}
-                      </div>
+                      <div className="text-[11px] font-medium text-[hsl(var(--muted))] shrink-0">{col.header}</div>
                       <div className="min-w-0 text-right text-[13px] font-medium break-words whitespace-normal">
                         {row[col.key]}
                       </div>
@@ -99,142 +94,138 @@ export function Table({
           ) : null}
         </div>
 
-        {/* Desktop / tablet table */}
+        {/* Tablet/Desktop table */}
         <div className="hidden sm:block rounded-2xl border border-[hsl(var(--border))] bg-white dark:bg-black shadow-soft overflow-hidden">
-          <div className="max-w-full overflow-x-auto">
-            <table className="w-full text-[13px] leading-5">
-              <thead className="text-left">
-                <tr>
+          <table className="w-full text-[13px] leading-5">
+            <thead className="text-left">
+              <tr>
+                {columns.map((col) => (
+                  <th
+                    key={col.key}
+                    className={[
+                      'sticky',
+                      stickyTopClassName,
+                      'z-10',
+                      'bg-white dark:bg-black',
+                      'border-b border-[hsl(var(--border))]',
+                      'px-3 py-2',
+                      'font-semibold',
+                      'whitespace-nowrap',
+                      col.thClassName ?? '',
+                    ]
+                      .filter(Boolean)
+                      .join(' ')}
+                  >
+                    {col.header}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+
+            <tbody>
+              {rows.map((row) => (
+                <tr
+                  key={row[keyField]}
+                  className="odd:bg-white even:bg-[hsl(var(--bg))] dark:odd:bg-black dark:even:bg-white/[0.04]"
+                >
                   {columns.map((col) => (
-                    <th
+                    <td
                       key={col.key}
                       className={[
-                        'sticky',
-                        stickyTopClassName,
-                        'z-10',
-                        'bg-white dark:bg-black',
-                        'border-b border-[hsl(var(--border))]',
                         'px-3 py-2',
-                        'font-semibold',
+                        'border-t border-[hsl(var(--border))]',
+                        'align-top',
                         'whitespace-nowrap',
-                        col.thClassName ?? '',
+                        col.tdClassName ?? '',
                       ]
                         .filter(Boolean)
                         .join(' ')}
                     >
-                      {col.header}
-                    </th>
+                      <div className="max-w-[60vw] lg:max-w-none truncate">{row[col.key]}</div>
+                    </td>
                   ))}
                 </tr>
-              </thead>
+              ))}
 
-              <tbody>
-                {rows.map((row) => (
-                  <tr
-                    key={row[keyField]}
-                    className="odd:bg-white even:bg-[hsl(var(--bg))] dark:odd:bg-black dark:even:bg-white/[0.04]"
-                  >
-                    {columns.map((col) => (
-                      <td
-                        key={col.key}
-                        className={[
-                          'px-3 py-2',
-                          'border-t border-[hsl(var(--border))]',
-                          'align-top',
-                          'whitespace-nowrap',
-                          col.tdClassName ?? '',
-                        ]
-                          .filter(Boolean)
-                          .join(' ')}
-                      >
-                        <div className="max-w-[60vw] lg:max-w-none truncate">{row[col.key]}</div>
-                      </td>
-                    ))}
-                  </tr>
-                ))}
-
-                {!rows.length ? (
-                  <tr>
-                    <td colSpan={columns.length} className="px-3 py-6 text-center text-sm text-[hsl(var(--muted))]">
-                      No results
-                    </td>
-                  </tr>
-                ) : null}
-              </tbody>
-            </table>
-          </div>
+              {!rows.length ? (
+                <tr>
+                  <td colSpan={columns.length} className="px-3 py-6 text-center text-sm text-[hsl(var(--muted))]">
+                    No results
+                  </td>
+                </tr>
+              ) : null}
+            </tbody>
+          </table>
         </div>
       </>
     )
   }
 
-  // Table on all breakpoints (use sparingly; may overflow on mobile depending on columns).
+  // Rare: force table on mobile (may overflow)
   return (
     <div className="rounded-2xl border border-[hsl(var(--border))] bg-white dark:bg-black shadow-soft overflow-hidden">
-      <div className="max-w-full overflow-x-auto">
-        <table className="w-full text-[13px] leading-5">
-          <thead className="text-left">
-            <tr>
+      <table className="w-full text-[13px] leading-5">
+        <thead className="text-left">
+          <tr>
+            {columns.map((col) => (
+              <th
+                key={col.key}
+                className={[
+                  'sticky',
+                  stickyTopClassName,
+                  'z-10',
+                  'bg-white dark:bg-black',
+                  'border-b border-[hsl(var(--border))]',
+                  'px-3 py-2',
+                  'font-semibold',
+                  'whitespace-nowrap',
+                  col.hideOnMobile ? 'hidden sm:table-cell' : '',
+                  col.thClassName ?? '',
+                ]
+                  .filter(Boolean)
+                  .join(' ')}
+              >
+                {col.header}
+              </th>
+            ))}
+          </tr>
+        </thead>
+
+        <tbody>
+          {rows.map((row) => (
+            <tr
+              key={row[keyField]}
+              className="odd:bg-white even:bg-[hsl(var(--bg))] dark:odd:bg-black dark:even:bg-white/[0.04]"
+            >
               {columns.map((col) => (
-                <th
+                <td
                   key={col.key}
                   className={[
-                    'sticky',
-                    stickyTopClassName,
-                    'z-10',
-                    'bg-white dark:bg-black',
-                    'border-b border-[hsl(var(--border))]',
                     'px-3 py-2',
-                    'font-semibold',
+                    'border-t border-[hsl(var(--border))]',
+                    'align-top',
                     'whitespace-nowrap',
                     col.hideOnMobile ? 'hidden sm:table-cell' : '',
-                    col.thClassName ?? '',
+                    col.tdClassName ?? '',
                   ]
                     .filter(Boolean)
                     .join(' ')}
                 >
-                  {col.header}
-                </th>
+                  <div className="max-w-[70vw] sm:max-w-none truncate">{row[col.key]}</div>
+                </td>
               ))}
             </tr>
-          </thead>
+          ))}
 
-          <tbody>
-            {rows.map((row) => (
-              <tr
-                key={row[keyField]}
-                className="odd:bg-white even:bg-[hsl(var(--bg))] dark:odd:bg-black dark:even:bg-white/[0.04]"
-              >
-                {columns.map((col) => (
-                  <td
-                    key={col.key}
-                    className={[
-                      'px-3 py-2',
-                      'border-t border-[hsl(var(--border))]',
-                      'align-top',
-                      'whitespace-nowrap',
-                      col.hideOnMobile ? 'hidden sm:table-cell' : '',
-                      col.tdClassName ?? '',
-                    ]
-                      .filter(Boolean)
-                      .join(' ')}
-                  >
-                    <div className="max-w-[70vw] sm:max-w-none truncate">{row[col.key]}</div>
-                  </td>
-                ))}
-              </tr>
-            ))}
-
-            {!rows.length ? (
-              <tr>
-                <td colSpan={columns.length} className="px-3 py-6 text-center text-sm text-[hsl(var(--muted))]">
-                  No results
-                </td>
-              </tr>
-            ) : null}
-          </tbody>
-        </table>
-      </div>
+          {!rows.length ? (
+            <tr>
+              <td colSpan={columns.length} className="px-3 py-6 text-center text-sm text-[hsl(var(--muted))]">
+                No results
+              </td>
+            </tr>
+          ) : null}
+        </tbody>
+      </table>
     </div>
   )
 }
