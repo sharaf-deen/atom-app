@@ -3,17 +3,36 @@ import { requireStaff } from '@/lib/apiAuth';
 import { getAppUrl } from '@/lib/appUrl';
 import { createClient } from '@supabase/supabase-js';
 
-const admin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!, // server only
-  { auth: { autoRefreshToken: false, persistSession: false } }
-);
+// IMPORTANT:
+// Don't create the Supabase client at module scope.
+// Next.js evaluates route modules during `next build` and will crash CI if env vars
+// aren't set (e.g. "supabaseUrl is required"). We create it lazily at request time.
+let _admin: ReturnType<typeof createClient> | null = null
+
+function getAdmin() {
+  if (_admin) return _admin
+
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY // server-only
+
+  if (!url || !serviceKey) {
+    // Throw at runtime (when this route is called), not at build time.
+    throw new Error('Missing Supabase env vars: NEXT_PUBLIC_SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY')
+  }
+
+  _admin = createClient(url, serviceKey, {
+    auth: { autoRefreshToken: false, persistSession: false },
+  })
+
+  return _admin
+}
 
 export async function POST(req: Request) {
   const gate = await requireStaff()
   if (!gate.ok) return gate.res
 
   try {
+    const admin = getAdmin()
     const { first_name, last_name, email, phone } = await req.json();
 
     if (!email || !/^\S+@\S+\.\S+$/.test(email)) {
