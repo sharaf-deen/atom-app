@@ -123,8 +123,8 @@ as $$
     c.total_count
   from counted c, params p
   order by c.created_at desc
-  offset ((p.page - 1) * p.page_size)
-  limit p.page_size;
+  offset ((greatest(coalesce(_page, 1), 1) - 1) * least(greatest(coalesce(_page_size, 20), 1), 200))
+  limit least(greatest(coalesce(_page_size, 20), 1), 200);
 $$;
 
 revoke all on function public.admin_list_store_orders(text, text, date, date, integer, integer) from anon, authenticated;

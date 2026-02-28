@@ -3,7 +3,11 @@
 -- Our function previously used _q/_status/_page/_page_size, so PostgREST couldn't match it.
 -- This migration updates argument names to q/status/page/page_size without changing the signature.
 
-create or replace function public.search_members(
+-- NOTE: PostgreSQL does NOT allow changing input parameter names with CREATE OR REPLACE.
+-- We must DROP then CREATE to rename input parameters.
+drop function if exists public.search_members(text, text, integer, integer);
+
+create function public.search_members(
   q text,
   status text default 'all',
   page integer default 1,
