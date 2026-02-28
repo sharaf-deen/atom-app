@@ -1,0 +1,33 @@
+name: DB Reset + Smoke
+
+on:
+  push:
+    branches: [staging, main]
+
+concurrency:
+  group: db-smoke-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    env:
+      CI: true
+      NEXT_TELEMETRY_DISABLED: 1
+      SUPABASE_DB_ONLY: "true"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Install
+        run: npm ci
+
+      - name: Reset DB + Smoke
+        run: npm run reset:smoke

@@ -50,20 +50,15 @@ export default function SettleDueDialog({
 }) {
   const router = useRouter()
 
-  // Safety: if caller passed nothing, do not crash.
-  if (!sub) return null
+  // NOTE:
+  // Hooks must be called unconditionally. Some callers may pass no subscription
+  // (or a settled one), so we compute safe defaults and return null *after* hooks.
+  const subId = sub?.id ?? ''
+  const initialMethod = (sub?.payment_method as PaymentMethod) || 'cash'
 
-  // Capture stable primitives so TypeScript knows they're defined inside callbacks
-  // (props can change between renders).
-  const subId = sub.id
-  const initialMethod = (sub.payment_method as PaymentMethod) || 'cash'
-
-  const due = Number(sub.amount_due ?? 0)
-  const paidSoFar = Number(sub.amount ?? 0)
+  const due = Number(sub?.amount_due ?? 0)
+  const paidSoFar = Number(sub?.amount ?? 0)
   const totalNow = (Number.isFinite(paidSoFar) ? paidSoFar : 0) + (Number.isFinite(due) ? due : 0)
-
-  const show = Number.isFinite(due) && due > 0
-  if (!show) return null
 
   const [open, setOpen] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -108,6 +103,12 @@ export default function SettleDueDialog({
     if (!paidOk) return null
     return Math.max(0, due - paidNum)
   }, [paidOk, due, paidNum])
+
+  // Safety: if caller passed nothing, or due is already settled, do not render.
+  // (Must be after hooks.)
+  if (!sub) return null
+  const show = Number.isFinite(due) && due > 0
+  if (!show) return null
 
   async function submit() {
     if (!paidOk) {

@@ -99,11 +99,11 @@ end;
 $$;
 
 -- 5) Security: keep these server-only (Next uses service role key)
-revoke all on materialized view public.members_with_activity_mv from anon, authenticated;
-grant select on materialized view public.members_with_activity_mv to service_role;
+revoke all on table public.members_with_activity_mv from anon, authenticated;
+grant select on table public.members_with_activity_mv to service_role;
 
-revoke all on view public.members_with_activity from anon, authenticated;
-grant select on view public.members_with_activity to service_role;
+revoke all on table public.members_with_activity from anon, authenticated;
+grant select on table public.members_with_activity to service_role;
 
 revoke all on function public.members_activity_stats() from anon, authenticated;
 grant execute on function public.members_activity_stats() to service_role;

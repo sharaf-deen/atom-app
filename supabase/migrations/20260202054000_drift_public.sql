@@ -11,17 +11,6 @@ BEGIN
   END IF;
 END
 $$;
-BEGIN
-  IF NOT EXISTS (
-    SELECT 1
-    FROM pg_type t
-    JOIN pg_namespace n ON n.oid = t.typnamespace
-    WHERE t.typname = 'freeze_request_status'
-      AND n.nspname = 'public'
-  ) THEN
-    CREATE TYPE public.freeze_request_status AS ENUM ('pending', 'approved', 'denied', 'canceled');
-  END IF;
-END
 DO $$
 BEGIN
   IF NOT EXISTS (
