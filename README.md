@@ -49,3 +49,21 @@ Open http://localhost:3000
 - Set env vars in Vercel (including `SUPABASE_SERVICE_ROLE_KEY` as a **protected** secret).
 
 > **Important security note:** The **Service Role key must never be exposed to the browser**. In this starter, it is used only in the server API route `/api/scan`.
+
+
+## 6) Development workflow (staging → main)
+
+This repo uses two protected branches:
+
+- `staging`: pre-prod / validation
+- `main`: production
+
+Direct pushes to `staging` and `main` are blocked. Changes must go through Pull Requests and pass required checks.
+
+### Daily workflow
+
+1) Start from `staging`:
+```bash
+git checkout staging
+git pull
+git checkout -b feat/<topic>
