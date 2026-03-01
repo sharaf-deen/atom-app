@@ -1,8 +1,8 @@
 name: DB Reset + Smoke
 
 on:
-  push:
-    branches: [staging, main]
+  pull_request:
+  workflow_dispatch:
 
 concurrency:
   group: db-smoke-${{ github.ref }}
