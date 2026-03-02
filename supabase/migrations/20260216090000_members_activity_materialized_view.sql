@@ -82,6 +82,7 @@ $$;
 
 -- 4) Refresh function (safe fallback)
 -- Use CONCURRENTLY when possible so SELECTs are not blocked.
+drop function if exists public.refresh_members_with_activity_mv();
 create or replace function public.refresh_members_with_activity_mv()
 returns void
 language plpgsql

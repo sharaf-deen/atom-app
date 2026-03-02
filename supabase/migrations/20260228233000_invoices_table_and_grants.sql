@@ -1,5 +1,6 @@
 -- Create invoices table (if missing) and ensure it's exposed to PostgREST.
--- This migration is idempotent and safe to run multiple times.
+-- This migration is idempotent and compatible with both legacy schemas (member_id TEXT)
+-- and the newer schema (member_id UUID referencing profiles.user_id).
 
 do $$
 begin
@@ -77,7 +78,6 @@ begin
         foreign key (subscription_id) references public.subscriptions (id)
         on delete set null;
     exception when duplicate_object then
-      -- already exists
       null;
     end;
   end if;
@@ -108,32 +108,67 @@ alter table public.invoices enable row level security;
 grant select on table public.invoices to anon, authenticated;
 grant all on table public.invoices to service_role;
 
--- Policies (read-only for client roles; writes should be done server-side with service_role)
-drop policy if exists invoices_select_own on public.invoices;
-create policy invoices_select_own
-on public.invoices
-for select
-to authenticated
-using (
-  exists (
-    select 1
-    from public.profiles p
-    where p.user_id = auth.uid()
-      and p.member_id is not null
-      and p.member_id = invoices.member_id
-  )
-);
+-- Policies:
+-- We support 2 schemas:
+--   A) legacy: invoices.member_id is TEXT (often member code)
+--   B) new:    invoices.member_id is UUID (profiles.user_id)
+-- We choose the policy conditionally based on the column type.
 
-drop policy if exists invoices_select_staff on public.invoices;
-create policy invoices_select_staff
-on public.invoices
-for select
-to authenticated
-using (
-  exists (
-    select 1
-    from public.profiles p
-    where p.user_id = auth.uid()
-      and p.role in ('admin','super_admin','reception','coach','assistant_coach')
-  )
-);
+do $$
+declare
+  col_type text;
+begin
+  select data_type into col_type
+  from information_schema.columns
+  where table_schema='public' and table_name='invoices' and column_name='member_id';
+
+  -- Drop existing policies first (safe)
+  execute 'drop policy if exists invoices_select_own on public.invoices';
+  execute 'drop policy if exists invoices_select_staff on public.invoices';
+
+  -- Own invoices policy
+  if col_type = 'uuid' then
+    execute $pol$
+      create policy invoices_select_own
+      on public.invoices
+      for select
+      to authenticated
+      using (member_id = auth.uid())
+    $pol$;
+  else
+    -- legacy text schema: match by profiles.member_id (text)
+    execute $pol$
+      create policy invoices_select_own
+      on public.invoices
+      for select
+      to authenticated
+      using (
+        exists (
+          select 1
+          from public.profiles p
+          where p.user_id = auth.uid()
+            and p.member_id is not null
+            and p.member_id = invoices.member_id
+        )
+      )
+    $pol$;
+  end if;
+
+  -- Staff read policy (always allowed for staff)
+  execute $pol$
+    create policy invoices_select_staff
+    on public.invoices
+    for select
+    to authenticated
+    using (
+      exists (
+        select 1
+        from public.profiles p
+        where p.user_id = auth.uid()
+          and p.role in ('admin','super_admin','reception','coach','assistant_coach')
+      )
+    )
+  $pol$;
+end $$;
+
+notify pgrst, 'reload schema';
