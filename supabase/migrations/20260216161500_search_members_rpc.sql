@@ -1,8 +1,27 @@
 -- Pro search RPC for /members (FTS + trigram) using the materialized view snapshot.
 -- Returns paged rows + total_count in one call.
+--
+-- Remote-compat:
+-- Some databases already have an older search_members() with a different RETURNS TABLE (OUT columns).
+-- Postgres cannot change return type with CREATE OR REPLACE in that case, so we drop all overloads first.
 
 -- Ensure pg_trgm exists (needed for similarity).
 create extension if not exists pg_trgm with schema extensions;
+
+-- Drop any existing overloads so we can recreate with the current RETURNS TABLE safely.
+DO $$
+DECLARE r record;
+BEGIN
+  FOR r IN
+    SELECT p.oid::regprocedure AS sig
+    FROM pg_proc p
+    JOIN pg_namespace n ON n.oid = p.pronamespace
+    WHERE n.nspname = 'public'
+      AND p.proname = 'search_members'
+  LOOP
+    EXECUTE 'drop function if exists ' || r.sig;
+  END LOOP;
+END $$;
 
 create or replace function public.search_members(
   q text default null,

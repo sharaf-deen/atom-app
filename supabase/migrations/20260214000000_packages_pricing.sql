@@ -1,4 +1,6 @@
--- Packages pricing (editable by super_admin)
+-- Packages pricing (legacy JSON seed)
+-- IMPORTANT: This migration must be safe if the table already exists with the NEW schema (no "pricing" column).
+-- We therefore guard the legacy seed insert behind a column-exists check.
 
 create table if not exists public.packages_pricing (
   id int primary key,
@@ -13,7 +15,9 @@ alter table public.packages_pricing enable row level security;
 DO $$
 BEGIN
   IF NOT EXISTS (
-    SELECT 1 FROM pg_policies WHERE schemaname = 'public' AND tablename = 'packages_pricing' AND policyname = 'packages_pricing_select_authenticated'
+    SELECT 1 FROM pg_policies
+    WHERE schemaname = 'public' AND tablename = 'packages_pricing'
+      AND policyname = 'packages_pricing_select_authenticated'
   ) THEN
     CREATE POLICY packages_pricing_select_authenticated
       ON public.packages_pricing
@@ -27,7 +31,9 @@ END$$;
 DO $$
 BEGIN
   IF NOT EXISTS (
-    SELECT 1 FROM pg_policies WHERE schemaname = 'public' AND tablename = 'packages_pricing' AND policyname = 'packages_pricing_write_super_admin'
+    SELECT 1 FROM pg_policies
+    WHERE schemaname = 'public' AND tablename = 'packages_pricing'
+      AND policyname = 'packages_pricing_write_super_admin'
   ) THEN
     CREATE POLICY packages_pricing_write_super_admin
       ON public.packages_pricing
@@ -52,27 +58,40 @@ BEGIN
   END IF;
 END$$;
 
--- Seed default pricing (only if empty)
-insert into public.packages_pricing (id, pricing)
-values (
-  1,
-  $$
-  {
-    "memberships": [
-      {"label": "1 Month", "price": "1,500 EGP"},
-      {"label": "3 Months", "price": "4,000 EGP"},
-      {"label": "6 Months", "price": "7,000 EGP"}
-    ],
-    "dropIn": [
-      {"label": "Single Session", "price": "250 EGP"},
-      {"label": "Try Class", "note": "Free"}
-    ],
-    "privateTraining": [
-      {"label": "1 Session", "price": "1,200 EGP"},
-      {"label": "5 Sessions", "price": "5,000 EGP"},
-      {"label": "10 Sessions", "price": "9,000 EGP"}
-    ]
-  }
-  $$::jsonb
-)
-on conflict (id) do nothing;
+-- Seed default pricing (only if the legacy "pricing" column exists; remote may already be on the new schema)
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name   = 'packages_pricing'
+      AND column_name  = 'pricing'
+  ) THEN
+    INSERT INTO public.packages_pricing (id, pricing)
+    VALUES (
+      1,
+      $json$
+      {
+        "memberships": [
+          {"label": "1 Month", "price": "1,500 EGP"},
+          {"label": "3 Months", "price": "4,000 EGP"},
+          {"label": "6 Months", "price": "7,000 EGP"}
+        ],
+        "dropIn": [
+          {"label": "Single Session", "price": "250 EGP"},
+          {"label": "Try Class", "note": "Free"}
+        ],
+        "privateTraining": [
+          {"label": "1 Session", "price": "1,200 EGP"},
+          {"label": "5 Sessions", "price": "5,000 EGP"},
+          {"label": "10 Sessions", "price": "9,000 EGP"}
+        ]
+      }
+      $json$::jsonb
+    )
+    ON CONFLICT (id) DO NOTHING;
+  ELSE
+    RAISE NOTICE 'packages_pricing: legacy seed skipped (pricing column not present)';
+  END IF;
+END$$;
