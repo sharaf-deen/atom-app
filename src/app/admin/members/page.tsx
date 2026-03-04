@@ -4,18 +4,20 @@ export const revalidate = 0
 
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
-import { createClient } from '@supabase/supabase-js'
 import AccessDeniedCard from '@/components/AccessDeniedCard'
 import { getSessionUser, type Role } from '@/lib/session'
+import { getSupabaseAdminClientCached } from '@/lib/requestCache'
 import AdminMembersFilters from './_components/AdminMembersFilters'
 
 type Member = {
   user_id: string
+  member_id: string | null
   email: string | null
   first_name: string | null
   last_name: string | null
   phone: string | null
   role: Role | null
+  created_at: string | null
 }
 
 const OPS: Role[] = ['reception', 'admin', 'super_admin']
@@ -78,30 +80,25 @@ export default async function AdminMembersPage({
   }
 
   // Server-side query (service role) to keep this page server-first.
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL
-  const service = process.env.SUPABASE_SERVICE_ROLE_KEY
-
-  if (!url || !service) {
+  // Use the shared cached admin client for consistency.
+  let admin: ReturnType<typeof getSupabaseAdminClientCached>
+  try {
+    admin = getSupabaseAdminClientCached()
+  } catch {
     return (
       <main className="p-6">
         <h1 className="text-2xl font-bold">Admin · Members</h1>
-        <p className="mt-3 text-sm text-rose-700">
-          Server env missing: NEXT_PUBLIC_SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY
-        </p>
+        <p className="mt-3 text-sm text-rose-700">Server env missing: NEXT_PUBLIC_SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY</p>
       </main>
     )
   }
-
-  const admin = createClient(url, service, {
-    auth: { persistSession: false, autoRefreshToken: false },
-  })
 
   const from = (page - 1) * pageSize
   const to = from + pageSize - 1
 
   let query = admin
     .from('profiles')
-    .select('user_id,email,first_name,last_name,phone,role', { count: 'exact' })
+    .select('user_id,member_id,email,first_name,last_name,phone,role,created_at', { count: 'exact' })
     .order('created_at', { ascending: false })
     .range(from, to)
 
@@ -158,41 +155,106 @@ export default async function AdminMembersPage({
         <p className="text-sm text-rose-700">❌ {error.message || 'Failed to load members'}</p>
       )}
 
-      <div className="overflow-auto border rounded-xl">
-        <table className="min-w-full text-sm">
-          <thead className="bg-gray-50 text-gray-600">
-            <tr>
-              <th className="border-b px-3 py-2 text-left">Name</th>
-              <th className="border-b px-3 py-2 text-left">Email</th>
-              <th className="border-b px-3 py-2 text-left">Phone</th>
-              <th className="border-b px-3 py-2 text-center">Role</th>
-              <th className="border-b px-3 py-2 text-left">Profile</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((m) => (
-              <tr key={m.user_id} className="hover:bg-gray-50">
-                <td className="border-b px-3 py-2">{`${m.first_name ?? ''} ${m.last_name ?? ''}`.trim() || '—'}</td>
-                <td className="border-b px-3 py-2">{m.email ?? '—'}</td>
-                <td className="border-b px-3 py-2">{m.phone ?? '—'}</td>
-                <td className="border-b px-3 py-2 text-center">{m.role ?? 'member'}</td>
-                <td className="border-b px-3 py-2">
-                  <Link prefetch={false} className="underline" href={`/members/${m.user_id}`}>
+      {/* Results (mobile-first, no horizontal scroll) */}
+      <div className="space-y-3">
+        {/* Cards (mobile / tablet) */}
+        <div className="space-y-3 lg:hidden">
+          {rows.map((m) => {
+            const name = `${m.first_name ?? ''} ${m.last_name ?? ''}`.trim() || '—'
+            return (
+              <div
+                key={m.user_id}
+                className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4 shadow-soft"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="font-semibold text-[15px] leading-5 truncate">{name}</div>
+                    <div className="mt-1 text-[12px] text-[hsl(var(--muted))]">
+                      ID: <code className="text-[11px]">{m.member_id?.trim() || '—'}</code>
+                    </div>
+                  </div>
+
+                  <div className="shrink-0 text-right">
+                    <span className="inline-flex items-center rounded-full border border-[hsl(var(--border))] bg-[hsl(var(--bg))] px-2 py-0.5 text-[11px] font-semibold">
+                      {m.role ?? 'member'}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="mt-3 space-y-1 text-[13px]">
+                  <div className="flex items-start justify-between gap-3">
+                    <span className="text-[11px] font-medium text-[hsl(var(--muted))]">Email</span>
+                    <span className="min-w-0 text-right font-medium break-words whitespace-normal">{m.email ?? '—'}</span>
+                  </div>
+                  <div className="flex items-start justify-between gap-3">
+                    <span className="text-[11px] font-medium text-[hsl(var(--muted))]">Phone</span>
+                    <span className="min-w-0 text-right font-medium break-words whitespace-normal">{m.phone ?? '—'}</span>
+                  </div>
+                </div>
+
+                <div className="mt-3 flex items-center justify-end gap-2 border-t border-[hsl(var(--border))] pt-3">
+                  <Link
+                    prefetch={false}
+                    className="inline-flex items-center rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm font-semibold hover:bg-[hsl(var(--bg))]"
+                    href={`/members/${m.user_id}`}
+                  >
                     Open
                   </Link>
-                </td>
-              </tr>
-            ))}
+                </div>
+              </div>
+            )
+          })}
 
-            {rows.length === 0 && !error && (
+          {rows.length === 0 && !error && (
+            <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4 text-center text-sm text-[hsl(var(--muted))] shadow-soft">
+              No members found
+            </div>
+          )}
+        </div>
+
+        {/* Table (desktop) */}
+        <div className="hidden lg:block rounded-2xl border border-[hsl(var(--border))] overflow-hidden bg-[hsl(var(--card))] shadow-soft">
+          <table className="w-full text-sm">
+            <thead className="bg-[hsl(var(--bg))] text-left text-[hsl(var(--muted))]">
               <tr>
-                <td className="px-3 py-6 text-center text-gray-500" colSpan={5}>
-                  No members found
-                </td>
+                <th className="border-b border-[hsl(var(--border))] px-4 py-3 font-medium">Name</th>
+                <th className="border-b border-[hsl(var(--border))] px-4 py-3 font-medium">Member&nbsp;ID</th>
+                <th className="border-b border-[hsl(var(--border))] px-4 py-3 font-medium">Email</th>
+                <th className="border-b border-[hsl(var(--border))] px-4 py-3 font-medium">Phone</th>
+                <th className="border-b border-[hsl(var(--border))] px-4 py-3 font-medium text-center">Role</th>
+                <th className="border-b border-[hsl(var(--border))] px-4 py-3 font-medium">Profile</th>
               </tr>
-            )}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {rows.map((m) => (
+                <tr key={m.user_id} className="odd:bg-[hsl(var(--card))] even:bg-[hsl(var(--bg))]">
+                  <td className="border-t border-[hsl(var(--border))] px-4 py-3">
+                    {`${m.first_name ?? ''} ${m.last_name ?? ''}`.trim() || '—'}
+                  </td>
+                  <td className="border-t border-[hsl(var(--border))] px-4 py-3">
+                    <code className="text-xs">{m.member_id?.trim() || '—'}</code>
+                  </td>
+                  <td className="border-t border-[hsl(var(--border))] px-4 py-3">{m.email ?? '—'}</td>
+                  <td className="border-t border-[hsl(var(--border))] px-4 py-3">{m.phone ?? '—'}</td>
+                  <td className="border-t border-[hsl(var(--border))] px-4 py-3 text-center">{m.role ?? 'member'}</td>
+                  <td className="border-t border-[hsl(var(--border))] px-4 py-3">
+                    <Link prefetch={false} className="underline" href={`/members/${m.user_id}`}>
+                      Open
+                    </Link>
+                  </td>
+                </tr>
+              ))}
+
+              {rows.length === 0 && !error && (
+                <tr>
+                  <td className="px-4 py-8 text-center text-[hsl(var(--muted))]" colSpan={6}>
+                    No members found
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
       </div>
 
       {/* Pagination */}
