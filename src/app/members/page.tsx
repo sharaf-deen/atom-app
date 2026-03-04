@@ -277,7 +277,7 @@ export default async function MembersPage({
         {/* Results */}
         <div className="space-y-3">
           {/* Mobile (no horizontal scroll) */}
-          <div className="space-y-3 sm:hidden">
+          <div className="space-y-3 lg:hidden">
             {(rows ?? []).map((m) => {
               const name = `${m.first_name ?? ''} ${m.last_name ?? ''}`.trim() || '—'
               return (
@@ -339,7 +339,7 @@ export default async function MembersPage({
           </div>
 
           {/* Tablet/Desktop */}
-          <Card className="hidden sm:block p-0 overflow-hidden">
+          <Card className="hidden lg:block p-0 overflow-hidden">
             <table className="w-full text-sm">
               <thead className="bg-[hsl(var(--bg))] text-left">
                 <tr>
@@ -434,7 +434,7 @@ export default async function MembersPage({
           </Card>
 
           {/* Mobile pagination (below cards) */}
-          <div className="sm:hidden rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] px-3 py-3 shadow-soft">
+          <div className="lg:hidden rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] px-3 py-3 shadow-soft">
             <div className="flex items-center justify-between gap-3">
               <div className="text-[12px] text-[hsl(var(--muted))]">
                 {totalResults > 0 ? (
