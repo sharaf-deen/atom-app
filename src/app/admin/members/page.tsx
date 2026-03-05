@@ -8,6 +8,7 @@ import AccessDeniedCard from '@/components/AccessDeniedCard'
 import { getSessionUser, type Role } from '@/lib/session'
 import { getSupabaseAdminClientCached } from '@/lib/requestCache'
 import AdminMembersFilters from './_components/AdminMembersFilters'
+import AdminRoleEditor from './_components/AdminRoleEditor'
 
 type Member = {
   user_id: string
@@ -19,6 +20,17 @@ type Member = {
   role: Role | null
   created_at: string | null
 }
+
+type RoleOption = { id: Role; label: string }
+
+const FALLBACK_ROLE_OPTIONS: RoleOption[] = [
+  { id: 'member', label: 'Member' },
+  { id: 'assistant_coach', label: 'Assistant Coach' },
+  { id: 'coach', label: 'Coach' },
+  { id: 'reception', label: 'Reception' },
+  { id: 'admin', label: 'Admin' },
+  { id: 'super_admin', label: 'Super Admin' },
+]
 
 const OPS: Role[] = ['reception', 'admin', 'super_admin']
 
@@ -61,6 +73,7 @@ export default async function AdminMembersPage({
   if (!me) redirect(`/login?next=${encodeURIComponent(currentPath)}`)
 
   const canView = OPS.includes(me.role)
+  const canEdit = me.role === 'super_admin'
 
   if (!canView) {
     return (
@@ -91,6 +104,28 @@ export default async function AdminMembersPage({
         <p className="mt-3 text-sm text-rose-700">Server env missing: NEXT_PUBLIC_SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY</p>
       </main>
     )
+  }
+
+  // Load role labels (from public.roles) for nicer UI + validation.
+  let roleOptions: RoleOption[] = FALLBACK_ROLE_OPTIONS
+  try {
+    const { data: rdata, error: rerr } = await admin.from('roles').select('id,label').order('label', { ascending: true })
+    if (!rerr && Array.isArray(rdata)) {
+      const opts: RoleOption[] = []
+      for (const r of rdata as any[]) {
+        const id = normalizeRole((r as any)?.id)
+        const label = String((r as any)?.label ?? '').trim()
+        if (id) opts.push({ id, label: label || id })
+      }
+      if (opts.length) roleOptions = opts
+    }
+  } catch {
+    // ignore
+  }
+
+  const labelForRole = (r?: Role | null) => {
+    const id = (r ?? 'member') as Role
+    return roleOptions.find((x) => x.id === id)?.label ?? id
   }
 
   const from = (page - 1) * pageSize
@@ -176,7 +211,7 @@ export default async function AdminMembersPage({
 
                   <div className="shrink-0 text-right">
                     <span className="inline-flex items-center rounded-full border border-[hsl(var(--border))] bg-[hsl(var(--bg))] px-2 py-0.5 text-[11px] font-semibold">
-                      {m.role ?? 'member'}
+                      {labelForRole(m.role)}
                     </span>
                   </div>
                 </div>
@@ -192,7 +227,10 @@ export default async function AdminMembersPage({
                   </div>
                 </div>
 
-                <div className="mt-3 flex items-center justify-end gap-2 border-t border-[hsl(var(--border))] pt-3">
+                <div className={`mt-3 flex items-center gap-2 border-t border-[hsl(var(--border))] pt-3 ${canEdit ? 'justify-between' : 'justify-end'}`}>
+                  {canEdit ? (
+                    <AdminRoleEditor userId={m.user_id} currentRole={(m.role ?? 'member') as Role} options={roleOptions} compact />
+                  ) : null}
                   <Link
                     prefetch={false}
                     className="inline-flex items-center rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm font-semibold hover:bg-[hsl(var(--bg))]"
@@ -236,7 +274,17 @@ export default async function AdminMembersPage({
                   </td>
                   <td className="border-t border-[hsl(var(--border))] px-4 py-3">{m.email ?? '—'}</td>
                   <td className="border-t border-[hsl(var(--border))] px-4 py-3">{m.phone ?? '—'}</td>
-                  <td className="border-t border-[hsl(var(--border))] px-4 py-3 text-center">{m.role ?? 'member'}</td>
+                  <td className="border-t border-[hsl(var(--border))] px-4 py-3 text-center">
+                    {canEdit ? (
+                      <div className="inline-flex justify-center">
+                        <AdminRoleEditor userId={m.user_id} currentRole={(m.role ?? 'member') as Role} options={roleOptions} compact />
+                      </div>
+                    ) : (
+                      <span className="inline-flex items-center rounded-full border border-[hsl(var(--border))] bg-[hsl(var(--bg))] px-2 py-0.5 text-[11px] font-semibold">
+                        {labelForRole(m.role)}
+                      </span>
+                    )}
+                  </td>
                   <td className="border-t border-[hsl(var(--border))] px-4 py-3">
                     <Link prefetch={false} className="underline" href={`/members/${m.user_id}`}>
                       Open
