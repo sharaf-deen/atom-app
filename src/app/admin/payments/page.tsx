@@ -4,16 +4,16 @@ export const revalidate = 0
 
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
-import { createSupabaseAdminClient } from '@/lib/supabaseAdmin'
-import { getSessionUser } from '@/lib/session'
 import AccessDeniedCard from '@/components/AccessDeniedCard'
 import Badge from '@/components/ui/Badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card'
 import { Table } from '@/components/ui/Table'
 import { addDaysDateOnly, cairoDayBoundsUTC, cairoTodayDateOnly, isISODateOnly } from '@/lib/cairoTime'
+import type { Role } from '@/lib/session'
+import { getSessionUserCached, getSupabaseAdminClientCached } from '@/lib/requestCache'
 
-type Role = 'member' | 'assistant_coach' | 'coach' | 'reception' | 'admin' | 'super_admin'
 const ALLOWED: Role[] = ['admin', 'super_admin']
+const PAGE_SIZE = 50
 
 type ProfileLite = {
   user_id: string
@@ -67,7 +67,15 @@ function badgeClassForMethod(m: string) {
 
 function safeQ(v: unknown) {
   const s = typeof v === 'string' ? v.trim() : ''
+  // keep short to avoid abusive LIKE scans
   return s.slice(0, 80)
+}
+
+function sp1(sp: Record<string, string | string[] | undefined>, key: string): string | null {
+  const v = sp[key]
+  if (typeof v === 'string') return v
+  if (Array.isArray(v) && typeof v[0] === 'string') return v[0]
+  return null
 }
 
 export default async function AdminPaymentsPage({
@@ -75,10 +83,10 @@ export default async function AdminPaymentsPage({
 }: {
   searchParams: Record<string, string | string[] | undefined>
 }) {
-  const me = await getSessionUser()
+  const me = await getSessionUserCached()
   if (!me) redirect('/login?next=/admin/payments')
 
-  if (!ALLOWED.includes(me.role as Role)) {
+  if (!ALLOWED.includes(me.role)) {
     return (
       <main className="p-6">
         <h1 className="text-2xl font-bold">Admin · Payments</h1>
@@ -96,35 +104,34 @@ export default async function AdminPaymentsPage({
   }
 
   const todayCairo = cairoTodayDateOnly()
-  const from = isISODateOnly(typeof searchParams.from === 'string' ? searchParams.from : null)
-    ? (searchParams.from as string)
-    : todayCairo
-  const to = isISODateOnly(typeof searchParams.to === 'string' ? searchParams.to : null)
-    ? (searchParams.to as string)
-    : from
+  const fromRaw = sp1(searchParams, 'from')
+  const toRaw = sp1(searchParams, 'to')
+  const from = isISODateOnly(fromRaw) ? fromRaw! : todayCairo
+  const to = isISODateOnly(toRaw) ? toRaw! : from
 
-  const payment_method = typeof searchParams.payment_method === 'string' ? searchParams.payment_method : 'all'
-  const q = safeQ(searchParams.q)
+  const payment_method = sp1(searchParams, 'payment_method') ?? 'all'
+  const q = safeQ(sp1(searchParams, 'q'))
 
-  const page = Math.max(1, Number(typeof searchParams.page === 'string' ? searchParams.page : 1) || 1)
-  const pageSize = 50
-  const fromIdx = (page - 1) * pageSize
-  const toIdx = fromIdx + pageSize - 1
+  const page = Math.max(1, Number(sp1(searchParams, 'page') ?? '1') || 1)
+  const fromIdx = (page - 1) * PAGE_SIZE
+  const toIdx = fromIdx + PAGE_SIZE - 1
 
-  const admin = createSupabaseAdminClient()
+  const admin = getSupabaseAdminClientCached()
 
   // Build bounds using Cairo calendar dates
   const startISO = cairoDayBoundsUTC(from).startISO
   const endISO = cairoDayBoundsUTC(addDaysDateOnly(to, 1)).startISO
 
-  // Optional member search -> list of member_ids
+  // Optional member search -> list of user_ids
   let memberIds: string[] | null = null
   if (q) {
     const like = `%${q.replace(/%/g, '')}%`
     const { data: profs } = await admin
       .from('profiles')
       .select('user_id')
-      .or(`email.ilike.${like},first_name.ilike.${like},last_name.ilike.${like},phone.ilike.${like},member_id.ilike.${like}`)
+      .or(
+        `email.ilike.${like},first_name.ilike.${like},last_name.ilike.${like},phone.ilike.${like},member_id.ilike.${like}`
+      )
       .limit(200)
 
     memberIds = (profs ?? []).map((p: any) => p.user_id).filter(Boolean)
@@ -143,12 +150,8 @@ export default async function AdminPaymentsPage({
 
   if (payment_method && payment_method !== 'all') query = query.eq('payment_method', payment_method)
   if (memberIds) {
-    if (!memberIds.length) {
-      // no matches
-      query = query.in('member_id', ['00000000-0000-0000-0000-000000000000'])
-    } else {
-      query = query.in('member_id', memberIds)
-    }
+    if (!memberIds.length) query = query.in('member_id', ['00000000-0000-0000-0000-000000000000'])
+    else query = query.in('member_id', memberIds)
   }
 
   const { data: rowsRaw, error: err, count } = await query.range(fromIdx, toIdx)
@@ -166,18 +169,12 @@ export default async function AdminPaymentsPage({
   }))
 
   // Totals (same filters but without pagination)
-  let totals = {
-    all: 0,
-    cash: 0,
-    instapay: 0,
-    card: 0,
-    bank_transfer: 0,
-  }
+  let totals = { all: 0, cash: 0, instapay: 0, card: 0, bank_transfer: 0 }
 
   try {
     let q2 = admin
       .from('subscription_payments')
-      .select('amount, payment_method')
+      .select('amount, payment_method, member_id')
       .gte('created_at', startISO)
       .lt('created_at', endISO)
       .limit(10000)
@@ -196,14 +193,14 @@ export default async function AdminPaymentsPage({
       const pm = String(r.payment_method ?? 'cash')
       if (pm === 'cash') totals.cash += amt
       else if (pm === 'instapay') totals.instapay += amt
-      else if (pm === 'card') totals.card += amt
+      else if (pm === 'card' || pm === 'visa') totals.card += amt
       else if (pm === 'bank_transfer') totals.bank_transfer += amt
     }
   } catch {
     // ignore totals failure
   }
 
-  const totalPages = Math.max(1, Math.ceil(Number(count ?? 0) / pageSize))
+  const totalPages = Math.max(1, Math.ceil(Number(count ?? 0) / PAGE_SIZE))
 
   const qsBase = new URLSearchParams({
     from,
@@ -354,16 +351,14 @@ export default async function AdminPaymentsPage({
         </Card>
       </div>
 
-      {err ? (
-        <p className="text-sm text-rose-700">❌ {err.message || 'Failed to load payments'}</p>
-      ) : null}
+      {err ? <p className="text-sm text-rose-700">❌ {err.message || 'Failed to load payments'}</p> : null}
 
       <Table columns={tableColumns} rows={tableRows as any} keyField="id" />
 
       <div className="flex items-center justify-between text-sm">
         <div className="text-[hsl(var(--muted))]">
-          Page <span className="font-medium">{page}</span> / <span className="font-medium">{totalPages}</span>{' '}
-          · Rows: <span className="font-medium">{count ?? rows.length}</span>
+          Page <span className="font-medium">{page}</span> / <span className="font-medium">{totalPages}</span> · Rows:{' '}
+          <span className="font-medium">{count ?? rows.length}</span>
         </div>
 
         <div className="flex gap-2">
@@ -375,7 +370,9 @@ export default async function AdminPaymentsPage({
             Prev
           </Link>
           <Link
-            className={`border px-3 py-1.5 rounded-lg ${page >= totalPages ? 'pointer-events-none opacity-50' : 'hover:bg-gray-50'}`}
+            className={`border px-3 py-1.5 rounded-lg ${
+              page >= totalPages ? 'pointer-events-none opacity-50' : 'hover:bg-gray-50'
+            }`}
             href={navLink(Math.min(totalPages, page + 1))}
             prefetch={false}
           >
