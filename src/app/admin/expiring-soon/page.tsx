@@ -16,8 +16,7 @@ import SubscribeDialog from '@/components/SubscribeDialog'
 import NotifyExpiryButton from './notify-button'
 import RunExpiryRemindersButton from './run-reminders-button'
 
-import { getSessionUser } from '@/lib/session'
-import { createSupabaseAdminClient } from '@/lib/supabaseAdmin'
+import { getSessionUserCached, getSupabaseAdminClientCached } from '@/lib/requestCache'
 import { addDays, cairoToday, diffDays, clampInt, CAIRO_TZ } from '@/lib/cairoDate'
 
 type ProfileLite = {
@@ -42,6 +41,8 @@ type SubRow = {
 }
 
 type View = 'today' | 'next7' | 'overdue' | 'range'
+
+const PER_PAGE = 50
 
 function isView(v: any): v is View {
   return v === 'today' || v === 'next7' || v === 'overdue' || v === 'range'
@@ -75,9 +76,9 @@ function fmtMoneyEGP(v: any) {
 export default async function ExpiringSoonPage({
   searchParams,
 }: {
-  searchParams?: { view?: string; days?: string; q?: string; includeFrozen?: string }
+  searchParams?: { view?: string; days?: string; q?: string; includeFrozen?: string; page?: string }
 }) {
-  const user = await getSessionUser()
+  const user = await getSessionUserCached()
   const nextPath = '/admin/expiring-soon'
 
   if (!user || (user.role !== 'admin' && user.role !== 'super_admin')) {
@@ -98,6 +99,7 @@ export default async function ExpiringSoonPage({
   const daysWindow = clampInt(Number(searchParams?.days ?? 7), 1, 60)
   const q = (searchParams?.q ?? '').trim()
   const includeFrozen = (searchParams?.includeFrozen ?? '').trim() === '1'
+  const page = clampInt(Number(searchParams?.page ?? 1), 1, 9999)
 
   // Range logic (Cairo date strings)
   const rangeStart = today
@@ -113,8 +115,13 @@ export default async function ExpiringSoonPage({
   let rows: SubRow[] = []
   let loadError: string | null = null
 
+  // Paging
+  let hasNext = false
+  const hasPrev = page > 1
+  let totalKnown: number | null = null
+
   try {
-    const admin = createSupabaseAdminClient()
+    const admin = getSupabaseAdminClientCached()
 
     let query = admin
       .from('subscriptions')
@@ -123,30 +130,39 @@ export default async function ExpiringSoonPage({
       )
       .eq('status', 'active')
       .not('end_date', 'is', null)
-      .limit(5000)
 
+    // Date window
     if (view === 'overdue') {
       query = query.lt('end_date', today).order('end_date', { ascending: false })
     } else {
       query = query.gte('end_date', rangeStart).lte('end_date', rangeEnd!).order('end_date', { ascending: true })
     }
 
+    // Frozen filter (push down to DB)
+    if (!includeFrozen) {
+      query = query.or(`frozen_until.is.null,frozen_until.lt.${today}`)
+    }
+
+    // Fetch strategy:
+    // - No search: fetch only one page (PER_PAGE + 1 to detect next)
+    // - With search: fetch the full window (capped) then paginate in memory (accurate search)
+    if (q) {
+      query = query.limit(5000)
+    } else {
+      const from = (page - 1) * PER_PAGE
+      const to = from + PER_PAGE // inclusive => PER_PAGE + 1 rows
+      query = query.range(from, to)
+    }
+
     const { data, error } = await query
     if (error) throw new Error(error.message)
 
-    rows = (data ?? []) as unknown as SubRow[]
+    let fetched = ((data ?? []) as unknown as SubRow[]) ?? []
 
-    if (!includeFrozen) {
-      rows = rows.filter((s) => {
-        const fu = (s.frozen_until ?? '').trim()
-        if (!fu) return true
-        return fu < today
-      })
-    }
-
+    // Local search (only when q is provided)
     if (q) {
       const qq = q.toLowerCase()
-      rows = rows.filter((s) => {
+      fetched = fetched.filter((s) => {
         const p = s.profiles
         const name = [p?.first_name ?? '', p?.last_name ?? ''].join(' ').trim().toLowerCase()
         const email = (p?.email ?? '').toLowerCase()
@@ -160,6 +176,15 @@ export default async function ExpiringSoonPage({
           (s.member_id ?? '').toLowerCase().includes(qq)
         )
       })
+
+      totalKnown = fetched.length
+      const start = (page - 1) * PER_PAGE
+      const end = start + PER_PAGE
+      rows = fetched.slice(start, end)
+      hasNext = end < fetched.length
+    } else {
+      hasNext = fetched.length > PER_PAGE
+      rows = fetched.slice(0, PER_PAGE)
     }
   } catch (e: any) {
     loadError = e?.message ?? String(e)
@@ -175,6 +200,7 @@ export default async function ExpiringSoonPage({
       : `Active memberships expiring within ${daysWindow} day(s) — Cairo time (${CAIRO_TZ}).`
 
   const baseQS = {
+    view,
     q: q || undefined,
     includeFrozen: includeFrozen ? '1' : '0',
     days: String(daysWindow),
@@ -191,7 +217,7 @@ export default async function ExpiringSoonPage({
         ] as const
       ).map((t) => {
         const active = view === t.key
-        const href = nextPath + buildQS({ ...baseQS, view: t.key })
+        const href = nextPath + buildQS({ ...baseQS, view: t.key, page: undefined })
         return (
           <Link
             key={t.key}
@@ -261,7 +287,7 @@ export default async function ExpiringSoonPage({
     { key: 'end', header: 'End date' },
     { key: 'left', header: 'Days left' },
     { key: 'due', header: 'Due (EGP)' },
-    { key: 'frozen', header: 'Frozen until' },
+    { key: 'frozen', header: 'Frozen until', hideOnMobile: true },
     { key: 'actions', header: '' },
   ]
 
@@ -314,10 +340,52 @@ export default async function ExpiringSoonPage({
     }
   })
 
-  const rangeText =
+  const rangeTextBase =
     view === 'overdue'
-      ? `Showing ${rows.length} overdue membership(s) with end date before ${today}.`
-      : `Showing ${rows.length} membership(s) expiring between ${rangeStart} and ${rangeEnd}.`
+      ? `Overdue: end date before ${today}.`
+      : `Between ${rangeStart} and ${rangeEnd}.`
+
+  const rangeText =
+    totalKnown === null
+      ? `Showing ${rows.length} membership(s) · ${rangeTextBase}${page > 1 ? ` · Page ${page}` : ''}`
+      : `Showing ${rows.length} of ${totalKnown} membership(s) · ${rangeTextBase}${page > 1 ? ` · Page ${page}` : ''}`
+
+  const pager = (
+    <div className="flex items-center justify-between gap-3">
+      <div className="text-xs text-[hsl(var(--muted))]">Per page: {PER_PAGE}</div>
+      <div className="flex items-center gap-2">
+        <Link
+          aria-disabled={!hasPrev}
+          href={
+            hasPrev
+              ? nextPath + buildQS({ ...baseQS, page: String(page - 1) })
+              : nextPath + buildQS({ ...baseQS, page: String(page) })
+          }
+          className={
+            'inline-flex items-center justify-center rounded-xl border px-3 py-2 text-sm font-medium ' +
+            (hasPrev ? 'hover:bg-gray-50' : 'opacity-50 pointer-events-none')
+          }
+        >
+          ← Prev
+        </Link>
+        <div className="text-sm font-medium">Page {page}</div>
+        <Link
+          aria-disabled={!hasNext}
+          href={
+            hasNext
+              ? nextPath + buildQS({ ...baseQS, page: String(page + 1) })
+              : nextPath + buildQS({ ...baseQS, page: String(page) })
+          }
+          className={
+            'inline-flex items-center justify-center rounded-xl border px-3 py-2 text-sm font-medium ' +
+            (hasNext ? 'hover:bg-gray-50' : 'opacity-50 pointer-events-none')
+          }
+        >
+          Next →
+        </Link>
+      </div>
+    </div>
+  )
 
   return (
     <main>
@@ -333,7 +401,11 @@ export default async function ExpiringSoonPage({
 
         <div className="text-sm text-[hsl(var(--muted))]">{rangeText}</div>
 
+        {pager}
+
         <Table columns={columns} rows={tableRows as any[]} keyField="id" />
+
+        {pager}
 
         <div className="text-xs text-[hsl(var(--muted))] max-w-3xl">
           Tips: use <b>Renew</b> directly from this list (no need to open the member profile). <b>Notify</b> sends an
