@@ -151,7 +151,7 @@ export default async function ScanResultPage({ searchParams }: { searchParams: S
               </div>
 
               <div className="mt-6 flex flex-col items-center gap-2">
-                <AutoReturn seconds={3} href="/scan" />
+                <AutoReturn seconds={7} href="/scan" />
                 <Link href="/scan">
                   <Button>Scan again now</Button>
                 </Link>
@@ -207,7 +207,7 @@ export default async function ScanResultPage({ searchParams }: { searchParams: S
               </div>
 
               <div className="mt-6 flex flex-col items-center gap-2">
-                <AutoReturn seconds={3} href="/scan" />
+                <AutoReturn seconds={7} href="/scan" />
                 <Link href="/scan">
                   <Button>Scan again now</Button>
                 </Link>
@@ -262,7 +262,7 @@ export default async function ScanResultPage({ searchParams }: { searchParams: S
             </div>
 
             <div className="mt-6 flex flex-col items-center gap-2">
-              <AutoReturn seconds={3} href="/scan" />
+              <AutoReturn seconds={7} href="/scan" />
               <Link href="/scan">
                 <Button>Scan again now</Button>
               </Link>
