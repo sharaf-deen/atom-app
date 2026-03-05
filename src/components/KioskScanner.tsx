@@ -25,6 +25,19 @@ type ScanResponse = {
 
 type Detected = { rawValue: string }
 
+function getOrCreateDeviceTag(): string {
+  try {
+    const key = 'atom:kiosk_device_tag'
+    const prev = window.localStorage.getItem(key)
+    if (prev) return prev
+    const tag = `kiosk-${Math.random().toString(36).slice(2, 8)}`
+    window.localStorage.setItem(key, tag)
+    return tag
+  } catch {
+    return 'kiosk'
+  }
+}
+
 function parseMemberText(text: string): string | null {
   const t = (text || '').trim()
   if (!t) return null
@@ -151,10 +164,11 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className }: 
       try {
         const maybeId = parseMemberText(raw)
         const payload = { code: maybeId ? `atom:${maybeId}` : raw }
+        const deviceTag = getOrCreateDeviceTag()
 
         const r = await fetch('/api/kiosk/scan', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', 'x-device-tag': deviceTag },
           body: JSON.stringify(payload),
         })
         const j: ScanResponse = await r.json().catch(() => ({ ok: false, message: 'Invalid response' }))
@@ -166,6 +180,7 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className }: 
           // ✅ Navigate to result page (active vs expired)
           const sp = new URLSearchParams()
           sp.set('valid', j.valid ? '1' : '0')
+          if (j.member_id) sp.set('memberId', String(j.member_id))
           if (j.days_remaining !== undefined && j.days_remaining !== null) sp.set('daysRemaining', String(j.days_remaining))
           if (j.expires_on) sp.set('expiresOn', String(j.expires_on))
           if (j.expired_days !== undefined && j.expired_days !== null) sp.set('expiredDays', String(j.expired_days))
