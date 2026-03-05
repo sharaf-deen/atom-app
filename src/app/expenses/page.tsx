@@ -3,14 +3,21 @@ export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
 import { redirect } from 'next/navigation'
-import { getSessionUser } from '@/lib/session'
-import { createSupabaseAdminClient } from '@/lib/supabaseAdmin'
+import { getSessionUserCached } from '@/lib/requestCache'
+import { getSupabaseAdminClientCached } from '@/lib/requestCache'
 import AccessDeniedPage from '@/components/AccessDeniedPage'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card'
 import InlineAlert from '@/components/ui/InlineAlert'
 import ExpensesTableClient, { type ExpenseRow } from '@/components/ExpensesTableClient'
 
 type RangePreset = 'today' | '7d' | 'month' | 'custom'
+
+const PER_PAGE = 50
+
+function parsePositiveInt(v: unknown, fallback: number) {
+  const n = typeof v === 'string' ? Number.parseInt(v, 10) : NaN
+  return Number.isFinite(n) && n > 0 ? n : fallback
+}
 
 function isAdmin(role?: string | null) {
   return role === 'admin' || role === 'super_admin'
@@ -71,7 +78,7 @@ function sanitizeSearch(v: string) {
 async function addExpenseAction(formData: FormData) {
   'use server'
 
-  const me = await getSessionUser()
+  const me = await getSessionUserCached()
   if (!me) redirect('/login?next=/expenses')
   if (!isAdmin(me.role)) redirect('/expenses?error=Access%20denied')
 
@@ -97,7 +104,7 @@ async function addExpenseAction(formData: FormData) {
   const today = toISODate(new Date())
   const date = dateRaw || today
 
-  const admin = createSupabaseAdminClient()
+  const admin = getSupabaseAdminClientCached()
 
   // Validate payment method
   const allowedMethods = new Set(['cash', 'visa', 'instapay', 'bank_transfer'])
@@ -171,7 +178,7 @@ export default async function ExpensesPage({
 }: {
   searchParams: Record<string, string | string[] | undefined>
 }) {
-  const user = await getSessionUser()
+  const user = await getSessionUserCached()
   if (!user) redirect('/login?next=/expenses')
 
   if (!isAdmin(user.role)) {
@@ -216,10 +223,13 @@ export default async function ExpensesPage({
   const qTextRaw = typeof searchParams.q === 'string' ? searchParams.q : ''
   const qText = sanitizeSearch(qTextRaw)
 
+  const page = parsePositiveInt(searchParams.page, 1)
+  const offset = (page - 1) * PER_PAGE
+
   const saved = typeof searchParams.saved === 'string' ? searchParams.saved : ''
   const errorMsg = typeof searchParams.error === 'string' ? searchParams.error : ''
 
-  const admin = createSupabaseAdminClient()
+  const admin = getSupabaseAdminClientCached()
 
   const { data: cats, error: catsError } = await admin
     .from('expense_categories')
@@ -243,7 +253,7 @@ export default async function ExpensesPage({
 
   let query = admin
     .from('expenses')
-    .select('id,date,category_key,description,amount,payment_method,receipt_path,receipt_mime,receipt_filename')
+    .select('id,date,category_key,description,amount,payment_method,receipt_path,receipt_mime,receipt_filename', { count: 'exact' })
     .order('date', { ascending: false })
 
   if (from) query = query.gte('date', from)
@@ -257,13 +267,22 @@ export default async function ExpensesPage({
     query = query.or(`description.ilike.${like},category_key.ilike.${like},payment_method.ilike.${like}`)
   }
 
-  const { data: rows, error: rowsError } = await query
+const { data: rows, error: rowsError, count } = await query
+  .range(offset, offset + PER_PAGE - 1)
 
-  const expenses = (rows || []) as ExpenseRow[]
-  const total = expenses.reduce((sum, e) => sum + (Number.isFinite(e.amount) ? e.amount : 0), 0)
+const expenses = (rows || []) as ExpenseRow[]
+const pageTotal = expenses.reduce((sum, e) => sum + (Number.isFinite(e.amount) ? e.amount : 0), 0)
 
-  const returnQS = buildQS({ preset, from, to, category, payment_method: paymentFilter, q: qTextRaw })
-  const exportQS = buildQS({ from, to, category, payment_method: paymentFilter, q: qTextRaw })
+const totalCount = typeof count === 'number' ? count : undefined
+const totalPages = totalCount ? Math.max(1, Math.ceil(totalCount / PER_PAGE)) : undefined
+const hasPrev = page > 1
+const hasNext = totalPages ? page < totalPages : expenses.length === PER_PAGE
+
+const returnQS = buildQS({ preset, from, to, category, payment_method: paymentFilter, q: qTextRaw, page: String(page) })
+const exportQS = buildQS({ from, to, category, payment_method: paymentFilter, q: qTextRaw })
+const basePageQS = { preset, from, to, category, payment_method: paymentFilter, q: qTextRaw }
+const prevHref = hasPrev ? `/expenses?${buildQS({ ...basePageQS, page: String(page - 1) })}` : ''
+const nextHref = hasNext ? `/expenses?${buildQS({ ...basePageQS, page: String(page + 1) })}` : ''
 
   return (
     <main className="p-6 max-w-5xl mx-auto space-y-6">
@@ -297,7 +316,7 @@ export default async function ExpensesPage({
         <CardHeader>
           <CardTitle>Filters</CardTitle>
           <div className="text-sm text-[hsl(var(--muted))]">
-            Total: <span className="font-medium text-[hsl(var(--fg))]">{formatEGP(total)}</span>
+            Page total: <span className="font-medium text-[hsl(var(--fg))]">{formatEGP(pageTotal)}</span>
           </div>
         </CardHeader>
 
@@ -419,12 +438,49 @@ export default async function ExpensesPage({
         <CardHeader>
           <CardTitle>Expenses</CardTitle>
           <div className="text-xs text-[hsl(var(--muted))]">
-            Showing {expenses.length} item{expenses.length === 1 ? '' : 's'}
+            Showing {totalCount ? `${Math.min(offset + 1, totalCount)}–${Math.min(offset + expenses.length, totalCount)} of ${totalCount}` : `${expenses.length}`} item{expenses.length === 1 ? '' : 's'}
           </div>
         </CardHeader>
 
         <CardContent>
           <ExpensesTableClient expenses={expenses} labelByKey={labelByKeyObj} />
+
+<div className="mt-4 flex items-center justify-between gap-3">
+  <a
+    href={hasPrev ? prevHref : '#'}
+    aria-disabled={!hasPrev}
+    className={`inline-flex items-center justify-center rounded-2xl px-4 py-2 text-sm font-medium border shadow-soft ${
+      hasPrev
+        ? 'bg-white text-black border-[hsl(var(--border))] hover:bg-[hsl(var(--bg))]/80'
+        : 'bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed pointer-events-none'
+    }`}
+  >
+    Prev
+  </a>
+
+  <div className="text-xs text-[hsl(var(--muted))]">
+    Page <span className="font-medium text-[hsl(var(--fg))]">{page}</span>
+    {totalPages ? (
+      <>
+        {' '}
+        / <span className="font-medium text-[hsl(var(--fg))]">{totalPages}</span>
+      </>
+    ) : null}
+  </div>
+
+  <a
+    href={hasNext ? nextHref : '#'}
+    aria-disabled={!hasNext}
+    className={`inline-flex items-center justify-center rounded-2xl px-4 py-2 text-sm font-medium border shadow-soft ${
+      hasNext
+        ? 'bg-white text-black border-[hsl(var(--border))] hover:bg-[hsl(var(--bg))]/80'
+        : 'bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed pointer-events-none'
+    }`}
+  >
+    Next
+  </a>
+</div>
+
         </CardContent>
       </Card>
 
