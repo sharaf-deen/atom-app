@@ -5,7 +5,7 @@ import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 
 type AutoReturnProps = {
-  /** Seconds before redirecting back to the scanner (default: 3) */
+  /** Seconds before redirecting back to the scanner (default: 7) */
   seconds?: number
   /** Destination route (default: /scan) */
   href?: string
@@ -13,7 +13,7 @@ type AutoReturnProps = {
   hideText?: boolean
 }
 
-export default function AutoReturn({ seconds = 3, href = '/scan', hideText }: AutoReturnProps) {
+export default function AutoReturn({ seconds = 7, href = '/scan', hideText }: AutoReturnProps) {
   const router = useRouter()
   const [left, setLeft] = useState<number>(seconds)
 
