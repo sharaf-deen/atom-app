@@ -4,7 +4,8 @@ export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
 import { NextResponse } from 'next/server'
-import { createClient } from '@supabase/supabase-js'
+import { createSupabaseServerActionClient } from '@/lib/supabaseServer'
+import { createSupabaseAdminClient } from '@/lib/supabaseAdmin'
 
 type ScanBody = { code?: string }
 
@@ -60,16 +61,40 @@ function daysBetweenUTC(fromDateOnly: string, toDateOnly: string) {
 }
 
 function makeAdminClient() {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY
-  if (!url || !key) return null
-  return createClient(url, key, { auth: { persistSession: false } })
+  try {
+    return createSupabaseAdminClient()
+  } catch {
+    return null
+  }
 }
 
 export async function POST(req: Request) {
   const admin = makeAdminClient()
   if (!admin) {
     return json(500, { ok: false, message: 'Server missing service key' })
+  }
+
+  // 🔐 Staff-only: require authenticated session (reception/admin/super_admin)
+  const supa = createSupabaseServerActionClient()
+  const { data: auth } = await supa.auth.getUser()
+  if (!auth.user) {
+    return json(401, { ok: false, message: 'Not authenticated' })
+  }
+
+  const actorId = auth.user.id
+  const { data: actorProfile, error: actorErr } = await supa
+    .from('profiles')
+    .select('role')
+    .eq('user_id', actorId)
+    .maybeSingle<{ role: string | null }>()
+
+  if (actorErr) {
+    return json(500, { ok: false, message: actorErr.message })
+  }
+  const actorRole = actorProfile?.role ?? 'member'
+  const isStaff = actorRole === 'reception' || actorRole === 'admin' || actorRole === 'super_admin'
+  if (!isStaff) {
+    return json(403, { ok: false, message: 'Forbidden' })
   }
 
   let body: ScanBody = {}
@@ -85,6 +110,22 @@ export async function POST(req: Request) {
   }
 
   const today = todayDateOnlyCairo() // Cairo date-only to avoid midnight UTC drift
+
+  // Optional: track which staff scanned + device tag
+  const deviceTag = (req.headers.get('x-device-tag') || '').slice(0, 64) || null
+
+  // If there is already an attendance row today, update it instead of inserting duplicates.
+  const { data: existingAttendance } = await admin
+    .from('attendance')
+    .select('id, valid')
+    .eq('member_id', memberId)
+    .eq('date', today)
+    .order('scanned_at', { ascending: false })
+    .limit(1)
+    .maybeSingle<{ id: string; valid: boolean | null }>()
+
+  const existingId = existingAttendance?.id ?? null
+  const alreadyValidToday = !!existingAttendance?.valid
 
   // Try TIME-based subscription first
   const { data: timeSub, error: timeErr } = await admin
@@ -126,10 +167,35 @@ export async function POST(req: Request) {
     if (isFrozen) {
       const freezeDays = Math.max(0, daysBetweenUTC(today, timeSub.frozen_until as string))
 
-      // Record attendance as invalid (frozen)
-      await admin
-        .from('attendance')
-        .insert({ member_id: memberId, date: today, valid: false, from_sessions: false, subscription_id: timeSub.id })
+      // Record attendance as invalid (frozen) — update existing row if present
+      if (existingId) {
+        await admin
+          .from('attendance')
+          .update({
+            valid: false,
+            status: 'invalid',
+            from_sessions: false,
+            subscription_id: timeSub.id,
+            scanned_by: actorId,
+            device_tag: deviceTag,
+            source: 'kiosk',
+          })
+          .eq('id', existingId)
+      } else {
+        await admin
+          .from('attendance')
+          .insert({
+            member_id: memberId,
+            date: today,
+            valid: false,
+            status: 'invalid',
+            from_sessions: false,
+            subscription_id: timeSub.id,
+            scanned_by: actorId,
+            device_tag: deviceTag,
+            source: 'kiosk',
+          })
+      }
 
       return json(200, {
         ok: true,
@@ -145,10 +211,37 @@ export async function POST(req: Request) {
 
     const daysRemaining = Math.max(0, daysBetweenUTC(today, timeSub.end_date))
 
-    // Record attendance valid
-    await admin
-      .from('attendance')
-      .insert({ member_id: memberId, date: today, valid: true, from_sessions: false, subscription_id: timeSub.id })
+    // If already valid today, don't create duplicates
+    if (!alreadyValidToday) {
+      if (existingId) {
+        await admin
+          .from('attendance')
+          .update({
+            valid: true,
+            status: 'ok',
+            from_sessions: false,
+            subscription_id: timeSub.id,
+            scanned_by: actorId,
+            device_tag: deviceTag,
+            source: 'kiosk',
+          })
+          .eq('id', existingId)
+      } else {
+        await admin
+          .from('attendance')
+          .insert({
+            member_id: memberId,
+            date: today,
+            valid: true,
+            status: 'ok',
+            from_sessions: false,
+            subscription_id: timeSub.id,
+            scanned_by: actorId,
+            device_tag: deviceTag,
+            source: 'kiosk',
+          })
+      }
+    }
 
     return json(200, {
       ok: true,
@@ -187,15 +280,53 @@ export async function POST(req: Request) {
     const remaining = Math.max((sessSub.sessions_total ?? 0) - (sessSub.sessions_used ?? 0), 0)
 
     if (remaining > 0) {
+      // If already valid today, don't consume another session
+      if (alreadyValidToday) {
+        return json(200, {
+          ok: true,
+          valid: true,
+          member_id: memberId,
+          subscription_id: sessSub.id,
+          days_remaining: null,
+          expires_on: null,
+          message: `Already checked in today. Sessions remaining: ${remaining}`,
+        })
+      }
+
       // Decrement sessions_used and record attendance
       await admin
         .from('subscriptions')
         .update({ sessions_used: (sessSub.sessions_used ?? 0) + 1 })
         .eq('id', sessSub.id)
 
-      await admin
-        .from('attendance')
-        .insert({ member_id: memberId, date: today, valid: true, from_sessions: true, subscription_id: sessSub.id })
+      if (existingId) {
+        await admin
+          .from('attendance')
+          .update({
+            valid: true,
+            status: 'ok',
+            from_sessions: true,
+            subscription_id: sessSub.id,
+            scanned_by: actorId,
+            device_tag: deviceTag,
+            source: 'kiosk',
+          })
+          .eq('id', existingId)
+      } else {
+        await admin
+          .from('attendance')
+          .insert({
+            member_id: memberId,
+            date: today,
+            valid: true,
+            status: 'ok',
+            from_sessions: true,
+            subscription_id: sessSub.id,
+            scanned_by: actorId,
+            device_tag: deviceTag,
+            source: 'kiosk',
+          })
+      }
 
       return json(200, {
         ok: true,
@@ -209,9 +340,34 @@ export async function POST(req: Request) {
     }
 
     // sessions exhausted
-    await admin
-      .from('attendance')
-      .insert({ member_id: memberId, date: today, valid: false, from_sessions: true, subscription_id: sessSub.id })
+    if (existingId) {
+      await admin
+        .from('attendance')
+        .update({
+          valid: false,
+          status: 'invalid',
+          from_sessions: true,
+          subscription_id: sessSub.id,
+          scanned_by: actorId,
+          device_tag: deviceTag,
+          source: 'kiosk',
+        })
+        .eq('id', existingId)
+    } else {
+      await admin
+        .from('attendance')
+        .insert({
+          member_id: memberId,
+          date: today,
+          valid: false,
+          status: 'invalid',
+          from_sessions: true,
+          subscription_id: sessSub.id,
+          scanned_by: actorId,
+          device_tag: deviceTag,
+          source: 'kiosk',
+        })
+    }
 
     return json(200, {
       ok: true,
@@ -236,9 +392,34 @@ export async function POST(req: Request) {
   const expiredOn = lastSub?.end_date || today
   const expiredDays = Math.max(0, daysBetweenUTC(expiredOn, today))
 
-  await admin
-    .from('attendance')
-    .insert({ member_id: memberId, date: today, valid: false, from_sessions: false, subscription_id: null })
+  if (existingId) {
+    await admin
+      .from('attendance')
+      .update({
+        valid: false,
+        status: 'invalid',
+        from_sessions: false,
+        subscription_id: null,
+        scanned_by: actorId,
+        device_tag: deviceTag,
+        source: 'kiosk',
+      })
+      .eq('id', existingId)
+  } else {
+    await admin
+      .from('attendance')
+      .insert({
+        member_id: memberId,
+        date: today,
+        valid: false,
+        status: 'invalid',
+        from_sessions: false,
+        subscription_id: null,
+        scanned_by: actorId,
+        device_tag: deviceTag,
+        source: 'kiosk',
+      })
+  }
 
   return json(200, {
     ok: true,
