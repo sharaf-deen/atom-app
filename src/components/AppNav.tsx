@@ -112,7 +112,7 @@ export default async function AppNav() {
   const hasNotifications = items.some((it) => it.href === '/notifications')
 
   return (
-    <nav className="sticky top-0 z-30 border-b bg-white dark:bg-black">
+    <nav className="app-nav sticky top-0 z-30 border-b bg-white dark:bg-black">
       <div className="mx-auto flex h-12 max-w-6xl items-center gap-3 px-4">
         {/* Brand */}
         <Link href="/" className="group flex items-center gap-2" aria-label="ATOM Jiu-Jitsu">
