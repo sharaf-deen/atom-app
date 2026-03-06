@@ -2,33 +2,64 @@
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
+import type React from 'react'
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { createSupabaseRSC } from '@/lib/supabaseServer'
 import { getSessionUser } from '@/lib/session'
 import PageHeader from '@/components/layout/PageHeader'
 import Section from '@/components/layout/Section'
+import Forbidden from '@/components/Forbidden'
 import { Card, CardContent } from '@/components/ui/Card'
 import Button from '@/components/ui/Button'
 import AdminExports from '@/components/AdminExports'
 import AdminRevenue from '@/components/AdminRevenue'
-import Forbidden from '@/components/Forbidden'
+import { addDays, cairoToday, CAIRO_TZ } from '@/lib/cairoDate'
 
-type Plan = '1m' | '3m' | '6m' | '12m' | 'sessions'
-
-function todayDateOnly() {
-  return new Date().toISOString().slice(0, 10) // YYYY-MM-DD (UTC)
+function fmtMoneyEGP(v: any) {
+  const n = Number(v ?? 0)
+  if (!Number.isFinite(n)) return '0'
+  try {
+    return new Intl.NumberFormat('en-EG', { style: 'currency', currency: 'EGP' }).format(n)
+  } catch {
+    return `${n.toFixed(0)} EGP`
+  }
 }
-function addDaysUTC(dateOnly: string, days: number) {
-  const [y, m, d] = dateOnly.split('-').map(Number)
-  const dt = new Date(Date.UTC(y, m - 1, d))
-  dt.setUTCDate(dt.getUTCDate() + days)
-  return dt.toISOString().slice(0, 10)
+
+function StatCard({
+  label,
+  value,
+  hint,
+  href,
+}: {
+  label: string
+  value: React.ReactNode
+  hint?: string
+  href?: string
+}) {
+  const inner = (
+    <Card hover>
+      <CardContent>
+        <div className="text-sm text-[hsl(var(--muted))]">{label}</div>
+        <div className="mt-1 text-2xl font-semibold">{value}</div>
+        {hint ? <div className="mt-1 text-xs text-[hsl(var(--muted))]">{hint}</div> : null}
+      </CardContent>
+    </Card>
+  )
+
+  if (!href) return inner
+  return (
+    <Link
+      href={href}
+      className="block focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 rounded-2xl"
+    >
+      {inner}
+    </Link>
+  )
 }
 
 export default async function AdminPage() {
   const me = await getSessionUser()
-
   if (!me) redirect('/login?next=/admin')
 
   const allowed = me.role === 'admin' || me.role === 'super_admin'
@@ -41,75 +72,67 @@ export default async function AdminPage() {
         message="Only Admin / Super Admin can access the admin dashboard."
         allowed="admin, super_admin"
         nextPath="/admin"
-        actions={[{ href: '/members', label: 'Go to Members' }]}
+        actions={[{ href: '/', label: 'Go Home' }, { href: '/members', label: 'Members' }]}
         showBackHome
       />
     )
   }
 
   const supa = createSupabaseRSC()
-  const today = todayDateOnly()
-  const tomorrow = addDaysUTC(today, 1)
 
-  const { count: activeTimeCount } = await supa
-    .from('subscriptions')
-    .select('id', { count: 'exact', head: true })
-    .eq('subscription_type', 'time')
-    .eq('status', 'active')
-    .gte('end_date', today)
+  // Cairo date strings (YYYY-MM-DD)
+  const today = cairoToday()
+  const next7 = addDays(today, 7)
 
-  const { count: activeSessionsCount } = await supa
-    .from('subscriptions')
-    .select('id', { count: 'exact', head: true })
-    .eq('subscription_type', 'sessions')
-    .eq('status', 'active')
-    .gte('end_date', today)
+  // KPIs
+  const [{ count: activeCount }, { count: expiring7Count }, scansRes] = await Promise.all([
+    supa
+      .from('subscriptions')
+      .select('id', { count: 'exact', head: true })
+      .eq('status', 'active')
+      .gte('end_date', today)
+      // exclude frozen memberships (same logic as Expiring Soon page)
+      .or(`frozen_until.is.null,frozen_until.lt.${today}`),
+    supa
+      .from('subscriptions')
+      .select('id', { count: 'exact', head: true })
+      .eq('status', 'active')
+      .not('end_date', 'is', null)
+      .gte('end_date', today)
+      .lte('end_date', next7)
+      .or(`frozen_until.is.null,frozen_until.lt.${today}`),
+    supa.from('attendance').select('id', { count: 'exact', head: true }).eq('date', today),
+  ])
 
-  const { count: expiredCount } = await supa
-    .from('subscriptions')
-    .select('id', { count: 'exact', head: true })
-    .eq('status', 'expired')
+  // Outstanding total (sum)
+  let outstandingCount = 0
+  let outstandingTotal = 0
+  try {
+    const { data, count } = await supa
+      .from('subscriptions')
+      .select('amount_due', { count: 'exact' })
+      .gt('amount_due', 0)
+      .not('member_id', 'is', null)
+      .limit(10000)
 
-  const { count: attendanceToday } = await supa
-    .from('attendance')
-    .select('id', { count: 'exact', head: true })
-    .eq('valid', true)
-    .eq('date', today)
-
-  const { data: activeRows } = (await supa
-    .from('subscriptions')
-    .select('plan, status, end_date')
-    .eq('status', 'active')
-    .gte('end_date', today)
-    .limit(5000)) as {
-    data: Array<{ plan: Plan; status: string | null; end_date: string | null }> | null
+    outstandingCount = count ?? (data?.length ?? 0)
+    outstandingTotal = (data ?? []).reduce((acc, r: any) => acc + Number(r?.amount_due ?? 0), 0)
+  } catch {
+    // ignore
   }
 
-  const byPlan: Record<Plan, number> = { '1m': 0, '3m': 0, '6m': 0, '12m': 0, sessions: 0 }
-  for (const r of activeRows ?? []) {
-    if (r.plan && (['1m', '3m', '6m', '12m', 'sessions'] as Plan[]).includes(r.plan)) {
-      byPlan[r.plan] = (byPlan[r.plan] ?? 0) + 1
-    }
-  }
-
-  const { count: readyCount } = await supa.from('store_orders').select('id', { count: 'exact', head: true }).eq('status', 'ready')
-  const { count: pendingCount } = await supa.from('store_orders').select('id', { count: 'exact', head: true }).eq('status', 'pending')
-  const { count: confirmedCount } = await supa.from('store_orders').select('id', { count: 'exact', head: true }).eq('status', 'confirmed')
-  const { count: deliveredCount } = await supa.from('store_orders').select('id', { count: 'exact', head: true }).eq('status', 'delivered')
-  const { count: canceledCount } = await supa.from('store_orders').select('id', { count: 'exact', head: true }).eq('status', 'canceled')
-  const { count: storeTodayCount } = await supa
-    .from('store_orders')
-    .select('id', { count: 'exact', head: true })
-    .gte('created_at', today)
-    .lt('created_at', tomorrow)
+  const scansToday = scansRes?.count ?? 0
 
   return (
     <main>
       <PageHeader
-        title="Admin"
-        subtitle="Overview and operations"
+        title="Admin Dashboard"
+        subtitle={`Daily ops — Cairo time (${CAIRO_TZ}).`}
         right={
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <Button asChild variant="outline" href="/scan?kiosk=1">
+              Scan
+            </Button>
             <Button asChild variant="outline" href="/members">
               Members
             </Button>
@@ -119,85 +142,62 @@ export default async function AdminPage() {
 
       <Section>
         <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-4">
-          <Card hover>
-            <CardContent>
-              <div className="text-sm text-[hsl(var(--muted))]">Active (subscriptions)</div>
-              <div className="mt-1 text-2xl font-semibold">{activeTimeCount ?? 0}</div>
-              <div className="mt-1 text-xs text-[hsl(var(--muted))]">end date ≥ today</div>
-            </CardContent>
-          </Card>
-
-          <Card hover>
-            <CardContent>
-              <div className="text-sm text-[hsl(var(--muted))]">Active (sessions)</div>
-              <div className="mt-1 text-2xl font-semibold">{activeSessionsCount ?? 0}</div>
-              <div className="mt-1 text-xs text-[hsl(var(--muted))]">end date ≥ today</div>
-            </CardContent>
-          </Card>
-
-          <Card hover>
-            <CardContent>
-              <div className="text-sm text-[hsl(var(--muted))]">Expired (all)</div>
-              <div className="mt-1 text-2xl font-semibold">{expiredCount ?? 0}</div>
-              <div className="mt-1 text-xs text-[hsl(var(--muted))]">status = expired</div>
-            </CardContent>
-          </Card>
-
-          <Card hover>
-            <CardContent>
-              <div className="text-sm text-[hsl(var(--muted))]">Attendance today</div>
-              <div className="mt-1 text-2xl font-semibold">{attendanceToday ?? 0}</div>
-              <div className="mt-1 text-xs text-[hsl(var(--muted))]">date = {today}</div>
-            </CardContent>
-          </Card>
-        </div>
-      </Section>
-
-      <Section>
-        <h2 className="text-lg font-semibold mb-3">Active subscriptions (by plan)</h2>
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-          {(['1m', '3m', '6m', '12m', 'sessions'] as Plan[]).map((p) => (
-            <Card key={p}>
-              <CardContent>
-                <div className="text-sm text-[hsl(var(--muted))]">
-                  {p === 'sessions' ? 'Per sessions' : p === '1m' ? '1 month' : p === '3m' ? '3 months' : p === '6m' ? '6 months' : '12 months'}
-                </div>
-                <div className="mt-1 text-xl font-semibold">{byPlan[p] ?? 0}</div>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
-      </Section>
-
-      <Section>
-        <h2 className="text-lg font-semibold mb-3">Store</h2>
-        <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-6">
-          <Card><CardContent><div className="text-sm text-[hsl(var(--muted))]">Ready</div><div className="mt-1 text-2xl font-semibold">{readyCount ?? 0}</div></CardContent></Card>
-          <Card><CardContent><div className="text-sm text-[hsl(var(--muted))]">Pending</div><div className="mt-1 text-2xl font-semibold">{pendingCount ?? 0}</div></CardContent></Card>
-          <Card><CardContent><div className="text-sm text-[hsl(var(--muted))]">Confirmed</div><div className="mt-1 text-2xl font-semibold">{confirmedCount ?? 0}</div></CardContent></Card>
-          <Card><CardContent><div className="text-sm text-[hsl(var(--muted))]">Delivered</div><div className="mt-1 text-2xl font-semibold">{deliveredCount ?? 0}</div></CardContent></Card>
-          <Card><CardContent><div className="text-sm text-[hsl(var(--muted))]">Canceled</div><div className="mt-1 text-2xl font-semibold">{canceledCount ?? 0}</div></CardContent></Card>
-          <Card><CardContent><div className="text-sm text-[hsl(var(--muted))]">Orders today</div><div className="mt-1 text-2xl font-semibold">{storeTodayCount ?? 0}</div></CardContent></Card>
+          <StatCard
+            label="Active members"
+            value={activeCount ?? 0}
+            hint={`Active subscriptions (end date ≥ ${today})`}
+            href="/members"
+          />
+          <StatCard
+            label="Expiring in 7 days"
+            value={expiring7Count ?? 0}
+            hint={`${today} → ${next7}`}
+            href="/admin/expiring-soon"
+          />
+          <StatCard
+            label="Outstanding total"
+            value={fmtMoneyEGP(outstandingTotal)}
+            hint={`${outstandingCount} member(s) with dues`}
+            href="/admin/outstanding-dues"
+          />
+          <StatCard
+            label="Scans today"
+            value={scansToday}
+            hint={`Kiosk attendance — ${today}`}
+            href="/admin/scan-audit"
+          />
         </div>
       </Section>
 
       <Section className="space-y-4">
+        <h2 className="text-lg font-semibold">Quick actions</h2>
         <div className="flex flex-wrap gap-2">
-          <Button asChild href="/members" variant="outline">Members</Button>
-          <Button asChild href="/admin/categories" variant="outline">Expense Categories</Button>
-          <Button asChild href="/expenses" variant="outline">Expenses</Button>
-          <Button asChild href="/store/admin" variant="outline">Store Admin</Button>
+          <Button asChild variant="outline" href="/admin/expiring-soon">
+            Expiring
+          </Button>
+          <Button asChild variant="outline" href="/admin/outstanding-dues">
+            Outstanding
+          </Button>
+          <Button asChild variant="outline" href="/admin/payments">
+            Payments
+          </Button>
+          <Button asChild variant="outline" href="/expenses">
+            Expenses
+          </Button>
+          <Button asChild variant="outline" href="/admin/scan-audit">
+            Scan Audit
+          </Button>
         </div>
 
         <div className="grid gap-4 lg:grid-cols-2">
           <AdminRevenue />
           <AdminExports />
         </div>
-      </Section>
 
-      <Section>
         <div className="text-xs text-[hsl(var(--muted))]">
-          <Link href="/" className="underline">Back to home</Link>
+          <Link href="/" className="underline">
+            Back to home
+          </Link>
         </div>
       </Section>
     </main>
