@@ -39,6 +39,21 @@ export default function AutoReturn({ seconds = 7, href = '/scan', hideText }: Au
   const [left, setLeft] = useState<number>(seconds)
   const wakeLockRef = useRef<WakeLockSentinel | null>(null)
 
+
+// Network status (offline fallback)
+const [online, setOnline] = useState(true)
+
+useEffect(() => {
+  const update = () => setOnline(typeof navigator !== 'undefined' ? navigator.onLine : true)
+  update()
+  window.addEventListener('online', update)
+  window.addEventListener('offline', update)
+  return () => {
+    window.removeEventListener('online', update)
+    window.removeEventListener('offline', update)
+  }
+}, [])
+
   const [exitOpen, setExitOpen] = useState(false)
   const [exitPin, setExitPin] = useState('')
   const [exitError, setExitError] = useState<string | null>(null)
@@ -126,6 +141,11 @@ export default function AutoReturn({ seconds = 7, href = '/scan', hideText }: Au
   async function confirmExitKiosk() {
     setExitError(null)
 
+    if (!online || (typeof navigator !== 'undefined' && !navigator.onLine)) {
+      setExitError('Offline — reconnect to verify PIN')
+      return
+    }
+
     try {
       const r = await fetch('/api/kiosk/verify-exit-pin', {
         method: 'POST',
@@ -151,7 +171,7 @@ export default function AutoReturn({ seconds = 7, href = '/scan', hideText }: Au
       closeExitModal()
       router.replace('/scan')
     } catch {
-      setExitError('Failed to verify PIN')
+      setExitError(!online || (typeof navigator !== 'undefined' && !navigator.onLine) ? 'Offline — reconnect to verify PIN' : 'Failed to verify PIN')
     }
   }
 
@@ -181,6 +201,7 @@ export default function AutoReturn({ seconds = 7, href = '/scan', hideText }: Au
           <div className="w-full max-w-sm rounded-2xl border border-[hsl(var(--border))] bg-white p-4 text-gray-900 shadow-soft">
             <div className="text-base font-semibold">Exit kiosk</div>
             <p className="mt-1 text-sm text-gray-600">Hold confirmed. Enter PIN to exit kiosk mode.</p>
+            {!online ? <p className="mt-2 text-sm text-rose-700">Offline — reconnect to verify PIN.</p> : null}
 
             <input
               className="mt-3 w-full rounded-xl border border-[hsl(var(--border))] px-3 py-2 text-sm outline-none"
