@@ -199,6 +199,39 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className }: 
   const [msg, setMsg] = useState<string>('Ready')
   const resumeTimerRef = useRef<number | null>(null)
 
+
+// Network status (offline fallback)
+const [online, setOnline] = useState(true)
+const wasOfflineRef = useRef(false)
+
+useEffect(() => {
+  const update = () => setOnline(typeof navigator !== 'undefined' ? navigator.onLine : true)
+  update()
+  window.addEventListener('online', update)
+  window.addEventListener('offline', update)
+  return () => {
+    window.removeEventListener('online', update)
+    window.removeEventListener('offline', update)
+  }
+}, [])
+
+useEffect(() => {
+  if (!online) {
+    wasOfflineRef.current = true
+    setPaused(true)
+    setStatus('error')
+    setMsg('Offline — reconnect to the internet, then tap Retry.')
+    return
+  }
+
+  if (wasOfflineRef.current) {
+    wasOfflineRef.current = false
+    // Auto-resume scanning when back online
+    manualRescan()
+  }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+}, [online])
+
   // Camera controls
   const [facingMode, setFacingMode] = useState<FacingMode>('environment')
   const [fullScreen, setFullScreen] = useState(false)
@@ -282,6 +315,12 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className }: 
         const maybeId = parseMemberText(raw)
         const payload = { code: maybeId ? `atom:${maybeId}` : raw }
 
+        if (!online) {
+          setStatus('error')
+          setMsg('Offline — reconnect to the internet, then tap Retry.')
+          return
+        }
+
         const r = await fetch('/api/kiosk/scan', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -312,10 +351,14 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className }: 
         }
       } catch (e) {
         setStatus('error')
-        setMsg(errToString(e))
+        setMsg(
+          !online || (typeof navigator !== 'undefined' && !navigator.onLine)
+            ? 'Offline — reconnect to the internet, then tap Retry.'
+            : errToString(e)
+        )
       } finally {
         // If we navigated to the result page, don't resume scanning here.
-        if (didNavigate) return
+        if (didNavigate || !online) return
         if (resumeTimerRef.current) window.clearTimeout(resumeTimerRef.current)
       if (exitHoldRef.current) window.clearTimeout(exitHoldRef.current)
         resumeTimerRef.current = window.setTimeout(() => {
@@ -325,7 +368,7 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className }: 
         }, 1500)
       }
     },
-    [paused, router]
+    [paused, router, kioskMode, online]
   )
 
   function manualRescan() {
@@ -334,6 +377,18 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className }: 
     setStatus('idle')
     setMsg('Ready')
   }
+
+
+function retryNow() {
+  const nowOnline = typeof navigator !== 'undefined' ? navigator.onLine : online
+  if (!nowOnline) {
+    setPaused(true)
+    setStatus('error')
+    setMsg('Offline — reconnect to the internet, then tap Retry.')
+    return
+  }
+  manualRescan()
+}
 
   function toggleFacingMode() {
     // Force a fresh start when switching camera
@@ -393,6 +448,9 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className }: 
                 >
                   {msg}
                 </span>
+                {!online ? (
+                  <span className="rounded-full border border-rose-400/30 bg-rose-500/10 px-2 py-0.5 text-rose-100">Offline</span>
+                ) : null}
                 {!kioskMode ? (
                   <span className="text-white/50">• Press ESC to exit</span>
                 ) : (
@@ -402,6 +460,16 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className }: 
             </div>
 
             <div className="flex items-center gap-2">
+              {!online ? (
+                <Button
+                  variant="outline"
+                  className="!bg-transparent !text-white !border-white/30 hover:!bg-white/10"
+                  onClick={retryNow}
+                  title="Retry (requires internet)"
+                >
+                  Retry
+                </Button>
+              ) : null}
               <Button
                 variant="outline"
                 className="!bg-transparent !text-white !border-white/30 hover:!bg-white/10"
@@ -510,6 +578,24 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className }: 
           </Button>
 
           
+
+
+{!online ? (
+  <div className="mt-3 rounded-2xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800">
+    <div className="font-semibold">Offline</div>
+    <div className="mt-1 text-xs">
+      Internet connection lost. Scanning requires internet access. Reconnect, then tap Retry.
+    </div>
+    <div className="mt-2 flex flex-wrap gap-2">
+      <Button variant="outline" onClick={retryNow} title="Retry">
+        Retry
+      </Button>
+      <Button variant="outline" onClick={() => window.location.reload()} title="Reload the page">
+        Reload
+      </Button>
+    </div>
+  </div>
+) : null}
         </div>
 
         {/* Zone Scanner : réduite & centrée */}
