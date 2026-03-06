@@ -14,7 +14,7 @@ export default function PageHeader({
   showReload?: boolean
 }) {
   return (
-    <div className="border-b border-[hsl(var(--border))] bg-[hsl(var(--bg))]">
+    <div className="page-header border-b border-[hsl(var(--border))] bg-[hsl(var(--bg))]">
       <Container className="py-6">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-4">
           <div className="flex-1 min-w-0">
