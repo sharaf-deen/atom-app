@@ -39,6 +39,12 @@ export default function AutoReturn({ seconds = 7, href = '/scan', hideText }: Au
   const [left, setLeft] = useState<number>(seconds)
   const wakeLockRef = useRef<WakeLockSentinel | null>(null)
 
+  const [exitOpen, setExitOpen] = useState(false)
+  const [exitPin, setExitPin] = useState('')
+  const [exitError, setExitError] = useState<string | null>(null)
+  const [exitHolding, setExitHolding] = useState(false)
+  const exitHoldRef = useRef<number | null>(null)
+
   const kiosk = typeof window !== 'undefined' ? (isKioskUrl() || isKioskStored()) : false
   const hrefFinal = kiosk && href === '/scan' ? '/scan?kiosk=1' : href
 
@@ -72,6 +78,7 @@ export default function AutoReturn({ seconds = 7, href = '/scan', hideText }: Au
   }, [kiosk])
 
   useEffect(() => {
+    if (exitOpen) return
     setLeft(seconds)
 
     // Countdown
@@ -88,21 +95,46 @@ export default function AutoReturn({ seconds = 7, href = '/scan', hideText }: Au
       window.clearInterval(interval)
       window.clearTimeout(timeout)
     }
-  }, [seconds, hrefFinal, router])
+  }, [seconds, hrefFinal, router, exitOpen])
 
-  async function exitKiosk() {
-    const pin = window.prompt('Enter kiosk PIN to exit')
-    if (!pin) return
+
+  function cancelExitHold() {
+    if (exitHoldRef.current) window.clearTimeout(exitHoldRef.current)
+    exitHoldRef.current = null
+    setExitHolding(false)
+  }
+
+  function startExitHold() {
+    cancelExitHold()
+    setExitHolding(true)
+    exitHoldRef.current = window.setTimeout(() => {
+      exitHoldRef.current = null
+      setExitHolding(false)
+      setExitError(null)
+      setExitPin('')
+      setExitOpen(true)
+    }, 2000) as any
+  }
+
+  function closeExitModal() {
+    cancelExitHold()
+    setExitOpen(false)
+    setExitError(null)
+    setExitPin('')
+  }
+
+  async function confirmExitKiosk() {
+    setExitError(null)
 
     try {
       const r = await fetch('/api/kiosk/verify-exit-pin', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ pin }),
+        body: JSON.stringify({ pin: exitPin || '' }),
       })
       const j: VerifyRes = await r.json().catch(() => ({ ok: false }))
       if (!r.ok || !j.ok) {
-        window.alert(j.message || 'Invalid PIN')
+        setExitError(j.message || 'Invalid PIN')
         return
       }
 
@@ -116,26 +148,73 @@ export default function AutoReturn({ seconds = 7, href = '/scan', hideText }: Au
         ;(document as any).exitFullscreen?.()
       } catch {}
 
+      closeExitModal()
       router.replace('/scan')
     } catch {
-      window.alert('Failed to verify PIN')
+      setExitError('Failed to verify PIN')
     }
   }
+
 
   return (
     <div className={kiosk ? 'relative' : ''}>
       {kiosk ? (
         <button
           type="button"
-          onClick={exitKiosk}
+          onClick={(e) => {
+            e.preventDefault()
+          }}
+          onPointerDown={startExitHold}
+          onPointerUp={cancelExitHold}
+          onPointerLeave={cancelExitHold}
+          onPointerCancel={cancelExitHold}
           className="fixed bottom-4 right-4 z-50 rounded-2xl border border-[hsl(var(--border))] bg-white px-4 py-2 text-sm font-medium shadow-soft"
-          title="Exit kiosk"
+          title="Hold 2s to exit kiosk"
         >
-          Exit kiosk
+          {exitHolding ? 'Holding…' : 'Hold to exit'}
         </button>
       ) : null}
 
-      {hideText ? null : (
+      
+      {exitOpen ? (
+        <div className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/60 p-4">
+          <div className="w-full max-w-sm rounded-2xl border border-[hsl(var(--border))] bg-white p-4 text-gray-900 shadow-soft">
+            <div className="text-base font-semibold">Exit kiosk</div>
+            <p className="mt-1 text-sm text-gray-600">Hold confirmed. Enter PIN to exit kiosk mode.</p>
+
+            <input
+              className="mt-3 w-full rounded-xl border border-[hsl(var(--border))] px-3 py-2 text-sm outline-none"
+              type="password"
+              inputMode="numeric"
+              placeholder="PIN"
+              value={exitPin}
+              onChange={(e) => setExitPin(e.target.value)}
+              autoFocus
+            />
+
+            {exitError ? <p className="mt-2 text-sm text-rose-700">{exitError}</p> : null}
+
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                type="button"
+                className="rounded-xl border border-[hsl(var(--border))] bg-white px-4 py-2 text-sm font-medium"
+                onClick={closeExitModal}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="rounded-xl bg-black px-4 py-2 text-sm font-medium text-white"
+                onClick={confirmExitKiosk}
+              >
+                Exit
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+{hideText ? null : (
         <p className="text-sm text-[hsl(var(--muted))]">
           Returning to scanner in <span className="font-semibold">{left}</span>s…
         </p>

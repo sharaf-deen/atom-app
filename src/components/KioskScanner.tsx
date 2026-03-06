@@ -66,6 +66,13 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className }: 
   const [kioskMode, setKioskMode] = useState(false)
   const wakeLockRef = useRef<any>(null)
 
+  // Exit kiosk modal (hold-to-exit)
+  const [exitOpen, setExitOpen] = useState(false)
+  const [exitPin, setExitPin] = useState('')
+  const [exitError, setExitError] = useState<string | null>(null)
+  const [exitHolding, setExitHolding] = useState(false)
+  const exitHoldRef = useRef<number | null>(null)
+
   // Bootstrap kiosk mode from URL or localStorage
   useEffect(() => {
     try {
@@ -125,12 +132,31 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className }: 
     return { ok: !!j?.ok && r.ok, message: j?.message }
   }
 
-  async function exitKiosk() {
-    // Super admin can exit without PIN (API allows it)
-    const pin = window.prompt('Enter kiosk PIN to exit') || ''
-    const res = await verifyExitPin(pin)
+
+  function cancelExitHold() {
+    if (exitHoldRef.current) window.clearTimeout(exitHoldRef.current)
+    exitHoldRef.current = null
+    setExitHolding(false)
+  }
+
+  function startExitHold() {
+    if (!kioskMode) return
+    cancelExitHold()
+    setExitHolding(true)
+    exitHoldRef.current = window.setTimeout(() => {
+      exitHoldRef.current = null
+      setExitHolding(false)
+      setExitError(null)
+      setExitPin('')
+      setExitOpen(true)
+    }, 2000) as any
+  }
+
+  async function confirmExitKiosk() {
+    setExitError(null)
+    const res = await verifyExitPin(exitPin || '')
     if (!res.ok) {
-      window.alert(res.message || 'Invalid PIN')
+      setExitError(res.message || 'Invalid PIN')
       return
     }
 
@@ -138,10 +164,20 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className }: 
       window.localStorage.setItem('atom:kiosk', '0')
     } catch {}
 
+    cancelExitHold()
+    setExitOpen(false)
     setKioskMode(false)
     setFullScreen(false)
     router.replace('/scan')
   }
+
+  function closeExitModal() {
+    cancelExitHold()
+    setExitOpen(false)
+    setExitError(null)
+    setExitPin('')
+  }
+
 
   function enterKioskMode() {
     try {
@@ -211,6 +247,7 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className }: 
   useEffect(() => {
     return () => {
       if (resumeTimerRef.current) window.clearTimeout(resumeTimerRef.current)
+      if (exitHoldRef.current) window.clearTimeout(exitHoldRef.current)
     }
   }, [])
 
@@ -280,6 +317,7 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className }: 
         // If we navigated to the result page, don't resume scanning here.
         if (didNavigate) return
         if (resumeTimerRef.current) window.clearTimeout(resumeTimerRef.current)
+      if (exitHoldRef.current) window.clearTimeout(exitHoldRef.current)
         resumeTimerRef.current = window.setTimeout(() => {
           setPaused(false)
           setStatus('idle')
@@ -334,6 +372,7 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className }: 
   // Fullscreen overlay (works everywhere, without relying on the Fullscreen API)
   if (fullScreen) {
     return (
+      <>
       <div className="fixed inset-0 z-50 bg-black/90 text-white">
         {/* Top bar */}
         <div className="absolute inset-x-0 top-0 z-10 border-b border-white/10 bg-black/50 backdrop-blur-md">
@@ -354,7 +393,11 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className }: 
                 >
                   {msg}
                 </span>
-                {!kioskMode ? <span className="text-white/50">• Press ESC to exit</span> : null}
+                {!kioskMode ? (
+                  <span className="text-white/50">• Press ESC to exit</span>
+                ) : (
+                  <span className="text-white/50">• Hold Exit 2s</span>
+                )}
               </div>
             </div>
 
@@ -362,27 +405,20 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className }: 
               <Button
                 variant="outline"
                 className="!bg-transparent !text-white !border-white/30 hover:!bg-white/10"
-                onClick={manualRescan}
-                disabled={!paused && status === 'idle'}
-                title="Resume scanning"
+                onClick={(e: any) => {
+                  if (kioskMode) {
+                    e?.preventDefault?.()
+                    return
+                  }
+                  setFullScreen(false)
+                }}
+                onPointerDown={kioskMode ? startExitHold : undefined}
+                onPointerUp={kioskMode ? cancelExitHold : undefined}
+                onPointerLeave={kioskMode ? cancelExitHold : undefined}
+                onPointerCancel={kioskMode ? cancelExitHold : undefined}
+                title={kioskMode ? 'Hold 2s to exit kiosk' : 'Exit full screen'}
               >
-                Rescan
-              </Button>
-              <Button
-                variant="outline"
-                className="!bg-transparent !text-white !border-white/30 hover:!bg-white/10"
-                onClick={toggleFacingMode}
-                title="Switch camera"
-              >
-                Flip camera
-              </Button>
-              <Button
-                variant="outline"
-                className="!bg-transparent !text-white !border-white/30 hover:!bg-white/10"
-                onClick={() => (kioskMode ? exitKiosk() : setFullScreen(false))}
-                title={kioskMode ? 'Exit kiosk' : 'Exit full screen'}
-              >
-                {kioskMode ? 'Exit kiosk' : 'Exit full screen'}
+                {kioskMode ? (exitHolding ? 'Holding…' : 'Hold to exit') : 'Exit full screen'}
               </Button>
             </div>
           </div>
@@ -398,6 +434,46 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className }: 
 
         </div>
       </div>
+
+      {exitOpen ? (
+        <div className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/60 p-4">
+          <div className="w-full max-w-sm rounded-2xl border border-[hsl(var(--border))] bg-white p-4 text-gray-900 shadow-soft">
+            <div className="text-base font-semibold">Exit kiosk</div>
+            <p className="mt-1 text-sm text-gray-600">Hold confirmed. Enter PIN to exit kiosk mode.</p>
+
+            <input
+              className="mt-3 w-full rounded-xl border border-[hsl(var(--border))] px-3 py-2 text-sm outline-none"
+              type="password"
+              inputMode="numeric"
+              placeholder="PIN"
+              value={exitPin}
+              onChange={(e) => setExitPin(e.target.value)}
+              autoFocus
+            />
+
+            {exitError ? <p className="mt-2 text-sm text-rose-700">{exitError}</p> : null}
+
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                type="button"
+                className="rounded-xl border border-[hsl(var(--border))] bg-white px-4 py-2 text-sm font-medium"
+                onClick={closeExitModal}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="rounded-xl bg-black px-4 py-2 text-sm font-medium text-white"
+                onClick={confirmExitKiosk}
+              >
+                Exit
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      </>
     )
   }
 
