@@ -96,8 +96,8 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className }: 
 
     const requestWake = async () => {
       try {
-        // @ts-expect-error wakeLock not in TS lib everywhere
-        const wl = await navigator.wakeLock?.request?.('screen')
+        // @ts-ignore wakeLock may be missing in some TS libs
+        const wl = await (navigator as any).wakeLock?.request?.('screen')
         if (wl) wakeLockRef.current = wl
       } catch {
         // ignore
