@@ -127,6 +127,7 @@ const MENU_BY_ROLE: GroupedMenuByRole = {
         { label: 'Notifications', href: '/notifications', icon: Bell },
         { label: 'Schedule', href: '/schedule', icon: CalendarDays },
         { label: 'Attendance', href: '/admin/attendance', icon: CalendarDays },
+        { label: 'Scan Audit', href: '/admin/scan-audit', icon: FileText },
       ],
     },
     {
@@ -166,6 +167,8 @@ const MENU_BY_ROLE: GroupedMenuByRole = {
         { label: 'Notifications', href: '/notifications', icon: Bell },
         { label: 'Schedule', href: '/schedule', icon: CalendarDays },
         { label: 'Attendance', href: '/admin/attendance', icon: CalendarDays },
+        { label: 'Scan Audit', href: '/admin/scan-audit', icon: FileText },
+
       ],
     },
     {
