@@ -1,342 +1,289 @@
-// src/app/admin/scan-audit/page.tsx
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
 import Link from 'next/link'
-import PageHeader from '@/components/layout/PageHeader'
-import Section from '@/components/layout/Section'
-import Forbidden from '@/components/Forbidden'
-import Input from '@/components/ui/Input'
-import Select from '@/components/ui/Select'
-import Badge from '@/components/ui/Badge'
-import Button from '@/components/ui/Button'
+import { redirect } from 'next/navigation'
+import AccessDeniedCard from '@/components/AccessDeniedCard'
 import { Table } from '@/components/ui/Table'
+import Badge from '@/components/ui/Badge'
+import { getSessionUserCached, getSupabaseAdminClientCached } from '@/lib/requestCache'
 
-import { getSessionUser } from '@/lib/session'
-import { createSupabaseAdminClient } from '@/lib/supabaseAdmin'
-import { cairoTodayDateOnly, addDaysDateOnly, cairoRangeBoundsUTC, CAIRO_TZ, isISODateOnly } from '@/lib/cairoTime'
+type SearchParams = Record<string, string | string[] | undefined>
+
+function spGet(sp: SearchParams, key: string): string {
+  const v = sp[key]
+  if (Array.isArray(v)) return v[0] ?? ''
+  return v ?? ''
+}
+
+function qs(sp: URLSearchParams, key: string, value: string) {
+  if (!value) sp.delete(key)
+  else sp.set(key, value)
+}
+
+function buildHref(base: string, current: SearchParams, patch: Record<string, string>) {
+  const p = new URLSearchParams()
+  // keep known keys
+  for (const k of ['q','status','device','scanned_by_role','start','end','sort','page']) {
+    const v = spGet(current, k)
+    if (v) p.set(k, v)
+  }
+  for (const [k,v] of Object.entries(patch)) {
+    if (v === '') p.delete(k)
+    else p.set(k, v)
+  }
+  const s = p.toString()
+  return s ? `${base}?${s}` : base
+}
+
+function fmtName(first?: string | null, last?: string | null) {
+  return [first ?? '', last ?? ''].join(' ').trim()
+}
+
+function fmtDateTime(iso?: string | null) {
+  if (!iso) return '—'
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return iso
+  return d.toLocaleString()
+}
 
 const PER_PAGE = 50
 
-type AttendanceRow = {
-  id: string
-  scan_time: string | null
-  date: string
-  status: string
-  member_id: string
-  scanned_by: string | null
-  device_tag: string | null
-  valid: boolean | null
-  from_sessions: boolean
-  subscription_id: string | null
-  source: string
-}
+export default async function ScanAuditPage({ searchParams }: { searchParams: SearchParams }) {
+  const me = await getSessionUserCached()
+  if (!me) redirect('/login')
+  if (me.role !== 'admin' && me.role !== 'super_admin') return <AccessDeniedCard />
 
-type ProfileRow = {
-  user_id: string
-  first_name: string | null
-  last_name: string | null
-  email: string | null
-  member_id: string | null
-}
+  const q = spGet(searchParams, 'q').trim()
+  const status = spGet(searchParams, 'status').trim()
+  const device = spGet(searchParams, 'device').trim()
+  const scannedByRole = spGet(searchParams, 'scanned_by_role').trim()
+  const start = spGet(searchParams, 'start').trim()
+  const end = spGet(searchParams, 'end').trim()
+  const sort = spGet(searchParams, 'sort').trim() || 'recent'
+  const page = Math.max(1, Number(spGet(searchParams, 'page') || '1') || 1)
 
-function fullName(p?: ProfileRow | null) {
-  const a = (p?.first_name ?? '').trim()
-  const b = (p?.last_name ?? '').trim()
-  const n = `${a} ${b}`.trim()
-  return n || (p?.email ?? '') || '—'
-}
+  const from = (page - 1) * PER_PAGE
+  const to = from + PER_PAGE - 1
 
-function fmtCairo(tsIso: string | null) {
-  if (!tsIso) return '—'
-  try {
-    const dt = new Date(tsIso)
-    return dt.toLocaleString('en-GB', {
-      timeZone: CAIRO_TZ,
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
-    })
-  } catch {
-    return '—'
-  }
-}
+  const supabase = getSupabaseAdminClientCached()
 
-function statusPill(status: string, valid: boolean | null) {
-  const s = (status || '').toLowerCase().trim()
-
-  let cls = 'bg-[hsl(var(--muted-foreground))/0.06] text-[hsl(var(--muted-foreground))]'
-  if (valid) cls = 'bg-emerald-500/10 text-emerald-700'
-  if (!valid && (s.includes('expired') || s.includes('no') || s.includes('deny') || s.includes('invalid'))) {
-    cls = 'bg-rose-500/10 text-rose-700'
-  }
-  if (s.includes('frozen')) cls = 'bg-amber-500/10 text-amber-700'
-  if (s === 'ok') cls = 'bg-emerald-500/10 text-emerald-700'
-
-  return <Badge className={cls}>{status || (valid ? 'ok' : 'deny')}</Badge>
-}
-
-function clampPage(v: any) {
-  const n = Number(v)
-  if (!Number.isFinite(n)) return 1
-  return Math.max(1, Math.trunc(n))
-}
-
-function pickRange(args: { period?: string; from?: string; to?: string }) {
-  const today = cairoTodayDateOnly()
-  const p = (args.period ?? 'today').trim()
-
-  if (p === 'last7') return { from: addDaysDateOnly(today, -6), to: today, period: 'last7' }
-  if (p === 'last30') return { from: addDaysDateOnly(today, -29), to: today, period: 'last30' }
-  if (p === 'custom') {
-    const from = isISODateOnly(args.from) ? args.from : addDaysDateOnly(today, -6)
-    const to = isISODateOnly(args.to) ? args.to : today
-    return { from, to, period: 'custom' }
-  }
-
-  return { from: today, to: today, period: 'today' }
-}
-
-export default async function ScanAuditPage({
-  searchParams,
-}: {
-  searchParams?: { period?: string; from?: string; to?: string; q?: string; status?: string; device?: string; page?: string }
-}) {
-  const user = await getSessionUser()
-  const nextPath = '/admin/scan-audit'
-
-  if (!user || (user.role !== 'admin' && user.role !== 'super_admin')) {
-    return (
-      <Forbidden
-        pageTitle="Scan Audit"
-        subtitle="Admins only."
-        nextPath={nextPath}
-        allowed="admin, super_admin"
-        signedInAs={user?.email ?? null}
-        actions={[{ href: '/', label: 'Go Home' }]}
-      />
+  let qb = supabase
+    .from('scan_audit')
+    .select(
+      'id,date,scanned_at,status,valid,device_tag,member_id,member_code,member_email,member_first_name,member_last_name,scanned_by,scanned_by_role,scanned_by_email,scanned_by_first_name,scanned_by_last_name',
+      { count: 'exact' }
     )
-  }
 
-  const admin = createSupabaseAdminClient()
+  if (start) qb = qb.gte('date', start)
+  if (end) qb = qb.lte('date', end)
+  if (status) qb = qb.eq('status', status)
+  if (device) qb = qb.eq('device_tag', device)
+  if (scannedByRole) qb = qb.eq('scanned_by_role', scannedByRole)
 
-  const q = (searchParams?.q ?? '').trim()
-  const status = (searchParams?.status ?? 'all').trim()
-  const device = (searchParams?.device ?? '').trim()
-  const page = clampPage(searchParams?.page ?? '1')
-
-  const range = pickRange({ period: searchParams?.period, from: searchParams?.from, to: searchParams?.to })
-  const bounds = cairoRangeBoundsUTC(range.from, range.to)
-
-  // Optional: resolve member ids from q (member_id / email / name)
-  let memberIds: string[] | null = null
   if (q) {
     const like = `%${q}%`
-    const { data: prof, error: profErr } = await admin
-      .from('profiles')
-      .select('user_id')
-      .or(`member_id.ilike.${like},email.ilike.${like},first_name.ilike.${like},last_name.ilike.${like}`)
-      .limit(250)
-
-    if (!profErr && prof?.length) {
-      memberIds = Array.from(new Set(prof.map((r: any) => String(r.user_id)).filter(Boolean)))
-    } else {
-      memberIds = []
-    }
-  }
-
-  const fromIdx = (page - 1) * PER_PAGE
-  const toIdx = fromIdx + PER_PAGE // inclusive => PER_PAGE + 1 rows
-
-  let query = admin
-    .from('attendance')
-    .select('id, scan_time, date, status, member_id, scanned_by, device_tag, valid, from_sessions, subscription_id, source')
-    .eq('source', 'kiosk')
-    .gte('scan_time', bounds.startISO)
-    .lt('scan_time', bounds.endISO)
-    .order('scan_time', { ascending: false })
-    .range(fromIdx, toIdx)
-
-  if (status !== 'all') query = query.eq('status', status)
-  if (device) query = query.ilike('device_tag', `%${device}%`)
-  if (memberIds) {
-    if (!memberIds.length) {
-      query = query.in('member_id', ['00000000-0000-0000-0000-000000000000'])
-    } else {
-      query = query.in('member_id', memberIds.slice(0, 250))
-    }
-  }
-
-  const { data, error } = await query
-  if (error) {
-    return (
-      <>
-        <PageHeader title="Scan Audit" subtitle="Kiosk scan log (attendance events)" />
-        <Section className="space-y-3">
-          <div className="rounded-2xl border border-rose-500/30 bg-rose-500/5 p-4 text-sm text-rose-700">
-            Failed to load: {error.message}
-          </div>
-        </Section>
-      </>
+    qb = qb.or(
+      [
+        `member_code.ilike.${like}`,
+        `member_email.ilike.${like}`,
+        `member_first_name.ilike.${like}`,
+        `member_last_name.ilike.${like}`,
+        `scanned_by_email.ilike.${like}`,
+        `scanned_by_first_name.ilike.${like}`,
+        `scanned_by_last_name.ilike.${like}`,
+        `device_tag.ilike.${like}`,
+      ].join(',')
     )
   }
 
-  const rows = (data ?? []) as any as AttendanceRow[]
-  const hasMore = rows.length > PER_PAGE
-  const pageRows = rows.slice(0, PER_PAGE)
+  // Sorting
+  if (sort === 'device_asc') qb = qb.order('device_tag', { ascending: true }).order('scanned_at', { ascending: false })
+  else if (sort === 'device_desc') qb = qb.order('device_tag', { ascending: false }).order('scanned_at', { ascending: false })
+  else qb = qb.order('scanned_at', { ascending: false })
 
-  const memberSet = new Set<string>()
-  const staffSet = new Set<string>()
-  for (const r of pageRows) {
-    if (r.member_id) memberSet.add(r.member_id)
-    if (r.scanned_by) staffSet.add(r.scanned_by)
-  }
-  const lookupIds = Array.from(new Set([...memberSet, ...staffSet]))
+  const { data, count, error } = await qb.range(from, to)
 
-  const { data: profRows } = await admin
-    .from('profiles')
-    .select('user_id, first_name, last_name, email, member_id')
-    .in('user_id', lookupIds)
-    .limit(1000)
-
-  const profMap = new Map<string, ProfileRow>()
-  for (const p of (profRows ?? []) as any[]) {
-    profMap.set(String(p.user_id), p as ProfileRow)
-  }
-
-  const tableColumns = [
-    { key: 'time', header: 'Time' },
-    { key: 'member', header: 'Member' },
-    { key: 'status', header: 'Status' },
-    { key: 'device', header: 'Device', hideOnMobile: true },
-    { key: 'by', header: 'Scanned by', hideOnMobile: true },
-    { key: 'notes', header: 'Notes', hideOnMobile: true },
-  ]
-
-  const tableRows = pageRows.map((r) => {
-    const member = profMap.get(r.member_id) ?? null
-    const staff = r.scanned_by ? profMap.get(r.scanned_by) ?? null : null
-    const memberLabel = (
-      <div className="min-w-0">
-        <div className="truncate font-medium">{fullName(member)}</div>
-        <div className="truncate text-[11px] text-[hsl(var(--muted))]">
-          {(member?.member_id ?? '—') + (member?.email ? ` • ${member.email}` : '')}
-        </div>
-      </div>
-    )
-
-    const staffLabel = staff ? (
-      <div className="min-w-0">
-        <div className="truncate font-medium">{fullName(staff)}</div>
-        <div className="truncate text-[11px] text-[hsl(var(--muted))]">{staff.email ?? '—'}</div>
-      </div>
-    ) : (
-      <span className="text-[hsl(var(--muted))]">—</span>
-    )
-
-    const notes: string[] = []
-    if (r.from_sessions) notes.push('sessions')
-    if (r.subscription_id) notes.push('sub')
-    if (r.valid === false) notes.push('denied')
-    if (r.source && r.source !== 'kiosk') notes.push(r.source)
-
+  const rows = (data ?? []).map((r) => {
+    const memberName = fmtName(r.member_first_name, r.member_last_name) || r.member_email || r.member_code || r.member_id
+    const scannerName = fmtName(r.scanned_by_first_name, r.scanned_by_last_name) || r.scanned_by_email || (r.scanned_by ?? '—')
     return {
       id: r.id,
-      time: fmtCairo(r.scan_time),
-      member: memberLabel,
-      status: statusPill(r.status, r.valid),
+      scanned_at: fmtDateTime(r.scanned_at),
+      status: r.status,
       device: r.device_tag ?? '—',
-      by: staffLabel,
-      notes: notes.length ? notes.join(' • ') : '—',
+      member: memberName,
+      scanned_by: scannerName,
+      scanned_by_role: r.scanned_by_role ?? '—',
+      valid: r.valid ? 'Yes' : 'No',
     }
   })
 
-  // Preserve filters in pagination links
-  const keep = new URLSearchParams()
-  keep.set('period', range.period)
-  if (range.period === 'custom') {
-    keep.set('from', range.from)
-    keep.set('to', range.to)
-  }
-  if (q) keep.set('q', q)
-  if (status) keep.set('status', status)
-  if (device) keep.set('device', device)
+  const total = count ?? 0
+  const totalPages = Math.max(1, Math.ceil(total / PER_PAGE))
+  const hasPrev = page > 1
+  const hasNext = page < totalPages
 
-  const prevHref = page > 1 ? `${nextPath}?${new URLSearchParams({ ...Object.fromEntries(keep), page: String(page - 1) })}` : null
-  const nextHref = hasMore ? `${nextPath}?${new URLSearchParams({ ...Object.fromEntries(keep), page: String(page + 1) })}` : null
+  const exportHref = buildHref('/api/admin/scan-audit/export', searchParams, { page: '' })
 
   return (
-    <>
-      <PageHeader title="Scan Audit" subtitle="Kiosk scan log (attendance events)" />
-
-      <Section className="space-y-3">
-        <form className="grid gap-3 sm:grid-cols-4" action={nextPath} method="get">
-          <Select name="period" label="Period" defaultValue={range.period}>
-            <option value="today">Today</option>
-            <option value="last7">Last 7 days</option>
-            <option value="last30">Last 30 days</option>
-            <option value="custom">Custom</option>
-          </Select>
-
-          <Input name="from" label="From (YYYY-MM-DD)" defaultValue={range.period === 'custom' ? range.from : ''} />
-          <Input name="to" label="To (YYYY-MM-DD)" defaultValue={range.period === 'custom' ? range.to : ''} />
-
-          <Select name="status" label="Status" defaultValue={status}>
-            <option value="all">All</option>
-            <option value="ok">ok</option>
-            <option value="expired">expired</option>
-            <option value="frozen">frozen</option>
-            <option value="no_subscription">no_subscription</option>
-            <option value="invalid">invalid</option>
-          </Select>
-
-          <Input name="q" label="Member search" placeholder="Name, email, member_id…" defaultValue={q} />
-          <Input name="device" label="Device tag" placeholder="Entrance iPad…" defaultValue={device} />
-
-          <div className="flex items-end gap-2 sm:col-span-2">
-            <Button type="submit" className="w-full sm:w-auto">
-              Apply
-            </Button>
-            <Link href={nextPath} className="text-sm text-[hsl(var(--muted))] hover:underline">
-              Reset
-            </Link>
-          </div>
-        </form>
-      </Section>
-
-      <Section className="space-y-3">
-        <div className="flex items-center justify-between gap-3">
-          <div className="text-sm text-[hsl(var(--muted))]">
-            Showing page <span className="font-medium text-[hsl(var(--foreground))]">{page}</span>
+    <main className="min-h-[calc(100vh-3rem)] bg-white text-black">
+      <section className="mx-auto max-w-6xl px-4 py-8 space-y-4">
+        <div className="flex items-start justify-between gap-3 flex-wrap">
+          <div>
+            <h1 className="text-2xl font-semibold tracking-tight">Scan Audit</h1>
+            <p className="mt-1 text-sm text-[hsl(var(--muted))]">Kiosk scan history (attendance) with staff + device context.</p>
           </div>
 
           <div className="flex items-center gap-2">
-            {prevHref ? (
-              <Link href={prevHref}>
-                <Button variant="outline">Prev</Button>
-              </Link>
-            ) : (
-              <Button variant="outline" disabled>
-                Prev
-              </Button>
-            )}
-
-            {nextHref ? (
-              <Link href={nextHref}>
-                <Button variant="outline">Next</Button>
-              </Link>
-            ) : (
-              <Button variant="outline" disabled>
-                Next
-              </Button>
-            )}
+            <a
+              href={exportHref}
+              className="rounded-xl border px-3 py-2 text-sm font-semibold hover:bg-black/[0.03] dark:hover:bg-white/[0.06]"
+              title="Download CSV"
+            >
+              Export CSV
+            </a>
           </div>
         </div>
 
-        <Table columns={tableColumns} rows={tableRows} keyField="id" />
-      </Section>
-    </>
+        {/* Filters */}
+        <form className="grid gap-3 rounded-2xl border border-[hsl(var(--border))] bg-white p-4 shadow-soft sm:grid-cols-2 lg:grid-cols-6" action="/admin/scan-audit" method="get">
+          <input
+            className="w-full rounded-xl border border-black/10 bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-black/50 lg:col-span-2"
+            name="q"
+            defaultValue={q}
+            placeholder="Search member / staff / device…"
+          />
+
+          <select
+            name="status"
+            defaultValue={status}
+            className="w-full rounded-xl border border-black/10 bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-black/50"
+          >
+            <option value="">All statuses</option>
+            <option value="ok">ok</option>
+            <option value="invalid">invalid</option>
+            <option value="expired">expired</option>
+            <option value="frozen">frozen</option>
+            <option value="error">error</option>
+          </select>
+
+          <select
+            name="scanned_by_role"
+            defaultValue={scannedByRole}
+            className="w-full rounded-xl border border-black/10 bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-black/50"
+          >
+            <option value="">Scanned by (any)</option>
+            <option value="reception">reception</option>
+            <option value="admin">admin</option>
+            <option value="super_admin">super_admin</option>
+          </select>
+
+          <select
+            name="sort"
+            defaultValue={sort}
+            className="w-full rounded-xl border border-black/10 bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-black/50"
+          >
+            <option value="recent">Most recent</option>
+            <option value="device_asc">Device A → Z</option>
+            <option value="device_desc">Device Z → A</option>
+          </select>
+
+          <input
+            className="w-full rounded-xl border border-black/10 bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-black/50"
+            name="device"
+            defaultValue={device}
+            placeholder="Device tag"
+          />
+
+          <input
+            className="w-full rounded-xl border border-black/10 bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-black/50"
+            type="date"
+            name="start"
+            defaultValue={start}
+            title="Start date"
+          />
+
+          <input
+            className="w-full rounded-xl border border-black/10 bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-black/50"
+            type="date"
+            name="end"
+            defaultValue={end}
+            title="End date"
+          />
+
+          <div className="flex items-center gap-2 lg:col-span-6">
+            <button
+              type="submit"
+              className="rounded-xl bg-black px-4 py-2 text-sm font-semibold text-white hover:opacity-90"
+            >
+              Apply
+            </button>
+
+            <Link
+              href="/admin/scan-audit"
+              className="rounded-xl border px-4 py-2 text-sm font-semibold hover:bg-black/[0.03]"
+              title="Reset filters"
+            >
+              Reset
+            </Link>
+
+            {error ? (
+              <span className="text-sm text-red-700 ml-auto">{error.message}</span>
+            ) : (
+              <span className="text-sm text-[hsl(var(--muted))] ml-auto">
+                {total} scan{total === 1 ? '' : 's'}
+              </span>
+            )}
+          </div>
+        </form>
+
+        {/* Table */}
+        <div className="rounded-2xl border border-[hsl(var(--border))] bg-white shadow-soft">
+          <Table
+            keyField="id"
+            rows={rows}
+            columns={[
+              { key: 'scanned_at', header: 'Scanned at' },
+              { key: 'status', header: 'Status' },
+              { key: 'valid', header: 'Valid', hideOnMobile: true },
+              { key: 'device', header: 'Device' },
+              { key: 'member', header: 'Member' },
+              { key: 'scanned_by_role', header: 'Scanner role', hideOnMobile: true },
+              { key: 'scanned_by', header: 'Scanned by' },
+            ]}
+          />
+        </div>
+
+        {/* Pagination */}
+        <div className="flex items-center justify-between gap-3">
+          <div className="text-sm text-[hsl(var(--muted))]">
+            Page {page} / {totalPages}
+          </div>
+
+          <div className="flex items-center gap-2">
+            <Link
+              href={buildHref('/admin/scan-audit', searchParams, { page: String(Math.max(1, page - 1)) })}
+              className={
+                'rounded-xl border px-3 py-2 text-sm font-semibold ' +
+                (hasPrev ? 'hover:bg-black/[0.03]' : 'opacity-50 pointer-events-none')
+              }
+            >
+              Prev
+            </Link>
+
+            <Link
+              href={buildHref('/admin/scan-audit', searchParams, { page: String(page + 1) })}
+              className={
+                'rounded-xl border px-3 py-2 text-sm font-semibold ' +
+                (hasNext ? 'hover:bg-black/[0.03]' : 'opacity-50 pointer-events-none')
+              }
+            >
+              Next
+            </Link>
+          </div>
+        </div>
+      </section>
+    </main>
   )
 }
