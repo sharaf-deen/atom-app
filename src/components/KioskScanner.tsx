@@ -3,7 +3,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ComponentType } from 'react'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { Card, CardContent } from '@/components/ui/Card'
 import Button from '@/components/ui/Button'
 import Badge from '@/components/ui/Badge'
@@ -24,19 +24,6 @@ type ScanResponse = {
 }
 
 type Detected = { rawValue: string }
-
-function getOrCreateDeviceTag(): string {
-  try {
-    const key = 'atom:kiosk_device_tag'
-    const prev = window.localStorage.getItem(key)
-    if (prev) return prev
-    const tag = `kiosk-${Math.random().toString(36).slice(2, 8)}`
-    window.localStorage.setItem(key, tag)
-    return tag
-  } catch {
-    return 'kiosk'
-  }
-}
 
 function parseMemberText(text: string): string | null {
   const t = (text || '').trim()
@@ -73,6 +60,99 @@ type FacingMode = 'environment' | 'user'
 
 export default function KioskScanner({ size = 'sm', ratio = '1:1', className }: KioskScannerProps) {
   const router = useRouter()
+  const searchParams = useSearchParams()
+  const kioskRequested = searchParams?.get('kiosk') === '1'
+
+  const [kioskMode, setKioskMode] = useState(false)
+  const wakeLockRef = useRef<any>(null)
+
+  // Bootstrap kiosk mode from URL or localStorage
+  useEffect(() => {
+    try {
+      const stored = window.localStorage.getItem('atom:kiosk') === '1'
+      if (kioskRequested || stored) {
+        setKioskMode(true)
+      }
+      if (kioskRequested) {
+        window.localStorage.setItem('atom:kiosk', '1')
+      }
+    } catch {
+      if (kioskRequested) setKioskMode(true)
+    }
+  }, [kioskRequested])
+
+  // Apply kiosk UI (hide nav) + keep screen awake
+  useEffect(() => {
+    if (!kioskMode) {
+      document.body.classList.remove('kiosk-mode')
+      if (wakeLockRef.current?.release) {
+        wakeLockRef.current.release().catch(() => {})
+      }
+      wakeLockRef.current = null
+      return
+    }
+
+    document.body.classList.add('kiosk-mode')
+
+    const requestWake = async () => {
+      try {
+        // @ts-ignore wakeLock may be missing in some TS libs
+        const wl = await (navigator as any).wakeLock?.request?.('screen')
+        if (wl) wakeLockRef.current = wl
+      } catch {
+        // ignore
+      }
+    }
+
+    requestWake()
+
+    return () => {
+      document.body.classList.remove('kiosk-mode')
+      if (wakeLockRef.current?.release) {
+        wakeLockRef.current.release().catch(() => {})
+      }
+      wakeLockRef.current = null
+    }
+  }, [kioskMode])
+
+  async function verifyExitPin(pin: string): Promise<{ ok: boolean; message?: string }> {
+    const r = await fetch('/api/kiosk/verify-exit-pin', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pin }),
+    })
+    const j = await r.json().catch(() => ({ ok: false }))
+    return { ok: !!j?.ok && r.ok, message: j?.message }
+  }
+
+  async function exitKiosk() {
+    // Super admin can exit without PIN (API allows it)
+    const pin = window.prompt('Enter kiosk PIN to exit') || ''
+    const res = await verifyExitPin(pin)
+    if (!res.ok) {
+      window.alert(res.message || 'Invalid PIN')
+      return
+    }
+
+    try {
+      window.localStorage.setItem('atom:kiosk', '0')
+    } catch {}
+
+    setKioskMode(false)
+    setFullScreen(false)
+    router.replace('/scan')
+  }
+
+  function enterKioskMode() {
+    try {
+      window.localStorage.setItem('atom:kiosk', '1')
+    } catch {}
+    setKioskMode(true)
+    setFullScreen(true)
+    // Keep URL sticky for refresh
+    router.replace('/scan?kiosk=1')
+  }
+
 
   // Lazy-load the heavy camera scanner only when this component is mounted.
   // This keeps the main JS bundles lighter and avoids eager prefetch downloads.
@@ -94,7 +174,7 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className }: 
     document.body.style.overflow = 'hidden'
 
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setFullScreen(false)
+      if (e.key === 'Escape' && !kioskMode) setFullScreen(false)
     }
     window.addEventListener('keydown', onKeyDown)
 
@@ -164,11 +244,10 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className }: 
       try {
         const maybeId = parseMemberText(raw)
         const payload = { code: maybeId ? `atom:${maybeId}` : raw }
-        const deviceTag = getOrCreateDeviceTag()
 
         const r = await fetch('/api/kiosk/scan', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'x-device-tag': deviceTag },
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload),
         })
         const j: ScanResponse = await r.json().catch(() => ({ ok: false, message: 'Invalid response' }))
@@ -179,8 +258,8 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className }: 
         } else {
           // ✅ Navigate to result page (active vs expired)
           const sp = new URLSearchParams()
+          if (kioskMode) sp.set('kiosk', '1')
           sp.set('valid', j.valid ? '1' : '0')
-          if (j.member_id) sp.set('memberId', String(j.member_id))
           if (j.days_remaining !== undefined && j.days_remaining !== null) sp.set('daysRemaining', String(j.days_remaining))
           if (j.expires_on) sp.set('expiresOn', String(j.expires_on))
           if (j.expired_days !== undefined && j.expired_days !== null) sp.set('expiredDays', String(j.expired_days))
@@ -275,7 +354,7 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className }: 
                 >
                   {msg}
                 </span>
-                <span className="text-white/50">• Press ESC to exit</span>
+                {!kioskMode ? <span className="text-white/50">• Press ESC to exit</span> : null}
               </div>
             </div>
 
@@ -300,10 +379,10 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className }: 
               <Button
                 variant="outline"
                 className="!bg-transparent !text-white !border-white/30 hover:!bg-white/10"
-                onClick={() => setFullScreen(false)}
-                title="Exit full screen"
+                onClick={() => (kioskMode ? exitKiosk() : setFullScreen(false))}
+                title={kioskMode ? 'Exit kiosk' : 'Exit full screen'}
               >
-                Exit full screen
+                {kioskMode ? 'Exit kiosk' : 'Exit full screen'}
               </Button>
             </div>
           </div>
@@ -346,6 +425,15 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className }: 
           >
             Full screen
           </Button>
+          <Button
+            variant="outline"
+            onClick={enterKioskMode}
+            title="Enter kiosk mode (hide nav + keep awake)"
+          >
+            Kiosk mode
+          </Button>
+
+          
         </div>
 
         {/* Zone Scanner : réduite & centrée */}

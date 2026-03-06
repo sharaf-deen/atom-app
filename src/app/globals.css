@@ -54,6 +54,25 @@ a {
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-thumb { background: rgba(0,0,0,.2); border-radius: 999px; }
 
+
+
+/* ===== KIOSK MODE ===== */
+body.kiosk-mode {
+  /* Prevent pull-to-refresh / bounce on touch devices */
+  overscroll-behavior: none;
+}
+
+/* Hide top navigation + page headers in kiosk */
+body.kiosk-mode .app-nav,
+body.kiosk-mode .page-header {
+  display: none !important;
+}
+
+/* Reduce padding when nav/header are hidden */
+body.kiosk-mode main {
+  padding-top: 0 !important;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.001ms !important; animation-iteration-count: 1 !important; transition-duration: 0.001ms !important; scroll-behavior: auto !important; }
 }
