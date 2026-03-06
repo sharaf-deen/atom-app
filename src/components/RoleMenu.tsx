@@ -63,6 +63,7 @@ function pickQuick(items: MenuItem[]) {
     '/scan',
     '/admin/expiring-soon',
     '/admin/attendance',
+    '/admin/scan-audit',
     '/admin/outstanding-dues',
     '/admin/cash-report',
     '/admin/payments',
@@ -83,6 +84,13 @@ function pickQuick(items: MenuItem[]) {
     if (quick.some((q) => q.href === it.href)) continue
     quick.push(it)
     if (quick.length >= QUICK_MAX) break
+  }
+
+  // Ensure Scan Audit is always visible if present
+  const scanAudit = byHref.get('/admin/scan-audit')
+  if (scanAudit && !quick.some((q) => q.href === '/admin/scan-audit')) {
+    if (quick.length >= QUICK_MAX) quick.pop()
+    quick.push(scanAudit)
   }
 
   // Ensure Notifications is always visible if present
@@ -120,7 +128,11 @@ export default function RoleMenu({ items }: { items: MenuItem[] }) {
   const [showAll, setShowAll] = useState(false)
   const [q, setQ] = useState('')
   const btnRef = useRef<HTMLButtonElement | null>(null)
-  const panelRef = useRef<HTMLDivElement | null>(null)
+
+  // Important: mobile + desktop panels both exist in the DOM (desktop is hidden by CSS on mobile).
+  // Using a single ref causes "outside click" to mis-detect and close the menu when you press "All (...)". 
+  const mobilePanelRef = useRef<HTMLDivElement | null>(null)
+  const desktopPanelRef = useRef<HTMLDivElement | null>(null)
 
   useBodyScrollLock(open)
 
@@ -205,8 +217,17 @@ export default function RoleMenu({ items }: { items: MenuItem[] }) {
     function onClick(e: MouseEvent) {
       if (!open) return
       const t = e.target as Node
-      // click outside closes (desktop dropdown)
-      if (panelRef.current?.contains(t) || btnRef.current?.contains(t)) return
+
+      // click inside: ignore
+      if (
+        btnRef.current?.contains(t) ||
+        mobilePanelRef.current?.contains(t) ||
+        desktopPanelRef.current?.contains(t)
+      ) {
+        return
+      }
+
+      // outside closes
       setOpen(false)
       setShowAll(false)
       setQ('')
@@ -317,7 +338,7 @@ export default function RoleMenu({ items }: { items: MenuItem[] }) {
       {open && (
         <div className="fixed inset-x-0 bottom-0 z-50 sm:hidden">
           <div
-            ref={panelRef}
+            ref={mobilePanelRef}
             className="mx-auto w-full max-w-md rounded-t-3xl border border-black/10 bg-white dark:bg-black shadow-2xl"
           >
             {/* Handle */}
@@ -372,7 +393,7 @@ export default function RoleMenu({ items }: { items: MenuItem[] }) {
               <MenuList />
               <div className="border-t border-black/10 dark:border-white/10 px-4 py-3">
                 <Link href="/" onClick={close} className="text-sm font-semibold underline">
-                  Home dashboard
+                  Home
                 </Link>
               </div>
             </div>
@@ -383,7 +404,7 @@ export default function RoleMenu({ items }: { items: MenuItem[] }) {
       {/* Desktop: dropdown panel */}
       {open && (
         <div
-          ref={panelRef}
+          ref={desktopPanelRef}
           className="hidden sm:block absolute z-50 mt-3 w-72 rounded-2xl border border-black/10 bg-white dark:bg-black shadow-xl"
         >
           <div className="flex items-center justify-between gap-2 px-3 pt-3 pb-2">
@@ -403,7 +424,10 @@ export default function RoleMenu({ items }: { items: MenuItem[] }) {
           {showAll ? (
             <div className="px-3 pb-2">
               <div className="relative">
-                <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-black/50 dark:text-white/50" />
+                <Search
+                  size={16}
+                  className="absolute left-3 top-1/2 -translate-y-1/2 text-black/50 dark:text-white/50"
+                />
                 <input
                   value={q}
                   onChange={(e) => setQ(e.target.value)}
@@ -419,7 +443,12 @@ export default function RoleMenu({ items }: { items: MenuItem[] }) {
             <MenuList dense />
             <div className="mt-1 border-t border-black/10 dark:border-white/10 px-3 py-2">
               <div className="flex items-center justify-between gap-2">
-                <Link href="/" onClick={close} className="text-xs font-semibold underline" title="Open the Home dashboard">
+                <Link
+                  href="/"
+                  onClick={close}
+                  className="text-xs font-semibold underline"
+                  title="Open the Home dashboard"
+                >
                   Home dashboard
                 </Link>
 
