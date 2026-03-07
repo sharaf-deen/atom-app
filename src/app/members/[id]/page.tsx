@@ -281,6 +281,10 @@ const defaultRenewPlan: Plan =
                   ? `${profile.first_name ?? ''} ${profile.last_name ?? ''}`.trim()
                   : '—'}
               </div>
+<div>
+  <span className="text-[hsl(var(--muted))]">Member ID:</span>{' '}
+  <code className="text-xs">{profile.member_id?.trim() || '—'}</code>
+</div>
               <div><span className="text-[hsl(var(--muted))]">Email:</span> {profile.email ?? '—'}</div>
               <div><span className="text-[hsl(var(--muted))]">Phone:</span> {profile.phone ?? '—'}</div>
               <div><span className="text-[hsl(var(--muted))]">Role:</span> {profile.role ?? 'member'}</div>
