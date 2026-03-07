@@ -34,22 +34,22 @@ type MemberRowWithTotal = MemberRow & { total_count?: number | string | null }
 const membersStatsCached = unstable_cache(
   async () => {
     const admin = getSupabaseAdminClientCached()
-    const { data, error } = await admin.rpc('members_activity_stats')
+    const { data, error } = await admin.rpc('members_activity_stats_v3')
     if (error) throw new Error(error.message)
     return data
   },
-  ['members_activity_stats_v2'],
+  ['members_activity_stats_v3'],
   { revalidate: 60, tags: ['members'] }
 )
 
 const searchMembersCached = unstable_cache(
   async (params: { q: string | null; status: Status; page: number; page_size: number }) => {
     const admin = getSupabaseAdminClientCached()
-    const { data, error } = await admin.rpc('search_members', params)
+    const { data, error } = await admin.rpc('search_members_v3', params)
     if (error) throw new Error(error.message)
     return (data ?? []) as MemberRowWithTotal[]
   },
-  ['search_members_v2'],
+  ['search_members_v3'],
   { revalidate: 30, tags: ['members'] }
 )
 
@@ -172,7 +172,7 @@ export default async function MembersPage({
   try {
     statsData = await membersStatsCached()
   } catch (e: any) {
-    console.error('Error fetching members stats (RPC):', e?.message || e)
+    console.error('Error fetching members stats (RPC v3):', e?.message || e)
   }
 
   const stats = (Array.isArray(statsData) ? statsData[0] : statsData) as
