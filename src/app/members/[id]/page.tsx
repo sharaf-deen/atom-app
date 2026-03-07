@@ -51,6 +51,11 @@ function humanPlan(p?: Plan | null) {
   }
 }
 
+function isUuid(v: string) {
+  // Accepts common UUID formats (v1-v5). Good enough for routing.
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(v)
+}
+
 export default async function MemberDetailPage({ params }: { params: { id: string } }) {
   const me = await getSessionUser()
   const nextPath = `/members/${params.id}`
@@ -62,10 +67,12 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
   const STAFF: Role[] = ['reception', 'admin', 'super_admin']
   const isStaff = STAFF.includes(me.role)
   const canManageSubscriptions = ['admin', 'super_admin'].includes(me.role)
-  const isSelf = me.id === params.id
+  const supa = createSupabaseRSC()
 
-  // Staff can view anyone. Non-staff can only view self.
-  if (!isStaff && !isSelf) {
+  const idIsUuid = isUuid(params.id)
+
+  // Fast path: when the route param is a UUID, non-staff can only open their own UUID.
+  if (idIsUuid && !isStaff && me.id !== params.id) {
     return (
       <AccessDeniedPage
         title="Member"
@@ -80,14 +87,13 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
     )
   }
 
-  const supa = createSupabaseRSC()
-
   const { data: profile } = await supa
     .from('profiles')
-    .select('user_id, email, first_name, last_name, phone, role, qr_code, created_at')
-    .eq('user_id', params.id)
+    .select('user_id, member_id, email, first_name, last_name, phone, role, qr_code, created_at')
+    .eq(idIsUuid ? 'user_id' : 'member_id', params.id)
     .maybeSingle<{
       user_id: string
+      member_id: string | null
       email: string | null
       first_name: string | null
       last_name: string | null
@@ -98,6 +104,23 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
     }>()
 
   if (!profile) return notFound()
+
+  // Staff can view anyone. Non-staff can only view self.
+  const isSelf = me.id === profile.user_id
+  if (!isStaff && !isSelf) {
+    return (
+      <AccessDeniedPage
+        title="Member"
+        subtitle="Access restricted."
+        signedInAs={me.email}
+        message="Only Reception / Admin / Super Admin can view other members."
+        allowed="reception, admin, super_admin"
+        nextPath={nextPath}
+        showBackHome
+        showProfile
+      />
+    )
+  }
 
   const { data: subs } = await supa
     .from('subscriptions')
@@ -346,7 +369,7 @@ const defaultRenewPlan: Plan =
           ) : (
             <>
               {/* Mobile cards (no horizontal scroll) */}
-              <div className="grid gap-3 lg:hidden">
+              <div className="grid gap-3 sm:hidden">
                 {(subs ?? []).map((s) => {
                   const isSessions = s.plan === 'sessions'
                   const isTime = !isSessions
@@ -465,24 +488,24 @@ const defaultRenewPlan: Plan =
               </div>
 
               {/* Desktop table */}
-              <div className="hidden lg:block">
+              <div className="hidden sm:block overflow-x-auto">
                 <table className="w-full text-sm">
-                  <thead className="text-[hsl(var(--muted))]">
-                    <tr className="border-b border-[hsl(var(--border))]">
-                      <th className="text-left px-3 py-2">Plan</th>
-                      <th className="text-left px-3 py-2">Status</th>
-                      <th className="text-left px-3 py-2">Start</th>
-                      <th className="text-left px-3 py-2">End</th>
-                      <th className="text-left px-3 py-2 hidden xl:table-cell">Sessions</th>
-                      <th className="text-left px-3 py-2">Paid</th>
-                      <th className="text-left px-3 py-2 hidden xl:table-cell">Payment</th>
-                      <th className="text-left px-3 py-2">Due</th>
-                      <th className="text-left px-3 py-2 hidden xl:table-cell">Paid at</th>
-                      <th className="text-left px-3 py-2 hidden xl:table-cell">Badges</th>
-                      {canManageSubscriptions && <th className="text-left px-3 py-2">Actions</th>}
-                    </tr>
-                  </thead>
-                  <tbody>
+                <thead className="text-[hsl(var(--muted))]">
+                  <tr className="border-b border-[hsl(var(--border))]">
+                    <th className="text-left px-3 py-2">Plan</th>
+                    <th className="text-left px-3 py-2">Status</th>
+                    <th className="text-left px-3 py-2">Start</th>
+                    <th className="text-left px-3 py-2">End</th>
+                    <th className="text-left px-3 py-2">Sessions</th>
+                    <th className="text-left px-3 py-2">Paid</th>
+                    <th className="text-left px-3 py-2">Payment</th>
+                    <th className="text-left px-3 py-2">Due</th>
+                    <th className="text-left px-3 py-2">Paid at</th>
+                    <th className="text-left px-3 py-2">Badges</th>
+	                    {canManageSubscriptions && <th className="text-left px-3 py-2">Actions</th>}
+                  </tr>
+                </thead>
+                <tbody>
                   {(subs ?? []).map((s) => {
                     const isSessions = s.plan === 'sessions'
                     const isTime = !isSessions
@@ -520,16 +543,16 @@ const defaultRenewPlan: Plan =
                         <td className="px-3 py-2">{s.status ?? '—'}</td>
                         <td className="px-3 py-2">{fmtDate(s.start_date)}</td>
                         <td className="px-3 py-2">{fmtDate(s.end_date)}</td>
-                        <td className="px-3 py-2 hidden xl:table-cell">
+                        <td className="px-3 py-2">
                           {isSessions
                             ? `${s.sessions_used ?? 0}/${s.sessions_total ?? 0} (left ${remaining})`
                             : '—'}
                         </td>
                         <td className="px-3 py-2">{s.amount ?? 0}</td>
-                        <td className="px-3 py-2 hidden xl:table-cell">{humanPayment(s.payment_method)}</td>
+                        <td className="px-3 py-2">{humanPayment(s.payment_method)}</td>
                         <td className="px-3 py-2">{Number(s.amount_due ?? 0) || 0}</td>
-                        <td className="px-3 py-2 hidden xl:table-cell">{fmtDate(s.paid_at)}</td>
-                        <td className="px-3 py-2 hidden xl:table-cell">
+                        <td className="px-3 py-2">{fmtDate(s.paid_at)}</td>
+                        <td className="px-3 py-2">
                           <div className="flex flex-wrap gap-1">
                             {isTime && typeof dleft === 'number' && dleft >= 0 && (
                               <span
@@ -565,16 +588,15 @@ const defaultRenewPlan: Plan =
                             )}
                           </div>
                         </td>
-
-                        {canManageSubscriptions && (
-                          <td className="px-3 py-2">
-                            <SubscriptionManageRowActions sub={s} />
-                          </td>
-                        )}
+	                        {canManageSubscriptions && (
+	                          <td className="px-3 py-2">
+	                            <SubscriptionManageRowActions sub={s} />
+	                          </td>
+	                        )}
                       </tr>
                     )
                   })}
-                  </tbody>
+                </tbody>
                 </table>
               </div>
             </>
@@ -588,23 +610,21 @@ const defaultRenewPlan: Plan =
             {(attendance ?? []).length === 0 ? (
               <div className="mt-2 text-sm text-[hsl(var(--muted))]">No attendance.</div>
             ) : (
-              <div className="mt-3 space-y-3">
-                {/* Mobile/tablet cards (no horizontal scroll) */}
-                <div className="space-y-3 lg:hidden">
-                  {(attendance ?? []).map((a) => (
-                    <div
-                      key={a.id}
-                      className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-3 shadow-soft"
-                    >
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="min-w-0">
-                          <div className="font-semibold text-[14px]">{fmtDate(a.date)}</div>
-                          <div className="mt-1 text-[12px] text-[hsl(var(--muted))]">
-                            Plan: {a.subscription_id ? humanPlan(subPlanById.get(a.subscription_id) ?? null) : '—'}
-                          </div>
-                        </div>
-
-                        <div className="flex flex-col items-end gap-1 shrink-0">
+              <div className="mt-2 overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead className="text-[hsl(var(--muted))]">
+                    <tr className="border-b border-[hsl(var(--border))]">
+                      <th className="text-left px-3 py-2">Date</th>
+                      <th className="text-left px-3 py-2">Valid</th>
+                      <th className="text-left px-3 py-2">From sessions</th>
+                      <th className="text-left px-3 py-2">Plan</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(attendance ?? []).map((a) => (
+                      <tr key={a.id} className="border-t border-[hsl(var(--border))]">
+                        <td className="px-3 py-2">{fmtDate(a.date)}</td>
+                        <td className="px-3 py-2">
                           <span
                             className={`text-[11px] px-2 py-0.5 rounded-2xl border ${
                               a.valid
@@ -614,51 +634,15 @@ const defaultRenewPlan: Plan =
                           >
                             {a.valid ? 'valid' : 'invalid'}
                           </span>
-
-                          <span className="text-[11px] px-2 py-0.5 rounded-2xl border bg-[hsl(var(--bg))] border-[hsl(var(--border))] text-[hsl(var(--muted))]">
-                            {a.from_sessions ? 'from sessions' : 'from time'}
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-
-                {/* Desktop table */}
-                <div className="hidden lg:block">
-                  <table className="w-full text-sm">
-                    <thead className="text-[hsl(var(--muted))]">
-                      <tr className="border-b border-[hsl(var(--border))]">
-                        <th className="text-left px-3 py-2">Date</th>
-                        <th className="text-left px-3 py-2">Valid</th>
-                        <th className="text-left px-3 py-2">From</th>
-                        <th className="text-left px-3 py-2">Plan</th>
+                        </td>
+                        <td className="px-3 py-2">{a.from_sessions ? 'yes' : 'no'}</td>
+                        <td className="px-3 py-2">
+                          {a.subscription_id ? humanPlan(subPlanById.get(a.subscription_id) ?? null) : '—'}
+                        </td>
                       </tr>
-                    </thead>
-                    <tbody>
-                      {(attendance ?? []).map((a) => (
-                        <tr key={a.id} className="border-t border-[hsl(var(--border))]">
-                          <td className="px-3 py-2">{fmtDate(a.date)}</td>
-                          <td className="px-3 py-2">
-                            <span
-                              className={`text-[11px] px-2 py-0.5 rounded-2xl border ${
-                                a.valid
-                                  ? 'bg-emerald-50 border-emerald-300 text-emerald-900'
-                                  : 'bg-rose-50 border-rose-300 text-rose-900'
-                              }`}
-                            >
-                              {a.valid ? 'valid' : 'invalid'}
-                            </span>
-                          </td>
-                          <td className="px-3 py-2">{a.from_sessions ? 'sessions' : 'time'}</td>
-                          <td className="px-3 py-2">
-                            {a.subscription_id ? humanPlan(subPlanById.get(a.subscription_id) ?? null) : '—'}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             )}
           </section>
