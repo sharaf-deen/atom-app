@@ -3,7 +3,8 @@
  * Smoke test post-reset:
  * - Create user (admin)
  * - Login (anon)
- * - Create profile (admin)
+ * - Create profile (admin) + assert member_id generation
+ * - Update existing profile + assert member_id is preserved
  * - Create subscription (admin)
  * - Upload invoice PDF to Storage (admin)
  * - Create invoice row (admin)
@@ -122,6 +123,12 @@ function isoDate(d) {
   return d.toISOString().slice(0, 10)
 }
 
+function assertValidMemberId(value, context = 'member_id') {
+  if (typeof value !== 'string' || !/^ATOM-\d{6}$/.test(value)) {
+    throw new Error(`INVALID_MEMBER_ID_${context.toUpperCase()}: ${String(value)}`)
+  }
+}
+
 async function main() {
   loadEnvFromFiles()
   const { url, anon, service } = resolveSupabaseCreds()
@@ -153,6 +160,7 @@ async function main() {
   let subscriptionId = null
   let invoiceId = null
   let invoicePath = null
+  let initialMemberId = null
 
   try {
     logStep('1) Create user (admin)')
@@ -190,7 +198,26 @@ async function main() {
       .maybeSingle()
 
     if (prof.error) throw prof.error
-    logOk(`Profile OK (member_id=${prof.data?.member_id ?? 'null'})`)
+    initialMemberId = prof.data?.member_id ?? null
+    assertValidMemberId(initialMemberId, 'after_profile_upsert')
+    logOk(`Profile OK (member_id=${initialMemberId})`)
+
+    logStep('3.1) Update existing profile and ensure member_id is preserved')
+    const profUpdate = await admin
+      .from('profiles')
+      .update({ first_name: 'SmokeUpdated' })
+      .eq('user_id', userId)
+      .select('user_id, member_id, first_name')
+      .single()
+
+    if (profUpdate.error) throw profUpdate.error
+    assertValidMemberId(profUpdate.data?.member_id ?? null, 'after_profile_update')
+    if (profUpdate.data?.member_id !== initialMemberId) {
+      throw new Error(
+        `MEMBER_ID_CHANGED_ON_PROFILE_UPDATE: before=${initialMemberId} after=${String(profUpdate.data?.member_id)}`
+      )
+    }
+    logOk(`Profile update preserved member_id (${profUpdate.data.member_id})`)
 
     logStep('4) Create subscription (admin)')
     const now = new Date()
