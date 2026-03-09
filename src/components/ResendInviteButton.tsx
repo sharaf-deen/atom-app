@@ -1,4 +1,3 @@
-// src/components/ResendInviteButton.tsx
 'use client'
 
 import { useEffect, useMemo, useRef, useState } from 'react'
@@ -18,6 +17,25 @@ type Status =
   | 'not_found'
   | 'forbidden'
   | 'unknown'
+
+type Feedback = {
+  kind: 'success' | 'info' | 'warning' | 'error'
+  msg: string
+} | null
+
+type ResendOutcome =
+  | 'invite_resent'
+  | 'already_active'
+  | 'orphan_profile'
+  | 'rate_limited_actor'
+  | 'rate_limited_target'
+  | 'cooldown_target'
+  | 'not_found'
+  | 'forbidden'
+  | 'member_has_no_email'
+  | 'invalid_member_id'
+  | 'invite_failed'
+  | 'server_misconfigured'
 
 const LS_KEY_PREFIX = 'atom:resend_invite_cooldown:' // + userId
 const TICK_MS = 1000
@@ -54,6 +72,7 @@ export default function ResendInviteButton({ userId, email, className }: Props) 
 
   const [status, setStatus] = useState<Status>('loading')
   const [lastSentAt, setLastSentAt] = useState<string | null>(null)
+  const [feedback, setFeedback] = useState<Feedback>(null)
 
   // cooldownUntil is epoch ms
   const [cooldownUntil, setCooldownUntil] = useState<number | null>(null)
@@ -120,6 +139,10 @@ export default function ResendInviteButton({ userId, email, className }: Props) 
     }
   }
 
+  function setUiFeedback(kind: NonNullable<Feedback>['kind'], msg: string) {
+    setFeedback({ kind, msg })
+  }
+
   // Load invite status (and last sent)
   const loadingRef = useRef(false)
   async function refreshStatus() {
@@ -134,8 +157,10 @@ export default function ResendInviteButton({ userId, email, className }: Props) 
       const j = await r.json().catch(() => ({} as any))
 
       if (!r.ok) {
-        // Server may send a status field; fallback to unknown
-        setStatus((j?.status as Status) || (r.status === 403 ? 'forbidden' : r.status === 404 ? 'not_found' : 'unknown'))
+        setStatus(
+          (j?.status as Status) ||
+            (r.status === 403 ? 'forbidden' : r.status === 404 ? 'not_found' : 'unknown'),
+        )
         return
       }
 
@@ -169,15 +194,18 @@ export default function ResendInviteButton({ userId, email, className }: Props) 
 
     // Safety: profile has no auth user -> block resend (prevents mismatch)
     if (status === 'missing_auth_user') {
+      const msg =
+        'This member profile has no matching auth user. Re-create the member before resending invites.'
       toast.error('Cannot resend invite', {
-        description:
-          'This member profile has no matching auth user. Please re-create the member or contact support.',
+        description: msg,
       })
+      setUiFeedback('error', msg)
       setConfirming(false)
       return
     }
 
     setBusy(true)
+    setFeedback(null)
     try {
       const r = await fetch(`/api/members/${userId}/resend-invite`, {
         method: 'POST',
@@ -185,11 +213,15 @@ export default function ResendInviteButton({ userId, email, className }: Props) 
       })
       const retryAfterHeader = Number(r.headers.get('Retry-After') || '0')
       const j = await r.json().catch(() => ({} as any))
+      const outcome = String(j?.outcome || '') as ResendOutcome | ''
 
       if (r.ok) {
-        toast.success('Invite resent ✅', {
-          description: emailNorm ? `Sent to ${emailNorm}` : undefined,
+        const successMsg = emailNorm ? `Invite email sent to ${emailNorm}.` : 'Invite email sent.'
+
+        toast.success('Invite resent', {
+          description: successMsg,
         })
+        setUiFeedback('success', successMsg)
 
         setLastSentAt(new Date().toISOString())
         setStatus('pending')
@@ -207,56 +239,90 @@ export default function ResendInviteButton({ userId, email, className }: Props) 
         return
       }
 
-      // 429 rate limit
+      // 429 rate limit / cooldown
       if (r.status === 429) {
         const retryAfter = retryAfterHeader || Number(j?.retry_after_seconds || 0)
+        const msg =
+          j?.details ||
+          (retryAfter > 0
+            ? `Please wait about ${msToHuman(retryAfter * 1000)} before trying again.`
+            : 'Rate limited. Try again later.')
+
         if (retryAfter > 0) {
           setCooldownSeconds(retryAfter)
-          toast.error('Please wait before resending', {
-            description: `Try again in ~${msToHuman(retryAfter * 1000)}.`,
-          })
-        } else {
-          toast.error(j?.details || 'Rate limited. Try again later.')
         }
+
+        toast.error('Please wait before resending', {
+          description: msg,
+        })
+        setUiFeedback(outcome === 'cooldown_target' ? 'info' : 'warning', msg)
         setConfirming(false)
         return
       }
 
       // 409 conflict (already active / orphan etc.)
       if (r.status === 409) {
-        const errCode = String(j?.error || '').toUpperCase()
         const details = j?.details || 'Conflict.'
-        toast.error(details)
 
-        if (errCode.includes('ALREADY_ACTIVE')) {
+        if (outcome === 'already_active' || String(j?.error || '').toUpperCase().includes('ALREADY_ACTIVE')) {
           setStatus('active')
-        }
-        if (errCode.includes('ORPHAN_PROFILE')) {
-          setStatus('missing_auth_user')
+          toast.success('Account already active', {
+            description: 'Use Reset password instead of Resend invite.',
+          })
+          setUiFeedback('info', 'This account is already active. Use Reset password instead.')
+          setConfirming(false)
+          return
         }
 
+        if (outcome === 'orphan_profile' || String(j?.error || '').toUpperCase().includes('ORPHAN_PROFILE')) {
+          setStatus('missing_auth_user')
+          toast.error('Cannot resend invite', {
+            description: details,
+          })
+          setUiFeedback('error', details)
+          setConfirming(false)
+          return
+        }
+
+        toast.error('Resend invite failed', { description: details })
+        setUiFeedback('error', details)
         setConfirming(false)
         return
       }
 
-      // 403/404
+      // 403/404/400
       if (r.status === 403) {
         setStatus('forbidden')
-        toast.error('Forbidden', { description: 'You do not have permission to resend invites.' })
+        const msg = j?.details || 'You do not have permission to resend invites.'
+        toast.error('Forbidden', { description: msg })
+        setUiFeedback('error', msg)
         setConfirming(false)
         return
       }
       if (r.status === 404) {
         setStatus('not_found')
-        toast.error('Not found', { description: 'This member no longer exists.' })
+        const msg = j?.details || 'This member no longer exists.'
+        toast.error('Not found', { description: msg })
+        setUiFeedback('error', msg)
+        setConfirming(false)
+        return
+      }
+      if (r.status === 400) {
+        const msg = j?.details || j?.error || 'This member cannot receive an invite.'
+        toast.error('Cannot resend invite', { description: msg })
+        setUiFeedback('error', msg)
         setConfirming(false)
         return
       }
 
-      toast.error(j?.details || j?.error || 'Resend failed')
+      const msg = j?.details || j?.error || 'Resend failed'
+      toast.error('Resend invite failed', { description: msg })
+      setUiFeedback('error', msg)
       setConfirming(false)
     } catch (e: any) {
-      toast.error('Network error', { description: e?.message || String(e) })
+      const msg = e?.message || String(e)
+      toast.error('Network error', { description: msg })
+      setUiFeedback('error', msg)
       setConfirming(false)
     } finally {
       setBusy(false)
@@ -273,16 +339,28 @@ export default function ResendInviteButton({ userId, email, className }: Props) 
     return { text: 'Invite status unknown', cls: 'bg-gray-50 border-gray-200 text-gray-700' }
   })()
 
+  const feedbackCls = (() => {
+    if (!feedback) return ''
+    if (feedback.kind === 'success') return 'text-emerald-700'
+    if (feedback.kind === 'warning') return 'text-amber-700'
+    if (feedback.kind === 'info') return 'text-sky-700'
+    return 'text-rose-700'
+  })()
+
   const badgeTitle = lastSentAt ? `Last: ${lastSentAt}` : undefined
   const badgeExtra = lastSentAt ? ` • ${fmtRelative(lastSentAt)}` : ''
 
   // Active => badge only (hide button)
   if (status === 'active') {
     return (
-      <div className={`flex items-center gap-2 ${className ?? ''}`}>
-        <span className={`text-[11px] px-2 py-1 rounded-2xl border ${badge.cls}`} title={badgeTitle}>
-          {badge.text}
-        </span>
+      <div className={`grid gap-1 ${className ?? ''}`}>
+        <div className="flex items-center gap-2">
+          <span className={`text-[11px] px-2 py-1 rounded-2xl border ${badge.cls}`} title={badgeTitle}>
+            {badge.text}
+          </span>
+        </div>
+        <p className="text-[11px] text-[hsl(var(--muted))]">Use Reset password for this member.</p>
+        {feedback ? <p className={`text-[11px] ${feedbackCls}`}>{feedback.msg}</p> : null}
       </div>
     )
   }
@@ -290,17 +368,21 @@ export default function ResendInviteButton({ userId, email, className }: Props) 
   // No email => disabled UI with badge
   if (!hasEmail) {
     return (
-      <div className={`flex items-center gap-2 ${className ?? ''}`}>
-        <span className={`text-[11px] px-2 py-1 rounded-2xl border ${badge.cls}`} title={badgeTitle}>
-          {badge.text}
-        </span>
-        <button
-          disabled
-          className="rounded-xl px-4 py-2 text-sm font-medium bg-gray-200 text-gray-500 cursor-not-allowed"
-          title="This member has no email"
-        >
-          Resend invite
-        </button>
+      <div className={`grid gap-1 ${className ?? ''}`}>
+        <div className="flex items-center gap-2">
+          <span className={`text-[11px] px-2 py-1 rounded-2xl border ${badge.cls}`} title={badgeTitle}>
+            {badge.text}
+          </span>
+          <button
+            disabled
+            className="rounded-xl px-4 py-2 text-sm font-medium bg-gray-200 text-gray-500 cursor-not-allowed"
+            title="This member has no email"
+          >
+            Resend invite
+          </button>
+        </div>
+        <p className="text-[11px] text-[hsl(var(--muted))]">This member needs an email before an invite can be sent.</p>
+        {feedback ? <p className={`text-[11px] ${feedbackCls}`}>{feedback.msg}</p> : null}
       </div>
     )
   }
@@ -309,18 +391,21 @@ export default function ResendInviteButton({ userId, email, className }: Props) 
   if (inCooldown) {
     const left = isFiniteNumber(cooldownLeft) ? cooldownLeft : 0
     return (
-      <div className={`flex items-center gap-2 ${className ?? ''}`}>
-        <span className={`text-[11px] px-2 py-1 rounded-2xl border ${badge.cls}`} title={badgeTitle}>
-          {badge.text}
-          {badgeExtra}
-        </span>
-        <button
-          disabled
-          className="rounded-xl px-4 py-2 text-sm font-medium bg-gray-200 text-gray-500 cursor-not-allowed"
-          title="Rate limited"
-        >
-          Resend in {msToHuman(left)}
-        </button>
+      <div className={`grid gap-1 ${className ?? ''}`}>
+        <div className="flex items-center gap-2">
+          <span className={`text-[11px] px-2 py-1 rounded-2xl border ${badge.cls}`} title={badgeTitle}>
+            {badge.text}
+            {badgeExtra}
+          </span>
+          <button
+            disabled
+            className="rounded-xl px-4 py-2 text-sm font-medium bg-gray-200 text-gray-500 cursor-not-allowed"
+            title="Rate limited"
+          >
+            Resend in {msToHuman(left)}
+          </button>
+        </div>
+        {feedback ? <p className={`text-[11px] ${feedbackCls}`}>{feedback.msg}</p> : null}
       </div>
     )
   }
@@ -328,30 +413,34 @@ export default function ResendInviteButton({ userId, email, className }: Props) 
   // Confirm step
   if (confirming) {
     return (
-      <div className={`flex items-center gap-2 ${className ?? ''}`}>
-        <span className={`text-[11px] px-2 py-1 rounded-2xl border ${badge.cls}`} title={badgeTitle}>
-          {badge.text}
-          {badgeExtra}
-        </span>
+      <div className={`grid gap-1 ${className ?? ''}`}>
+        <div className="flex items-center gap-2">
+          <span className={`text-[11px] px-2 py-1 rounded-2xl border ${badge.cls}`} title={badgeTitle}>
+            {badge.text}
+            {badgeExtra}
+          </span>
 
-        <button
-          onClick={() => setConfirming(false)}
-          disabled={busy}
-          className="rounded-xl px-3 py-2 text-sm font-medium border border-[hsl(var(--border))] bg-white hover:bg-gray-50 disabled:opacity-60"
-        >
-          Cancel
-        </button>
+          <button
+            onClick={() => setConfirming(false)}
+            disabled={busy}
+            className="rounded-xl px-3 py-2 text-sm font-medium border border-[hsl(var(--border))] bg-white hover:bg-gray-50 disabled:opacity-60"
+          >
+            Cancel
+          </button>
 
-        <button
-          onClick={doResend}
-          disabled={busy}
-          className={`rounded-xl px-4 py-2 text-sm font-medium ${
-            busy ? 'bg-gray-200 text-gray-500' : 'bg-black text-white hover:opacity-90'
-          }`}
-          title={`Send invite to ${emailNorm}`}
-        >
-          {busy ? 'Sending…' : 'Confirm send'}
-        </button>
+          <button
+            onClick={doResend}
+            disabled={busy}
+            className={`rounded-xl px-4 py-2 text-sm font-medium ${
+              busy ? 'bg-gray-200 text-gray-500' : 'bg-black text-white hover:opacity-90'
+            }`}
+            title={`Send invite to ${emailNorm}`}
+          >
+            {busy ? 'Sending…' : 'Confirm send'}
+          </button>
+        </div>
+        <p className="text-[11px] text-[hsl(var(--muted))]">Send a new invite email to this member.</p>
+        {feedback ? <p className={`text-[11px] ${feedbackCls}`}>{feedback.msg}</p> : null}
       </div>
     )
   }
@@ -359,30 +448,42 @@ export default function ResendInviteButton({ userId, email, className }: Props) 
   const disabledMain = busy || status === 'missing_auth_user' || status === 'forbidden' || status === 'not_found'
 
   return (
-    <div className={`flex items-center gap-2 ${className ?? ''}`}>
-      <span className={`text-[11px] px-2 py-1 rounded-2xl border ${badge.cls}`} title={badgeTitle}>
-        {badge.text}
-        {badgeExtra}
-      </span>
+    <div className={`grid gap-1 ${className ?? ''}`}>
+      <div className="flex items-center gap-2">
+        <span className={`text-[11px] px-2 py-1 rounded-2xl border ${badge.cls}`} title={badgeTitle}>
+          {badge.text}
+          {badgeExtra}
+        </span>
 
-      <button
-        onClick={() => setConfirming(true)}
-        disabled={disabledMain}
-        className={`rounded-xl px-4 py-2 text-sm font-medium ${
-          disabledMain ? 'bg-gray-200 text-gray-500 cursor-not-allowed' : 'bg-black text-white hover:opacity-90'
-        }`}
-        title={
-          status === 'missing_auth_user'
-            ? 'Orphan profile (no matching auth user).'
-            : status === 'forbidden'
-              ? 'Forbidden.'
-              : status === 'not_found'
-                ? 'Member not found.'
-                : `Resend invite to ${emailNorm}`
-        }
-      >
-        {busy ? 'Resending…' : 'Resend invite'}
-      </button>
+        <button
+          onClick={() => setConfirming(true)}
+          disabled={disabledMain}
+          className={`rounded-xl px-4 py-2 text-sm font-medium ${
+            disabledMain ? 'bg-gray-200 text-gray-500 cursor-not-allowed' : 'bg-black text-white hover:opacity-90'
+          }`}
+          title={
+            status === 'missing_auth_user'
+              ? 'Orphan profile (no matching auth user).'
+              : status === 'forbidden'
+                ? 'Forbidden.'
+                : status === 'not_found'
+                  ? 'Member not found.'
+                  : `Resend invite to ${emailNorm}`
+          }
+        >
+          {busy ? 'Resending…' : 'Resend invite'}
+        </button>
+      </div>
+
+      {status === 'pending' ? (
+        <p className="text-[11px] text-[hsl(var(--muted))]">This member has not activated the account yet.</p>
+      ) : status === 'missing_auth_user' ? (
+        <p className="text-[11px] text-rose-700">This profile has no matching auth user. Re-create the member before resending.</p>
+      ) : status === 'unknown' ? (
+        <p className="text-[11px] text-[hsl(var(--muted))]">You can resend the invite if the member has not finished account setup.</p>
+      ) : null}
+
+      {feedback ? <p className={`text-[11px] ${feedbackCls}`}>{feedback.msg}</p> : null}
     </div>
   )
 }

@@ -1,4 +1,3 @@
-// src/app/api/members/[id]/resend-invite/route.ts
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
@@ -24,6 +23,20 @@ const RL_RESEND_PER_TARGET_WINDOW_HOURS = 24
 
 // Cooldown anti double-click (par cible)
 const RL_TARGET_COOLDOWN_SECONDS = 60
+
+type ResendOutcome =
+  | 'invite_resent'
+  | 'already_active'
+  | 'orphan_profile'
+  | 'rate_limited_actor'
+  | 'rate_limited_target'
+  | 'cooldown_target'
+  | 'not_found'
+  | 'forbidden'
+  | 'member_has_no_email'
+  | 'invalid_member_id'
+  | 'invite_failed'
+  | 'server_misconfigured'
 
 function noStore(res: NextResponse) {
   res.headers.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate')
@@ -106,14 +119,34 @@ export async function POST(req: Request, ctx: { params: { id: string } }) {
 
   const memberUserId = String(ctx?.params?.id ?? '').trim()
   if (!isUuid(memberUserId)) {
-    return noStore(NextResponse.json({ ok: false, error: 'INVALID_MEMBER_ID' }, { status: 400 }))
+    return noStore(
+      NextResponse.json(
+        {
+          ok: false,
+          outcome: 'invalid_member_id' as ResendOutcome,
+          error: 'INVALID_MEMBER_ID',
+          details: 'Invalid member id.',
+        },
+        { status: 400 },
+      ),
+    )
   }
 
   // Service role (create once, reused even for error audit)
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY
   if (!url || !serviceKey) {
-    return noStore(NextResponse.json({ ok: false, error: 'SERVER_MISCONFIGURED' }, { status: 500 }))
+    return noStore(
+      NextResponse.json(
+        {
+          ok: false,
+          outcome: 'server_misconfigured' as ResendOutcome,
+          error: 'SERVER_MISCONFIGURED',
+          details: 'Server misconfigured.',
+        },
+        { status: 500 },
+      ),
+    )
   }
 
   const admin = createClient(url, serviceKey, {
@@ -155,7 +188,17 @@ export async function POST(req: Request, ctx: { params: { id: string } }) {
 
     const role = (me?.role ?? 'member') as Role
     if (!can(role)) {
-      return noStore(NextResponse.json({ ok: false, error: 'FORBIDDEN' }, { status: 403 }))
+      return noStore(
+        NextResponse.json(
+          {
+            ok: false,
+            outcome: 'forbidden' as ResendOutcome,
+            error: 'FORBIDDEN',
+            details: 'You do not have permission to resend invites.',
+          },
+          { status: 403 },
+        ),
+      )
     }
 
     // 2) Rate limit (par acteur)
@@ -181,7 +224,13 @@ export async function POST(req: Request, ctx: { params: { id: string } }) {
         })
 
         const res = NextResponse.json(
-          { ok: false, error: 'RATE_LIMITED', details: 'Too many resend attempts. Please try again later.' },
+          {
+            ok: false,
+            outcome: 'rate_limited_actor' as ResendOutcome,
+            error: 'RATE_LIMITED',
+            details: 'Too many resend attempts. Please try again later.',
+            retry_after_seconds: RL_RESEND_WINDOW_MIN * 60,
+          },
           { status: 429 },
         )
         res.headers.set('Retry-After', String(RL_RESEND_WINDOW_MIN * 60))
@@ -202,12 +251,32 @@ export async function POST(req: Request, ctx: { params: { id: string } }) {
       )
     }
     if (!prof?.user_id) {
-      return noStore(NextResponse.json({ ok: false, error: 'NOT_FOUND' }, { status: 404 }))
+      return noStore(
+        NextResponse.json(
+          {
+            ok: false,
+            outcome: 'not_found' as ResendOutcome,
+            error: 'NOT_FOUND',
+            details: 'This member no longer exists.',
+          },
+          { status: 404 },
+        ),
+      )
     }
 
     const targetEmail = normalizeEmail(prof.email)
     if (!targetEmail) {
-      return noStore(NextResponse.json({ ok: false, error: 'MEMBER_HAS_NO_EMAIL' }, { status: 400 }))
+      return noStore(
+        NextResponse.json(
+          {
+            ok: false,
+            outcome: 'member_has_no_email' as ResendOutcome,
+            error: 'MEMBER_HAS_NO_EMAIL',
+            details: 'This member has no email address.',
+          },
+          { status: 400 },
+        ),
+      )
     }
 
     // 4) Cooldown par cible (anti double click)
@@ -234,7 +303,13 @@ export async function POST(req: Request, ctx: { params: { id: string } }) {
         })
 
         const res = NextResponse.json(
-          { ok: false, error: 'RATE_LIMITED', details: 'Please wait a moment before resending again.' },
+          {
+            ok: false,
+            outcome: 'cooldown_target' as ResendOutcome,
+            error: 'RATE_LIMITED',
+            details: 'Please wait a moment before resending again.',
+            retry_after_seconds: RL_TARGET_COOLDOWN_SECONDS,
+          },
           { status: 429 },
         )
         res.headers.set('Retry-After', String(RL_TARGET_COOLDOWN_SECONDS))
@@ -266,7 +341,13 @@ export async function POST(req: Request, ctx: { params: { id: string } }) {
         })
 
         const res = NextResponse.json(
-          { ok: false, error: 'RATE_LIMITED', details: 'Too many resends for this member. Try later.' },
+          {
+            ok: false,
+            outcome: 'rate_limited_target' as ResendOutcome,
+            error: 'RATE_LIMITED',
+            details: 'Too many resends for this member. Try later.',
+            retry_after_seconds: RL_RESEND_PER_TARGET_WINDOW_HOURS * 60 * 60,
+          },
           { status: 429 },
         )
         res.headers.set('Retry-After', String(RL_RESEND_PER_TARGET_WINDOW_HOURS * 60 * 60))
@@ -313,7 +394,9 @@ export async function POST(req: Request, ctx: { params: { id: string } }) {
         NextResponse.json(
           {
             ok: false,
+            outcome: 'orphan_profile' as ResendOutcome,
             error: 'ORPHAN_PROFILE',
+            next_action: 'recreate_member',
             details:
               'This profile does not have a matching auth user. Re-create the member (or fix auth/users) before resending invites.',
           },
@@ -344,7 +427,9 @@ export async function POST(req: Request, ctx: { params: { id: string } }) {
         NextResponse.json(
           {
             ok: false,
+            outcome: 'already_active' as ResendOutcome,
             error: 'ALREADY_ACTIVE',
+            next_action: 'reset_password',
             details: 'Account already active. Use password reset instead of invite.',
           },
           { status: 409 },
@@ -388,13 +473,29 @@ export async function POST(req: Request, ctx: { params: { id: string } }) {
       if (m.includes('already') || m.includes('registered') || m.includes('confirmed')) {
         return noStore(
           NextResponse.json(
-            { ok: false, error: 'ALREADY_ACTIVE', details: 'User already active. Use reset password.' },
+            {
+              ok: false,
+              outcome: 'already_active' as ResendOutcome,
+              error: 'ALREADY_ACTIVE',
+              next_action: 'reset_password',
+              details: 'Account already active. Use password reset instead of invite.',
+            },
             { status: 409 },
           ),
         )
       }
 
-      return noStore(NextResponse.json({ ok: false, error: 'INVITE_FAILED', details: inviteErr.message }, { status: 500 }))
+      return noStore(
+        NextResponse.json(
+          {
+            ok: false,
+            outcome: 'invite_failed' as ResendOutcome,
+            error: 'INVITE_FAILED',
+            details: inviteErr.message,
+          },
+          { status: 500 },
+        ),
+      )
     }
 
     await safeAudit(admin, {
@@ -416,9 +517,12 @@ export async function POST(req: Request, ctx: { params: { id: string } }) {
     return noStore(
       NextResponse.json({
         ok: true,
+        outcome: 'invite_resent' as ResendOutcome,
+        invite_sent: true,
         user_id: memberUserId,
         email: targetEmail,
-        message: 'Invite resent.',
+        next_action: 'wait_for_activation',
+        message: 'Invite email sent.',
       }),
     )
   } catch (e: any) {
@@ -442,7 +546,15 @@ export async function POST(req: Request, ctx: { params: { id: string } }) {
     })
 
     return noStore(
-      NextResponse.json({ ok: false, error: 'SERVER_ERROR', details: e?.message || String(e) }, { status: 500 }),
+      NextResponse.json(
+        {
+          ok: false,
+          outcome: 'invite_failed' as ResendOutcome,
+          error: 'SERVER_ERROR',
+          details: e?.message || String(e),
+        },
+        { status: 500 },
+      ),
     )
   }
 }
