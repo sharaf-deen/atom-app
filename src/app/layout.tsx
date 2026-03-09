@@ -6,6 +6,7 @@ import AppNav from '@/components/AppNav'
 import ThemeProvider from '@/components/ThemeProvider'
 import { Toaster } from 'sonner'
 import BackButtonHandler from '@/components/BackButtonHandler'
+import AuthHashRedirect from '@/components/AuthHashRedirect'
 
 const poppins = Poppins({
   subsets: ['latin'],
@@ -24,6 +25,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body className={poppins.className}>
         <ThemeProvider>
           <BackButtonHandler>
+            <AuthHashRedirect />
             <AppNav />
             {children}
             <Toaster position="top-right" richColors expand />
