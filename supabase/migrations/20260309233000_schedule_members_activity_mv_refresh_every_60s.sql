@@ -1,12 +1,6 @@
--- Enable pg_cron if available
 create extension if not exists pg_cron;
 
--- Make sure the refresh function exists before scheduling
-create or replace function public.ensure_members_activity_mv_refresh_job()
-returns void
-language plpgsql
-security definer
-as $$
+do $do$
 declare
   existing_job_id bigint;
 begin
@@ -26,12 +20,8 @@ begin
 
   perform cron.schedule(
     'refresh-members-with-activity-mv-every-60s',
-    '60 seconds',
-    $$select public.refresh_members_with_activity_mv();$$
+    '* * * * *',
+    $job$select public.refresh_members_with_activity_mv();$job$
   );
-end;
-$$;
-
-select public.ensure_members_activity_mv_refresh_job();
-
-drop function if exists public.ensure_members_activity_mv_refresh_job();
+end
+$do$;
