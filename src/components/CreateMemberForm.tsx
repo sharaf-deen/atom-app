@@ -18,7 +18,12 @@ type NewMemberPayload = {
   date_of_birth?: string
 }
 
-type Status = { kind: '' | 'info' | 'success' | 'error'; msg: string }
+type Status = { kind: '' | 'info' | 'success' | 'warning' | 'error'; msg: string }
+
+type CreateOutcome =
+  | 'invited_new_user'
+  | 'existing_profile'
+  | 'existing_auth_user'
 
 function ageFromDob(dob?: string) {
   if (!dob || !/^\d{4}-\d{2}-\d{2}$/.test(dob)) return null
@@ -65,6 +70,7 @@ export default function CreateMemberForm() {
   const [createdId, setCreatedId] = useState<string | null>(null)
   const [postCreateOpen, setPostCreateOpen] = useState(false)
   const [createdEmail, setCreatedEmail] = useState<string | null>(null)
+  const [createOutcome, setCreateOutcome] = useState<CreateOutcome | null>(null)
 
   function update<K extends keyof NewMemberPayload>(k: K, v: NewMemberPayload[K]) {
     setForm((f) => ({ ...f, [k]: v }))
@@ -76,6 +82,7 @@ export default function CreateMemberForm() {
     setStatus({ kind: '', msg: '' })
     setCreatedId(null)
     setCreatedEmail(null)
+    setCreateOutcome(null)
   }
 
   const emailOk = !!(form.email || '').trim()
@@ -90,6 +97,7 @@ export default function CreateMemberForm() {
     setStatus({ kind: 'info', msg: 'Creating member…' })
     setCreatedId(null)
     setCreatedEmail(null)
+    setCreateOutcome(null)
 
     const email = (form.email || '').trim().toLowerCase()
 
@@ -122,20 +130,44 @@ export default function CreateMemberForm() {
       }
 
       const id: string = j.user?.id || j.id || j.user_id
+      const outcome = (j?.outcome || 'invited_new_user') as CreateOutcome
+      const inviteSent = !!j?.invite_sent
+
       setCreatedId(id || null)
       setCreatedEmail(email)
+      setCreateOutcome(outcome)
 
-      setStatus({ kind: 'success', msg: 'Member created. An invite email was sent.' })
-      toast.success('Member created')
+      if (outcome === 'invited_new_user' && inviteSent) {
+        setStatus({ kind: 'success', msg: 'Member created. Invite email sent.' })
+        toast.success('Member created', {
+          description: 'Invite email sent.',
+        })
+      } else if (outcome === 'existing_profile') {
+        setStatus({
+          kind: 'warning',
+          msg: 'This email already belongs to an existing member. Profile updated. No invite email was sent.',
+        })
+        toast.success('Existing member updated', {
+          description: 'No new invite email was sent.',
+        })
+      } else {
+        setStatus({
+          kind: 'warning',
+          msg: 'Member profile saved, but no new invite email was sent because the auth account already exists.',
+        })
+        toast.success('Member profile saved', {
+          description: 'Use Resend invite from the member profile if needed.',
+        })
+      }
 
       // Reset the form so you can create another member right away
       setForm({ email: '', date_of_birth: '' })
+      setDobParts({ day: '', month: '', year: '' })
       // Refresh server data (lists/stats on the page)
       router.refresh()
 
       // Open the post-create modal with actions
       setPostCreateOpen(true)
-
     } catch (e: any) {
       const msg = String(e?.message || e)
       setStatus({ kind: 'error', msg })
@@ -149,13 +181,21 @@ export default function CreateMemberForm() {
     <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-5 shadow-soft">
       <h3 className="text-lg font-semibold">Create new member</h3>
       <p className="mt-1 text-sm text-[hsl(var(--muted))]">
-        An invite email will be sent so the member can set their password.
+        If the email is new, an invite email will be sent. If the member already exists, the profile will be updated.
       </p>
 
       {status.msg ? (
         <div className="mt-3">
           <InlineAlert
-            variant={status.kind === 'error' ? 'error' : status.kind === 'success' ? 'success' : 'info'}
+            variant={
+              status.kind === 'error'
+                ? 'error'
+                : status.kind === 'success'
+                  ? 'success'
+                  : status.kind === 'warning'
+                    ? 'warning'
+                    : 'info'
+            }
           >
             <span>{status.msg}</span>
           </InlineAlert>
@@ -242,13 +282,15 @@ export default function CreateMemberForm() {
                   <option key={y} value={y}>
                     {y}
                   </option>
-                )
+                ),
               )}
             </select>
           </div>
 
           <span className="text-[11px] text-[hsl(var(--muted))]">
-            {dobOk && ageGroup ? `Auto category: ${ageGroup} (${age} years old)` : 'Used to classify the member as Kid (<17) or Adult (>=17).'}
+            {dobOk && ageGroup
+              ? `Auto category: ${ageGroup} (${age} years old)`
+              : 'Used to classify the member as Kid (<17) or Adult (>=17).'}
           </span>
         </label>
 
@@ -289,16 +331,32 @@ export default function CreateMemberForm() {
         open={postCreateOpen}
         onClose={() => {
           setPostCreateOpen(false)
-          // Keep it ready for the next action
         }}
-        title="Member created"
+        title={
+          createOutcome === 'invited_new_user'
+            ? 'Member created'
+            : createOutcome === 'existing_profile'
+              ? 'Existing member found'
+              : 'Member profile saved'
+        }
       >
         <div className="grid gap-3">
           <p className="text-sm text-[hsl(var(--muted))]">
-            {createdEmail ? (
-              <>Invite email sent to <span className="font-medium text-black">{createdEmail}</span>.</>
+            {createOutcome === 'invited_new_user' ? (
+              createdEmail ? (
+                <>
+                  Invite email sent to <span className="font-medium text-black">{createdEmail}</span>.
+                </>
+              ) : (
+                <>Invite email has been sent.</>
+              )
+            ) : createOutcome === 'existing_profile' ? (
+              <>This email already belongs to an existing member. No new invite email was sent.</>
             ) : (
-              <>Invite email has been sent.</>
+              <>
+                The auth account already exists. No new invite email was sent. Open the member profile to use{' '}
+                <span className="font-medium text-black">Resend invite</span> if needed.
+              </>
             )}
           </p>
 
@@ -306,11 +364,11 @@ export default function CreateMemberForm() {
             <Button
               type="button"
               onClick={() => {
-                // Close modal and get ready to create another
                 setPostCreateOpen(false)
                 setStatus({ kind: '', msg: '' })
                 setCreatedId(null)
                 setCreatedEmail(null)
+                setCreateOutcome(null)
                 setTimeout(() => emailRef.current?.focus(), 50)
               }}
             >
