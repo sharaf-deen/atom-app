@@ -12,6 +12,7 @@ import { getSessionUser, type Role } from '@/lib/session'
 import QrImage from '@/components/QrImage'
 import SubscribeDialog, { type Plan } from '@/components/SubscribeDialog'
 import SubscriptionManageRowActions from '@/components/SubscriptionManageRowActions'
+import ResendInviteButton from '@/components/ResendInviteButton'
 
 function todayDateOnlyUTC() {
   return new Date().toISOString().slice(0, 10) // YYYY-MM-DD (UTC)
@@ -160,46 +161,44 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
         return '—'
     }
   }
-// Prevent creating a new subscription when there's already an active one
-const today = new Date().toISOString().slice(0, 10) // YYYY-MM-DD (UTC)
-const hasActiveSubscription = (subs ?? []).some((s) => {
-  const status = String(s.status ?? '').toLowerCase()
-  if (status !== 'active') return false
 
-  const end = s.end_date
-  if (end && today > end) return false
-
-  if (s.subscription_type === 'sessions') {
-    const total = Number(s.sessions_total ?? 0)
-    const used = Number(s.sessions_used ?? 0)
-    if (Number.isFinite(total) && total > 0) return total - used > 0
-  }
-
-  return true
-})
-const subscribeDisabledReason = hasActiveSubscription
-  ? 'This member already has an active subscription. Please expire/edit it first.'
-  : undefined
-
-
-// Renewal: allow stacking a future time subscription that starts after the active one ends
-const activeTimeEnds = (subs ?? [])
-  .filter((s) => {
+  // Prevent creating a new subscription when there's already an active one
+  const today = new Date().toISOString().slice(0, 10) // YYYY-MM-DD (UTC)
+  const hasActiveSubscription = (subs ?? []).some((s) => {
     const status = String(s.status ?? '').toLowerCase()
     if (status !== 'active') return false
-    if (s.plan === 'sessions') return false
+
     const end = s.end_date
-    if (!end) return false
-    return today <= end
+    if (end && today > end) return false
+
+    if (s.subscription_type === 'sessions') {
+      const total = Number(s.sessions_total ?? 0)
+      const used = Number(s.sessions_used ?? 0)
+      if (Number.isFinite(total) && total > 0) return total - used > 0
+    }
+
+    return true
   })
-  .map((s) => s.end_date as string)
+  const subscribeDisabledReason = hasActiveSubscription
+    ? 'This member already has an active subscription. Please expire/edit it first.'
+    : undefined
 
-const maxActiveTimeEnd = activeTimeEnds.length ? activeTimeEnds.sort().slice(-1)[0] : null
-const renewStartDate = maxActiveTimeEnd ? addDays(maxActiveTimeEnd, 1) : today
-const defaultRenewPlan: Plan =
-  ((subs ?? []).find((s) => String(s.status ?? '').toLowerCase() === 'active' && s.plan !== 'sessions')?.plan as Plan) ?? '1m'
+  // Renewal: allow stacking a future time subscription that starts after the active one ends
+  const activeTimeEnds = (subs ?? [])
+    .filter((s) => {
+      const status = String(s.status ?? '').toLowerCase()
+      if (status !== 'active') return false
+      if (s.plan === 'sessions') return false
+      const end = s.end_date
+      if (!end) return false
+      return today <= end
+    })
+    .map((s) => s.end_date as string)
 
-
+  const maxActiveTimeEnd = activeTimeEnds.length ? activeTimeEnds.sort().slice(-1)[0] : null
+  const renewStartDate = maxActiveTimeEnd ? addDays(maxActiveTimeEnd, 1) : today
+  const defaultRenewPlan: Plan =
+    ((subs ?? []).find((s) => String(s.status ?? '').toLowerCase() === 'active' && s.plan !== 'sessions')?.plan as Plan) ?? '1m'
 
   // Attendance is a staff-only view.
   // Members / coaches can see their own profile + subscriptions, but not attendance.
@@ -281,15 +280,21 @@ const defaultRenewPlan: Plan =
                   ? `${profile.first_name ?? ''} ${profile.last_name ?? ''}`.trim()
                   : '—'}
               </div>
-<div>
-  <span className="text-[hsl(var(--muted))]">Member ID:</span>{' '}
-  <code className="text-xs">{profile.member_id?.trim() || '—'}</code>
-</div>
+              <div>
+                <span className="text-[hsl(var(--muted))]">Member ID:</span>{' '}
+                <code className="text-xs">{profile.member_id?.trim() || '—'}</code>
+              </div>
               <div><span className="text-[hsl(var(--muted))]">Email:</span> {profile.email ?? '—'}</div>
               <div><span className="text-[hsl(var(--muted))]">Phone:</span> {profile.phone ?? '—'}</div>
               <div><span className="text-[hsl(var(--muted))]">Role:</span> {profile.role ?? 'member'}</div>
               <div><span className="text-[hsl(var(--muted))]">Joined:</span> {fmtDate(profile.created_at)}</div>
             </div>
+
+            {isStaff ? (
+              <div className="mt-4 border-t border-[hsl(var(--border))] pt-4">
+                <ResendInviteButton userId={profile.user_id} email={profile.email} />
+              </div>
+            ) : null}
           </div>
 
           <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-5 shadow-soft flex items-center justify-center">
@@ -494,113 +499,113 @@ const defaultRenewPlan: Plan =
               {/* Desktop table */}
               <div className="hidden sm:block overflow-x-auto">
                 <table className="w-full text-sm">
-                <thead className="text-[hsl(var(--muted))]">
-                  <tr className="border-b border-[hsl(var(--border))]">
-                    <th className="text-left px-3 py-2">Plan</th>
-                    <th className="text-left px-3 py-2">Status</th>
-                    <th className="text-left px-3 py-2">Start</th>
-                    <th className="text-left px-3 py-2">End</th>
-                    <th className="text-left px-3 py-2">Sessions</th>
-                    <th className="text-left px-3 py-2">Paid</th>
-                    <th className="text-left px-3 py-2">Payment</th>
-                    <th className="text-left px-3 py-2">Due</th>
-                    <th className="text-left px-3 py-2">Paid at</th>
-                    <th className="text-left px-3 py-2">Badges</th>
-	                    {canManageSubscriptions && <th className="text-left px-3 py-2">Actions</th>}
-                  </tr>
-                </thead>
-                <tbody>
-                  {(subs ?? []).map((s) => {
-                    const isSessions = s.plan === 'sessions'
-                    const isTime = !isSessions
-                    const remaining = Math.max((s.sessions_total ?? 0) - (s.sessions_used ?? 0), 0)
-                    const dleft = daysLeft(s.end_date)
-                    const soon = isTime && dleft !== null && dleft <= 7 && dleft >= 0
-                    const expired = s.status === 'expired' || (isTime && (dleft ?? -999) < 0)
+                  <thead className="text-[hsl(var(--muted))]">
+                    <tr className="border-b border-[hsl(var(--border))]">
+                      <th className="text-left px-3 py-2">Plan</th>
+                      <th className="text-left px-3 py-2">Status</th>
+                      <th className="text-left px-3 py-2">Start</th>
+                      <th className="text-left px-3 py-2">End</th>
+                      <th className="text-left px-3 py-2">Sessions</th>
+                      <th className="text-left px-3 py-2">Paid</th>
+                      <th className="text-left px-3 py-2">Payment</th>
+                      <th className="text-left px-3 py-2">Due</th>
+                      <th className="text-left px-3 py-2">Paid at</th>
+                      <th className="text-left px-3 py-2">Badges</th>
+                      {canManageSubscriptions && <th className="text-left px-3 py-2">Actions</th>}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(subs ?? []).map((s) => {
+                      const isSessions = s.plan === 'sessions'
+                      const isTime = !isSessions
+                      const remaining = Math.max((s.sessions_total ?? 0) - (s.sessions_used ?? 0), 0)
+                      const dleft = daysLeft(s.end_date)
+                      const soon = isTime && dleft !== null && dleft <= 7 && dleft >= 0
+                      const expired = s.status === 'expired' || (isTime && (dleft ?? -999) < 0)
 
-                    const today = todayDateOnlyUTC()
-                    // Freeze logic (controlled range):
-                    // - If frozen_from exists: frozen when today >= frozen_from AND today < frozen_until (exclusive end)
-                    // - Legacy: if only frozen_until exists: frozen when today < frozen_until
-                    const isFrozen =
-                      isTime &&
-                      !!(
-                        s.frozen_until &&
-                        (s.frozen_from
-                          ? today >= s.frozen_from && today < s.frozen_until
-                          : today < s.frozen_until)
-                      )
-                    const freezeDays = isFrozen
-                      ? Math.max(
-                          0,
-                          Math.floor(
-                            (new Date(`${s.frozen_until}T00:00:00Z`).getTime() -
-                              new Date(`${today}T00:00:00Z`).getTime()) /
-                              86400000,
-                          ),
+                      const today = todayDateOnlyUTC()
+                      // Freeze logic (controlled range):
+                      // - If frozen_from exists: frozen when today >= frozen_from AND today < frozen_until (exclusive end)
+                      // - Legacy: if only frozen_until exists: frozen when today < frozen_until
+                      const isFrozen =
+                        isTime &&
+                        !!(
+                          s.frozen_until &&
+                          (s.frozen_from
+                            ? today >= s.frozen_from && today < s.frozen_until
+                            : today < s.frozen_until)
                         )
-                      : null
+                      const freezeDays = isFrozen
+                        ? Math.max(
+                            0,
+                            Math.floor(
+                              (new Date(`${s.frozen_until}T00:00:00Z`).getTime() -
+                                new Date(`${today}T00:00:00Z`).getTime()) /
+                                86400000,
+                            ),
+                          )
+                        : null
 
-                    return (
-                      <tr key={s.id} className="border-t border-[hsl(var(--border))]">
-                        <td className="px-3 py-2">{humanPlan(s.plan)}</td>
-                        <td className="px-3 py-2">{s.status ?? '—'}</td>
-                        <td className="px-3 py-2">{fmtDate(s.start_date)}</td>
-                        <td className="px-3 py-2">{fmtDate(s.end_date)}</td>
-                        <td className="px-3 py-2">
-                          {isSessions
-                            ? `${s.sessions_used ?? 0}/${s.sessions_total ?? 0} (left ${remaining})`
-                            : '—'}
-                        </td>
-                        <td className="px-3 py-2">{s.amount ?? 0}</td>
-                        <td className="px-3 py-2">{humanPayment(s.payment_method)}</td>
-                        <td className="px-3 py-2">{Number(s.amount_due ?? 0) || 0}</td>
-                        <td className="px-3 py-2">{fmtDate(s.paid_at)}</td>
-                        <td className="px-3 py-2">
-                          <div className="flex flex-wrap gap-1">
-                            {isTime && typeof dleft === 'number' && dleft >= 0 && (
-                              <span
-                                className={`text-[11px] px-2 py-0.5 rounded-2xl border ${
-                                  soon
-                                    ? 'bg-amber-50 border-amber-300 text-amber-900'
-                                    : 'bg-emerald-50 border-emerald-300 text-emerald-900'
-                                }`}
-                              >
-                                {dleft} day(s) left
-                              </span>
-                            )}
-                            {expired && (
-                              <span className="text-[11px] px-2 py-0.5 rounded-2xl border bg-rose-50 border-rose-300 text-rose-900">
-                                expired
-                              </span>
-                            )}
-                            {isFrozen && (
-                              <span className="text-[11px] px-2 py-0.5 rounded-2xl border bg-sky-50 border-sky-300 text-sky-900">
-                                frozen{typeof freezeDays === 'number' ? ` (${freezeDays}d)` : ''}
-                              </span>
-                            )}
-                            {isSessions && (
-                              <span
-                                className={`text-[11px] px-2 py-0.5 rounded-2xl border ${
-                                  remaining <= 2
-                                    ? 'bg-amber-50 border-amber-300 text-amber-900'
-                                    : 'bg-emerald-50 border-emerald-300 text-emerald-900'
-                                }`}
-                              >
-                                {remaining} left
-                              </span>
-                            )}
-                          </div>
-                        </td>
-	                        {canManageSubscriptions && (
-	                          <td className="px-3 py-2">
-	                            <SubscriptionManageRowActions sub={s} />
-	                          </td>
-	                        )}
-                      </tr>
-                    )
-                  })}
-                </tbody>
+                      return (
+                        <tr key={s.id} className="border-t border-[hsl(var(--border))]">
+                          <td className="px-3 py-2">{humanPlan(s.plan)}</td>
+                          <td className="px-3 py-2">{s.status ?? '—'}</td>
+                          <td className="px-3 py-2">{fmtDate(s.start_date)}</td>
+                          <td className="px-3 py-2">{fmtDate(s.end_date)}</td>
+                          <td className="px-3 py-2">
+                            {isSessions
+                              ? `${s.sessions_used ?? 0}/${s.sessions_total ?? 0} (left ${remaining})`
+                              : '—'}
+                          </td>
+                          <td className="px-3 py-2">{s.amount ?? 0}</td>
+                          <td className="px-3 py-2">{humanPayment(s.payment_method)}</td>
+                          <td className="px-3 py-2">{Number(s.amount_due ?? 0) || 0}</td>
+                          <td className="px-3 py-2">{fmtDate(s.paid_at)}</td>
+                          <td className="px-3 py-2">
+                            <div className="flex flex-wrap gap-1">
+                              {isTime && typeof dleft === 'number' && dleft >= 0 && (
+                                <span
+                                  className={`text-[11px] px-2 py-0.5 rounded-2xl border ${
+                                    soon
+                                      ? 'bg-amber-50 border-amber-300 text-amber-900'
+                                      : 'bg-emerald-50 border-emerald-300 text-emerald-900'
+                                  }`}
+                                >
+                                  {dleft} day(s) left
+                                </span>
+                              )}
+                              {expired && (
+                                <span className="text-[11px] px-2 py-0.5 rounded-2xl border bg-rose-50 border-rose-300 text-rose-900">
+                                  expired
+                                </span>
+                              )}
+                              {isFrozen && (
+                                <span className="text-[11px] px-2 py-0.5 rounded-2xl border bg-sky-50 border-sky-300 text-sky-900">
+                                  frozen{typeof freezeDays === 'number' ? ` (${freezeDays}d)` : ''}
+                                </span>
+                              )}
+                              {isSessions && (
+                                <span
+                                  className={`text-[11px] px-2 py-0.5 rounded-2xl border ${
+                                    remaining <= 2
+                                      ? 'bg-amber-50 border-amber-300 text-amber-900'
+                                      : 'bg-emerald-50 border-emerald-300 text-emerald-900'
+                                  }`}
+                                >
+                                  {remaining} left
+                                </span>
+                              )}
+                            </div>
+                          </td>
+                          {canManageSubscriptions && (
+                            <td className="px-3 py-2">
+                              <SubscriptionManageRowActions sub={s} />
+                            </td>
+                          )}
+                        </tr>
+                      )
+                    })}
+                  </tbody>
                 </table>
               </div>
             </>
