@@ -23,6 +23,11 @@ type Body =
     }
   | Record<string, any>
 
+type CreateOutcome =
+  | 'invited_new_user'
+  | 'existing_profile'
+  | 'existing_auth_user'
+
 const STAFF: Role[] = ['reception', 'admin', 'super_admin']
 const can = (r: Role) => STAFF.includes(r)
 
@@ -55,12 +60,7 @@ export async function POST(req: Request) {
     // 1) Auth de l’acteur (staff uniquement)
     const { data: authData, error: authErr } = await supa.auth.getUser()
     if (authErr) {
-  
-// Invalidate members cache so the list reflects the new profile immediately
-try { revalidateTag('members') } catch {}
-try { revalidatePath('/members') } catch {}
-
-    return noStore(
+      return noStore(
         NextResponse.json(
           { ok: false, error: `AUTH_ERROR: ${authErr.message}` },
           { status: 401 },
@@ -107,7 +107,9 @@ try { revalidatePath('/members') } catch {}
       null) as string | null
     const phone = (String(body.phone ?? '').trim() || null) as string | null
 
-    const dobRaw = String((body as any).date_of_birth ?? (body as any).dateOfBirth ?? (body as any).dob ?? '').trim()
+    const dobRaw = String(
+      (body as any).date_of_birth ?? (body as any).dateOfBirth ?? (body as any).dob ?? '',
+    ).trim()
     const date_of_birth = (dobRaw || null) as string | null
 
     if (date_of_birth) {
@@ -123,7 +125,6 @@ try { revalidatePath('/members') } catch {}
         )
       }
     }
-
 
     if (!email) {
       return noStore(
@@ -167,11 +168,33 @@ try { revalidatePath('/members') } catch {}
           await admin.from('profiles').update(patch).eq('user_id', existing.user_id)
         }
 
+        try {
+          revalidateTag('members')
+        } catch {}
+        try {
+          revalidatePath('/members')
+        } catch {}
+
         return noStore(
           NextResponse.json({
             ok: true,
+            outcome: 'existing_profile' as CreateOutcome,
+            invite_sent: false,
+            profile_action: Object.keys(patch).length > 0 ? 'updated' : 'unchanged',
+            next_action: 'open_profile',
             user_id: existing.user_id,
-            updated: Object.keys(patch),
+            user: {
+              id: existing.user_id,
+              email,
+              first_name,
+              last_name,
+              phone,
+              date_of_birth,
+            },
+            message:
+              Object.keys(patch).length > 0
+                ? 'Existing member found. Profile updated. No invite email was sent.'
+                : 'This member already exists. No invite email was sent.',
           }),
         )
       }
@@ -187,6 +210,8 @@ try { revalidatePath('/members') } catch {}
 
     // 6) Tentative d’inviter l’utilisateur (email + lien)
     let userId: string | null = null
+    let outcome: CreateOutcome = 'invited_new_user'
+    let inviteSent = false
 
     const { data: invited, error: inviteErr } =
       await admin.auth.admin.inviteUserByEmail(email, {
@@ -197,6 +222,8 @@ try { revalidatePath('/members') } catch {}
     if (!inviteErr && invited?.user?.id) {
       // Cas normal : nouvel utilisateur créé dans auth.users
       userId = invited.user.id
+      outcome = 'invited_new_user'
+      inviteSent = true
     } else {
       // Cas où l’utilisateur existe déjà dans Auth → on le cherche par email
       const { data: usersData, error: listErr } = await admin.auth.admin.listUsers({
@@ -223,6 +250,8 @@ try { revalidatePath('/members') } catch {}
       }
 
       userId = existingAuth.id
+      outcome = 'existing_auth_user'
+      inviteSent = false
     }
 
     // 7) Sauvegarde dans public.profiles
@@ -267,6 +296,8 @@ try { revalidatePath('/members') } catch {}
       )
     }
 
+    const profileAction = existingById?.user_id ? 'updated' : 'created'
+
     if (existingById?.user_id) {
       const { error: updErr } = await admin.from('profiles').update(updateRow).eq('user_id', userId!)
       if (updErr) {
@@ -289,12 +320,28 @@ try { revalidatePath('/members') } catch {}
       }
     }
 
+    try {
+      revalidateTag('members')
+    } catch {}
+    try {
+      revalidatePath('/members')
+    } catch {}
+
     return noStore(
       NextResponse.json({
         ok: true,
+        outcome,
+        invite_sent: inviteSent,
+        profile_action: profileAction,
+        next_action: inviteSent ? 'none' : 'open_profile',
         user_id: userId,
         user: { id: userId, email, first_name, last_name, phone, date_of_birth },
-        message: 'Member invited and profile saved.',
+        message:
+          outcome === 'invited_new_user'
+            ? 'Member created. Invite email sent.'
+            : outcome === 'existing_auth_user'
+              ? 'Member profile saved, but no new invite email was sent because the auth account already exists.'
+              : 'Existing member found. No invite email was sent.',
       }),
     )
   } catch (e: any) {
