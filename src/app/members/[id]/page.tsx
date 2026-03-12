@@ -4,37 +4,93 @@ export const revalidate = 0
 
 import Link from 'next/link'
 import { notFound, redirect } from 'next/navigation'
+import type { ReactNode } from 'react'
+import {
+  AlertCircle,
+  ArrowLeft,
+  CalendarDays,
+  CreditCard,
+  QrCode,
+  ScanLine,
+  ShieldCheck,
+  UserRound,
+  Wallet,
+} from 'lucide-react'
 import PageHeader from '@/components/layout/PageHeader'
 import Section from '@/components/layout/Section'
 import AccessDeniedPage from '@/components/AccessDeniedPage'
 import { createSupabaseRSC } from '@/lib/supabaseServer'
 import { getSessionUser, type Role } from '@/lib/session'
+import { addDays, cairoToday, diffDays } from '@/lib/cairoDate'
 import QrImage from '@/components/QrImage'
 import SubscribeDialog, { type Plan } from '@/components/SubscribeDialog'
 import SubscriptionManageRowActions from '@/components/SubscriptionManageRowActions'
 import ResendInviteButton from '@/components/ResendInviteButton'
 
-function todayDateOnlyUTC() {
-  return new Date().toISOString().slice(0, 10) // YYYY-MM-DD (UTC)
+type ProfileRow = {
+  user_id: string
+  member_id: string | null
+  email: string | null
+  first_name: string | null
+  last_name: string | null
+  phone: string | null
+  role: Role | null
+  qr_code: string | null
+  created_at: string | null
+  date_of_birth: string | null
 }
-function addDays(dateOnly: string, days: number) {
-  const [y, m, d] = dateOnly.split('-').map(Number)
-  const dt = new Date(Date.UTC(y, m - 1, d))
-  dt.setUTCDate(dt.getUTCDate() + days)
-  return dt.toISOString().slice(0, 10)
+
+type SubscriptionRow = {
+  id: string
+  plan: Plan | null
+  subscription_type: 'time' | 'sessions' | null
+  status: string | null
+  start_date: string | null
+  end_date: string | null
+  frozen_from: string | null
+  frozen_until: string | null
+  sessions_total: number | null
+  sessions_used: number | null
+  amount: number | null
+  amount_due: number | null
+  payment_method: string | null
+  paid_at: string | null
 }
+
+type AttendanceRow = {
+  id: string
+  date: string
+  valid: boolean | null
+  from_sessions: boolean | null
+  subscription_id: string | null
+}
+
+type SummaryTone = 'success' | 'warning' | 'danger' | 'neutral'
+
+type MembershipSummary = {
+  tone: SummaryTone
+  label: string
+  title: string
+  hint: string
+}
+
 function fmtDate(dateStr?: string | null) {
   if (!dateStr) return '—'
   const dt = new Date(dateStr.length === 10 ? `${dateStr}T00:00:00Z` : dateStr)
-  if (isNaN(dt.getTime())) return dateStr
-  return dt.toLocaleDateString('en-GB', { year: 'numeric', month: 'short', day: '2-digit' })
+  if (Number.isNaN(dt.getTime())) return dateStr
+  return new Intl.DateTimeFormat('en-GB', { year: 'numeric', month: 'short', day: '2-digit' }).format(dt)
 }
-function daysLeft(endDate?: string | null) {
-  if (!endDate) return null
-  const t = todayDateOnlyUTC()
-  const ms = new Date(`${endDate}T00:00:00Z`).getTime() - new Date(`${t}T00:00:00Z`).getTime()
-  return Math.floor(ms / 86400000)
+
+function fmtMoneyEGP(value?: number | null) {
+  const n = Number(value ?? 0)
+  if (!Number.isFinite(n)) return '0 EGP'
+  try {
+    return new Intl.NumberFormat('en-EG', { style: 'currency', currency: 'EGP' }).format(n)
+  } catch {
+    return `${n.toFixed(0)} EGP`
+  }
 }
+
 function humanPlan(p?: Plan | null) {
   switch (p) {
     case '1m':
@@ -46,15 +102,208 @@ function humanPlan(p?: Plan | null) {
     case '12m':
       return '12 months'
     case 'sessions':
-      return 'Per sessions'
+      return 'Sessions'
+    default:
+      return 'Membership'
+  }
+}
+
+function humanRole(role?: Role | null) {
+  switch (role) {
+    case 'assistant_coach':
+      return 'Assistant coach'
+    case 'super_admin':
+      return 'Super admin'
+    case 'coach':
+      return 'Coach'
+    case 'reception':
+      return 'Reception'
+    case 'admin':
+      return 'Admin'
+    default:
+      return 'Member'
+  }
+}
+
+function humanPayment(method?: string | null) {
+  switch (method) {
+    case 'cash':
+      return 'Cash'
+    case 'instapay':
+      return 'InstaPay'
+    case 'card':
+      return 'Card'
+    case 'bank_transfer':
+      return 'Bank transfer'
     default:
       return '—'
   }
 }
 
 function isUuid(v: string) {
-  // Accepts common UUID formats (v1-v5). Good enough for routing.
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(v)
+}
+
+function ageYears(dob?: string | null) {
+  if (!dob) return null
+  const dateOnly = dob.length === 10 ? dob : dob.slice(0, 10)
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateOnly)) return null
+  const [y, m, d] = dateOnly.split('-').map(Number)
+  const born = new Date(Date.UTC(y, m - 1, d))
+  if (Number.isNaN(born.getTime())) return null
+
+  const now = new Date()
+  const today = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()))
+  let age = today.getUTCFullYear() - born.getUTCFullYear()
+  const mm = today.getUTCMonth() - born.getUTCMonth()
+  if (mm < 0 || (mm === 0 && today.getUTCDate() < born.getUTCDate())) age--
+  if (age < 0) return null
+  return age
+}
+
+function isFrozenNow(sub: Pick<SubscriptionRow, 'subscription_type' | 'frozen_from' | 'frozen_until'>, today: string) {
+  const type = (sub.subscription_type ?? 'time') as 'time' | 'sessions'
+  if (type !== 'time') return false
+  const until = sub.frozen_until
+  if (!until) return false
+  const from = sub.frozen_from
+  return from ? today >= from && today < until : today < until
+}
+
+function daysUntil(endDate?: string | null, today: string = cairoToday()) {
+  if (!endDate) return null
+  return diffDays(today, endDate)
+}
+
+function toneClasses(tone: SummaryTone) {
+  if (tone === 'success') {
+    return 'border-emerald-200 bg-emerald-50 text-emerald-700'
+  }
+  if (tone === 'warning') {
+    return 'border-amber-200 bg-amber-50 text-amber-800'
+  }
+  if (tone === 'danger') {
+    return 'border-rose-200 bg-rose-50 text-rose-700'
+  }
+  return 'border-[hsl(var(--border))] bg-[hsl(var(--bg))] text-[hsl(var(--muted))]'
+}
+
+function buildMembershipSummary(
+  viewedRole: Role | null,
+  isSelf: boolean,
+  subs: SubscriptionRow[],
+  today: string,
+): MembershipSummary {
+  if (isSelf && (viewedRole === 'coach' || viewedRole === 'assistant_coach')) {
+    return {
+      tone: 'success',
+      label: 'Staff access',
+      title: 'Always active',
+      hint: 'Your staff access is active in the app.',
+    }
+  }
+
+  const activeTime = subs.find((s) => {
+    if ((s.subscription_type ?? 'time') !== 'time') return false
+    if (String(s.status ?? '').toLowerCase() !== 'active') return false
+    if (!s.end_date || s.end_date < today) return false
+    return true
+  })
+
+  if (activeTime) {
+    if (isFrozenNow(activeTime, today)) {
+      const until = activeTime.frozen_until ? fmtDate(activeTime.frozen_until) : '—'
+      return {
+        tone: 'warning',
+        label: 'Membership frozen',
+        title: humanPlan(activeTime.plan),
+        hint: `Frozen until ${until}`,
+      }
+    }
+
+    const left = daysUntil(activeTime.end_date, today)
+    return {
+      tone: left !== null && left <= 7 ? 'warning' : 'success',
+      label: left !== null && left <= 7 ? 'Expiring soon' : 'Membership active',
+      title: humanPlan(activeTime.plan),
+      hint:
+        left === null
+          ? 'Time membership active.'
+          : left === 0
+            ? 'Ends today.'
+            : `${left} day(s) left · ends ${fmtDate(activeTime.end_date)}`,
+    }
+  }
+
+  const activeSessions = subs.find((s) => {
+    const type = (s.subscription_type ?? (s.plan === 'sessions' ? 'sessions' : 'time')) as 'time' | 'sessions'
+    if (type !== 'sessions') return false
+    if (String(s.status ?? '').toLowerCase() !== 'active') return false
+    const remaining = Math.max(Number(s.sessions_total ?? 0) - Number(s.sessions_used ?? 0), 0)
+    return remaining > 0
+  })
+
+  if (activeSessions) {
+    const remaining = Math.max(Number(activeSessions.sessions_total ?? 0) - Number(activeSessions.sessions_used ?? 0), 0)
+    return {
+      tone: remaining <= 2 ? 'warning' : 'success',
+      label: remaining <= 2 ? 'Low sessions left' : 'Sessions active',
+      title: `${remaining} session(s) left`,
+      hint: `${activeSessions.sessions_used ?? 0}/${activeSessions.sessions_total ?? 0} used`,
+    }
+  }
+
+  const latest = subs[0]
+  if (latest) {
+    return {
+      tone: 'neutral',
+      label: 'No active membership',
+      title: humanPlan(latest.plan),
+      hint: latest.end_date ? `Last ended ${fmtDate(latest.end_date)}` : `Last paid ${fmtDate(latest.paid_at)}`,
+    }
+  }
+
+  return {
+    tone: 'neutral',
+    label: 'No subscription',
+    title: 'No active membership',
+    hint: 'No subscription history yet.',
+  }
+}
+
+function Surface({ children, className = '' }: { children: ReactNode; className?: string }) {
+  return <section className={`rounded-3xl border border-[hsl(var(--border))] bg-white shadow-soft ${className}`}>{children}</section>
+}
+
+function TinyBadge({ children, tone = 'neutral' }: { children: ReactNode; tone?: SummaryTone }) {
+  return <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold ${toneClasses(tone)}`}>{children}</span>
+}
+
+function SummaryCard({
+  label,
+  value,
+  hint,
+  icon,
+}: {
+  label: string
+  value: ReactNode
+  hint?: string
+  icon: ReactNode
+}) {
+  return (
+    <Surface className="p-4 sm:p-5">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <div className="text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">{label}</div>
+          <div className="mt-2 text-xl font-semibold tracking-tight">{value}</div>
+          {hint ? <div className="mt-2 text-sm text-[hsl(var(--muted))]">{hint}</div> : null}
+        </div>
+        <span className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] text-black">
+          {icon}
+        </span>
+      </div>
+    </Surface>
+  )
 }
 
 export default async function MemberDetailPage({ params }: { params: { id: string } }) {
@@ -66,14 +315,15 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
   }
 
   const STAFF: Role[] = ['reception', 'admin', 'super_admin']
-  const isStaff = STAFF.includes(me.role)
+  const canViewOthers = STAFF.includes(me.role)
+  const canViewAttendance = canViewOthers
   const canManageSubscriptions = ['admin', 'super_admin'].includes(me.role)
+  const canCreateSubscription = STAFF.includes(me.role)
+  const canResendInvite = STAFF.includes(me.role)
   const supa = createSupabaseRSC()
 
   const idIsUuid = isUuid(params.id)
-
-  // Fast path: when the route param is a UUID, non-staff can only open their own UUID.
-  if (idIsUuid && !isStaff && me.id !== params.id) {
+  if (idIsUuid && !canViewOthers && me.id !== params.id) {
     return (
       <AccessDeniedPage
         title="Member"
@@ -90,25 +340,14 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
 
   const { data: profile } = await supa
     .from('profiles')
-    .select('user_id, member_id, email, first_name, last_name, phone, role, qr_code, created_at')
+    .select('user_id, member_id, email, first_name, last_name, phone, role, qr_code, created_at, date_of_birth')
     .eq(idIsUuid ? 'user_id' : 'member_id', params.id)
-    .maybeSingle<{
-      user_id: string
-      member_id: string | null
-      email: string | null
-      first_name: string | null
-      last_name: string | null
-      phone: string | null
-      role: Role | null
-      qr_code: string | null
-      created_at: string | null
-    }>()
+    .maybeSingle<ProfileRow>()
 
   if (!profile) return notFound()
 
-  // Staff can view anyone. Non-staff can only view self.
   const isSelf = me.id === profile.user_id
-  if (!isStaff && !isSelf) {
+  if (!canViewOthers && !isSelf) {
     return (
       <AccessDeniedPage
         title="Member"
@@ -123,72 +362,40 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
     )
   }
 
-  const { data: subs } = await supa
+  const { data: subsData } = await supa
     .from('subscriptions')
     .select('id, plan, subscription_type, status, start_date, end_date, frozen_from, frozen_until, sessions_total, sessions_used, amount, amount_due, payment_method, paid_at')
     .eq('member_id', profile.user_id)
     .order('paid_at', { ascending: false })
-    .limit(500) as {
-    data: Array<{
-      id: string
-      plan: Plan | null
-      subscription_type: 'time' | 'sessions' | null
-      status: string | null
-      start_date: string | null
-      end_date: string | null
-      frozen_from: string | null
-      frozen_until: string | null
-      sessions_total: number | null
-      sessions_used: number | null
-      amount: number | null
-      amount_due: number | null
-      payment_method: string | null
-      paid_at: string | null
-    }> | null
-  }
+    .limit(500)
 
-  function humanPayment(m?: string | null) {
-    switch (m) {
-      case 'cash':
-        return 'Cash'
-      case 'instapay':
-        return 'InstaPay'
-      case 'card':
-        return 'Card'
-      case 'bank_transfer':
-        return 'Bank transfer'
-      default:
-        return '—'
-    }
-  }
+  const subs = (subsData ?? []) as SubscriptionRow[]
+  const today = cairoToday()
 
-  // Prevent creating a new subscription when there's already an active one
-  const today = new Date().toISOString().slice(0, 10) // YYYY-MM-DD (UTC)
-  const hasActiveSubscription = (subs ?? []).some((s) => {
+  const hasActiveSubscription = subs.some((s) => {
     const status = String(s.status ?? '').toLowerCase()
     if (status !== 'active') return false
 
-    const end = s.end_date
-    if (end && today > end) return false
-
-    if (s.subscription_type === 'sessions') {
+    const type = (s.subscription_type ?? (s.plan === 'sessions' ? 'sessions' : 'time')) as 'time' | 'sessions'
+    if (type === 'sessions') {
       const total = Number(s.sessions_total ?? 0)
       const used = Number(s.sessions_used ?? 0)
-      if (Number.isFinite(total) && total > 0) return total - used > 0
+      return Math.max(total - used, 0) > 0
     }
 
+    if (s.end_date && s.end_date < today) return false
     return true
   })
+
   const subscribeDisabledReason = hasActiveSubscription
-    ? 'This member already has an active subscription. Please expire/edit it first.'
+    ? 'This member already has an active subscription. Please expire or update it first.'
     : undefined
 
-  // Renewal: allow stacking a future time subscription that starts after the active one ends
-  const activeTimeEnds = (subs ?? [])
+  const activeTimeEnds = subs
     .filter((s) => {
       const status = String(s.status ?? '').toLowerCase()
       if (status !== 'active') return false
-      if (s.plan === 'sessions') return false
+      if ((s.subscription_type ?? (s.plan === 'sessions' ? 'sessions' : 'time')) !== 'time') return false
       const end = s.end_date
       if (!end) return false
       return today <= end
@@ -198,466 +405,392 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
   const maxActiveTimeEnd = activeTimeEnds.length ? activeTimeEnds.sort().slice(-1)[0] : null
   const renewStartDate = maxActiveTimeEnd ? addDays(maxActiveTimeEnd, 1) : today
   const defaultRenewPlan: Plan =
-    ((subs ?? []).find((s) => String(s.status ?? '').toLowerCase() === 'active' && s.plan !== 'sessions')?.plan as Plan) ?? '1m'
+    (subs.find((s) => String(s.status ?? '').toLowerCase() === 'active' && s.plan !== 'sessions')?.plan as Plan) ?? '1m'
 
-  // Attendance is a staff-only view.
-  // Members / coaches can see their own profile + subscriptions, but not attendance.
-  let attendance:
-    | Array<{
-        id: string
-        date: string
-        valid: boolean | null
-        from_sessions: boolean | null
-        subscription_id: string | null
-      }>
-    | null = null
-
-  if (isStaff) {
-    const today = todayDateOnlyUTC()
+  let attendance: AttendanceRow[] = []
+  if (canViewAttendance) {
     const from = addDays(today, -30)
-    const { data } = (await supa
+    const { data } = await supa
       .from('attendance')
       .select('id, date, valid, from_sessions, subscription_id')
       .eq('member_id', profile.user_id)
       .gte('date', from)
       .lte('date', today)
       .order('date', { ascending: false })
-      .limit(1000)) as {
-      data:
-        | Array<{
-            id: string
-            date: string
-            valid: boolean | null
-            from_sessions: boolean | null
-            subscription_id: string | null
-          }>
-        | null
+      .limit(1000)
+
+    attendance = (data ?? []) as AttendanceRow[]
+  }
+
+  const subPlanById = new Map<string, Plan | null>(subs.map((s) => [s.id, s.plan]))
+
+  const alerts: Array<{ kind: SummaryTone; text: string }> = []
+  for (const s of subs) {
+    const type = (s.subscription_type ?? (s.plan === 'sessions' ? 'sessions' : 'time')) as 'time' | 'sessions'
+    if (String(s.status ?? '').toLowerCase() !== 'active') continue
+
+    if (type === 'time') {
+      if (isFrozenNow(s, today)) {
+        alerts.push({ kind: 'warning', text: `${humanPlan(s.plan)} is frozen until ${fmtDate(s.frozen_until)}` })
+        continue
+      }
+      const left = daysUntil(s.end_date, today)
+      if (left !== null && left <= 7 && left >= 0) {
+        alerts.push({ kind: 'warning', text: `${humanPlan(s.plan)} expires in ${left} day(s)` })
+      }
+      if (left !== null && left < 0) {
+        alerts.push({ kind: 'danger', text: `${humanPlan(s.plan)} is expired.` })
+      }
+      continue
     }
-    attendance = data ?? null
+
+    const remaining = Math.max(Number(s.sessions_total ?? 0) - Number(s.sessions_used ?? 0), 0)
+    if (remaining <= 2) {
+      alerts.push({ kind: remaining === 0 ? 'danger' : 'warning', text: `Sessions plan has ${remaining} session(s) left.` })
+    }
   }
 
-  const subPlanById = new Map<string, Plan | null>((subs ?? []).map((s) => [s.id, s.plan]))
+  const summary = buildMembershipSummary(profile.role, isSelf, subs, today)
+  const outstandingTotal = subs.reduce((sum, s) => sum + Math.max(Number(s.amount_due ?? 0), 0), 0)
+  const latestPayment = subs.find((s) => !!s.paid_at)?.paid_at ?? null
+  const recentAttendanceValid = attendance.filter((a) => a.valid).length
+  const lastAttendance = attendance[0]?.date ?? null
+  const fullName = `${profile.first_name ?? ''} ${profile.last_name ?? ''}`.trim() || '—'
+  const age = ageYears(profile.date_of_birth)
+  const viewedRole = profile.role ?? 'member'
+  const showSubscriptionActions = canCreateSubscription && viewedRole === 'member'
 
-  const activeTime = (subs ?? []).filter((s) => s.plan !== 'sessions' && s.status === 'active')
-  const activeSessions = (subs ?? []).filter((s) => s.plan === 'sessions' && s.status === 'active')
-  const alerts: Array<{ kind: 'time' | 'sessions'; text: string }> = []
-
-  for (const s of activeTime) {
-    const dl = daysLeft(s.end_date)
-    if (dl !== null && dl <= 7) alerts.push({ kind: 'time', text: `Time plan ${humanPlan(s.plan)} expires in ${dl} day(s)` })
-  }
-  for (const s of activeSessions) {
-    const remaining = Math.max((s.sessions_total ?? 0) - (s.sessions_used ?? 0), 0)
-    if (remaining <= 2) alerts.push({ kind: 'sessions', text: `Sessions plan: only ${remaining} session(s) left` })
-  }
+  const subtitle = isSelf
+    ? viewedRole === 'member'
+      ? 'Your profile, QR code and membership details.'
+      : 'Your profile, QR code and staff access overview.'
+    : 'Fast member overview built for field usage on mobile and tablet.'
 
   return (
     <main>
       <PageHeader
-        title="Member"
-        subtitle={isStaff ? 'Profile, QR, subscriptions and attendance' : 'Profile, QR and subscriptions'}
+        title={isSelf ? 'My profile' : 'Member detail'}
+        subtitle={subtitle}
         right={
-          isStaff ? (
+          canViewOthers ? (
             <Link
               href="/members"
-              className="px-4 py-2 rounded-2xl border border-[hsl(var(--border))] bg-white hover:bg-[hsl(var(--bg))]/80 shadow-soft text-sm"
+              className="inline-flex items-center gap-2 rounded-2xl border border-[hsl(var(--border))] bg-white px-4 py-2 text-sm font-medium shadow-soft hover:bg-[hsl(var(--bg))]"
             >
+              <ArrowLeft size={16} />
               Back to list
             </Link>
-          ) : null
+          ) : undefined
         }
       />
 
-      <Section className="space-y-6">
-        {/* Identity + QR */}
-        <section className="grid gap-4 md:grid-cols-[1fr_220px]">
-          <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-5 shadow-soft">
-            <h2 className="font-semibold">Identity</h2>
-            <div className="mt-3 grid gap-2 text-sm">
-              <div>
-                <span className="text-[hsl(var(--muted))]">Name:</span>{' '}
-                {(profile.first_name || profile.last_name)
-                  ? `${profile.first_name ?? ''} ${profile.last_name ?? ''}`.trim()
-                  : '—'}
-              </div>
-              <div>
-                <span className="text-[hsl(var(--muted))]">Member ID:</span>{' '}
-                <code className="text-xs">{profile.member_id?.trim() || '—'}</code>
-              </div>
-              <div><span className="text-[hsl(var(--muted))]">Email:</span> {profile.email ?? '—'}</div>
-              <div><span className="text-[hsl(var(--muted))]">Phone:</span> {profile.phone ?? '—'}</div>
-              <div><span className="text-[hsl(var(--muted))]">Role:</span> {profile.role ?? 'member'}</div>
-              <div><span className="text-[hsl(var(--muted))]">Joined:</span> {fmtDate(profile.created_at)}</div>
+      <Section className="space-y-5">
+        <Surface className="overflow-hidden">
+          <div className="flex flex-col gap-4 p-5 sm:p-6">
+            <div className="flex flex-wrap items-center gap-2">
+              <TinyBadge tone={summary.tone}>{summary.label}</TinyBadge>
+              <TinyBadge>{humanRole(viewedRole)}</TinyBadge>
+              {profile.member_id ? <TinyBadge>Member ID: {profile.member_id}</TinyBadge> : null}
+              {typeof age === 'number' ? <TinyBadge>{age < 17 ? `Kid · ${age}y` : `Adult · ${age}y`}</TinyBadge> : null}
             </div>
 
-            {isStaff ? (
-              <div className="mt-4 border-t border-[hsl(var(--border))] pt-4">
-                <ResendInviteButton userId={profile.user_id} email={profile.email} />
-              </div>
-            ) : null}
+            <div>
+              <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">{fullName}</h1>
+              <p className="mt-2 max-w-3xl text-sm text-[hsl(var(--muted))] sm:text-base">
+                {isSelf
+                  ? 'Everything important is grouped here for quick reading on mobile.'
+                  : 'Identity, subscription status, QR code and operational info grouped in one clear mobile-first page.'}
+              </p>
+            </div>
           </div>
+        </Surface>
 
-          <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-5 shadow-soft flex items-center justify-center">
-            {profile.qr_code ? (
-              <div className="text-center">
-                <QrImage value={profile.qr_code} size={180} />
-                <div className="text-xs text-[hsl(var(--muted))] mt-2">Show this code at reception</div>
+        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          <SummaryCard
+            label="Membership"
+            value={summary.title}
+            hint={summary.hint}
+            icon={<ShieldCheck size={18} strokeWidth={2.1} />}
+          />
+          <SummaryCard
+            label="Outstanding due"
+            value={outstandingTotal > 0 ? fmtMoneyEGP(outstandingTotal) : 'No due'}
+            hint={outstandingTotal > 0 ? 'Unpaid balance on subscriptions.' : 'Nothing due at the moment.'}
+            icon={<Wallet size={18} strokeWidth={2.1} />}
+          />
+          <SummaryCard
+            label={canViewAttendance ? 'Attendance · 30 days' : 'Last payment'}
+            value={canViewAttendance ? recentAttendanceValid : latestPayment ? fmtDate(latestPayment) : '—'}
+            hint={canViewAttendance ? (lastAttendance ? `Last check-in ${fmtDate(lastAttendance)}` : 'No recent attendance.') : 'Latest recorded payment date.'}
+            icon={canViewAttendance ? <ScanLine size={18} strokeWidth={2.1} /> : <CreditCard size={18} strokeWidth={2.1} />}
+          />
+          <SummaryCard
+            label="Joined"
+            value={fmtDate(profile.created_at)}
+            hint={profile.email ?? profile.phone ?? 'No extra contact info.'}
+            icon={<CalendarDays size={18} strokeWidth={2.1} />}
+          />
+        </div>
+
+        {showSubscriptionActions || canResendInvite ? (
+          <Surface className="p-4 sm:p-5">
+            <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
+              <div className="min-w-0 flex-1">
+                <div className="text-base font-semibold tracking-tight">Quick actions</div>
+                <p className="mt-1 text-sm text-[hsl(var(--muted))]">
+                  Keep high-frequency actions visible without opening extra screens.
+                </p>
               </div>
-            ) : (
-              <div className="text-sm text-[hsl(var(--muted))]">No QR code.</div>
-            )}
-          </div>
-        </section>
 
-        {/* Alerts */}
-        <section className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-5 shadow-soft">
-          <h2 className="font-semibold">Alerts</h2>
-          {alerts.length === 0 ? (
-            <div className="mt-2 text-sm text-[hsl(var(--muted))]">No alerts.</div>
-          ) : (
-            <ul className="mt-3 grid gap-2">
-              {alerts.map((a, i) => (
-                <li
-                  key={i}
-                  className={`text-sm px-3 py-2 rounded-2xl border ${
-                    a.kind === 'time'
-                      ? 'bg-amber-50 border-amber-300 text-amber-900'
-                      : 'bg-rose-50 border-rose-300 text-rose-900'
-                  }`}
-                >
-                  {a.text}
-                </li>
-              ))}
-            </ul>
-          )}
-        </section>
+              <div className="flex flex-wrap gap-2">
+                {showSubscriptionActions ? (
+                  <>
+                    <SubscribeDialog
+                      member={{
+                        user_id: profile.user_id,
+                        email: profile.email,
+                        first_name: profile.first_name,
+                        last_name: profile.last_name,
+                      }}
+                      buttonLabel="New subscription"
+                      defaultPlan="1m"
+                      defaultSessions={10}
+                      disabled={hasActiveSubscription}
+                      disabledReason={subscribeDisabledReason}
+                    />
 
-        {/* Subscriptions */}
-        <section className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-5 shadow-soft space-y-3">
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-            <h2 className="font-semibold">Subscriptions</h2>
-
-            {isStaff ? (
-              <div className="flex flex-wrap items-center gap-2 sm:ml-auto">
-                <SubscribeDialog
-                  member={{
-                    user_id: profile.user_id,
-                    email: profile.email,
-                    first_name: profile.first_name,
-                    last_name: profile.last_name,
-                  }}
-                  buttonLabel="New subscription"
-                  defaultPlan="1m"
-                  defaultSessions={10}
-                  disabled={hasActiveSubscription}
-                  disabledReason={subscribeDisabledReason}
-                />
-
-                {canManageSubscriptions && maxActiveTimeEnd ? (
-                  <SubscribeDialog
-                    member={{
-                      user_id: profile.user_id,
-                      email: profile.email,
-                      first_name: profile.first_name,
-                      last_name: profile.last_name,
-                    }}
-                    buttonLabel="Renew / Extend"
-                    defaultPlan={defaultRenewPlan}
-                    defaultStartDate={renewStartDate}
-                    defaultSessions={10}
-                    mode="renew"
-                    lockStartDate
-                  />
+                    {canManageSubscriptions && maxActiveTimeEnd ? (
+                      <SubscribeDialog
+                        member={{
+                          user_id: profile.user_id,
+                          email: profile.email,
+                          first_name: profile.first_name,
+                          last_name: profile.last_name,
+                        }}
+                        buttonLabel="Renew / Extend"
+                        defaultPlan={defaultRenewPlan}
+                        defaultStartDate={renewStartDate}
+                        defaultSessions={10}
+                        mode="renew"
+                        lockStartDate
+                      />
+                    ) : null}
+                  </>
                 ) : null}
+
+                {canResendInvite ? <ResendInviteButton userId={profile.user_id} email={profile.email} /> : null}
               </div>
-            ) : null}
+            </div>
+          </Surface>
+        ) : null}
+
+        {alerts.length > 0 ? (
+          <Surface className="p-4 sm:p-5">
+            <div className="flex items-center gap-2">
+              <AlertCircle size={18} className="text-black" />
+              <h2 className="text-base font-semibold tracking-tight">Alerts</h2>
+            </div>
+            <div className="mt-4 grid gap-2">
+              {alerts.map((a, i) => (
+                <div key={`${a.text}-${i}`} className={`rounded-2xl border px-3 py-2 text-sm font-medium ${toneClasses(a.kind)}`}>
+                  {a.text}
+                </div>
+              ))}
+            </div>
+          </Surface>
+        ) : null}
+
+        <div className="grid gap-4 xl:grid-cols-[1.15fr_0.85fr]">
+          <Surface className="p-4 sm:p-5">
+            <div className="flex items-center gap-2">
+              <UserRound size={18} className="text-black" />
+              <h2 className="text-base font-semibold tracking-tight">Identity</h2>
+            </div>
+
+            <div className="mt-4 grid gap-3 text-sm">
+              <div className="flex items-start justify-between gap-3">
+                <span className="text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Name</span>
+                <span className="text-right font-medium">{fullName}</span>
+              </div>
+              <div className="flex items-start justify-between gap-3">
+                <span className="text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Member ID</span>
+                <code className="text-right text-xs font-semibold">{profile.member_id?.trim() || '—'}</code>
+              </div>
+              <div className="flex items-start justify-between gap-3">
+                <span className="text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Role</span>
+                <span className="text-right font-medium">{humanRole(viewedRole)}</span>
+              </div>
+              <div className="flex items-start justify-between gap-3">
+                <span className="text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Email</span>
+                <span className="min-w-0 text-right font-medium break-words whitespace-normal">{profile.email ?? '—'}</span>
+              </div>
+              <div className="flex items-start justify-between gap-3">
+                <span className="text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Phone</span>
+                <span className="min-w-0 text-right font-medium break-words whitespace-normal">{profile.phone ?? '—'}</span>
+              </div>
+              <div className="flex items-start justify-between gap-3">
+                <span className="text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Joined</span>
+                <span className="text-right font-medium">{fmtDate(profile.created_at)}</span>
+              </div>
+              <div className="flex items-start justify-between gap-3">
+                <span className="text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Date of birth</span>
+                <span className="text-right font-medium">{profile.date_of_birth ? fmtDate(profile.date_of_birth) : '—'}</span>
+              </div>
+            </div>
+          </Surface>
+
+          <Surface className="p-4 sm:p-5">
+            <div className="flex items-center gap-2">
+              <QrCode size={18} className="text-black" />
+              <h2 className="text-base font-semibold tracking-tight">QR code</h2>
+            </div>
+            <p className="mt-1 text-sm text-[hsl(var(--muted))]">Show this code at reception for attendance scanning.</p>
+
+            <div className="mt-4 flex min-h-[220px] items-center justify-center rounded-2xl border border-dashed border-[hsl(var(--border))] bg-[hsl(var(--bg))] p-4">
+              {profile.qr_code ? (
+                <div className="text-center">
+                  <QrImage value={profile.qr_code} size={180} />
+                  <div className="mt-3 text-xs text-[hsl(var(--muted))]">Ready for kiosk or front-desk scan.</div>
+                </div>
+              ) : (
+                <div className="text-sm text-[hsl(var(--muted))]">No QR code.</div>
+              )}
+            </div>
+          </Surface>
+        </div>
+
+        <Surface className="p-4 sm:p-5">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h2 className="text-base font-semibold tracking-tight">Subscriptions</h2>
+              <p className="mt-1 text-sm text-[hsl(var(--muted))]">A clean card view with no horizontal scrolling on mobile.</p>
+            </div>
+            <TinyBadge>{subs.length} record(s)</TinyBadge>
           </div>
 
-          {(subs ?? []).length === 0 ? (
-            <div className="text-sm text-[hsl(var(--muted))]">No subscriptions yet.</div>
+          {subs.length === 0 ? (
+            <div className="mt-4 rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] px-4 py-3 text-sm text-[hsl(var(--muted))]">
+              No subscriptions yet.
+            </div>
           ) : (
-            <>
-              {/* Mobile cards (no horizontal scroll) */}
-              <div className="grid gap-3 sm:hidden">
-                {(subs ?? []).map((s) => {
-                  const isSessions = s.plan === 'sessions'
-                  const isTime = !isSessions
-                  const remaining = Math.max((s.sessions_total ?? 0) - (s.sessions_used ?? 0), 0)
-                  const dleft = daysLeft(s.end_date)
-                  const soon = isTime && dleft !== null && dleft <= 7 && dleft >= 0
-                  const expired = s.status === 'expired' || (isTime && (dleft ?? -999) < 0)
+            <div className="mt-4 grid gap-3">
+              {subs.map((s) => {
+                const type = (s.subscription_type ?? (s.plan === 'sessions' ? 'sessions' : 'time')) as 'time' | 'sessions'
+                const isSessions = type === 'sessions'
+                const remaining = Math.max(Number(s.sessions_total ?? 0) - Number(s.sessions_used ?? 0), 0)
+                const left = !isSessions ? daysUntil(s.end_date, today) : null
+                const frozen = !isSessions && isFrozenNow(s, today)
+                const expired = !isSessions && left !== null && left < 0
+                const due = Math.max(Number(s.amount_due ?? 0), 0)
 
-                  const today = todayDateOnlyUTC()
-                  const isFrozen =
-                    isTime &&
-                    !!(
-                      s.frozen_until &&
-                      (s.frozen_from
-                        ? today >= s.frozen_from && today < s.frozen_until
-                        : today < s.frozen_until)
-                    )
-                  const freezeDays = isFrozen
-                    ? Math.max(
-                        0,
-                        Math.floor(
-                          (new Date(`${s.frozen_until}T00:00:00Z`).getTime() -
-                            new Date(`${today}T00:00:00Z`).getTime()) /
-                            86400000,
-                        ),
-                      )
-                    : null
-
-                  return (
-                    <div
-                      key={s.id}
-                      className="rounded-2xl border border-[hsl(var(--border))] bg-white p-4 shadow-soft space-y-3"
-                    >
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span className="inline-flex items-center rounded-full border px-2 py-0.5 text-xs bg-gray-50">
-                          {humanPlan(s.plan)}
-                        </span>
-                        <span className="text-xs text-[hsl(var(--muted))]">
-                          {fmtDate(s.start_date)} → {fmtDate(s.end_date)}
-                        </span>
-                        <span className="ml-auto text-[11px] px-2 py-0.5 rounded-full border bg-gray-50">
-                          {s.status ?? '—'}
-                        </span>
-                      </div>
-
-                      <div className="grid gap-2 text-sm">
-                        <div className="flex items-center justify-between gap-3">
-                          <div className="text-xs text-[hsl(var(--muted))]">Paid</div>
-                          <div className="font-medium">{s.amount ?? 0}</div>
-                        </div>
-                        <div className="flex items-center justify-between gap-3">
-                          <div className="text-xs text-[hsl(var(--muted))]">Due</div>
-                          <div className="font-medium">{Number(s.amount_due ?? 0) || 0}</div>
-                        </div>
-                        <div className="flex items-center justify-between gap-3">
-                          <div className="text-xs text-[hsl(var(--muted))]">Payment</div>
-                          <div className="font-medium">{humanPayment(s.payment_method)}</div>
-                        </div>
-                        <div className="flex items-center justify-between gap-3">
-                          <div className="text-xs text-[hsl(var(--muted))]">Paid at</div>
-                          <div className="font-medium">{fmtDate(s.paid_at)}</div>
-                        </div>
-                        {isSessions ? (
-                          <div className="flex items-center justify-between gap-3">
-                            <div className="text-xs text-[hsl(var(--muted))]">Sessions</div>
-                            <div className="font-medium">
-                              {s.sessions_used ?? 0}/{s.sessions_total ?? 0} (left {remaining})
-                            </div>
-                          </div>
-                        ) : null}
-                      </div>
-
-                      <div className="flex flex-wrap gap-1">
-                        {isTime && typeof dleft === 'number' && dleft >= 0 && (
-                          <span
-                            className={`text-[11px] px-2 py-0.5 rounded-2xl border ${
-                              soon
-                                ? 'bg-amber-50 border-amber-300 text-amber-900'
-                                : 'bg-emerald-50 border-emerald-300 text-emerald-900'
-                            }`}
-                          >
-                            {dleft} day(s) left
-                          </span>
-                        )}
-                        {expired && (
-                          <span className="text-[11px] px-2 py-0.5 rounded-2xl border bg-rose-50 border-rose-300 text-rose-900">
-                            expired
-                          </span>
-                        )}
-                        {isFrozen && (
-                          <span className="text-[11px] px-2 py-0.5 rounded-2xl border bg-sky-50 border-sky-300 text-sky-900">
-                            frozen{typeof freezeDays === 'number' ? ` (${freezeDays}d)` : ''}
-                          </span>
-                        )}
-                        {isSessions && (
-                          <span
-                            className={`text-[11px] px-2 py-0.5 rounded-2xl border ${
-                              remaining <= 2
-                                ? 'bg-amber-50 border-amber-300 text-amber-900'
-                                : 'bg-emerald-50 border-emerald-300 text-emerald-900'
-                            }`}
-                          >
-                            {remaining} left
-                          </span>
-                        )}
-                      </div>
-
-                      {canManageSubscriptions ? (
-                        <div className="flex flex-wrap items-center justify-end gap-2 border-t border-[hsl(var(--border))] pt-3">
-                          <SubscriptionManageRowActions sub={s} />
-                        </div>
+                return (
+                  <div key={s.id} className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4 shadow-soft">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <TinyBadge>{humanPlan(s.plan)}</TinyBadge>
+                      <TinyBadge tone={String(s.status ?? '').toLowerCase() === 'active' ? 'success' : expired ? 'danger' : 'neutral'}>
+                        {s.status ?? '—'}
+                      </TinyBadge>
+                      {left !== null && left >= 0 && !isSessions && !frozen ? (
+                        <TinyBadge tone={left <= 7 ? 'warning' : 'success'}>{left} day(s) left</TinyBadge>
                       ) : null}
+                      {frozen ? <TinyBadge tone="warning">Frozen until {fmtDate(s.frozen_until)}</TinyBadge> : null}
+                      {isSessions ? <TinyBadge tone={remaining <= 2 ? 'warning' : 'success'}>{remaining} left</TinyBadge> : null}
+                      {due > 0 ? <TinyBadge tone="warning">Due {fmtMoneyEGP(due)}</TinyBadge> : null}
                     </div>
-                  )
-                })}
-              </div>
 
-              {/* Desktop table */}
-              <div className="hidden sm:block overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead className="text-[hsl(var(--muted))]">
-                    <tr className="border-b border-[hsl(var(--border))]">
-                      <th className="text-left px-3 py-2">Plan</th>
-                      <th className="text-left px-3 py-2">Status</th>
-                      <th className="text-left px-3 py-2">Start</th>
-                      <th className="text-left px-3 py-2">End</th>
-                      <th className="text-left px-3 py-2">Sessions</th>
-                      <th className="text-left px-3 py-2">Paid</th>
-                      <th className="text-left px-3 py-2">Payment</th>
-                      <th className="text-left px-3 py-2">Due</th>
-                      <th className="text-left px-3 py-2">Paid at</th>
-                      <th className="text-left px-3 py-2">Badges</th>
-                      {canManageSubscriptions && <th className="text-left px-3 py-2">Actions</th>}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {(subs ?? []).map((s) => {
-                      const isSessions = s.plan === 'sessions'
-                      const isTime = !isSessions
-                      const remaining = Math.max((s.sessions_total ?? 0) - (s.sessions_used ?? 0), 0)
-                      const dleft = daysLeft(s.end_date)
-                      const soon = isTime && dleft !== null && dleft <= 7 && dleft >= 0
-                      const expired = s.status === 'expired' || (isTime && (dleft ?? -999) < 0)
+                    <div className="mt-4 grid gap-3 text-sm md:grid-cols-2 xl:grid-cols-4">
+                      <div>
+                        <div className="text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Start</div>
+                        <div className="mt-1 font-medium">{fmtDate(s.start_date)}</div>
+                      </div>
+                      <div>
+                        <div className="text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">End</div>
+                        <div className="mt-1 font-medium">{isSessions ? '—' : fmtDate(s.end_date)}</div>
+                      </div>
+                      <div>
+                        <div className="text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Paid</div>
+                        <div className="mt-1 font-medium">{fmtMoneyEGP(s.amount ?? 0)}</div>
+                      </div>
+                      <div>
+                        <div className="text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Payment</div>
+                        <div className="mt-1 font-medium">{humanPayment(s.payment_method)}</div>
+                      </div>
+                      <div>
+                        <div className="text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Paid at</div>
+                        <div className="mt-1 font-medium">{fmtDate(s.paid_at)}</div>
+                      </div>
+                      <div>
+                        <div className="text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Outstanding due</div>
+                        <div className="mt-1 font-medium">{due > 0 ? fmtMoneyEGP(due) : 'No due'}</div>
+                      </div>
+                      <div>
+                        <div className="text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Sessions</div>
+                        <div className="mt-1 font-medium">
+                          {isSessions ? `${s.sessions_used ?? 0}/${s.sessions_total ?? 0} used` : '—'}
+                        </div>
+                      </div>
+                      <div>
+                        <div className="text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Invoice state</div>
+                        <div className="mt-1 font-medium">{due > 0 ? 'Partially paid / due left' : 'Settled'}</div>
+                      </div>
+                    </div>
 
-                      const today = todayDateOnlyUTC()
-                      // Freeze logic (controlled range):
-                      // - If frozen_from exists: frozen when today >= frozen_from AND today < frozen_until (exclusive end)
-                      // - Legacy: if only frozen_until exists: frozen when today < frozen_until
-                      const isFrozen =
-                        isTime &&
-                        !!(
-                          s.frozen_until &&
-                          (s.frozen_from
-                            ? today >= s.frozen_from && today < s.frozen_until
-                            : today < s.frozen_until)
-                        )
-                      const freezeDays = isFrozen
-                        ? Math.max(
-                            0,
-                            Math.floor(
-                              (new Date(`${s.frozen_until}T00:00:00Z`).getTime() -
-                                new Date(`${today}T00:00:00Z`).getTime()) /
-                                86400000,
-                            ),
-                          )
-                        : null
-
-                      return (
-                        <tr key={s.id} className="border-t border-[hsl(var(--border))]">
-                          <td className="px-3 py-2">{humanPlan(s.plan)}</td>
-                          <td className="px-3 py-2">{s.status ?? '—'}</td>
-                          <td className="px-3 py-2">{fmtDate(s.start_date)}</td>
-                          <td className="px-3 py-2">{fmtDate(s.end_date)}</td>
-                          <td className="px-3 py-2">
-                            {isSessions
-                              ? `${s.sessions_used ?? 0}/${s.sessions_total ?? 0} (left ${remaining})`
-                              : '—'}
-                          </td>
-                          <td className="px-3 py-2">{s.amount ?? 0}</td>
-                          <td className="px-3 py-2">{humanPayment(s.payment_method)}</td>
-                          <td className="px-3 py-2">{Number(s.amount_due ?? 0) || 0}</td>
-                          <td className="px-3 py-2">{fmtDate(s.paid_at)}</td>
-                          <td className="px-3 py-2">
-                            <div className="flex flex-wrap gap-1">
-                              {isTime && typeof dleft === 'number' && dleft >= 0 && (
-                                <span
-                                  className={`text-[11px] px-2 py-0.5 rounded-2xl border ${
-                                    soon
-                                      ? 'bg-amber-50 border-amber-300 text-amber-900'
-                                      : 'bg-emerald-50 border-emerald-300 text-emerald-900'
-                                  }`}
-                                >
-                                  {dleft} day(s) left
-                                </span>
-                              )}
-                              {expired && (
-                                <span className="text-[11px] px-2 py-0.5 rounded-2xl border bg-rose-50 border-rose-300 text-rose-900">
-                                  expired
-                                </span>
-                              )}
-                              {isFrozen && (
-                                <span className="text-[11px] px-2 py-0.5 rounded-2xl border bg-sky-50 border-sky-300 text-sky-900">
-                                  frozen{typeof freezeDays === 'number' ? ` (${freezeDays}d)` : ''}
-                                </span>
-                              )}
-                              {isSessions && (
-                                <span
-                                  className={`text-[11px] px-2 py-0.5 rounded-2xl border ${
-                                    remaining <= 2
-                                      ? 'bg-amber-50 border-amber-300 text-amber-900'
-                                      : 'bg-emerald-50 border-emerald-300 text-emerald-900'
-                                  }`}
-                                >
-                                  {remaining} left
-                                </span>
-                              )}
-                            </div>
-                          </td>
-                          {canManageSubscriptions && (
-                            <td className="px-3 py-2">
-                              <SubscriptionManageRowActions sub={s} />
-                            </td>
-                          )}
-                        </tr>
-                      )
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            </>
+                    {canManageSubscriptions && viewedRole === 'member' ? (
+                      <div className="mt-4 border-t border-[hsl(var(--border))] pt-4">
+                        <SubscriptionManageRowActions sub={s} />
+                      </div>
+                    ) : null}
+                  </div>
+                )
+              })}
+            </div>
           )}
-        </section>
+        </Surface>
 
-        {/* Attendance (staff only) */}
-        {isStaff ? (
-          <section className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-5 shadow-soft">
-            <h2 className="font-semibold">Attendance (last 30 days)</h2>
-            {(attendance ?? []).length === 0 ? (
-              <div className="mt-2 text-sm text-[hsl(var(--muted))]">No attendance.</div>
+        {canViewAttendance ? (
+          <Surface className="p-4 sm:p-5">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <h2 className="text-base font-semibold tracking-tight">Attendance · last 30 days</h2>
+                <p className="mt-1 text-sm text-[hsl(var(--muted))]">Recent check-ins shown in compact cards for phone and tablet.</p>
+              </div>
+              <TinyBadge>{attendance.length} record(s)</TinyBadge>
+            </div>
+
+            {attendance.length === 0 ? (
+              <div className="mt-4 rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] px-4 py-3 text-sm text-[hsl(var(--muted))]">
+                No attendance in the last 30 days.
+              </div>
             ) : (
-              <div className="mt-2 overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead className="text-[hsl(var(--muted))]">
-                    <tr className="border-b border-[hsl(var(--border))]">
-                      <th className="text-left px-3 py-2">Date</th>
-                      <th className="text-left px-3 py-2">Valid</th>
-                      <th className="text-left px-3 py-2">From sessions</th>
-                      <th className="text-left px-3 py-2">Plan</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {(attendance ?? []).map((a) => (
-                      <tr key={a.id} className="border-t border-[hsl(var(--border))]">
-                        <td className="px-3 py-2">{fmtDate(a.date)}</td>
-                        <td className="px-3 py-2">
-                          <span
-                            className={`text-[11px] px-2 py-0.5 rounded-2xl border ${
-                              a.valid
-                                ? 'bg-emerald-50 border-emerald-300 text-emerald-900'
-                                : 'bg-rose-50 border-rose-300 text-rose-900'
-                            }`}
-                          >
-                            {a.valid ? 'valid' : 'invalid'}
-                          </span>
-                        </td>
-                        <td className="px-3 py-2">{a.from_sessions ? 'yes' : 'no'}</td>
-                        <td className="px-3 py-2">
-                          {a.subscription_id ? humanPlan(subPlanById.get(a.subscription_id) ?? null) : '—'}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+              <div className="mt-4 grid gap-3">
+                {attendance.map((a) => (
+                  <div key={a.id} className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4 shadow-soft">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <TinyBadge tone={a.valid ? 'success' : 'danger'}>{a.valid ? 'Valid' : 'Invalid'}</TinyBadge>
+                      <TinyBadge>{a.from_sessions ? 'From sessions' : 'From time plan'}</TinyBadge>
+                    </div>
+
+                    <div className="mt-4 grid gap-3 text-sm md:grid-cols-3">
+                      <div>
+                        <div className="text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Date</div>
+                        <div className="mt-1 font-medium">{fmtDate(a.date)}</div>
+                      </div>
+                      <div>
+                        <div className="text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Plan</div>
+                        <div className="mt-1 font-medium">{a.subscription_id ? humanPlan(subPlanById.get(a.subscription_id) ?? null) : '—'}</div>
+                      </div>
+                      <div>
+                        <div className="text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Source</div>
+                        <div className="mt-1 font-medium">{a.from_sessions ? 'Sessions balance' : 'Time membership'}</div>
+                      </div>
+                    </div>
+                  </div>
+                ))}
               </div>
             )}
-          </section>
+          </Surface>
         ) : null}
       </Section>
     </main>
   )
 }
-
