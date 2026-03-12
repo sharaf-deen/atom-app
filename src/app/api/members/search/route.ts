@@ -1,10 +1,11 @@
 // src/app/api/members/search/route.ts
-import { NextResponse } from 'next/server'
-import { createSupabaseRSC } from '@/lib/supabaseServer'
-import { getSessionUser, type Role } from '@/lib/session'
-
+export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
+
+import { NextResponse } from 'next/server'
+import { getSessionUser, type Role } from '@/lib/session'
+import { createSupabaseAdminClient } from '@/lib/supabaseAdmin'
 
 type MemberRow = {
   user_id: string
@@ -51,12 +52,19 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-
 
 export async function GET(req: Request) {
   const me = await getSessionUser()
+
   if (!me) {
-    return NextResponse.json({ ok: false, error: 'NOT_AUTHENTICATED' }, { status: 401, headers: { 'Cache-Control': 'no-store' } })
+    return NextResponse.json(
+      { ok: false, error: 'NOT_AUTHENTICATED' },
+      { status: 401, headers: { 'Cache-Control': 'no-store' } },
+    )
   }
 
   if (!ALLOWED.includes(me.role)) {
-    return NextResponse.json({ ok: false, error: 'FORBIDDEN' }, { status: 403, headers: { 'Cache-Control': 'no-store' } })
+    return NextResponse.json(
+      { ok: false, error: 'FORBIDDEN' },
+      { status: 403, headers: { 'Cache-Control': 'no-store' } },
+    )
   }
 
   const { searchParams } = new URL(req.url)
@@ -71,10 +79,10 @@ export async function GET(req: Request) {
   const to = from + limit - 1
 
   try {
-    const supabase = createSupabaseRSC()
+    const admin = createSupabaseAdminClient()
     const today = new Date().toISOString().slice(0, 10)
 
-    let qb = supabase
+    let qb = admin
       .from('profiles')
       .select(
         `
@@ -88,7 +96,7 @@ export async function GET(req: Request) {
         member_id,
         date_of_birth
       `,
-        { count: 'exact', head: false },
+        { count: 'exact' },
       )
       .eq('role', 'member')
       .order('created_at', { ascending: false })
@@ -99,15 +107,14 @@ export async function GET(req: Request) {
         `first_name.ilike.%${q}%`,
         `last_name.ilike.%${q}%`,
         `member_id.ilike.%${q}%`,
-        `phone.ilike.%${q}%`,
       ]
 
       if (me.role !== 'coach') {
         ors.push(`email.ilike.%${q}%`)
-      }
-
-      if (qDigits.length >= 4) {
-        ors.push(`phone_digits.ilike.%${qDigits}%`)
+        ors.push(`phone.ilike.%${q}%`)
+        if (qDigits.length >= 4) {
+          ors.push(`phone_digits.ilike.%${qDigits}%`)
+        }
       }
 
       if (UUID_RE.test(q)) {
@@ -118,38 +125,49 @@ export async function GET(req: Request) {
     }
 
     const { data, error, count } = await qb
+
     if (error) {
-      return NextResponse.json({ ok: false, error: error.message }, { status: 400, headers: { 'Cache-Control': 'no-store' } })
+      return NextResponse.json(
+        { ok: false, error: error.message },
+        { status: 400, headers: { 'Cache-Control': 'no-store' } },
+      )
     }
 
-    const items: MemberRow[] =
-      (data ?? []).map((r: any) => ({
-        user_id: r.user_id,
-        email: me.role === 'coach' ? null : r.email ?? null,
-        first_name: r.first_name ?? null,
-        last_name: r.last_name ?? null,
-        phone: me.role === 'coach' ? null : r.phone ?? null,
-        role: (r.role ?? null) as Role | null,
-        created_at: r.created_at ?? null,
-        member_id: r.member_id ?? null,
-        date_of_birth: r.date_of_birth ?? null,
-      })) ?? []
+    const items: MemberRow[] = (data ?? []).map((r: any) => ({
+      user_id: r.user_id,
+      email: me.role === 'coach' ? null : r.email ?? null,
+      first_name: r.first_name ?? null,
+      last_name: r.last_name ?? null,
+      phone: me.role === 'coach' ? null : r.phone ?? null,
+      role: (r.role ?? null) as Role | null,
+      created_at: r.created_at ?? null,
+      member_id: r.member_id ?? null,
+      date_of_birth: r.date_of_birth ?? null,
+    }))
 
     const ids = items.map((i) => i.user_id).filter(Boolean)
+
     if (ids.length > 0) {
-      const { data: subs, error: subsError } = await supabase
+      const { data: subs, error: subsError } = await admin
         .from('subscriptions')
-        .select('member_id, end_date, status, subscription_type, frozen_from, frozen_until, sessions_total, sessions_used')
+        .select(
+          'member_id, end_date, status, subscription_type, frozen_from, frozen_until, sessions_total, sessions_used'
+        )
         .eq('status', 'active')
         .in('member_id', ids)
 
       if (!subsError) {
         const activeSet = new Set<string>()
+
         for (const s of subs ?? []) {
           const mid = (s as any)?.member_id as string | null
           if (!mid) continue
 
-          const subscriptionType = ((s as any)?.subscription_type ?? (((s as any)?.end_date ? 'time' : 'sessions'))) as 'time' | 'sessions'
+          const subscriptionType = (
+            (s as any)?.subscription_type ??
+            ((s as any)?.end_date ? 'time' : 'sessions')
+          ) as 'time' | 'sessions'
+
           if (subscriptionType === 'time') {
             const endDate = (s as any)?.end_date as string | null
             if (!endDate || endDate < today) continue
@@ -170,8 +188,14 @@ export async function GET(req: Request) {
       }
     }
 
-    return NextResponse.json({ ok: true, items, page, limit, total: count ?? null }, { headers: { 'Cache-Control': 'no-store' } })
+    return NextResponse.json(
+      { ok: true, items, page, limit, total: count ?? null },
+      { headers: { 'Cache-Control': 'no-store' } },
+    )
   } catch (e: any) {
-    return NextResponse.json({ ok: false, error: String(e?.message || e) }, { status: 500, headers: { 'Cache-Control': 'no-store' } })
+    return NextResponse.json(
+      { ok: false, error: String(e?.message || e) },
+      { status: 500, headers: { 'Cache-Control': 'no-store' } },
+    )
   }
 }
