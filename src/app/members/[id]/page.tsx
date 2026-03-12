@@ -660,3 +660,4 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
     </main>
   )
 }
+

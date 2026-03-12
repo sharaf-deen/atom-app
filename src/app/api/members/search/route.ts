@@ -1,11 +1,11 @@
 // src/app/api/members/search/route.ts
 import { NextResponse } from 'next/server'
 import { createSupabaseRSC } from '@/lib/supabaseServer'
+import { getSessionUser, type Role } from '@/lib/session'
 
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
-type Role = 'member' | 'assistant_coach' | 'coach' | 'reception' | 'admin' | 'super_admin'
 type MemberRow = {
   user_id: string
   email: string | null
@@ -18,6 +18,8 @@ type MemberRow = {
   date_of_birth: string | null
   is_active?: boolean | null
 }
+
+const ALLOWED: Role[] = ['coach', 'assistant_coach', 'reception', 'admin', 'super_admin']
 
 function isISODateOnly(s?: string | null) {
   return !!s && /^\d{4}-\d{2}-\d{2}$/.test(s)
@@ -40,18 +42,27 @@ function isFrozenNow(sub: {
 function normalizeQ(raw: string | null): string {
   return (raw ?? '').trim()
 }
+
 function digitsOnly(s: string): string {
   return s.replace(/\D+/g, '')
 }
-const UUID_RE =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
 export async function GET(req: Request) {
+  const me = await getSessionUser()
+  if (!me) {
+    return NextResponse.json({ ok: false, error: 'NOT_AUTHENTICATED' }, { status: 401, headers: { 'Cache-Control': 'no-store' } })
+  }
+
+  if (!ALLOWED.includes(me.role)) {
+    return NextResponse.json({ ok: false, error: 'FORBIDDEN' }, { status: 403, headers: { 'Cache-Control': 'no-store' } })
+  }
+
   const { searchParams } = new URL(req.url)
   const q = normalizeQ(searchParams.get('q'))
   const qDigits = digitsOnly(q)
 
-  // Pagination
   const limitParam = Number(searchParams.get('limit') || 50)
   const pageParam = Number(searchParams.get('page') || 1)
   const limit = Math.min(Math.max(limitParam, 1), 200)
@@ -61,9 +72,8 @@ export async function GET(req: Request) {
 
   try {
     const supabase = createSupabaseRSC()
-    const today = new Date().toISOString().slice(0, 10) // 'YYYY-MM-DD'
+    const today = new Date().toISOString().slice(0, 10)
 
-    // ⚠️ Filtre RÔLE: on force 'member'
     let qb = supabase
       .from('profiles')
       .select(
@@ -94,7 +104,6 @@ export async function GET(req: Request) {
       ]
 
       if (qDigits.length >= 4) {
-        // Utilise la colonne normalisée si tu l'as créée
         ors.push(`phone_digits.ilike.%${qDigits}%`)
       }
 
@@ -123,14 +132,12 @@ export async function GET(req: Request) {
         date_of_birth: r.date_of_birth ?? null,
       })) ?? []
 
-    // Compute active flag for the returned items only (fast)
     const ids = items.map((i) => i.user_id).filter(Boolean)
     if (ids.length > 0) {
       const { data: subs, error: subsError } = await supabase
         .from('subscriptions')
-        .select('member_id, end_date, status, subscription_type, frozen_from, frozen_until')
+        .select('member_id, end_date, status, subscription_type, frozen_from, frozen_until, sessions_total, sessions_used')
         .eq('status', 'active')
-        .gte('end_date', today)
         .in('member_id', ids)
 
       if (!subsError) {
@@ -138,9 +145,21 @@ export async function GET(req: Request) {
         for (const s of subs ?? []) {
           const mid = (s as any)?.member_id as string | null
           if (!mid) continue
-          if (isFrozenNow(s as any, today)) continue
-          activeSet.add(mid)
+
+          const subscriptionType = ((s as any)?.subscription_type ?? (((s as any)?.end_date ? 'time' : 'sessions'))) as 'time' | 'sessions'
+          if (subscriptionType === 'time') {
+            const endDate = (s as any)?.end_date as string | null
+            if (!endDate || endDate < today) continue
+            if (isFrozenNow(s as any, today)) continue
+            activeSet.add(mid)
+            continue
+          }
+
+          const total = Number((s as any)?.sessions_total ?? 0)
+          const used = Number((s as any)?.sessions_used ?? 0)
+          if (Math.max(total - used, 0) > 0) activeSet.add(mid)
         }
+
         for (const it of items) it.is_active = activeSet.has(it.user_id)
       } else {
         console.error('Error fetching subscriptions (search active flag):', subsError)
