@@ -1,7 +1,6 @@
 'use client'
 
 import { useMemo, useState } from 'react'
-import Link from 'next/link'
 import Button from '@/components/ui/Button'
 import Input from '@/components/ui/Input'
 
@@ -102,12 +101,14 @@ function AgeBadge({ dob }: { dob?: string | null }) {
 
 export default function HomeMemberLookup({
   title = 'Quick member lookup',
-  subtitle = 'Search a member by name, email, phone or member ID.',
+  subtitle = 'Search a member by name, member ID or phone.',
   canOpenProfile = false,
+  showSensitiveFields = true,
 }: {
   title?: string
   subtitle?: string
   canOpenProfile?: boolean
+  showSensitiveFields?: boolean
 }) {
   const [q, setQ] = useState('')
   const [loading, setLoading] = useState(false)
@@ -233,14 +234,19 @@ export default function HomeMemberLookup({
                 </div>
 
                 <div className="mt-3 grid gap-1 text-[13px]">
-                  <div className="flex items-start justify-between gap-3">
-                    <span className="text-[11px] font-medium text-[hsl(var(--muted))]">Phone</span>
-                    <span className="min-w-0 text-right font-medium break-words whitespace-normal">{m.phone ?? '—'}</span>
-                  </div>
-                  <div className="flex items-start justify-between gap-3">
-                    <span className="text-[11px] font-medium text-[hsl(var(--muted))]">Email</span>
-                    <span className="min-w-0 text-right font-medium break-words whitespace-normal">{m.email ?? '—'}</span>
-                  </div>
+                  {showSensitiveFields ? (
+                    <>
+                      <div className="flex items-start justify-between gap-3">
+                        <span className="text-[11px] font-medium text-[hsl(var(--muted))]">Phone</span>
+                        <span className="min-w-0 text-right font-medium break-words whitespace-normal">{m.phone ?? '—'}</span>
+                      </div>
+                      <div className="flex items-start justify-between gap-3">
+                        <span className="text-[11px] font-medium text-[hsl(var(--muted))]">Email</span>
+                        <span className="min-w-0 text-right font-medium break-words whitespace-normal">{m.email ?? '—'}</span>
+                      </div>
+                    </>
+                  ) : null}
+
                   <div className="flex items-start justify-between gap-3">
                     <span className="text-[11px] font-medium text-[hsl(var(--muted))]">Joined</span>
                     <span className="font-medium">{fmtDate(m.created_at)}</span>
@@ -249,10 +255,8 @@ export default function HomeMemberLookup({
 
                 {canOpenProfile ? (
                   <div className="mt-3 border-t border-[hsl(var(--border))] pt-3">
-                    <Button asChild variant="outline" size="sm">
-                      <Link prefetch={false} href={`/members/${m.user_id}`}>
-                        Open profile
-                      </Link>
+                    <Button asChild href={`/members/${m.user_id}`} variant="outline" size="sm">
+                      Open profile
                     </Button>
                   </div>
                 ) : null}
