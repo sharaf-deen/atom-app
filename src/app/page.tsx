@@ -5,23 +5,26 @@ export const revalidate = 0
 import type React from 'react'
 import Link from 'next/link'
 import Image from 'next/image'
-import { getSessionUser, type Role } from '@/lib/session'
 import { createSupabaseRSC } from '@/lib/supabaseServer'
+import { getSessionUser, type Role } from '@/lib/session'
+import { addDays, cairoToday, diffDays } from '@/lib/cairoDate'
 import HomeNotificationsTile from '@/components/HomeNotificationsTile'
-
-// Lucide icons
+import QrImage from '@/components/QrImage'
+import HomeMemberLookup from '@/components/home/HomeMemberLookup'
 import {
-  LayoutDashboard,
+  ArrowRight,
   Bell,
+  CalendarDays,
+  CreditCard,
   Gift,
   IdCard,
+  LayoutDashboard,
+  Receipt,
   ScanLine,
-  Users,
-  UserCog,
   ShoppingBag,
+  UserCog,
+  Users,
   Wallet,
-  CalendarDays,
-  FileText,
 } from 'lucide-react'
 
 type SessionUser = {
@@ -31,11 +34,169 @@ type SessionUser = {
   first_name?: string | null
   last_name?: string | null
   id_photo_path?: string | null
+  member_id?: string | null
+  qr_code?: string | null
+}
+
+type ProfileLite = {
+  member_id: string | null
+  qr_code: string | null
+  id_photo_path: string | null
+  created_at: string | null
+}
+
+type SubscriptionLite = {
+  id: string
+  plan: '1m' | '3m' | '6m' | '12m' | 'sessions' | null
+  subscription_type: 'time' | 'sessions' | null
+  status: 'active' | 'expired' | 'canceled' | 'paused' | string | null
+  start_date: string | null
+  end_date: string | null
+  frozen_from: string | null
+  frozen_until: string | null
+  sessions_total: number | null
+  sessions_used: number | null
+  amount_due: number | null
+  paid_at: string | null
+}
+
+type MembershipSnapshot = {
+  tone: 'success' | 'warning' | 'neutral'
+  eyebrow: string
+  title: string
+  meta: string
+  extra?: string | null
+}
+
+type OpsKpis = {
+  activeCount: number
+  expiring7Count: number
+  scansToday: number
+  outstandingCount: number
+  outstandingTotal: number
+}
+
+type IconType = React.ComponentType<{ size?: number | string; strokeWidth?: number | string; className?: string }>
+
+type QuickAction = {
+  href: string
+  label: string
+  desc: string
+  icon: IconType
 }
 
 function humanizeRole(role: string) {
   const s = role.replace(/_/g, ' ')
   return s.charAt(0).toUpperCase() + s.slice(1)
+}
+
+function fmtDate(d?: string | null) {
+  if (!d) return '—'
+  const dt = d.length === 10 ? new Date(`${d}T00:00:00Z`) : new Date(d)
+  if (Number.isNaN(dt.getTime())) return d
+  return new Intl.DateTimeFormat('en-GB', { year: 'numeric', month: 'short', day: '2-digit' }).format(dt)
+}
+
+function fmtMoneyEGP(v: number) {
+  const n = Number(v ?? 0)
+  if (!Number.isFinite(n)) return '0 EGP'
+  try {
+    return new Intl.NumberFormat('en-EG', { style: 'currency', currency: 'EGP' }).format(n)
+  } catch {
+    return `${n.toFixed(0)} EGP`
+  }
+}
+
+function humanPlan(p?: SubscriptionLite['plan']) {
+  switch (p) {
+    case '1m':
+      return '1 month'
+    case '3m':
+      return '3 months'
+    case '6m':
+      return '6 months'
+    case '12m':
+      return '12 months'
+    case 'sessions':
+      return 'Sessions'
+    default:
+      return 'Membership'
+  }
+}
+
+function isFrozenNow(sub: Pick<SubscriptionLite, 'subscription_type' | 'frozen_from' | 'frozen_until'>, today: string) {
+  const st = (sub.subscription_type ?? 'time') as 'time' | 'sessions'
+  if (st !== 'time') return false
+  const until = sub.frozen_until
+  if (!until) return false
+  const from = sub.frozen_from
+  return from ? today >= from && today < until : today < until
+}
+
+function buildMembershipSnapshot(subs: SubscriptionLite[], today: string): MembershipSnapshot {
+  const activeTime = subs.find((s) => {
+    if (s.status !== 'active') return false
+    if ((s.subscription_type ?? 'time') !== 'time') return false
+    if (!s.end_date || s.end_date < today) return false
+    if (isFrozenNow(s, today)) return false
+    return true
+  })
+
+  if (activeTime) {
+    const daysLeft = activeTime.end_date ? diffDays(today, activeTime.end_date) : null
+    const due = Number(activeTime.amount_due ?? 0)
+    return {
+      tone: daysLeft !== null && daysLeft <= 7 ? 'warning' : 'success',
+      eyebrow: daysLeft !== null && daysLeft <= 7 ? 'Needs attention soon' : 'Active membership',
+      title: humanPlan(activeTime.plan),
+      meta:
+        daysLeft === null
+          ? 'Membership active'
+          : daysLeft === 0
+            ? 'Ends today'
+            : `${daysLeft} day(s) left · ends ${fmtDate(activeTime.end_date)}`,
+      extra: due > 0 ? `Amount due: ${fmtMoneyEGP(due)}` : null,
+    }
+  }
+
+  const activeSessions = subs.find((s) => {
+    if (s.status !== 'active') return false
+    if ((s.subscription_type ?? (s.plan === 'sessions' ? 'sessions' : 'time')) !== 'sessions') return false
+    const remaining = Math.max(Number(s.sessions_total ?? 0) - Number(s.sessions_used ?? 0), 0)
+    return remaining > 0
+  })
+
+  if (activeSessions) {
+    const remaining = Math.max(Number(activeSessions.sessions_total ?? 0) - Number(activeSessions.sessions_used ?? 0), 0)
+    const total = Number(activeSessions.sessions_total ?? 0)
+    const due = Number(activeSessions.amount_due ?? 0)
+    return {
+      tone: remaining <= 2 ? 'warning' : 'success',
+      eyebrow: remaining <= 2 ? 'Low sessions left' : 'Sessions active',
+      title: `${remaining} session(s) left`,
+      meta: `${Math.max(total - remaining, 0)}/${total} used`,
+      extra: due > 0 ? `Amount due: ${fmtMoneyEGP(due)}` : null,
+    }
+  }
+
+  const latest = subs[0]
+  if (latest) {
+    return {
+      tone: 'neutral',
+      eyebrow: 'No active membership',
+      title: humanPlan(latest.plan),
+      meta: latest.end_date ? `Last ended ${fmtDate(latest.end_date)}` : `Last update ${fmtDate(latest.paid_at)}`,
+      extra: Number(latest.amount_due ?? 0) > 0 ? `Amount due: ${fmtMoneyEGP(Number(latest.amount_due ?? 0))}` : null,
+    }
+  }
+
+  return {
+    tone: 'neutral',
+    eyebrow: 'No subscription yet',
+    title: 'Membership not started',
+    meta: 'Contact reception to create or renew a subscription.',
+    extra: null,
+  }
 }
 
 async function getDisplayName(u: SessionUser): Promise<string> {
@@ -56,275 +217,584 @@ async function getDisplayName(u: SessionUser): Promise<string> {
       if (data.email) return data.email
     }
   } catch {}
+
   return u.email ?? humanizeRole(u.role)
 }
 
-type IconType = React.ComponentType<{ size?: number | string; strokeWidth?: number | string; className?: string }>
-type MenuItem = { label: string; href: string; desc?: string; icon: IconType }
-type Section = { title: string; items: MenuItem[] }
-type GroupedMenuByRole = Record<Role, Section[]>
+async function getUnreadNotificationsCount(userId: string) {
+  const supabase = createSupabaseRSC()
+  const { count } = await supabase
+    .from('notifications')
+    .select('id', { count: 'exact', head: true })
+    .eq('user_id', userId)
+    .is('read_at', null)
+    .is('deleted_for_user_at', null)
 
-/** Menus groupés par sections */
-const MENU_BY_ROLE: GroupedMenuByRole = {
-  member: [
-    {
-      title: 'My space',
-      items: [
-        { label: 'My Profile', href: '/profile', icon: IdCard },
-        { label: 'Notifications', href: '/notifications', icon: Bell },
-        { label: 'Schedule', href: '/schedule', icon: CalendarDays },
-        { label: 'Store', href: '/store', icon: ShoppingBag },
-        { label: 'Packages & Promos', href: '/packages-and-promos', icon: Gift },
-      ],
-    },
-    { title: 'Support', items: [{ label: 'Contact Admin', href: '/contact', icon: UserCog }] },
-  ],
-  assistant_coach: [
-    {
-      title: 'Coach tools',
-      items: [
-        { label: 'My Profile', href: '/profile', icon: IdCard },
-        { label: 'Notifications', href: '/notifications', icon: Bell },
-        { label: 'Schedule', href: '/schedule', icon: CalendarDays },
-        { label: 'Store', href: '/store', icon: ShoppingBag },
-        { label: 'Packages & Promos', href: '/packages-and-promos', icon: Gift },
-      ],
-    },
-  ],
-  coach: [
-    {
-      title: 'Coach tools',
-      items: [
-        { label: 'My Profile', href: '/profile', icon: IdCard },
-        { label: 'Notifications', href: '/notifications', icon: Bell },
-        { label: 'Schedule', href: '/schedule', icon: CalendarDays },
-        { label: 'Store', href: '/store', icon: ShoppingBag },
-        { label: 'Packages & Promos', href: '/packages-and-promos', icon: Gift },
-      ],
-    },
-  ],
-  reception: [
-    {
-      title: 'Front desk',
-      items: [
-        { label: 'Schedule', href: '/schedule', icon: CalendarDays },
-        { label: 'Membership', href: '/kiosk', icon: IdCard },
-        { label: 'Scan', href: '/scan', icon: ScanLine },
-        { label: 'Members', href: '/members', icon: Users },
-        { label: 'Packages & Promos', href: '/packages-and-promos', icon: Gift },
-      ],
-    },
-    {
-      title: 'Store',
-      items: [{ label: 'Store', href: '/store', icon: ShoppingBag }],
-    },
-  ],
-  admin: [
-    {
-      title: 'Overview',
-      items: [
-        { label: 'Dashboard', href: '/admin', icon: LayoutDashboard },
-        { label: 'Notifications', href: '/notifications', icon: Bell },
-        { label: 'Schedule', href: '/schedule', icon: CalendarDays },
-        { label: 'Attendance', href: '/admin/attendance', icon: CalendarDays },
-        { label: 'Scan Audit', href: '/admin/scan-audit', icon: FileText },
-      ],
-    },
-    {
-      title: 'Operations',
-      items: [
-        { label: 'Packages & Promos', href: '/packages-and-promos', icon: Gift },
-        { label: 'Membership', href: '/kiosk', icon: IdCard },
-        { label: 'Scan', href: '/scan', icon: ScanLine },
-        { label: 'Membership Activity', href: '/admin/membership-activity', icon: FileText },
-        { label: 'Expiring Soon', href: '/admin/expiring-soon', icon: Bell },
-      ],
-    },
-    {
-      title: 'People',
-      items: [
-        { label: 'Members', href: '/members', icon: Users },
-        { label: 'Coaches', href: '/coaches', icon: UserCog },
-      ],
-    },
-    {
-      title: 'Store & Finance',
-      items: [
-        { label: 'Store', href: '/store', icon: ShoppingBag },
-        { label: 'Invoices', href: '/invoices', icon: FileText },
-        { label: 'Payments', href: '/admin/payments', icon: FileText },
-        { label: 'Cash Report', href: '/admin/cash-report', icon: Wallet },
-        { label: 'Outstanding Dues', href: '/admin/outstanding-dues', icon: Wallet },
-        { label: 'Expenses', href: '/expenses', icon: Wallet },
-      ],
-    },
-  ],
-  super_admin: [
-    {
-      title: 'Overview',
-      items: [
-        { label: 'Dashboard', href: '/admin', icon: LayoutDashboard },
-        { label: 'Notifications', href: '/notifications', icon: Bell },
-        { label: 'Schedule', href: '/schedule', icon: CalendarDays },
-        { label: 'Attendance', href: '/admin/attendance', icon: CalendarDays },
-        { label: 'Scan Audit', href: '/admin/scan-audit', icon: FileText },
-
-      ],
-    },
-    {
-      title: 'Operations',
-      items: [
-        { label: 'Packages & Promos', href: '/packages-and-promos', icon: Gift },
-        { label: 'Membership', href: '/kiosk', icon: IdCard },
-        { label: 'Scan', href: '/scan', icon: ScanLine },
-        { label: 'Membership Activity', href: '/admin/membership-activity', icon: FileText },
-        { label: 'Expiring Soon', href: '/admin/expiring-soon', icon: Bell },
-      ],
-    },
-    {
-      title: 'People',
-      items: [
-        { label: 'Members', href: '/members', icon: Users },
-        { label: 'Coaches', href: '/coaches', icon: UserCog },
-      ],
-    },
-    {
-      title: 'Store & Finance',
-      items: [
-        { label: 'Store', href: '/store/admin', icon: ShoppingBag },
-        { label: 'Invoices', href: '/invoices', icon: FileText },
-        { label: 'Payments', href: '/admin/payments', icon: FileText },
-        { label: 'Cash Report', href: '/admin/cash-report', icon: Wallet },
-        { label: 'Outstanding Dues', href: '/admin/outstanding-dues', icon: Wallet },
-        { label: 'Expenses', href: '/expenses', icon: Wallet },
-      ],
-    },
-  ],
+  return count ?? 0
 }
 
-function SectionGrid({
-  section,
-  initialUnreadNotificationsCount = 0,
-}: {
-  section: Section
-  initialUnreadNotificationsCount?: number
-}) {
-  const items = section.items ?? []
-  if (!items.length) return null
-  return (
-    <div className="space-y-3">
-      <h2 className="text-sm font-semibold tracking-wide text-[hsl(var(--muted))]">{section.title}</h2>
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        {items.map((it) => {
-          if (it.href === '/notifications') {
-            return (
-              <HomeNotificationsTile
-                key={it.href}
-                href={it.href}
-                label={it.label}
-                desc={it.desc}
-                initialCount={initialUnreadNotificationsCount}
-              />
-            )
-          }
+async function getSignedAvatar(path?: string | null) {
+  if (!path) return ''
+  const supabase = createSupabaseRSC()
+  const { data } = await supabase.storage.from('id-photos').createSignedUrl(path, 60 * 10)
+  return data?.signedUrl || ''
+}
 
-          const Icon = it.icon
-          return (
-            <Link
-              key={it.href}
-              href={it.href}
-              className={
-                'group block rounded-2xl border border-[hsl(var(--border))] bg-white p-5 shadow-soft transition ease-soft hover:shadow-md hover:shadow-black/10 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2'
-              }
-            >
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <h3 className="text-lg font-semibold tracking-tight">{it.label}</h3>
-                </div>
-                <span
-                  aria-hidden
-                  className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-[hsl(var(--border))] transition group-hover:translate-x-0.5"
-                >
-                  <Icon size={18} strokeWidth={2.2} className="text-black" />
-                </span>
-              </div>
-              {it.desc && <p className="mt-1 text-sm text-[hsl(var(--muted))]">{it.desc}</p>}
-            </Link>
-          )
-        })}
-      </div>
+async function getProfileLite(userId: string): Promise<ProfileLite | null> {
+  const supabase = createSupabaseRSC()
+  const { data } = await supabase
+    .from('profiles')
+    .select('member_id, qr_code, id_photo_path, created_at')
+    .eq('user_id', userId)
+    .maybeSingle<ProfileLite>()
+
+  return data ?? null
+}
+
+async function getSubscriptionsLite(userId: string): Promise<SubscriptionLite[]> {
+  const supabase = createSupabaseRSC()
+  const { data } = await supabase
+    .from('subscriptions')
+    .select(
+      'id, plan, subscription_type, status, start_date, end_date, frozen_from, frozen_until, sessions_total, sessions_used, amount_due, paid_at'
+    )
+    .eq('member_id', userId)
+    .order('paid_at', { ascending: false })
+    .limit(20)
+
+  return (data ?? []) as SubscriptionLite[]
+}
+
+async function getOpsKpis(): Promise<OpsKpis> {
+  const supa = createSupabaseRSC()
+  const today = cairoToday()
+  const next7 = addDays(today, 7)
+
+  const [{ count: activeCount }, { count: expiring7Count }, scansRes] = await Promise.all([
+    supa
+      .from('subscriptions')
+      .select('id', { count: 'exact', head: true })
+      .eq('status', 'active')
+      .gte('end_date', today)
+      .or(`frozen_until.is.null,frozen_until.lt.${today}`),
+    supa
+      .from('subscriptions')
+      .select('id', { count: 'exact', head: true })
+      .eq('status', 'active')
+      .not('end_date', 'is', null)
+      .gte('end_date', today)
+      .lte('end_date', next7)
+      .or(`frozen_until.is.null,frozen_until.lt.${today}`),
+    supa.from('attendance').select('id', { count: 'exact', head: true }).eq('date', today),
+  ])
+
+  let outstandingCount = 0
+  let outstandingTotal = 0
+
+  try {
+    const { data, count } = await supa
+      .from('subscriptions')
+      .select('amount_due', { count: 'exact' })
+      .gt('amount_due', 0)
+      .not('member_id', 'is', null)
+      .limit(10000)
+
+    outstandingCount = count ?? (data?.length ?? 0)
+    outstandingTotal = (data ?? []).reduce((acc, row: any) => acc + Number(row?.amount_due ?? 0), 0)
+  } catch {
+    // ignore
+  }
+
+  return {
+    activeCount: activeCount ?? 0,
+    expiring7Count: expiring7Count ?? 0,
+    scansToday: scansRes?.count ?? 0,
+    outstandingCount,
+    outstandingTotal,
+  }
+}
+
+function toneClasses(tone: 'success' | 'warning' | 'neutral') {
+  if (tone === 'success') {
+    return {
+      badge: 'border-emerald-200 bg-emerald-50 text-emerald-700',
+      accent: 'text-emerald-700',
+    }
+  }
+
+  if (tone === 'warning') {
+    return {
+      badge: 'border-amber-200 bg-amber-50 text-amber-800',
+      accent: 'text-amber-800',
+    }
+  }
+
+  return {
+    badge: 'border-[hsl(var(--border))] bg-[hsl(var(--bg))] text-[hsl(var(--muted))]',
+    accent: 'text-black',
+  }
+}
+
+function Surface({ children, className = '' }: React.PropsWithChildren<{ className?: string }>) {
+  return <section className={`rounded-3xl border border-[hsl(var(--border))] bg-white shadow-soft ${className}`}>{children}</section>
+}
+
+function SectionTitle({ title, subtitle }: { title: string; subtitle?: string }) {
+  return (
+    <div className="flex flex-col gap-1">
+      <h2 className="text-base font-semibold tracking-tight">{title}</h2>
+      {subtitle ? <p className="text-sm text-[hsl(var(--muted))]">{subtitle}</p> : null}
     </div>
   )
 }
 
-export default async function HomePage() {
-  const user = (await getSessionUser()) as SessionUser | null
-  const displayName = user ? await getDisplayName(user) : null
-  const role: Role | null = user?.role ?? null
-  const grouped = role ? MENU_BY_ROLE[role] : []
+function RoleBadge({ role }: { role: Role }) {
+  return (
+    <span className="inline-flex items-center rounded-full border border-[hsl(var(--border))] bg-[hsl(var(--bg))] px-3 py-1 text-xs font-semibold text-[hsl(var(--muted))]">
+      {humanizeRole(role)}
+    </span>
+  )
+}
 
-  // Unread notifications count (for Home tile badge)
-  let unreadNotificationsCount = 0
-  if (user) {
-    const supabase = createSupabaseRSC()
-    const { count } = await supabase
-      .from('notifications')
-      .select('id', { count: 'exact', head: true })
-      .eq('user_id', user.id)
-      .is('read_at', null)
-      .is('deleted_for_user_at', null)
-    unreadNotificationsCount = count ?? 0
-  }
+function SummaryCard({
+  label,
+  value,
+  hint,
+  href,
+}: {
+  label: string
+  value: React.ReactNode
+  hint?: string
+  href?: string
+}) {
+  const inner = (
+    <Surface className="p-4 sm:p-5">
+      <div className="text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">{label}</div>
+      <div className="mt-2 text-2xl font-semibold tracking-tight">{value}</div>
+      {hint ? <div className="mt-2 text-sm text-[hsl(var(--muted))]">{hint}</div> : null}
+    </Surface>
+  )
 
-  // Avatar signé (RSC) — uniquement pour member / coach / assistant_coach
-  let signedAvatar = ''
-  const canShowAvatar =
-    !!user && ['member', 'coach', 'assistant_coach'].includes(user.role) && !!user.id_photo_path
+  if (!href) return inner
+  return (
+    <Link href={href} className="block rounded-3xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2">
+      {inner}
+    </Link>
+  )
+}
 
-  if (canShowAvatar && user?.id_photo_path) {
-    const supabase = createSupabaseRSC()
-    const { data } = await supabase.storage.from('id-photos').createSignedUrl(user.id_photo_path, 60 * 10)
-    signedAvatar = data?.signedUrl || ''
+function ActionCard({ href, label, desc, icon: Icon }: QuickAction) {
+  return (
+    <Link
+      href={href}
+      className="group block rounded-3xl border border-[hsl(var(--border))] bg-white p-4 shadow-soft transition hover:-translate-y-0.5 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="text-sm font-semibold tracking-tight">{label}</div>
+          <p className="mt-1 text-sm text-[hsl(var(--muted))]">{desc}</p>
+        </div>
+        <span className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] transition group-hover:translate-x-0.5">
+          <Icon size={18} strokeWidth={2.1} className="text-black" />
+        </span>
+      </div>
+    </Link>
+  )
+}
+
+function HeroCard({
+  displayName,
+  role,
+  avatarUrl,
+  memberId,
+  joinedAt,
+}: {
+  displayName: string
+  role: Role
+  avatarUrl?: string
+  memberId?: string | null
+  joinedAt?: string | null
+}) {
+  const roleCopy: Record<Role, string> = {
+    member: 'Everything important at a glance: membership, QR code and useful updates.',
+    coach: 'Fast access to your staff tools, QR code and member lookup.',
+    assistant_coach: 'Fast access to your staff tools, QR code and member lookup.',
+    reception: 'Built for quick actions at the front desk: scan, member creation and daily queues.',
+    admin: 'Daily operations first: members, finance, reporting and control.',
+    super_admin: 'Full operational overview with direct access to all critical areas.',
   }
 
   return (
-    <main className="min-h-[calc(100vh-3rem)] bg-white text-black">
-      <section className="mx-auto max-w-6xl px-4 py-8 space-y-6">
-        {user ? (
-          <>
-            {/* Header avec avatar au-dessus du rôle */}
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <h1 className="text-2xl font-semibold tracking-tight">Welcome, {displayName}</h1>
-                <p className="mt-1 text-sm text-[hsl(var(--muted))]">Choose a section to get started.</p>
-              </div>
+    <Surface className="overflow-hidden">
+      <div className="flex flex-col gap-5 p-5 sm:p-6 lg:flex-row lg:items-center lg:justify-between">
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <RoleBadge role={role} />
+            {memberId ? (
+              <span className="inline-flex items-center rounded-full border border-[hsl(var(--border))] bg-white px-3 py-1 text-xs font-medium text-[hsl(var(--muted))]">
+                Member ID: {memberId}
+              </span>
+            ) : null}
+          </div>
 
-              <div className="flex flex-col items-end gap-2">
-                {canShowAvatar && signedAvatar ? (
-                  <div className="relative h-24 w-24 sm:h-32 sm:w-32 lg:h-36 lg:w-36 overflow-hidden rounded-full border ring-1 ring-[hsl(var(--border))] bg-white shadow-soft">
-                    <Image src={signedAvatar} alt="Profile photo" fill className="object-cover" />
-                  </div>
-                ) : null}
-              </div>
+          <h1 className="mt-3 text-2xl font-semibold tracking-tight sm:text-3xl">Welcome, {displayName}</h1>
+          <p className="mt-2 max-w-2xl text-sm text-[hsl(var(--muted))] sm:text-base">{roleCopy[role]}</p>
+
+          {joinedAt ? (
+            <div className="mt-3 text-xs text-[hsl(var(--muted))]">Joined {fmtDate(joinedAt)}</div>
+          ) : null}
+        </div>
+
+        {avatarUrl ? (
+          <div className="relative h-24 w-24 overflow-hidden rounded-full border border-[hsl(var(--border))] bg-white ring-1 ring-[hsl(var(--border))] shadow-soft sm:h-28 sm:w-28 lg:h-32 lg:w-32">
+            <Image src={avatarUrl} alt="Profile photo" fill className="object-cover" />
+          </div>
+        ) : null}
+      </div>
+    </Surface>
+  )
+}
+
+function MembershipCard({ snapshot }: { snapshot: MembershipSnapshot }) {
+  const tone = toneClasses(snapshot.tone)
+
+  return (
+    <Surface className="p-4 sm:p-5">
+      <div className={`inline-flex rounded-full border px-2.5 py-1 text-[11px] font-semibold ${tone.badge}`}>{snapshot.eyebrow}</div>
+      <div className={`mt-3 text-xl font-semibold tracking-tight ${tone.accent}`}>{snapshot.title}</div>
+      <p className="mt-2 text-sm text-[hsl(var(--muted))]">{snapshot.meta}</p>
+      {snapshot.extra ? <p className="mt-2 text-sm font-medium text-black">{snapshot.extra}</p> : null}
+      <div className="mt-4 flex items-center gap-2 text-sm font-medium">
+        <Link href="/profile" className="inline-flex items-center gap-1 hover:underline">
+          Open profile
+          <ArrowRight size={15} />
+        </Link>
+      </div>
+    </Surface>
+  )
+}
+
+function StaffAccessCard({ role }: { role: 'coach' | 'assistant_coach' }) {
+  return (
+    <Surface className="p-4 sm:p-5">
+      <div className="inline-flex rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold text-emerald-700">
+        Staff access
+      </div>
+      <div className="mt-3 text-xl font-semibold tracking-tight text-emerald-700">Always active</div>
+      <p className="mt-2 text-sm text-[hsl(var(--muted))]">
+        {role === 'coach'
+          ? 'Your coach access is designed for daily training operations.'
+          : 'Your assistant coach access is designed for daily training operations.'}
+      </p>
+      <div className="mt-4 flex items-center gap-2 text-sm font-medium">
+        <Link href="/profile" className="inline-flex items-center gap-1 hover:underline">
+          Open profile
+          <ArrowRight size={15} />
+        </Link>
+      </div>
+    </Surface>
+  )
+}
+
+async function QrCard({ qrCode }: { qrCode?: string | null }) {
+  return (
+    <Surface className="p-4 sm:p-5">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <div className="text-sm font-semibold tracking-tight">My QR code</div>
+          <p className="mt-1 text-sm text-[hsl(var(--muted))]">Show this code at reception.</p>
+        </div>
+        <IdCard size={18} className="mt-0.5 text-black" />
+      </div>
+
+      <div className="mt-4 flex min-h-[160px] items-center justify-center rounded-2xl border border-dashed border-[hsl(var(--border))] bg-[hsl(var(--bg))] p-3">
+        {qrCode ? (
+          <div className="text-center">
+            <QrImage value={qrCode} size={132} />
+          </div>
+        ) : (
+          <div className="text-sm text-[hsl(var(--muted))]">No QR code available.</div>
+        )}
+      </div>
+    </Surface>
+  )
+}
+
+function QuickActions({ title, subtitle, items }: { title: string; subtitle?: string; items: QuickAction[] }) {
+  return (
+    <Surface className="p-4 sm:p-5">
+      <SectionTitle title={title} subtitle={subtitle} />
+      <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+        {items.map((item) => (
+          <ActionCard key={item.href} {...item} />
+        ))}
+      </div>
+    </Surface>
+  )
+}
+
+function memberActions(): QuickAction[] {
+  return [
+    { href: '/profile', label: 'My profile', desc: 'Identity, subscription details and QR code.', icon: IdCard },
+    { href: '/schedule', label: 'Schedule', desc: 'See the current class schedule.', icon: CalendarDays },
+    { href: '/notifications', label: 'Notifications', desc: 'Read your latest updates.', icon: Bell },
+    { href: '/store', label: 'Store', desc: 'Shop gear and see your orders.', icon: ShoppingBag },
+    { href: '/packages-and-promos', label: 'Packages & promos', desc: 'See current offers and packages.', icon: Gift },
+    { href: '/contact', label: 'Contact admin', desc: 'Send a message when you need help.', icon: UserCog },
+  ]
+}
+
+function coachActions(): QuickAction[] {
+  return [
+    { href: '/profile', label: 'My profile', desc: 'Identity, QR code and personal info.', icon: IdCard },
+    { href: '/schedule', label: 'Schedule', desc: 'Open the latest class schedule.', icon: CalendarDays },
+    { href: '/notifications', label: 'Notifications', desc: 'Read the latest staff updates.', icon: Bell },
+    { href: '/packages-and-promos', label: 'Packages & promos', desc: 'Quick access to current offers.', icon: Gift },
+    { href: '/store', label: 'Store', desc: 'View products and orders.', icon: ShoppingBag },
+  ]
+}
+
+function receptionActions(): QuickAction[] {
+  return [
+    { href: '/scan', label: 'Scan', desc: 'Fast attendance and QR validation.', icon: ScanLine },
+    { href: '/kiosk', label: 'Create member', desc: 'Open the front-desk member creation flow.', icon: IdCard },
+    { href: '/members', label: 'Members', desc: 'Search and manage members quickly.', icon: Users },
+    { href: '/schedule', label: 'Schedule', desc: 'Check class times on the desk.', icon: CalendarDays },
+    { href: '/notifications', label: 'Notifications', desc: 'Read operational updates.', icon: Bell },
+    { href: '/packages-and-promos', label: 'Packages & promos', desc: 'Use offers at the desk when needed.', icon: Gift },
+  ]
+}
+
+function adminActions(role: 'admin' | 'super_admin'): QuickAction[] {
+  const base: QuickAction[] = [
+    { href: '/admin', label: 'Dashboard', desc: 'Operational KPIs and admin overview.', icon: LayoutDashboard },
+    { href: '/scan', label: 'Scan', desc: 'QR check-in and validation flow.', icon: ScanLine },
+    { href: '/members', label: 'Members', desc: 'Open the members workspace.', icon: Users },
+    { href: '/admin/payments', label: 'Payments', desc: 'Track subscription payments.', icon: CreditCard },
+    { href: '/admin/cash-report', label: 'Cash report', desc: 'Review daily payment summaries.', icon: Wallet },
+    { href: '/expenses', label: 'Expenses', desc: 'Open expenses and categories.', icon: Receipt },
+    { href: '/admin/outstanding-dues', label: 'Outstanding dues', desc: 'Focus on unpaid balances.', icon: Wallet },
+    { href: '/admin/expiring-soon', label: 'Expiring soon', desc: 'Review urgent renewals.', icon: Bell },
+  ]
+
+  if (role === 'super_admin') {
+    base.splice(6, 0, { href: '/store/admin', label: 'Store admin', desc: 'Manage products and store ops.', icon: ShoppingBag })
+  }
+
+  return base
+}
+
+export default async function HomePage() {
+  const user = (await getSessionUser()) as SessionUser | null
+
+  if (!user) {
+    return (
+      <main className="min-h-[calc(100vh-3rem)] bg-[hsl(var(--bg))] text-black">
+        <section className="mx-auto max-w-6xl px-4 py-8">
+          <Surface className="p-6 sm:p-8">
+            <h1 className="text-2xl font-semibold tracking-tight">Welcome to ATOM</h1>
+            <p className="mt-2 max-w-xl text-sm text-[hsl(var(--muted))] sm:text-base">
+              Sign in to access your role dashboard, QR code, subscriptions and daily operations.
+            </p>
+            <div className="mt-5">
+              <Link
+                href="/login"
+                className="inline-flex items-center rounded-2xl bg-black px-4 py-2 text-sm font-semibold text-white shadow-soft"
+              >
+                Sign in
+              </Link>
+            </div>
+          </Surface>
+        </section>
+      </main>
+    )
+  }
+
+  const displayName = await getDisplayName(user)
+  const [profile, unreadNotificationsCount] = await Promise.all([
+    getProfileLite(user.id),
+    getUnreadNotificationsCount(user.id),
+  ])
+
+  const avatarPath = user.id_photo_path ?? profile?.id_photo_path ?? null
+  const avatarUrl = ['member', 'coach', 'assistant_coach'].includes(user.role) ? await getSignedAvatar(avatarPath) : ''
+  const memberId = user.member_id ?? profile?.member_id ?? null
+  const qrCode = user.qr_code ?? profile?.qr_code ?? null
+
+  let memberSnapshot: MembershipSnapshot | null = null
+  let opsKpis: OpsKpis | null = null
+
+  if (user.role === 'member') {
+    const subs = await getSubscriptionsLite(user.id)
+    memberSnapshot = buildMembershipSnapshot(subs, cairoToday())
+  }
+
+  if (['reception', 'admin', 'super_admin'].includes(user.role)) {
+    opsKpis = await getOpsKpis()
+  }
+
+  return (
+    <main className="min-h-[calc(100vh-3rem)] bg-[hsl(var(--bg))] text-black">
+      <section className="mx-auto max-w-6xl space-y-5 px-4 py-6 sm:py-8">
+        <HeroCard
+          displayName={displayName}
+          role={user.role}
+          avatarUrl={avatarUrl || undefined}
+          memberId={memberId}
+          joinedAt={profile?.created_at ?? null}
+        />
+
+        {user.role === 'member' ? (
+          <>
+            <div className="grid gap-4 lg:grid-cols-[1.2fr_0.8fr]">
+              <MembershipCard snapshot={memberSnapshot!} />
+              <QrCard qrCode={qrCode} />
             </div>
 
-            {/* Sections groupées */}
-            <div className="space-y-8">
-              {grouped.map((section) => (
-                <SectionGrid
-                  key={section.title}
-                  section={section}
-                  initialUnreadNotificationsCount={unreadNotificationsCount}
+            <div className="grid gap-4 lg:grid-cols-[1fr_1fr]">
+              <HomeNotificationsTile
+                href="/notifications"
+                label="Notifications"
+                desc="Open your inbox and see unread updates."
+                initialCount={unreadNotificationsCount}
+              />
+              <SummaryCard
+                label="Useful next step"
+                value="Check your profile"
+                hint="See your subscription history, QR code and identity details."
+                href="/profile"
+              />
+            </div>
+
+            <QuickActions
+              title="Quick actions"
+              subtitle="The essentials only, with no extra steps on mobile."
+              items={memberActions()}
+            />
+          </>
+        ) : null}
+
+                {(user.role === 'coach' || user.role === 'assistant_coach') ? (
+          <>
+            <div className="grid gap-4 lg:grid-cols-[1.05fr_0.95fr]">
+              <StaffAccessCard role={user.role} />
+              <QrCard qrCode={qrCode} />
+            </div>
+
+            <div className="grid gap-4 lg:grid-cols-[1fr_1fr]">
+              <HomeNotificationsTile
+                href="/notifications"
+                label="Notifications"
+                desc="Open your staff updates and unread messages."
+                initialCount={unreadNotificationsCount}
+              />
+              <SummaryCard
+                label="Role focus"
+                value="Fast field access"
+                hint="Your home is optimized for QR, schedule, profile and quick member lookup."
+              />
+            </div>
+
+            <QuickActions
+              title="Staff quick actions"
+              subtitle="Shortcuts built for training-floor usage on phone or tablet."
+              items={coachActions()}
+            />
+
+            <HomeMemberLookup
+              title="Quick member lookup"
+              subtitle="Read-only lookup for fast checks during class or around the mat."
+              canOpenProfile={false}
+            />
+          </>
+        ) : null}
+
+        {user.role === 'reception' ? (
+          <>
+            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+              <SummaryCard label="Scans today" value={opsKpis?.scansToday ?? 0} hint={`Attendance today · ${cairoToday()}`} href="/scan" />
+              <SummaryCard label="Expiring in 7 days" value={opsKpis?.expiring7Count ?? 0} hint="Members to contact soon." />
+              <SummaryCard label="Outstanding dues" value={opsKpis?.outstandingCount ?? 0} hint={fmtMoneyEGP(opsKpis?.outstandingTotal ?? 0)} />
+              <SummaryCard label="Active members" value={opsKpis?.activeCount ?? 0} hint="Current active subscriptions." href="/members" />
+            </div>
+
+            <QuickActions
+              title="Front desk actions"
+              subtitle="The most common tasks first, optimized for speed."
+              items={receptionActions()}
+            />
+
+            <div className="grid gap-4 lg:grid-cols-[1.15fr_0.85fr]">
+              <HomeMemberLookup
+                title="Member lookup"
+                subtitle="Search fast and open the member page when you need to act."
+                canOpenProfile
+              />
+              <div className="space-y-4">
+                <HomeNotificationsTile
+                  href="/notifications"
+                  label="Notifications"
+                  desc="Keep reception updates visible and easy to open."
+                  initialCount={unreadNotificationsCount}
                 />
-              ))}
+                <SummaryCard
+                  label="Kiosk"
+                  value="Create member quickly"
+                  hint="Open the kiosk flow for new members at the desk."
+                  href="/kiosk"
+                />
+              </div>
             </div>
           </>
-        ) : (
-          <p className="mt-6 text-gray-500">Please sign in to see your menu.</p>
-        )}
+        ) : null}
+
+        {(user.role === 'admin' || user.role === 'super_admin') ? (
+          <>
+            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+              <SummaryCard label="Active members" value={opsKpis?.activeCount ?? 0} hint="Subscriptions currently active." href="/members" />
+              <SummaryCard label="Expiring in 7 days" value={opsKpis?.expiring7Count ?? 0} hint="Renewals needing attention." href="/admin/expiring-soon" />
+              <SummaryCard label="Outstanding total" value={fmtMoneyEGP(opsKpis?.outstandingTotal ?? 0)} hint={`${opsKpis?.outstandingCount ?? 0} member(s) with dues`} href="/admin/outstanding-dues" />
+              <SummaryCard label="Scans today" value={opsKpis?.scansToday ?? 0} hint={`Kiosk attendance · ${cairoToday()}`} href="/admin/scan-audit" />
+            </div>
+
+            <QuickActions
+              title="Operations shortcuts"
+              subtitle="Jump directly to the pages that matter most in daily admin work."
+              items={adminActions(user.role)}
+            />
+
+            <div className="grid gap-4 lg:grid-cols-[1.15fr_0.85fr]">
+              <HomeMemberLookup
+                title="Member lookup"
+                subtitle="Search and open member pages without leaving the dashboard flow."
+                canOpenProfile
+              />
+              <div className="space-y-4">
+                <HomeNotificationsTile
+                  href="/notifications"
+                  label="Notifications"
+                  desc="Keep unread operational updates visible."
+                  initialCount={unreadNotificationsCount}
+                />
+                <SummaryCard
+                  label="Admin dashboard"
+                  value="Open full reporting"
+                  hint="Revenue, exports and detailed operational controls."
+                  href="/admin"
+                />
+                <SummaryCard
+                  label="Finance"
+                  value="Payments + expenses"
+                  hint="Move quickly between payments, cash report and expenses."
+                  href="/admin/payments"
+                />
+              </div>
+            </div>
+          </>
+        ) : null}
       </section>
 
-      <footer className="mx-auto max-w-6xl px-4 pb-10 pt-2 text-xs text-gray-500">
+      <footer className="mx-auto max-w-6xl px-4 pb-10 pt-1 text-xs text-[hsl(var(--muted))]">
         © {new Date().getFullYear()} ATOM Jiu-Jitsu
       </footer>
     </main>
