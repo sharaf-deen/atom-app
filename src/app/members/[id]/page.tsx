@@ -75,6 +75,17 @@ type MembershipSummary = {
   hint: string
 }
 
+type CoachTrainingUseful = {
+  membershipNow: string
+  membershipHint: string
+  sessionsNow: string
+  sessionsHint: string
+  lastCheckIn: string
+  lastCheckInHint: string
+  attentionPoint: string
+  attentionHint: string
+}
+
 function fmtDate(dateStr?: string | null) {
   if (!dateStr) return '—'
   const dt = new Date(dateStr.length === 10 ? `${dateStr}T00:00:00Z` : dateStr)
@@ -265,6 +276,97 @@ function buildMembershipSummary(
   }
 }
 
+function buildCoachTrainingUseful(subs: SubscriptionRow[], attendance: AttendanceRow[], today: string): CoachTrainingUseful {
+  const activeTime = subs.find((s) => {
+    const status = String(s.status ?? '').toLowerCase()
+    if (status !== 'active') return false
+    if ((s.subscription_type ?? (s.plan === 'sessions' ? 'sessions' : 'time')) !== 'time') return false
+    if (!s.end_date || s.end_date < today) return false
+    return true
+  })
+
+  const activeSessions = subs.find((s) => {
+    const status = String(s.status ?? '').toLowerCase()
+    if (status !== 'active') return false
+    const type = (s.subscription_type ?? (s.plan === 'sessions' ? 'sessions' : 'time')) as 'time' | 'sessions'
+    if (type !== 'sessions') return false
+    const remaining = Math.max(Number(s.sessions_total ?? 0) - Number(s.sessions_used ?? 0), 0)
+    return remaining > 0
+  })
+
+  let membershipNow = 'No active plan'
+  let membershipHint = 'No active membership right now.'
+  let sessionsNow = '—'
+  let sessionsHint = 'No active sessions plan.'
+  let attentionPoint = 'Needs review'
+  let attentionHint = 'No active plan found.'
+
+  if (activeTime) {
+    if (isFrozenNow(activeTime, today)) {
+      membershipNow = 'Frozen'
+      membershipHint = `${humanPlan(activeTime.plan)} · until ${fmtDate(activeTime.frozen_until)}`
+      attentionPoint = 'Frozen now'
+      attentionHint = `Pause active until ${fmtDate(activeTime.frozen_until)}`
+    } else {
+      const left = daysUntil(activeTime.end_date, today)
+      membershipNow = left !== null && left <= 7 ? 'Active · soon' : 'Active'
+      membershipHint =
+        left === null
+          ? `${humanPlan(activeTime.plan)} active`
+          : left === 0
+            ? `${humanPlan(activeTime.plan)} ends today`
+            : `${humanPlan(activeTime.plan)} · ${left} day(s) left`
+
+      if (left !== null && left <= 7) {
+        attentionPoint = 'Expiring soon'
+        attentionHint = `${left} day(s) left`
+      } else {
+        attentionPoint = 'No urgent issue'
+        attentionHint = 'Membership status looks okay.'
+      }
+    }
+  } else if (activeSessions) {
+    const remaining = Math.max(Number(activeSessions.sessions_total ?? 0) - Number(activeSessions.sessions_used ?? 0), 0)
+    membershipNow = remaining <= 2 ? 'Sessions low' : 'Sessions active'
+    membershipHint = `${humanPlan(activeSessions.plan)}`
+    sessionsNow = `${remaining}`
+    sessionsHint = `${activeSessions.sessions_used ?? 0}/${activeSessions.sessions_total ?? 0} used`
+
+    if (remaining <= 2) {
+      attentionPoint = 'Low sessions'
+      attentionHint = `${remaining} session(s) left`
+    } else {
+      attentionPoint = 'No urgent issue'
+      attentionHint = 'Sessions balance looks okay.'
+    }
+  } else {
+    const latest = subs[0]
+    if (latest) {
+      membershipHint = latest.end_date
+        ? `Last ended ${fmtDate(latest.end_date)}`
+        : `Last update ${fmtDate(latest.paid_at)}`
+      attentionPoint = 'Needs renewal'
+      attentionHint = 'No active subscription found.'
+    }
+  }
+
+  const validAttendance = attendance.filter((a) => a.valid).length
+  const lastAttendance = attendance[0]?.date ?? null
+
+  return {
+    membershipNow,
+    membershipHint,
+    sessionsNow,
+    sessionsHint,
+    lastCheckIn: lastAttendance ? fmtDate(lastAttendance) : 'No recent check-in',
+    lastCheckInHint: lastAttendance
+      ? `${validAttendance} valid check-in(s) in last 30 days`
+      : 'No valid attendance in the last 30 days.',
+    attentionPoint,
+    attentionHint,
+  }
+}
+
 function Surface({ children, className = '' }: { children: ReactNode; className?: string }) {
   return <section className={`rounded-3xl border border-[hsl(var(--border))] bg-white shadow-soft ${className}`}>{children}</section>
 }
@@ -315,10 +417,6 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
   const canCreateSubscription = STAFF.includes(me.role)
   const canResendInvite = STAFF.includes(me.role)
 
-  // FIX:
-  // - self view can stay on session client
-  // - coach/staff cross-member view must use admin client,
-  //   otherwise RLS returns null and the page falls into notFound() => 404
   const sessionDb = createSupabaseRSC()
   const adminDb = createSupabaseAdminClient()
   const db = canOpenOtherProfiles ? adminDb : sessionDb
@@ -474,6 +572,7 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
   }
 
   const summary = buildMembershipSummary(profile.role, isSelf, subs, today)
+  const coachTrainingUseful = coachSafeView ? buildCoachTrainingUseful(subs, attendance, today) : null
   const outstandingTotal = subs.reduce((sum, s) => sum + Math.max(Number(s.amount_due ?? 0), 0), 0)
   const latestPayment = subs.find((s) => !!s.paid_at)?.paid_at ?? null
   const recentAttendanceValid = attendance.filter((a) => a.valid).length
@@ -593,6 +692,45 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
             </>
           )}
         </div>
+
+        {coachSafeView && coachTrainingUseful ? (
+          <Surface className="p-4 sm:p-5">
+            <div className="flex items-center gap-2">
+              <ShieldCheck size={18} className="text-black" />
+              <h2 className="text-base font-semibold tracking-tight">Training useful</h2>
+            </div>
+            <p className="mt-1 text-sm text-[hsl(var(--muted))]">
+              Quick coach-only reading for what matters around the mat.
+            </p>
+
+            <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+              <SummaryCard
+                label="Membership now"
+                value={coachTrainingUseful.membershipNow}
+                hint={coachTrainingUseful.membershipHint}
+                icon={<ShieldCheck size={18} strokeWidth={2.1} />}
+              />
+              <SummaryCard
+                label="Sessions left"
+                value={coachTrainingUseful.sessionsNow}
+                hint={coachTrainingUseful.sessionsHint}
+                icon={<CalendarDays size={18} strokeWidth={2.1} />}
+              />
+              <SummaryCard
+                label="Last check-in"
+                value={coachTrainingUseful.lastCheckIn}
+                hint={coachTrainingUseful.lastCheckInHint}
+                icon={<ScanLine size={18} strokeWidth={2.1} />}
+              />
+              <SummaryCard
+                label="Attention point"
+                value={coachTrainingUseful.attentionPoint}
+                hint={coachTrainingUseful.attentionHint}
+                icon={<AlertCircle size={18} strokeWidth={2.1} />}
+              />
+            </div>
+          </Surface>
+        ) : null}
 
         {showSubscriptionActions || canResendInvite ? (
           <Surface className="p-4 sm:p-5">
