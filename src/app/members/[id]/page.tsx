@@ -315,22 +315,22 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
   }
 
   const STAFF: Role[] = ['reception', 'admin', 'super_admin']
-  const canViewOthers = STAFF.includes(me.role)
-  const canViewAttendance = canViewOthers
+  const canViewMembersList = STAFF.includes(me.role)
+  const canOpenOtherProfiles = canViewMembersList || me.role === 'coach'
   const canManageSubscriptions = ['admin', 'super_admin'].includes(me.role)
   const canCreateSubscription = STAFF.includes(me.role)
   const canResendInvite = STAFF.includes(me.role)
   const supa = createSupabaseRSC()
 
   const idIsUuid = isUuid(params.id)
-  if (idIsUuid && !canViewOthers && me.id !== params.id) {
+  if (idIsUuid && !canOpenOtherProfiles && me.id !== params.id) {
     return (
       <AccessDeniedPage
         title="Member"
         subtitle="Access restricted."
         signedInAs={me.email}
-        message="Only Reception / Admin / Super Admin can view other members."
-        allowed="reception, admin, super_admin"
+        message="Only Reception / Admin / Super Admin can view other members. Coaches can only open a read-only member profile from the home lookup."
+        allowed="coach (read-only members only), reception, admin, super_admin"
         nextPath={nextPath}
         showBackHome
         showProfile
@@ -347,20 +347,39 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
   if (!profile) return notFound()
 
   const isSelf = me.id === profile.user_id
-  if (!canViewOthers && !isSelf) {
+  const isCoachViewingOtherMember = me.role === 'coach' && !isSelf
+
+  if (!canOpenOtherProfiles && !isSelf) {
     return (
       <AccessDeniedPage
         title="Member"
         subtitle="Access restricted."
         signedInAs={me.email}
-        message="Only Reception / Admin / Super Admin can view other members."
-        allowed="reception, admin, super_admin"
+        message="Only Reception / Admin / Super Admin can view other members. Coaches can only open a read-only member profile from the home lookup."
+        allowed="coach (read-only members only), reception, admin, super_admin"
         nextPath={nextPath}
         showBackHome
         showProfile
       />
     )
   }
+
+  if (isCoachViewingOtherMember && profile.role !== 'member') {
+    return (
+      <AccessDeniedPage
+        title="Member"
+        subtitle="Access restricted."
+        signedInAs={me.email}
+        message="Coach access is limited to read-only member profiles only."
+        allowed="member profiles only"
+        nextPath={nextPath}
+        showBackHome
+        showProfile
+      />
+    )
+  }
+
+  const coachSafeView = isCoachViewingOtherMember
 
   const { data: subsData } = await supa
     .from('subscriptions')
@@ -408,6 +427,7 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
     (subs.find((s) => String(s.status ?? '').toLowerCase() === 'active' && s.plan !== 'sessions')?.plan as Plan) ?? '1m'
 
   let attendance: AttendanceRow[] = []
+  const canViewAttendance = canViewMembersList || coachSafeView
   if (canViewAttendance) {
     const from = addDays(today, -30)
     const { data } = await supa
@@ -458,30 +478,40 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
   const fullName = `${profile.first_name ?? ''} ${profile.last_name ?? ''}`.trim() || '—'
   const age = ageYears(profile.date_of_birth)
   const viewedRole = profile.role ?? 'member'
-  const showSubscriptionActions = canCreateSubscription && viewedRole === 'member'
+  const showSubscriptionActions = canCreateSubscription && viewedRole === 'member' && !coachSafeView
 
-  const subtitle = isSelf
-    ? viewedRole === 'member'
-      ? 'Your profile, QR code and membership details.'
-      : 'Your profile, QR code and staff access overview.'
-    : 'Fast member overview built for field usage on mobile and tablet.'
+  const subtitle = coachSafeView
+    ? 'Read-only coach view with only safe member information.'
+    : isSelf
+      ? viewedRole === 'member'
+        ? 'Your profile, QR code and membership details.'
+        : 'Your profile, QR code and staff access overview.'
+      : 'Fast member overview built for field usage on mobile and tablet.'
+
+  const right = canViewMembersList ? (
+    <Link
+      href="/members"
+      className="inline-flex items-center gap-2 rounded-2xl border border-[hsl(var(--border))] bg-white px-4 py-2 text-sm font-medium shadow-soft hover:bg-[hsl(var(--bg))]"
+    >
+      <ArrowLeft size={16} />
+      Back to list
+    </Link>
+  ) : coachSafeView ? (
+    <Link
+      href="/"
+      className="inline-flex items-center gap-2 rounded-2xl border border-[hsl(var(--border))] bg-white px-4 py-2 text-sm font-medium shadow-soft hover:bg-[hsl(var(--bg))]"
+    >
+      <ArrowLeft size={16} />
+      Back home
+    </Link>
+  ) : undefined
 
   return (
     <main>
       <PageHeader
-        title={isSelf ? 'My profile' : 'Member detail'}
+        title={coachSafeView ? 'Member overview' : isSelf ? 'My profile' : 'Member detail'}
         subtitle={subtitle}
-        right={
-          canViewOthers ? (
-            <Link
-              href="/members"
-              className="inline-flex items-center gap-2 rounded-2xl border border-[hsl(var(--border))] bg-white px-4 py-2 text-sm font-medium shadow-soft hover:bg-[hsl(var(--bg))]"
-            >
-              <ArrowLeft size={16} />
-              Back to list
-            </Link>
-          ) : undefined
-        }
+        right={right}
       />
 
       <Section className="space-y-5">
@@ -492,14 +522,17 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
               <TinyBadge>{humanRole(viewedRole)}</TinyBadge>
               {profile.member_id ? <TinyBadge>Member ID: {profile.member_id}</TinyBadge> : null}
               {typeof age === 'number' ? <TinyBadge>{age < 17 ? `Kid · ${age}y` : `Adult · ${age}y`}</TinyBadge> : null}
+              {coachSafeView ? <TinyBadge tone="success">Coach read-only view</TinyBadge> : null}
             </div>
 
             <div>
               <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">{fullName}</h1>
               <p className="mt-2 max-w-3xl text-sm text-[hsl(var(--muted))] sm:text-base">
-                {isSelf
-                  ? 'Everything important is grouped here for quick reading on mobile.'
-                  : 'Identity, subscription status, QR code and operational info grouped in one clear mobile-first page.'}
+                {coachSafeView
+                  ? 'Only training-useful information is shown here. No private contact data, finance data or member QR is displayed.'
+                  : isSelf
+                    ? 'Everything important is grouped here for quick reading on mobile.'
+                    : 'Identity, subscription status, QR code and operational info grouped in one clear mobile-first page.'}
               </p>
             </div>
           </div>
@@ -512,24 +545,50 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
             hint={summary.hint}
             icon={<ShieldCheck size={18} strokeWidth={2.1} />}
           />
-          <SummaryCard
-            label="Outstanding due"
-            value={outstandingTotal > 0 ? fmtMoneyEGP(outstandingTotal) : 'No due'}
-            hint={outstandingTotal > 0 ? 'Unpaid balance on subscriptions.' : 'Nothing due at the moment.'}
-            icon={<Wallet size={18} strokeWidth={2.1} />}
-          />
-          <SummaryCard
-            label={canViewAttendance ? 'Attendance · 30 days' : 'Last payment'}
-            value={canViewAttendance ? recentAttendanceValid : latestPayment ? fmtDate(latestPayment) : '—'}
-            hint={canViewAttendance ? (lastAttendance ? `Last check-in ${fmtDate(lastAttendance)}` : 'No recent attendance.') : 'Latest recorded payment date.'}
-            icon={canViewAttendance ? <ScanLine size={18} strokeWidth={2.1} /> : <CreditCard size={18} strokeWidth={2.1} />}
-          />
-          <SummaryCard
-            label="Joined"
-            value={fmtDate(profile.created_at)}
-            hint={profile.email ?? profile.phone ?? 'No extra contact info.'}
-            icon={<CalendarDays size={18} strokeWidth={2.1} />}
-          />
+
+          {coachSafeView ? (
+            <>
+              <SummaryCard
+                label="Attendance · 30 days"
+                value={recentAttendanceValid}
+                hint={lastAttendance ? `Last check-in ${fmtDate(lastAttendance)}` : 'No recent attendance.'}
+                icon={<ScanLine size={18} strokeWidth={2.1} />}
+              />
+              <SummaryCard
+                label="Joined"
+                value={fmtDate(profile.created_at)}
+                hint={typeof age === 'number' ? `${age < 17 ? 'Kid' : 'Adult'} member` : 'Member record'}
+                icon={<CalendarDays size={18} strokeWidth={2.1} />}
+              />
+              <SummaryCard
+                label="Coach access"
+                value="Read-only"
+                hint="Private contact and financial data are hidden in this view."
+                icon={<UserRound size={18} strokeWidth={2.1} />}
+              />
+            </>
+          ) : (
+            <>
+              <SummaryCard
+                label="Outstanding due"
+                value={outstandingTotal > 0 ? fmtMoneyEGP(outstandingTotal) : 'No due'}
+                hint={outstandingTotal > 0 ? 'Unpaid balance on subscriptions.' : 'Nothing due at the moment.'}
+                icon={<Wallet size={18} strokeWidth={2.1} />}
+              />
+              <SummaryCard
+                label={canViewAttendance ? 'Attendance · 30 days' : 'Last payment'}
+                value={canViewAttendance ? recentAttendanceValid : latestPayment ? fmtDate(latestPayment) : '—'}
+                hint={canViewAttendance ? (lastAttendance ? `Last check-in ${fmtDate(lastAttendance)}` : 'No recent attendance.') : 'Latest recorded payment date.'}
+                icon={canViewAttendance ? <ScanLine size={18} strokeWidth={2.1} /> : <CreditCard size={18} strokeWidth={2.1} />}
+              />
+              <SummaryCard
+                label="Joined"
+                value={fmtDate(profile.created_at)}
+                hint={profile.email ?? profile.phone ?? 'No extra contact info.'}
+                icon={<CalendarDays size={18} strokeWidth={2.1} />}
+              />
+            </>
+          )}
         </div>
 
         {showSubscriptionActions || canResendInvite ? (
@@ -600,7 +659,7 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
           </Surface>
         ) : null}
 
-        <div className="grid gap-4 xl:grid-cols-[1.15fr_0.85fr]">
+        <div className={`grid gap-4 ${coachSafeView ? '' : 'xl:grid-cols-[1.15fr_0.85fr]'}`}>
           <Surface className="p-4 sm:p-5">
             <div className="flex items-center gap-2">
               <UserRound size={18} className="text-black" />
@@ -620,50 +679,67 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
                 <span className="text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Role</span>
                 <span className="text-right font-medium">{humanRole(viewedRole)}</span>
               </div>
-              <div className="flex items-start justify-between gap-3">
-                <span className="text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Email</span>
-                <span className="min-w-0 text-right font-medium break-words whitespace-normal">{profile.email ?? '—'}</span>
-              </div>
-              <div className="flex items-start justify-between gap-3">
-                <span className="text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Phone</span>
-                <span className="min-w-0 text-right font-medium break-words whitespace-normal">{profile.phone ?? '—'}</span>
-              </div>
+              {!coachSafeView ? (
+                <>
+                  <div className="flex items-start justify-between gap-3">
+                    <span className="text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Email</span>
+                    <span className="min-w-0 text-right font-medium break-words whitespace-normal">{profile.email ?? '—'}</span>
+                  </div>
+                  <div className="flex items-start justify-between gap-3">
+                    <span className="text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Phone</span>
+                    <span className="min-w-0 text-right font-medium break-words whitespace-normal">{profile.phone ?? '—'}</span>
+                  </div>
+                </>
+              ) : null}
               <div className="flex items-start justify-between gap-3">
                 <span className="text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Joined</span>
                 <span className="text-right font-medium">{fmtDate(profile.created_at)}</span>
               </div>
-              <div className="flex items-start justify-between gap-3">
-                <span className="text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Date of birth</span>
-                <span className="text-right font-medium">{profile.date_of_birth ? fmtDate(profile.date_of_birth) : '—'}</span>
-              </div>
-            </div>
-          </Surface>
-
-          <Surface className="p-4 sm:p-5">
-            <div className="flex items-center gap-2">
-              <QrCode size={18} className="text-black" />
-              <h2 className="text-base font-semibold tracking-tight">QR code</h2>
-            </div>
-            <p className="mt-1 text-sm text-[hsl(var(--muted))]">Show this code at reception for attendance scanning.</p>
-
-            <div className="mt-4 flex min-h-[220px] items-center justify-center rounded-2xl border border-dashed border-[hsl(var(--border))] bg-[hsl(var(--bg))] p-4">
-              {profile.qr_code ? (
-                <div className="text-center">
-                  <QrImage value={profile.qr_code} size={180} />
-                  <div className="mt-3 text-xs text-[hsl(var(--muted))]">Ready for kiosk or front-desk scan.</div>
+              {!coachSafeView ? (
+                <div className="flex items-start justify-between gap-3">
+                  <span className="text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Date of birth</span>
+                  <span className="text-right font-medium">{profile.date_of_birth ? fmtDate(profile.date_of_birth) : '—'}</span>
                 </div>
               ) : (
-                <div className="text-sm text-[hsl(var(--muted))]">No QR code.</div>
+                <div className="flex items-start justify-between gap-3">
+                  <span className="text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Age</span>
+                  <span className="text-right font-medium">{typeof age === 'number' ? `${age} years` : '—'}</span>
+                </div>
               )}
             </div>
           </Surface>
+
+          {!coachSafeView ? (
+            <Surface className="p-4 sm:p-5">
+              <div className="flex items-center gap-2">
+                <QrCode size={18} className="text-black" />
+                <h2 className="text-base font-semibold tracking-tight">QR code</h2>
+              </div>
+              <p className="mt-1 text-sm text-[hsl(var(--muted))]">Show this code at reception for attendance scanning.</p>
+
+              <div className="mt-4 flex min-h-[220px] items-center justify-center rounded-2xl border border-dashed border-[hsl(var(--border))] bg-[hsl(var(--bg))] p-4">
+                {profile.qr_code ? (
+                  <div className="text-center">
+                    <QrImage value={profile.qr_code} size={180} />
+                    <div className="mt-3 text-xs text-[hsl(var(--muted))]">Ready for kiosk or front-desk scan.</div>
+                  </div>
+                ) : (
+                  <div className="text-sm text-[hsl(var(--muted))]">No QR code.</div>
+                )}
+              </div>
+            </Surface>
+          ) : null}
         </div>
 
         <Surface className="p-4 sm:p-5">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <h2 className="text-base font-semibold tracking-tight">Subscriptions</h2>
-              <p className="mt-1 text-sm text-[hsl(var(--muted))]">A clean card view with no horizontal scrolling on mobile.</p>
+              <p className="mt-1 text-sm text-[hsl(var(--muted))]">
+                {coachSafeView
+                  ? 'Only training-useful subscription status is visible here.'
+                  : 'A clean card view with no horizontal scrolling on mobile.'}
+              </p>
             </div>
             <TinyBadge>{subs.length} record(s)</TinyBadge>
           </div>
@@ -695,10 +771,10 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
                       ) : null}
                       {frozen ? <TinyBadge tone="warning">Frozen until {fmtDate(s.frozen_until)}</TinyBadge> : null}
                       {isSessions ? <TinyBadge tone={remaining <= 2 ? 'warning' : 'success'}>{remaining} left</TinyBadge> : null}
-                      {due > 0 ? <TinyBadge tone="warning">Due {fmtMoneyEGP(due)}</TinyBadge> : null}
+                      {!coachSafeView && due > 0 ? <TinyBadge tone="warning">Due {fmtMoneyEGP(due)}</TinyBadge> : null}
                     </div>
 
-                    <div className="mt-4 grid gap-3 text-sm md:grid-cols-2 xl:grid-cols-4">
+                    <div className={`mt-4 grid gap-3 text-sm ${coachSafeView ? 'md:grid-cols-2 xl:grid-cols-3' : 'md:grid-cols-2 xl:grid-cols-4'}`}>
                       <div>
                         <div className="text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Start</div>
                         <div className="mt-1 font-medium">{fmtDate(s.start_date)}</div>
@@ -708,34 +784,35 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
                         <div className="mt-1 font-medium">{isSessions ? '—' : fmtDate(s.end_date)}</div>
                       </div>
                       <div>
-                        <div className="text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Paid</div>
-                        <div className="mt-1 font-medium">{fmtMoneyEGP(s.amount ?? 0)}</div>
-                      </div>
-                      <div>
-                        <div className="text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Payment</div>
-                        <div className="mt-1 font-medium">{humanPayment(s.payment_method)}</div>
-                      </div>
-                      <div>
-                        <div className="text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Paid at</div>
-                        <div className="mt-1 font-medium">{fmtDate(s.paid_at)}</div>
-                      </div>
-                      <div>
-                        <div className="text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Outstanding due</div>
-                        <div className="mt-1 font-medium">{due > 0 ? fmtMoneyEGP(due) : 'No due'}</div>
-                      </div>
-                      <div>
                         <div className="text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Sessions</div>
                         <div className="mt-1 font-medium">
                           {isSessions ? `${s.sessions_used ?? 0}/${s.sessions_total ?? 0} used` : '—'}
                         </div>
                       </div>
-                      <div>
-                        <div className="text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Invoice state</div>
-                        <div className="mt-1 font-medium">{due > 0 ? 'Partially paid / due left' : 'Settled'}</div>
-                      </div>
+
+                      {!coachSafeView ? (
+                        <>
+                          <div>
+                            <div className="text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Paid</div>
+                            <div className="mt-1 font-medium">{fmtMoneyEGP(s.amount ?? 0)}</div>
+                          </div>
+                          <div>
+                            <div className="text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Payment</div>
+                            <div className="mt-1 font-medium">{humanPayment(s.payment_method)}</div>
+                          </div>
+                          <div>
+                            <div className="text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Paid at</div>
+                            <div className="mt-1 font-medium">{fmtDate(s.paid_at)}</div>
+                          </div>
+                          <div>
+                            <div className="text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Outstanding due</div>
+                            <div className="mt-1 font-medium">{due > 0 ? fmtMoneyEGP(due) : 'No due'}</div>
+                          </div>
+                        </>
+                      ) : null}
                     </div>
 
-                    {canManageSubscriptions && viewedRole === 'member' ? (
+                    {!coachSafeView && canManageSubscriptions && viewedRole === 'member' ? (
                       <div className="mt-4 border-t border-[hsl(var(--border))] pt-4">
                         <SubscriptionManageRowActions sub={s} />
                       </div>
@@ -770,7 +847,7 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
                       <TinyBadge>{a.from_sessions ? 'From sessions' : 'From time plan'}</TinyBadge>
                     </div>
 
-                    <div className="mt-4 grid gap-3 text-sm md:grid-cols-3">
+                    <div className={`mt-4 grid gap-3 text-sm ${coachSafeView ? 'md:grid-cols-2' : 'md:grid-cols-3'}`}>
                       <div>
                         <div className="text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Date</div>
                         <div className="mt-1 font-medium">{fmtDate(a.date)}</div>
@@ -779,10 +856,12 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
                         <div className="text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Plan</div>
                         <div className="mt-1 font-medium">{a.subscription_id ? humanPlan(subPlanById.get(a.subscription_id) ?? null) : '—'}</div>
                       </div>
-                      <div>
-                        <div className="text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Source</div>
-                        <div className="mt-1 font-medium">{a.from_sessions ? 'Sessions balance' : 'Time membership'}</div>
-                      </div>
+                      {!coachSafeView ? (
+                        <div>
+                          <div className="text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Source</div>
+                          <div className="mt-1 font-medium">{a.from_sessions ? 'Sessions balance' : 'Time membership'}</div>
+                        </div>
+                      ) : null}
                     </div>
                   </div>
                 ))}
