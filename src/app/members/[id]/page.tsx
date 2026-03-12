@@ -20,6 +20,7 @@ import PageHeader from '@/components/layout/PageHeader'
 import Section from '@/components/layout/Section'
 import AccessDeniedPage from '@/components/AccessDeniedPage'
 import { createSupabaseRSC } from '@/lib/supabaseServer'
+import { createSupabaseAdminClient } from '@/lib/supabaseAdmin'
 import { getSessionUser, type Role } from '@/lib/session'
 import { addDays, cairoToday, diffDays } from '@/lib/cairoDate'
 import QrImage from '@/components/QrImage'
@@ -176,15 +177,9 @@ function daysUntil(endDate?: string | null, today: string = cairoToday()) {
 }
 
 function toneClasses(tone: SummaryTone) {
-  if (tone === 'success') {
-    return 'border-emerald-200 bg-emerald-50 text-emerald-700'
-  }
-  if (tone === 'warning') {
-    return 'border-amber-200 bg-amber-50 text-amber-800'
-  }
-  if (tone === 'danger') {
-    return 'border-rose-200 bg-rose-50 text-rose-700'
-  }
+  if (tone === 'success') return 'border-emerald-200 bg-emerald-50 text-emerald-700'
+  if (tone === 'warning') return 'border-amber-200 bg-amber-50 text-amber-800'
+  if (tone === 'danger') return 'border-rose-200 bg-rose-50 text-rose-700'
   return 'border-[hsl(var(--border))] bg-[hsl(var(--bg))] text-[hsl(var(--muted))]'
 }
 
@@ -212,12 +207,11 @@ function buildMembershipSummary(
 
   if (activeTime) {
     if (isFrozenNow(activeTime, today)) {
-      const until = activeTime.frozen_until ? fmtDate(activeTime.frozen_until) : '—'
       return {
         tone: 'warning',
         label: 'Membership frozen',
         title: humanPlan(activeTime.plan),
-        hint: `Frozen until ${until}`,
+        hint: `Frozen until ${fmtDate(activeTime.frozen_until)}`,
       }
     }
 
@@ -320,9 +314,17 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
   const canManageSubscriptions = ['admin', 'super_admin'].includes(me.role)
   const canCreateSubscription = STAFF.includes(me.role)
   const canResendInvite = STAFF.includes(me.role)
-  const supa = createSupabaseRSC()
+
+  // FIX:
+  // - self view can stay on session client
+  // - coach/staff cross-member view must use admin client,
+  //   otherwise RLS returns null and the page falls into notFound() => 404
+  const sessionDb = createSupabaseRSC()
+  const adminDb = createSupabaseAdminClient()
+  const db = canOpenOtherProfiles ? adminDb : sessionDb
 
   const idIsUuid = isUuid(params.id)
+
   if (idIsUuid && !canOpenOtherProfiles && me.id !== params.id) {
     return (
       <AccessDeniedPage
@@ -338,7 +340,7 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
     )
   }
 
-  const { data: profile } = await supa
+  const { data: profile } = await db
     .from('profiles')
     .select('user_id, member_id, email, first_name, last_name, phone, role, qr_code, created_at, date_of_birth')
     .eq(idIsUuid ? 'user_id' : 'member_id', params.id)
@@ -381,7 +383,7 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
 
   const coachSafeView = isCoachViewingOtherMember
 
-  const { data: subsData } = await supa
+  const { data: subsData } = await db
     .from('subscriptions')
     .select('id, plan, subscription_type, status, start_date, end_date, frozen_from, frozen_until, sessions_total, sessions_used, amount, amount_due, payment_method, paid_at')
     .eq('member_id', profile.user_id)
@@ -426,11 +428,12 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
   const defaultRenewPlan: Plan =
     (subs.find((s) => String(s.status ?? '').toLowerCase() === 'active' && s.plan !== 'sessions')?.plan as Plan) ?? '1m'
 
-  let attendance: AttendanceRow[] = []
   const canViewAttendance = canViewMembersList || coachSafeView
+  let attendance: AttendanceRow[] = []
+
   if (canViewAttendance) {
     const from = addDays(today, -30)
-    const { data } = await supa
+    const { data } = await db
       .from('attendance')
       .select('id, date, valid, from_sessions, subscription_id')
       .eq('member_id', profile.user_id)
@@ -679,6 +682,7 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
                 <span className="text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Role</span>
                 <span className="text-right font-medium">{humanRole(viewedRole)}</span>
               </div>
+
               {!coachSafeView ? (
                 <>
                   <div className="flex items-start justify-between gap-3">
@@ -691,10 +695,12 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
                   </div>
                 </>
               ) : null}
+
               <div className="flex items-start justify-between gap-3">
                 <span className="text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Joined</span>
                 <span className="text-right font-medium">{fmtDate(profile.created_at)}</span>
               </div>
+
               {!coachSafeView ? (
                 <div className="flex items-start justify-between gap-3">
                   <span className="text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Date of birth</span>
@@ -785,9 +791,7 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
                       </div>
                       <div>
                         <div className="text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Sessions</div>
-                        <div className="mt-1 font-medium">
-                          {isSessions ? `${s.sessions_used ?? 0}/${s.sessions_total ?? 0} used` : '—'}
-                        </div>
+                        <div className="mt-1 font-medium">{isSessions ? `${s.sessions_used ?? 0}/${s.sessions_total ?? 0} used` : '—'}</div>
                       </div>
 
                       {!coachSafeView ? (
