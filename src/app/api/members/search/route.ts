@@ -19,7 +19,7 @@ type MemberRow = {
   is_active?: boolean | null
 }
 
-const ALLOWED: Role[] = ['coach', 'assistant_coach', 'reception', 'admin', 'super_admin']
+const ALLOWED: Role[] = ['coach', 'reception', 'admin', 'super_admin']
 
 function isISODateOnly(s?: string | null) {
   return !!s && /^\d{4}-\d{2}-\d{2}$/.test(s)
@@ -98,10 +98,13 @@ export async function GET(req: Request) {
       const ors: string[] = [
         `first_name.ilike.%${q}%`,
         `last_name.ilike.%${q}%`,
-        `email.ilike.%${q}%`,
         `member_id.ilike.%${q}%`,
         `phone.ilike.%${q}%`,
       ]
+
+      if (me.role !== 'coach') {
+        ors.push(`email.ilike.%${q}%`)
+      }
 
       if (qDigits.length >= 4) {
         ors.push(`phone_digits.ilike.%${qDigits}%`)
@@ -122,10 +125,10 @@ export async function GET(req: Request) {
     const items: MemberRow[] =
       (data ?? []).map((r: any) => ({
         user_id: r.user_id,
-        email: r.email ?? null,
+        email: me.role === 'coach' ? null : r.email ?? null,
         first_name: r.first_name ?? null,
         last_name: r.last_name ?? null,
-        phone: r.phone ?? null,
+        phone: me.role === 'coach' ? null : r.phone ?? null,
         role: (r.role ?? null) as Role | null,
         created_at: r.created_at ?? null,
         member_id: r.member_id ?? null,

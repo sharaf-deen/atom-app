@@ -118,7 +118,7 @@ function humanPlan(p?: SubscriptionLite['plan']) {
     case '12m':
       return '12 months'
     case 'sessions':
-      return 'Sessions'
+      return 'Membership'
     default:
       return 'Membership'
   }
@@ -417,8 +417,8 @@ function HeroCard({
 }) {
   const roleCopy: Record<Role, string> = {
     member: 'Everything important at a glance: membership, QR code and useful updates.',
-    coach: 'Fast access to your staff tools, QR code and member lookup.',
-    assistant_coach: 'Fast access to your staff tools, QR code and member lookup.',
+    coach: 'Fast access to your staff tools, QR code and a read-only member lookup.',
+    assistant_coach: 'Fast access to your staff tools, QR code and useful updates.',
     reception: 'Built for quick actions at the front desk: scan, member creation and daily queues.',
     admin: 'Daily operations first: members, finance, reporting and control.',
     super_admin: 'Full operational overview with direct access to all critical areas.',
@@ -674,7 +674,7 @@ export default async function HomePage() {
           </>
         ) : null}
 
-                {(user.role === 'coach' || user.role === 'assistant_coach') ? (
+        {(user.role === 'coach' || user.role === 'assistant_coach') ? (
           <>
             <div className="grid gap-4 lg:grid-cols-[1.05fr_0.95fr]">
               <StaffAccessCard role={user.role} />
@@ -690,8 +690,12 @@ export default async function HomePage() {
               />
               <SummaryCard
                 label="Role focus"
-                value="Fast field access"
-                hint="Your home is optimized for QR, schedule, profile and quick member lookup."
+                value={user.role === 'coach' ? 'Read-only member view' : 'Fast field access'}
+                hint={
+                  user.role === 'coach'
+                    ? 'Coach lookup opens a limited member profile with no financial or private contact data.'
+                    : 'Your home is optimized for QR, schedule, profile and useful staff shortcuts.'
+                }
               />
             </div>
 
@@ -701,11 +705,14 @@ export default async function HomePage() {
               items={coachActions()}
             />
 
-            <HomeMemberLookup
-              title="Quick member lookup"
-              subtitle="Read-only lookup for fast checks during class or around the mat."
-              canOpenProfile={false}
-            />
+            {user.role === 'coach' ? (
+              <HomeMemberLookup
+                title="Quick member lookup"
+                subtitle="Coach access is read-only and only opens safe member information."
+                canOpenProfile
+                showSensitiveFields={false}
+              />
+            ) : null}
           </>
         ) : null}
 
