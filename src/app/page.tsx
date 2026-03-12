@@ -708,7 +708,7 @@ export default async function HomePage() {
             {user.role === 'coach' ? (
               <HomeMemberLookup
                 title="Quick member lookup"
-                subtitle="Coach access is read-only and only opens safe member information."
+                subtitle="Coach access is read-only. Search by first name, last name or member ID."
                 canOpenProfile
                 showSensitiveFields={false}
               />
