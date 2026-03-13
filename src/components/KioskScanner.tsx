@@ -67,6 +67,23 @@ type KioskScannerProps = {
 
 type FacingMode = 'environment' | 'user'
 
+function getStableKioskDeviceTag() {
+  if (typeof window === 'undefined') return 'web-kiosk'
+
+  const storageKey = 'atom:kiosk-device-tag'
+  try {
+    const existing = window.localStorage.getItem(storageKey)?.trim()
+    if (existing) return existing.slice(0, 64)
+
+    const rand = Math.random().toString(36).slice(2, 8)
+    const next = `web-kiosk-${rand}`.slice(0, 64)
+    window.localStorage.setItem(storageKey, next)
+    return next
+  } catch {
+    return 'web-kiosk'
+  }
+}
+
 function StatusPill({ status }: { status: Status }) {
   switch (status) {
     case 'checking':
@@ -122,6 +139,7 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className }: 
   const kioskRequested = searchParams?.get('kiosk') === '1'
 
   const [kioskMode, setKioskMode] = useState(false)
+  const [deviceTag, setDeviceTag] = useState('web-kiosk')
   const wakeLockRef = useRef<any>(null)
 
   const [exitOpen, setExitOpen] = useState(false)
@@ -131,6 +149,8 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className }: 
   const exitHoldRef = useRef<number | null>(null)
 
   useEffect(() => {
+    setDeviceTag(getStableKioskDeviceTag())
+
     try {
       const stored = window.localStorage.getItem('atom:kiosk') === '1'
       if (kioskRequested || stored) {
@@ -347,7 +367,7 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className }: 
 
         const r = await fetch('/api/kiosk/scan', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', 'x-device-tag': deviceTag },
           body: JSON.stringify(payload),
         })
         const j: ScanResponse = await r.json().catch(() => ({ ok: false, message: 'Invalid response' }))
@@ -391,7 +411,7 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className }: 
         }, 1500)
       }
     },
-    [paused, router, kioskMode, online]
+    [paused, router, kioskMode, online, deviceTag]
   )
 
   function manualRescan() {
