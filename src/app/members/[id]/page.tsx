@@ -10,6 +10,8 @@ import {
   ArrowLeft,
   CalendarDays,
   CreditCard,
+  Mail,
+  Phone,
   QrCode,
   ScanLine,
   ShieldCheck,
@@ -84,6 +86,17 @@ type CoachTrainingUseful = {
   lastCheckInHint: string
   attentionPoint: string
   attentionHint: string
+}
+
+type ReceptionDeskUseful = {
+  checkInStatus: string
+  checkInHint: string
+  renewalState: string
+  renewalHint: string
+  paymentState: string
+  paymentHint: string
+  lastSeen: string
+  lastSeenHint: string
 }
 
 function fmtDate(dateStr?: string | null) {
@@ -367,6 +380,98 @@ function buildCoachTrainingUseful(subs: SubscriptionRow[], attendance: Attendanc
   }
 }
 
+function buildReceptionDeskUseful(
+  subs: SubscriptionRow[],
+  attendance: AttendanceRow[],
+  today: string,
+  outstandingTotal: number,
+): ReceptionDeskUseful {
+  const activeTime = subs.find((s) => {
+    const status = String(s.status ?? '').toLowerCase()
+    if (status !== 'active') return false
+    if ((s.subscription_type ?? (s.plan === 'sessions' ? 'sessions' : 'time')) !== 'time') return false
+    if (!s.end_date || s.end_date < today) return false
+    return true
+  })
+
+  const activeSessions = subs.find((s) => {
+    const status = String(s.status ?? '').toLowerCase()
+    if (status !== 'active') return false
+    const type = (s.subscription_type ?? (s.plan === 'sessions' ? 'sessions' : 'time')) as 'time' | 'sessions'
+    if (type !== 'sessions') return false
+    const remaining = Math.max(Number(s.sessions_total ?? 0) - Number(s.sessions_used ?? 0), 0)
+    return remaining > 0
+  })
+
+  const latestPayment = subs.find((s) => !!s.paid_at)?.paid_at ?? null
+  const validAttendance = attendance.filter((a) => a.valid).length
+  const lastAttendance = attendance[0]?.date ?? null
+
+  let checkInStatus = 'Not ready'
+  let checkInHint = 'No active membership found.'
+  let renewalState = 'Renew now'
+  let renewalHint = 'No active plan.'
+  let paymentState = outstandingTotal > 0 ? fmtMoneyEGP(outstandingTotal) : 'No due'
+  let paymentHint = outstandingTotal > 0
+    ? 'Outstanding due on subscriptions.'
+    : latestPayment
+      ? `Last payment ${fmtDate(latestPayment)}`
+      : 'No due recorded.'
+  let lastSeen = lastAttendance ? fmtDate(lastAttendance) : 'No recent check-in'
+  let lastSeenHint = lastAttendance
+    ? `${validAttendance} valid check-in(s) in last 30 days`
+    : 'No attendance in the last 30 days.'
+
+  if (activeTime) {
+    if (isFrozenNow(activeTime, today)) {
+      checkInStatus = 'Frozen'
+      checkInHint = `Until ${fmtDate(activeTime.frozen_until)}`
+      renewalState = 'Wait / review'
+      renewalHint = 'Membership is currently frozen.'
+    } else {
+      const left = daysUntil(activeTime.end_date, today)
+      checkInStatus = 'Ready'
+      checkInHint =
+        left === null
+          ? `${humanPlan(activeTime.plan)} active`
+          : left === 0
+            ? `${humanPlan(activeTime.plan)} ends today`
+            : `${humanPlan(activeTime.plan)} · ${left} day(s) left`
+
+      if (left !== null && left <= 7) {
+        renewalState = 'Renew soon'
+        renewalHint = `${left} day(s) left`
+      } else {
+        renewalState = 'OK'
+        renewalHint = 'No urgent renewal needed.'
+      }
+    }
+  } else if (activeSessions) {
+    const remaining = Math.max(Number(activeSessions.sessions_total ?? 0) - Number(activeSessions.sessions_used ?? 0), 0)
+    checkInStatus = 'Ready'
+    checkInHint = `${remaining} session(s) left`
+
+    if (remaining <= 2) {
+      renewalState = 'Low sessions'
+      renewalHint = `${remaining} session(s) left`
+    } else {
+      renewalState = 'OK'
+      renewalHint = 'Sessions balance looks okay.'
+    }
+  }
+
+  return {
+    checkInStatus,
+    checkInHint,
+    renewalState,
+    renewalHint,
+    paymentState,
+    paymentHint,
+    lastSeen,
+    lastSeenHint,
+  }
+}
+
 function Surface({ children, className = '' }: { children: ReactNode; className?: string }) {
   return <section className={`rounded-3xl border border-[hsl(var(--border))] bg-white shadow-soft ${className}`}>{children}</section>
 }
@@ -399,6 +504,37 @@ function SummaryCard({
         </span>
       </div>
     </Surface>
+  )
+}
+
+function QuickLink({
+  href,
+  label,
+  icon,
+  external = false,
+}: {
+  href: string
+  label: string
+  icon: ReactNode
+  external?: boolean
+}) {
+  const cls =
+    'inline-flex items-center justify-center gap-2 rounded-2xl border border-[hsl(var(--border))] bg-white px-4 py-3 text-sm font-medium shadow-soft hover:bg-[hsl(var(--bg))]'
+
+  if (external) {
+    return (
+      <a href={href} className={cls}>
+        {icon}
+        {label}
+      </a>
+    )
+  }
+
+  return (
+    <Link href={href} className={cls}>
+      {icon}
+      {label}
+    </Link>
   )
 }
 
@@ -448,6 +584,7 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
 
   const isSelf = me.id === profile.user_id
   const isCoachViewingOtherMember = me.role === 'coach' && !isSelf
+  const receptionDeskView = me.role === 'reception' && !isSelf
 
   if (!canOpenOtherProfiles && !isSelf) {
     return (
@@ -572,8 +709,9 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
   }
 
   const summary = buildMembershipSummary(profile.role, isSelf, subs, today)
-  const coachTrainingUseful = coachSafeView ? buildCoachTrainingUseful(subs, attendance, today) : null
   const outstandingTotal = subs.reduce((sum, s) => sum + Math.max(Number(s.amount_due ?? 0), 0), 0)
+  const coachTrainingUseful = coachSafeView ? buildCoachTrainingUseful(subs, attendance, today) : null
+  const receptionDeskUseful = receptionDeskView ? buildReceptionDeskUseful(subs, attendance, today, outstandingTotal) : null
   const latestPayment = subs.find((s) => !!s.paid_at)?.paid_at ?? null
   const recentAttendanceValid = attendance.filter((a) => a.valid).length
   const lastAttendance = attendance[0]?.date ?? null
@@ -584,11 +722,13 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
 
   const subtitle = coachSafeView
     ? 'Read-only coach view with only safe member information.'
-    : isSelf
-      ? viewedRole === 'member'
-        ? 'Your profile, QR code and membership details.'
-        : 'Your profile, QR code and staff access overview.'
-      : 'Fast member overview built for field usage on mobile and tablet.'
+    : receptionDeskView
+      ? 'Front-desk member view focused on renewal, due, contact and check-in readiness.'
+      : isSelf
+        ? viewedRole === 'member'
+          ? 'Your profile, QR code and membership details.'
+          : 'Your profile, QR code and staff access overview.'
+        : 'Fast member overview built for field usage on mobile and tablet.'
 
   const right = canViewMembersList ? (
     <Link
@@ -611,7 +751,7 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
   return (
     <main>
       <PageHeader
-        title={coachSafeView ? 'Member overview' : isSelf ? 'My profile' : 'Member detail'}
+        title={coachSafeView ? 'Member overview' : receptionDeskView ? 'Reception member detail' : isSelf ? 'My profile' : 'Member detail'}
         subtitle={subtitle}
         right={right}
       />
@@ -625,6 +765,7 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
               {profile.member_id ? <TinyBadge>Member ID: {profile.member_id}</TinyBadge> : null}
               {typeof age === 'number' ? <TinyBadge>{age < 17 ? `Kid · ${age}y` : `Adult · ${age}y`}</TinyBadge> : null}
               {coachSafeView ? <TinyBadge tone="success">Coach read-only view</TinyBadge> : null}
+              {receptionDeskView ? <TinyBadge tone="success">Reception desk view</TinyBadge> : null}
             </div>
 
             <div>
@@ -632,9 +773,11 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
               <p className="mt-2 max-w-3xl text-sm text-[hsl(var(--muted))] sm:text-base">
                 {coachSafeView
                   ? 'Only training-useful information is shown here. No private contact data, finance data or member QR is displayed.'
-                  : isSelf
-                    ? 'Everything important is grouped here for quick reading on mobile.'
-                    : 'Identity, subscription status, QR code and operational info grouped in one clear mobile-first page.'}
+                  : receptionDeskView
+                    ? 'This view is optimized for front-desk usage: contact, due, renewal, check-in readiness and fast actions.'
+                    : isSelf
+                      ? 'Everything important is grouped here for quick reading on mobile.'
+                      : 'Identity, subscription status, QR code and operational info grouped in one clear mobile-first page.'}
               </p>
             </div>
           </div>
@@ -669,6 +812,27 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
                 icon={<UserRound size={18} strokeWidth={2.1} />}
               />
             </>
+          ) : receptionDeskView ? (
+            <>
+              <SummaryCard
+                label="Outstanding due"
+                value={outstandingTotal > 0 ? fmtMoneyEGP(outstandingTotal) : 'No due'}
+                hint={outstandingTotal > 0 ? 'Collect or follow up at the desk.' : 'Nothing due at the moment.'}
+                icon={<Wallet size={18} strokeWidth={2.1} />}
+              />
+              <SummaryCard
+                label="Last payment"
+                value={latestPayment ? fmtDate(latestPayment) : '—'}
+                hint="Most recent recorded payment date."
+                icon={<CreditCard size={18} strokeWidth={2.1} />}
+              />
+              <SummaryCard
+                label="Last check-in"
+                value={lastAttendance ? fmtDate(lastAttendance) : '—'}
+                hint={lastAttendance ? `${recentAttendanceValid} valid check-in(s) in last 30 days` : 'No recent attendance.'}
+                icon={<ScanLine size={18} strokeWidth={2.1} />}
+              />
+            </>
           ) : (
             <>
               <SummaryCard
@@ -692,6 +856,45 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
             </>
           )}
         </div>
+
+        {receptionDeskView && receptionDeskUseful ? (
+          <Surface className="p-4 sm:p-5">
+            <div className="flex items-center gap-2">
+              <ScanLine size={18} className="text-black" />
+              <h2 className="text-base font-semibold tracking-tight">Reception desk summary</h2>
+            </div>
+            <p className="mt-1 text-sm text-[hsl(var(--muted))]">
+              The most useful front-desk information at a glance.
+            </p>
+
+            <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+              <SummaryCard
+                label="Check-in status"
+                value={receptionDeskUseful.checkInStatus}
+                hint={receptionDeskUseful.checkInHint}
+                icon={<ScanLine size={18} strokeWidth={2.1} />}
+              />
+              <SummaryCard
+                label="Renewal state"
+                value={receptionDeskUseful.renewalState}
+                hint={receptionDeskUseful.renewalHint}
+                icon={<CalendarDays size={18} strokeWidth={2.1} />}
+              />
+              <SummaryCard
+                label="Payment state"
+                value={receptionDeskUseful.paymentState}
+                hint={receptionDeskUseful.paymentHint}
+                icon={<Wallet size={18} strokeWidth={2.1} />}
+              />
+              <SummaryCard
+                label="Last seen"
+                value={receptionDeskUseful.lastSeen}
+                hint={receptionDeskUseful.lastSeenHint}
+                icon={<UserRound size={18} strokeWidth={2.1} />}
+              />
+            </div>
+          </Surface>
+        ) : null}
 
         {coachSafeView && coachTrainingUseful ? (
           <Surface className="p-4 sm:p-5">
@@ -732,17 +935,31 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
           </Surface>
         ) : null}
 
-        {showSubscriptionActions || canResendInvite ? (
+        {(showSubscriptionActions || canResendInvite || receptionDeskView) ? (
           <Surface className="p-4 sm:p-5">
             <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
               <div className="min-w-0 flex-1">
-                <div className="text-base font-semibold tracking-tight">Quick actions</div>
+                <div className="text-base font-semibold tracking-tight">
+                  {receptionDeskView ? 'Reception quick actions' : 'Quick actions'}
+                </div>
                 <p className="mt-1 text-sm text-[hsl(var(--muted))]">
-                  Keep high-frequency actions visible without opening extra screens.
+                  {receptionDeskView
+                    ? 'Keep the most common desk actions visible and fast on mobile.'
+                    : 'Keep high-frequency actions visible without opening extra screens.'}
                 </p>
               </div>
 
               <div className="flex flex-wrap gap-2">
+                {receptionDeskView && profile.phone ? (
+                  <QuickLink href={`tel:${profile.phone}`} label="Call member" icon={<Phone size={16} />} external />
+                ) : null}
+                {receptionDeskView && profile.email ? (
+                  <QuickLink href={`mailto:${profile.email}`} label="Email member" icon={<Mail size={16} />} external />
+                ) : null}
+                {receptionDeskView ? (
+                  <QuickLink href="/scan" label="Open scan" icon={<ScanLine size={16} />} />
+                ) : null}
+
                 {showSubscriptionActions ? (
                   <>
                     <SubscribeDialog
@@ -759,7 +976,7 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
                       disabledReason={subscribeDisabledReason}
                     />
 
-                    {canManageSubscriptions && maxActiveTimeEnd ? (
+                    {maxActiveTimeEnd ? (
                       <SubscribeDialog
                         member={{
                           user_id: profile.user_id,
@@ -882,7 +1099,9 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
               <p className="mt-1 text-sm text-[hsl(var(--muted))]">
                 {coachSafeView
                   ? 'Only training-useful subscription status is visible here.'
-                  : 'A clean card view with no horizontal scrolling on mobile.'}
+                  : receptionDeskView
+                    ? 'Clean front-desk reading of plans, dues and payment details.'
+                    : 'A clean card view with no horizontal scrolling on mobile.'}
               </p>
             </div>
             <TinyBadge>{subs.length} record(s)</TinyBadge>
