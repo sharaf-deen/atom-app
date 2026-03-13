@@ -11,13 +11,19 @@ export function isISODateOnly(s: string | null | undefined): s is string {
  * Uses Intl with a fixed timeZone to avoid server UTC drift.
  */
 export function cairoTodayDateOnly(now: Date = new Date()): string {
-  // en-CA reliably formats as YYYY-MM-DD
-  return new Intl.DateTimeFormat('en-CA', {
+  const parts = new Intl.DateTimeFormat('en-CA', {
     timeZone: CAIRO_TZ,
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
-  }).format(now)
+  }).formatToParts(now)
+
+  const map: Record<string, string> = {}
+  for (const p of parts) {
+    if (p.type !== 'literal') map[p.type] = p.value
+  }
+
+  return `${map.year ?? '1970'}-${map.month ?? '01'}-${map.day ?? '01'}`
 }
 
 export function addDaysDateOnly(dateOnly: string, days: number): string {
@@ -133,4 +139,38 @@ export function cairoMonthBoundsDateOnly(anchorDateOnly: string): { from: string
   const nextMonthStart = `${String(nextMonthY).padStart(4, '0')}-${String(nextMonthM).padStart(2, '0')}-01`
   const to = addDaysDateOnly(nextMonthStart, -1)
   return { from, to }
+}
+
+export function formatDateTimeInCairo(value?: string | Date | null, fallback = '—'): string {
+  if (!value) return fallback
+
+  const date = value instanceof Date ? value : new Date(value)
+  if (Number.isNaN(date.getTime())) {
+    return typeof value === 'string' ? value : fallback
+  }
+
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: CAIRO_TZ,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  }).formatToParts(date)
+
+  const map: Record<string, string> = {}
+  for (const p of parts) {
+    if (p.type !== 'literal') map[p.type] = p.value
+  }
+
+  const year = map.year ?? '0000'
+  const month = map.month ?? '00'
+  const day = map.day ?? '00'
+  const hour = map.hour ?? '00'
+  const minute = map.minute ?? '00'
+  const second = map.second ?? '00'
+
+  return `${year}-${month}-${day} ${hour}:${minute}:${second}`
 }
