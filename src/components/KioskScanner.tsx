@@ -553,12 +553,7 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className }: 
                 <p className="text-sm font-semibold">ATOM Scan</p>
                 <p className="text-xs text-white/70">Use the rear camera and keep the QR inside the frame.</p>
               </div>
-              <Button
-                type="button"
-                variant="outline"
-                className="!bg-transparent !text-white !border-white/25 hover:!bg-white/10"
-                onClick={() => setFullScreen(false)}
-              >
+              <Button type="button" variant="outline" onClick={() => setFullScreen(false)}>
                 <Minimize2 className="mr-2 h-4 w-4" />
                 Close
               </Button>
@@ -586,7 +581,7 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className }: 
             {exitError ? <p className="mt-2 text-sm text-rose-700">{exitError}</p> : null}
 
             <div className="mt-4 flex items-center justify-end gap-2">
-              <Button type="button" variant="secondary" onClick={() => setExitOpen(false)}>
+              <Button type="button" variant="outline" onClick={() => setExitOpen(false)}>
                 Cancel
               </Button>
               <Button type="button" onClick={confirmExitKiosk}>
