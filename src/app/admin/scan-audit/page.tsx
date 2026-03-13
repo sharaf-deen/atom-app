@@ -5,9 +5,8 @@ import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import AccessDeniedCard from '@/components/AccessDeniedCard'
 import { Table } from '@/components/ui/Table'
-import Badge from '@/components/ui/Badge'
-import { getSessionUserCached } from '@/lib/requestCache'
-import { fetchScanAuditRows } from '@/lib/scanAudit'
+import { getSessionUserCached, getSupabaseAdminClientCached } from '@/lib/requestCache'
+import { fetchScanAuditPage, formatDateTimeCairo } from '@/lib/scanAudit'
 
 type SearchParams = Record<string, string | string[] | undefined>
 
@@ -31,19 +30,7 @@ function buildHref(base: string, current: SearchParams, patch: Record<string, st
   return s ? `${base}?${s}` : base
 }
 
-function fmtName(first?: string | null, last?: string | null) {
-  return [first ?? '', last ?? ''].join(' ').trim()
-}
-
-function fmtDateTime(iso?: string | null) {
-  if (!iso) return '—'
-  const d = new Date(iso)
-  if (Number.isNaN(d.getTime())) return iso
-  return d.toLocaleString()
-}
-
 const PER_PAGE = 50
-const FETCH_LIMIT = 5000
 
 export default async function ScanAuditPage({ searchParams }: { searchParams: SearchParams }) {
   const me = await getSessionUserCached()
@@ -59,59 +46,44 @@ export default async function ScanAuditPage({ searchParams }: { searchParams: Se
   const sort = spGet(searchParams, 'sort').trim() || 'recent'
   const page = Math.max(1, Number(spGet(searchParams, 'page') || '1') || 1)
 
-  const from = (page - 1) * PER_PAGE
-  const to = from + PER_PAGE - 1
+  const supabase = getSupabaseAdminClientCached()
+  const { rows, total, error } = await fetchScanAuditPage(supabase, {
+    q,
+    status,
+    device,
+    scannedByRole,
+    start,
+    end,
+    sort,
+    page,
+    perPage: PER_PAGE,
+  })
 
-  let rowsData: Awaited<ReturnType<typeof fetchScanAuditRows>> = []
-  let errorMessage = ''
+  const uiRows = rows.map((r) => ({
+    id: r.id,
+    scanned_at: formatDateTimeCairo(r.scanned_at),
+    status: r.status ?? '—',
+    device: r.device_tag ?? '—',
+    member: r.member_name,
+    scanned_by_role: r.scanned_by_role ?? '—',
+    scanned_by: r.scanned_by_name,
+    valid: r.valid ? 'Yes' : 'No',
+  }))
 
-  try {
-    rowsData = await fetchScanAuditRows({
-      q,
-      status,
-      device,
-      scannedByRole,
-      start,
-      end,
-      sort,
-      limit: FETCH_LIMIT,
-    })
-  } catch (error: any) {
-    errorMessage = String(error?.message || error || 'Failed to load scan audit')
-  }
-
-  const total = rowsData.length
   const totalPages = Math.max(1, Math.ceil(total / PER_PAGE))
   const hasPrev = page > 1
   const hasNext = page < totalPages
-
-  const rows = rowsData.slice(from, to + 1).map((r) => {
-    const memberName = fmtName(r.member_first_name, r.member_last_name) || r.member_email || r.member_code || r.member_id
-    const scannerName = fmtName(r.scanned_by_first_name, r.scanned_by_last_name) || r.scanned_by_email || (r.scanned_by ?? '—')
-
-    return {
-      id: r.id,
-      scanned_at: fmtDateTime(r.scanned_at),
-      status: r.status,
-      valid: r.valid ? 'Yes' : 'No',
-      source: r.source ?? '—',
-      device: r.device_tag ?? '—',
-      member: memberName,
-      scanned_by_role: r.scanned_by_role ?? '—',
-      scanned_by: scannerName,
-    }
-  })
 
   const exportHref = buildHref('/api/admin/scan-audit/export', searchParams, { page: '' })
 
   return (
     <main className="min-h-[calc(100vh-3rem)] bg-white text-black">
-      <section className="mx-auto max-w-6xl space-y-4 px-4 py-8">
-        <div className="flex flex-wrap items-start justify-between gap-3">
+      <section className="mx-auto max-w-6xl px-4 py-8 space-y-4">
+        <div className="flex items-start justify-between gap-3 flex-wrap">
           <div>
             <h1 className="text-2xl font-semibold tracking-tight">Scan Audit</h1>
             <p className="mt-1 text-sm text-[hsl(var(--muted))]">
-              Kiosk scan history (attendance) with staff + device context.
+              Kiosk scan history with staff + device context. Times shown in Egypt time.
             </p>
           </div>
 
@@ -196,10 +168,7 @@ export default async function ScanAuditPage({ searchParams }: { searchParams: Se
           />
 
           <div className="flex items-center gap-2 lg:col-span-6">
-            <button
-              type="submit"
-              className="rounded-xl bg-black px-4 py-2 text-sm font-semibold text-white hover:opacity-90"
-            >
+            <button type="submit" className="rounded-xl bg-black px-4 py-2 text-sm font-semibold text-white hover:opacity-90">
               Apply
             </button>
 
@@ -211,8 +180,8 @@ export default async function ScanAuditPage({ searchParams }: { searchParams: Se
               Reset
             </Link>
 
-            {errorMessage ? (
-              <span className="ml-auto text-sm text-red-700">{errorMessage}</span>
+            {error ? (
+              <span className="ml-auto text-sm text-red-700">{error}</span>
             ) : (
               <span className="ml-auto text-sm text-[hsl(var(--muted))]">
                 {total} scan{total === 1 ? '' : 's'}
@@ -224,12 +193,11 @@ export default async function ScanAuditPage({ searchParams }: { searchParams: Se
         <div className="rounded-2xl border border-[hsl(var(--border))] bg-white shadow-soft">
           <Table
             keyField="id"
-            rows={rows}
+            rows={uiRows}
             columns={[
-              { key: 'scanned_at', header: 'Scanned at' },
+              { key: 'scanned_at', header: 'Scanned at (Egypt)' },
               { key: 'status', header: 'Status' },
               { key: 'valid', header: 'Valid', hideOnMobile: true },
-              { key: 'source', header: 'Source', hideOnMobile: true },
               { key: 'device', header: 'Device' },
               { key: 'member', header: 'Member' },
               { key: 'scanned_by_role', header: 'Scanner role', hideOnMobile: true },
@@ -239,36 +207,26 @@ export default async function ScanAuditPage({ searchParams }: { searchParams: Se
         </div>
 
         <div className="flex items-center justify-between gap-3">
-          <div className="text-sm text-[hsl(var(--muted))]">Page {page} / {totalPages}</div>
+          <div className="text-sm text-[hsl(var(--muted))]">
+            Page {page} / {totalPages}
+          </div>
 
           <div className="flex items-center gap-2">
             <Link
               href={buildHref('/admin/scan-audit', searchParams, { page: String(Math.max(1, page - 1)) })}
-              className={
-                'rounded-xl border px-3 py-2 text-sm font-semibold ' +
-                (hasPrev ? 'hover:bg-black/[0.03]' : 'pointer-events-none opacity-50')
-              }
+              className={'rounded-xl border px-3 py-2 text-sm font-semibold ' + (hasPrev ? 'hover:bg-black/[0.03]' : 'pointer-events-none opacity-50')}
             >
               Prev
             </Link>
 
             <Link
               href={buildHref('/admin/scan-audit', searchParams, { page: String(page + 1) })}
-              className={
-                'rounded-xl border px-3 py-2 text-sm font-semibold ' +
-                (hasNext ? 'hover:bg-black/[0.03]' : 'pointer-events-none opacity-50')
-              }
+              className={'rounded-xl border px-3 py-2 text-sm font-semibold ' + (hasNext ? 'hover:bg-black/[0.03]' : 'pointer-events-none opacity-50')}
             >
               Next
             </Link>
           </div>
         </div>
-
-        {!errorMessage && total === FETCH_LIMIT ? (
-          <div className="rounded-2xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
-            Showing the latest {FETCH_LIMIT} audit rows. Export CSV if you need a larger slice.
-          </div>
-        ) : null}
       </section>
     </main>
   )

@@ -27,7 +27,6 @@ type ScanResponse = {
 type AttendanceWrite = {
   member_id?: string
   date?: string
-  scanned_at?: string | null
   valid?: boolean | null
   status?: string
   from_sessions?: boolean
@@ -35,6 +34,7 @@ type AttendanceWrite = {
   scanned_by?: string | null
   device_tag?: string | null
   source?: string
+  scanned_at?: string
 }
 
 function json(status: number, body: ScanResponse) {
@@ -199,7 +199,6 @@ export async function POST(req: Request) {
         await persistAttendance(admin, existingId, {
           member_id: memberId,
           date: today,
-          scanned_at: scannedAt,
           valid: false,
           status: 'frozen',
           from_sessions: false,
@@ -207,6 +206,7 @@ export async function POST(req: Request) {
           scanned_by: actorId,
           device_tag: deviceTag,
           source: 'kiosk',
+          scanned_at: scannedAt,
         })
 
         return json(200, {
@@ -223,12 +223,9 @@ export async function POST(req: Request) {
 
       const daysRemaining = Math.max(0, daysBetweenUTC(today, timeSub.end_date))
 
-      // Important fix:
-      // even if already valid today, rewrite scanner context so scan_audit sees source='kiosk'
       await persistAttendance(admin, existingId, {
         member_id: memberId,
         date: today,
-        scanned_at: scannedAt,
         valid: true,
         status: 'ok',
         from_sessions: false,
@@ -236,6 +233,7 @@ export async function POST(req: Request) {
         scanned_by: actorId,
         device_tag: deviceTag,
         source: 'kiosk',
+        scanned_at: scannedAt,
       })
 
       return json(200, {
@@ -285,12 +283,9 @@ export async function POST(req: Request) {
           }
         }
 
-        // Important fix:
-        // also rewrite existing valid attendance row to keep source='kiosk'
         await persistAttendance(admin, existingId, {
           member_id: memberId,
           date: today,
-          scanned_at: scannedAt,
           valid: true,
           status: 'ok',
           from_sessions: true,
@@ -298,6 +293,7 @@ export async function POST(req: Request) {
           scanned_by: actorId,
           device_tag: deviceTag,
           source: 'kiosk',
+          scanned_at: scannedAt,
         })
 
         const remainingAfter = alreadyValidToday ? remaining : remaining - 1
@@ -316,7 +312,6 @@ export async function POST(req: Request) {
       await persistAttendance(admin, existingId, {
         member_id: memberId,
         date: today,
-        scanned_at: scannedAt,
         valid: false,
         status: 'expired',
         from_sessions: true,
@@ -324,6 +319,7 @@ export async function POST(req: Request) {
         scanned_by: actorId,
         device_tag: deviceTag,
         source: 'kiosk',
+        scanned_at: scannedAt,
       })
 
       return json(200, {
@@ -355,7 +351,6 @@ export async function POST(req: Request) {
     await persistAttendance(admin, existingId, {
       member_id: memberId,
       date: today,
-      scanned_at: scannedAt,
       valid: false,
       status: 'expired',
       from_sessions: false,
@@ -363,6 +358,7 @@ export async function POST(req: Request) {
       scanned_by: actorId,
       device_tag: deviceTag,
       source: 'kiosk',
+      scanned_at: scannedAt,
     })
 
     return json(200, {
