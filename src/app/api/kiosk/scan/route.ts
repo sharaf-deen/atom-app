@@ -27,6 +27,7 @@ type ScanResponse = {
 type AttendanceWrite = {
   member_id?: string
   date?: string
+  scanned_at?: string | null
   valid?: boolean | null
   status?: string
   from_sessions?: boolean
@@ -138,6 +139,7 @@ export async function POST(req: Request) {
   }
 
   const today = todayDateOnlyCairo()
+  const scannedAt = new Date().toISOString()
   const deviceTag = (req.headers.get('x-device-tag') || '').slice(0, 64) || null
 
   try {
@@ -197,6 +199,7 @@ export async function POST(req: Request) {
         await persistAttendance(admin, existingId, {
           member_id: memberId,
           date: today,
+          scanned_at: scannedAt,
           valid: false,
           status: 'frozen',
           from_sessions: false,
@@ -225,6 +228,7 @@ export async function POST(req: Request) {
       await persistAttendance(admin, existingId, {
         member_id: memberId,
         date: today,
+        scanned_at: scannedAt,
         valid: true,
         status: 'ok',
         from_sessions: false,
@@ -286,6 +290,7 @@ export async function POST(req: Request) {
         await persistAttendance(admin, existingId, {
           member_id: memberId,
           date: today,
+          scanned_at: scannedAt,
           valid: true,
           status: 'ok',
           from_sessions: true,
@@ -311,6 +316,7 @@ export async function POST(req: Request) {
       await persistAttendance(admin, existingId, {
         member_id: memberId,
         date: today,
+        scanned_at: scannedAt,
         valid: false,
         status: 'expired',
         from_sessions: true,
@@ -349,6 +355,7 @@ export async function POST(req: Request) {
     await persistAttendance(admin, existingId, {
       member_id: memberId,
       date: today,
+      scanned_at: scannedAt,
       valid: false,
       status: 'expired',
       from_sessions: false,
