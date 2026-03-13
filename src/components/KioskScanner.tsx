@@ -505,15 +505,15 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className }: 
               </div>
 
               <div className="flex flex-wrap items-center gap-2">
-                <Button type="button" variant="secondary" onClick={() => setFacingMode((v) => (v === 'environment' ? 'user' : 'environment'))}>
+                <Button type="button" variant="outline" onClick={() => setFacingMode((v) => (v === 'environment' ? 'user' : 'environment'))}>
                   <RotateCcw className="mr-2 h-4 w-4" />
                   Flip camera
                 </Button>
-                <Button type="button" variant="secondary" onClick={retryNow}>
+                <Button type="button" variant="outline" onClick={retryNow}>
                   <RefreshCw className="mr-2 h-4 w-4" />
                   Retry
                 </Button>
-                <Button type="button" variant="secondary" onClick={() => setFullScreen((v) => !v)}>
+                <Button type="button" variant="outline" onClick={() => setFullScreen((v) => !v)}>
                   {fullScreen ? <Minimize2 className="mr-2 h-4 w-4" /> : <Expand className="mr-2 h-4 w-4" />}
                   {fullScreen ? 'Exit full screen' : 'Full screen'}
                 </Button>
@@ -553,7 +553,12 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className }: 
                 <p className="text-sm font-semibold">ATOM Scan</p>
                 <p className="text-xs text-white/70">Use the rear camera and keep the QR inside the frame.</p>
               </div>
-              <Button type="button" variant="secondary" onClick={() => setFullScreen(false)}>
+              <Button
+                type="button"
+                variant="outline"
+                className="!bg-transparent !text-white !border-white/25 hover:!bg-white/10"
+                onClick={() => setFullScreen(false)}
+              >
                 <Minimize2 className="mr-2 h-4 w-4" />
                 Close
               </Button>
