@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { getSessionUserCached, getSupabaseAdminClientCached } from '@/lib/requestCache'
-import { fetchScanAuditExportRows, formatDateTimeCairo, cairoDateStamp } from '@/lib/scanAudit'
+import { formatScanAuditMember, formatScanAuditScanner, getScanAuditData } from '@/lib/scanAudit'
 
 function csvEscape(v: unknown): string {
   const s = (v ?? '').toString()
@@ -31,64 +31,72 @@ export async function GET(req: Request) {
   const limit = clamp(Number(url.searchParams.get('limit') ?? 5000), 1, 20000)
 
   const supabase = getSupabaseAdminClientCached()
-  const { rows, error } = await fetchScanAuditExportRows(supabase, {
-    q,
-    status,
-    device,
-    scannedByRole,
-    start,
-    end,
-    sort,
-    limit,
-  })
 
-  if (error) return NextResponse.json({ ok: false, error }, { status: 500 })
+  try {
+    const data = await getScanAuditData(supabase, {
+      q,
+      status,
+      device,
+      scannedByRole,
+      start,
+      end,
+      sort,
+      page: 1,
+      perPage: limit,
+      maxFetch: limit,
+    })
 
-  const header = [
-    'scanned_at_egypt',
-    'date',
-    'status',
-    'valid',
-    'device_tag',
-    'member_code',
-    'member_name',
-    'member_email',
-    'scanned_by_role',
-    'scanned_by_name',
-    'scanned_by_email',
-  ]
+    const header = [
+      'scanned_at_egypt',
+      'date',
+      'status',
+      'valid',
+      'device_tag',
+      'member_code',
+      'member_name',
+      'member_email',
+      'scanner_role',
+      'scanner_name',
+      'scanner_email',
+      'source',
+    ]
 
-  const lines = [header.map(csvEscape).join(',')]
+    const lines = [header.map(csvEscape).join(',')]
 
-  for (const r of rows) {
-    lines.push(
-      [
-        formatDateTimeCairo(r.scanned_at),
-        r.date ?? '',
-        r.status ?? '',
-        r.valid ? 'true' : 'false',
-        r.device_tag ?? '',
-        r.member_code ?? '',
-        r.member_name,
-        r.member_email ?? '',
-        r.scanned_by_role ?? '',
-        r.scanned_by_name,
-        r.scanned_by_email ?? '',
-      ]
-        .map(csvEscape)
-        .join(',')
-    )
+    for (const row of data.rows) {
+      lines.push(
+        [
+          row.scanned_at_cairo,
+          row.date ?? '',
+          row.status ?? '',
+          row.valid ? 'true' : 'false',
+          row.device_tag ?? '',
+          row.member_code ?? '',
+          formatScanAuditMember(row),
+          row.member_email ?? '',
+          row.scanned_by_role ?? '',
+          formatScanAuditScanner(row),
+          row.scanned_by_email ?? '',
+          row.source ?? '',
+        ]
+          .map(csvEscape)
+          .join(',')
+      )
+    }
+
+    const csv = lines.join('\n')
+    const stamp = new Date().toISOString().slice(0, 10)
+    const filename = `scan-audit-${stamp}.csv`
+
+    return new NextResponse(csv, {
+      status: 200,
+      headers: {
+        'content-type': 'text/csv; charset=utf-8',
+        'content-disposition': `attachment; filename="${filename}"`,
+        'cache-control': 'no-store',
+      },
+    })
+  } catch (error: any) {
+    return NextResponse.json({ ok: false, error: error?.message ?? 'export_failed' }, { status: 500 })
   }
-
-  const csv = lines.join('\n')
-  const filename = `scan-audit-${cairoDateStamp()}.csv`
-
-  return new NextResponse(csv, {
-    status: 200,
-    headers: {
-      'content-type': 'text/csv; charset=utf-8',
-      'content-disposition': `attachment; filename="${filename}"`,
-      'cache-control': 'no-store',
-    },
-  })
 }
