@@ -1,8 +1,10 @@
-// app/scan/page.tsx
+// src/app/scan/page.tsx
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
+import Link from 'next/link'
 import { redirect } from 'next/navigation'
+import { ClipboardList, ScanLine, UserPlus, Users } from 'lucide-react'
 import { getSessionUser } from '@/lib/session'
 import KioskScanner from '@/components/KioskScanner'
 import type { Role } from '@/lib/session'
@@ -13,6 +15,35 @@ import KioskHealthBadge from '@/components/KioskHealthBadge'
 
 function canAccess(role: Role) {
   return role === 'reception' || role === 'admin' || role === 'super_admin'
+}
+
+function QuickLink({
+  href,
+  label,
+  desc,
+  icon,
+}: {
+  href: string
+  label: string
+  desc: string
+  icon: React.ReactNode
+}) {
+  return (
+    <Link
+      href={href}
+      className="rounded-3xl border border-[hsl(var(--border))] bg-white p-4 shadow-soft transition hover:-translate-y-0.5 hover:shadow-md"
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="text-sm font-semibold tracking-tight">{label}</div>
+          <p className="mt-1 text-sm text-[hsl(var(--muted))]">{desc}</p>
+        </div>
+        <span className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] text-black">
+          {icon}
+        </span>
+      </div>
+    </Link>
+  )
 }
 
 export default async function ScanPage() {
@@ -35,20 +66,62 @@ export default async function ScanPage() {
     )
   }
 
+  const showAudit = user.role === 'admin' || user.role === 'super_admin'
+
   return (
     <main>
       <PageHeader
         title="Scan — Check-in & Validity"
-        subtitle="Scan member QR to record attendance and verify subscription validity."
+        subtitle="Fast front-desk scanning for attendance, subscription validation and kiosk mode."
       />
 
-      <Section className="max-w-3xl space-y-3">
+      <Section className="max-w-5xl space-y-5">
         <KioskHealthBadge />
-        <KioskScanner size="sm" ratio="1:1" />
-        <p className="mt-3 text-sm text-[hsl(var(--muted))]">
-          Aim the QR code within the frame. The system will validate the member’s current subscription and
-          save attendance automatically.
-        </p>
+
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          <QuickLink
+            href="/members"
+            label="Members"
+            desc="Find a member quickly before or after a scan."
+            icon={<Users size={18} strokeWidth={2.1} />}
+          />
+          <QuickLink
+            href="/kiosk"
+            label="Create member"
+            desc="Open the front-desk member creation flow."
+            icon={<UserPlus size={18} strokeWidth={2.1} />}
+          />
+          <QuickLink
+            href="/scan?kiosk=1"
+            label="Open kiosk mode"
+            desc="Sticky full-screen scanner for the entrance."
+            icon={<ScanLine size={18} strokeWidth={2.1} />}
+          />
+          {showAudit ? (
+            <QuickLink
+              href="/admin/scan-audit"
+              label="Scan audit"
+              desc="Review scan history, device tag and scanner context."
+              icon={<ClipboardList size={18} strokeWidth={2.1} />}
+            />
+          ) : (
+            <div className="hidden xl:block" />
+          )}
+        </div>
+
+        <KioskScanner size="md" ratio="1:1" />
+
+        <div className="rounded-3xl border border-[hsl(var(--border))] bg-white p-4 shadow-soft">
+          <h2 className="text-base font-semibold tracking-tight">Front-desk tips</h2>
+          <div className="mt-3 grid gap-3 sm:grid-cols-2">
+            <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-3 text-sm text-[hsl(var(--muted))]">
+              Use the back camera when possible and keep only one QR in the frame.
+            </div>
+            <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-3 text-sm text-[hsl(var(--muted))]">
+              Kiosk mode is better for the entrance because it hides navigation and keeps the screen awake.
+            </div>
+          </div>
+        </div>
       </Section>
     </main>
   )
