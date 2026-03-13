@@ -1,18 +1,8 @@
-import 'server-only'
+import { formatDateTimeInCairo } from '@/lib/cairoTime'
 
-const CAIRO_TZ = 'Africa/Cairo'
+type AdminClient = any
 
-export type ScanAuditFilters = {
-  q?: string
-  status?: string
-  device?: string
-  scannedByRole?: string
-  start?: string
-  end?: string
-  sort?: string
-}
-
-type AttendanceAuditRow = {
+type AttendanceBaseRow = {
   id: string
   date: string | null
   scanned_at: string | null
@@ -33,243 +23,230 @@ type ProfileLite = {
   role: string | null
 }
 
-export type ScanAuditRow = {
+export type ScanAuditRecord = {
   id: string
   date: string | null
   scanned_at: string | null
+  scanned_at_cairo: string
   status: string | null
-  valid: boolean
+  valid: boolean | null
   device_tag: string | null
   member_id: string | null
   member_code: string | null
   member_email: string | null
   member_first_name: string | null
   member_last_name: string | null
-  member_name: string
   scanned_by: string | null
   scanned_by_role: string | null
   scanned_by_email: string | null
   scanned_by_first_name: string | null
   scanned_by_last_name: string | null
-  scanned_by_name: string
   source: string | null
 }
 
-function asText(v: unknown) {
-  return typeof v === 'string' ? v : ''
+export type ScanAuditFilters = {
+  q?: string
+  status?: string
+  device?: string
+  scannedByRole?: string
+  start?: string
+  end?: string
+  sort?: string
+  page?: number
+  perPage?: number
+  maxFetch?: number
 }
 
-function norm(v: unknown) {
-  return asText(v).trim().toLowerCase()
+export type ScanAuditResult = {
+  rows: ScanAuditRecord[]
+  total: number
+  totalPages: number
+  page: number
+  truncated: boolean
+}
+
+const DEFAULT_MAX_FETCH = 5000
+const FETCH_BATCH = 1000
+
+function norm(v?: string | null) {
+  return (v ?? '').trim().toLowerCase()
 }
 
 function fmtName(first?: string | null, last?: string | null) {
-  const value = [first ?? '', last ?? ''].join(' ').trim()
-  return value || '—'
+  return [first ?? '', last ?? ''].join(' ').trim()
 }
 
-function buildSearchBlob(row: ScanAuditRow) {
-  return [
-    row.device_tag,
-    row.member_code,
-    row.member_email,
-    row.member_first_name,
-    row.member_last_name,
-    row.member_name,
-    row.scanned_by_role,
-    row.scanned_by_email,
-    row.scanned_by_first_name,
-    row.scanned_by_last_name,
-    row.scanned_by_name,
-  ]
-    .filter(Boolean)
-    .join(' ')
-    .toLowerCase()
+function isKioskLike(row: AttendanceBaseRow) {
+  return row.source === 'kiosk' || !!row.scanned_by || !!row.device_tag
 }
 
-function compareRows(sort: string, a: ScanAuditRow, b: ScanAuditRow) {
-  if (sort === 'device_asc') {
-    const byDevice = (a.device_tag ?? '').localeCompare(b.device_tag ?? '')
-    if (byDevice !== 0) return byDevice
+function compareNullableText(a?: string | null, b?: string | null, asc = true) {
+  const aa = (a ?? '').toLowerCase()
+  const bb = (b ?? '').toLowerCase()
+  const cmp = aa.localeCompare(bb)
+  return asc ? cmp : -cmp
+}
+
+function compareScannedAtDesc(a: ScanAuditRecord, b: ScanAuditRecord) {
+  const at = a.scanned_at ? new Date(a.scanned_at).getTime() : 0
+  const bt = b.scanned_at ? new Date(b.scanned_at).getTime() : 0
+  return bt - at
+}
+
+async function fetchAttendanceRows(admin: AdminClient, args: ScanAuditFilters) {
+  const maxFetch = Math.max(1, Math.min(args.maxFetch ?? DEFAULT_MAX_FETCH, 20000))
+  const rows: AttendanceBaseRow[] = []
+  let from = 0
+  let truncated = false
+
+  while (rows.length < maxFetch) {
+    let qb = admin
+      .from('attendance')
+      .select('id,date,scanned_at,status,valid,device_tag,member_id,scanned_by,source')
+      .or('source.eq.kiosk,scanned_by.not.is.null,device_tag.not.is.null')
+
+    if (args.start) qb = qb.gte('date', args.start)
+    if (args.end) qb = qb.lte('date', args.end)
+    if (args.status) qb = qb.eq('status', args.status)
+    if (args.device) qb = qb.eq('device_tag', args.device)
+
+    if (args.sort === 'device_asc') qb = qb.order('device_tag', { ascending: true }).order('scanned_at', { ascending: false })
+    else if (args.sort === 'device_desc') qb = qb.order('device_tag', { ascending: false }).order('scanned_at', { ascending: false })
+    else qb = qb.order('scanned_at', { ascending: false })
+
+    const to = Math.min(from + FETCH_BATCH - 1, maxFetch - 1)
+    const { data, error } = await qb.range(from, to)
+    if (error) throw new Error(error.message)
+
+    const batch = (data ?? []) as AttendanceBaseRow[]
+    rows.push(...batch)
+
+    if (batch.length < FETCH_BATCH) break
+    from += FETCH_BATCH
+
+    if (rows.length >= maxFetch) {
+      truncated = true
+      break
+    }
   }
 
-  if (sort === 'device_desc') {
-    const byDevice = (b.device_tag ?? '').localeCompare(a.device_tag ?? '')
-    if (byDevice !== 0) return byDevice
-  }
-
-  const ta = a.scanned_at ? new Date(a.scanned_at).getTime() : 0
-  const tb = b.scanned_at ? new Date(b.scanned_at).getTime() : 0
-  return tb - ta
+  return { rows, truncated }
 }
 
-async function loadBaseRows(supabase: any, filters: ScanAuditFilters, hardLimit: number) {
-  let qb = supabase
-    .from('attendance')
-    .select('id,date,scanned_at,status,valid,device_tag,member_id,scanned_by,source')
-    .or('source.eq.kiosk,scanned_by.not.is.null,device_tag.not.is.null')
-    .limit(hardLimit)
-
-  if (filters.start) qb = qb.gte('date', filters.start)
-  if (filters.end) qb = qb.lte('date', filters.end)
-  if (filters.status) qb = qb.eq('status', filters.status)
-  if (filters.device) qb = qb.eq('device_tag', filters.device)
-
-  if (filters.sort === 'device_asc') qb = qb.order('device_tag', { ascending: true }).order('scanned_at', { ascending: false })
-  else if (filters.sort === 'device_desc') qb = qb.order('device_tag', { ascending: false }).order('scanned_at', { ascending: false })
-  else qb = qb.order('scanned_at', { ascending: false })
-
-  const { data, error } = await qb
-  if (error) return { rows: [] as AttendanceAuditRow[], error: error.message }
-  return { rows: (data ?? []) as AttendanceAuditRow[], error: null as string | null }
-}
-
-async function loadProfiles(supabase: any, rows: AttendanceAuditRow[]) {
-  const ids = Array.from(
-    new Set(
-      rows
-        .flatMap((r) => [r.member_id, r.scanned_by])
-        .filter((v): v is string => !!v)
-    )
-  )
-
-  if (ids.length === 0) return new Map<string, ProfileLite>()
-
-  const { data } = await supabase
-    .from('profiles')
-    .select('user_id,member_id,email,first_name,last_name,role')
-    .in('user_id', ids)
-    .limit(ids.length)
-
+async function fetchProfilesByUserIds(admin: AdminClient, ids: string[]) {
+  const uniqueIds = Array.from(new Set(ids.filter(Boolean)))
   const map = new Map<string, ProfileLite>()
-  for (const p of (data ?? []) as ProfileLite[]) {
-    map.set(p.user_id, p)
+
+  if (!uniqueIds.length) return map
+
+  for (let i = 0; i < uniqueIds.length; i += FETCH_BATCH) {
+    const chunk = uniqueIds.slice(i, i + FETCH_BATCH)
+    const { data, error } = await admin
+      .from('profiles')
+      .select('user_id,member_id,email,first_name,last_name,role')
+      .in('user_id', chunk)
+
+    if (error) throw new Error(error.message)
+
+    for (const row of (data ?? []) as ProfileLite[]) {
+      map.set(row.user_id, row)
+    }
   }
+
   return map
 }
 
-function enrichRows(rows: AttendanceAuditRow[], profiles: Map<string, ProfileLite>) {
-  return rows.map((r): ScanAuditRow => {
-    const member = r.member_id ? profiles.get(r.member_id) : null
-    const scanner = r.scanned_by ? profiles.get(r.scanned_by) : null
+export async function getScanAuditData(admin: AdminClient, args: ScanAuditFilters = {}): Promise<ScanAuditResult> {
+  const page = Math.max(1, Number(args.page ?? 1) || 1)
+  const perPage = Math.max(1, Math.min(Number(args.perPage ?? 50) || 50, 200))
+  const q = norm(args.q)
+  const scannedByRole = norm(args.scannedByRole)
 
-    const memberName = [member?.first_name ?? '', member?.last_name ?? ''].join(' ').trim() || member?.email || member?.member_id || r.member_id || '—'
-    const scannerName = [scanner?.first_name ?? '', scanner?.last_name ?? ''].join(' ').trim() || scanner?.email || r.scanned_by || '—'
+  const { rows: attendanceRows, truncated } = await fetchAttendanceRows(admin, args)
+  const kioskRows = attendanceRows.filter(isKioskLike)
+
+  const ids = kioskRows.flatMap((row) => [row.member_id ?? '', row.scanned_by ?? ''])
+  const profiles = await fetchProfilesByUserIds(admin, ids)
+
+  let enriched: ScanAuditRecord[] = kioskRows.map((row) => {
+    const member = row.member_id ? profiles.get(row.member_id) : undefined
+    const scanner = row.scanned_by ? profiles.get(row.scanned_by) : undefined
 
     return {
-      id: r.id,
-      date: r.date,
-      scanned_at: r.scanned_at,
-      status: r.status,
-      valid: !!r.valid,
-      device_tag: r.device_tag,
-      member_id: r.member_id,
+      id: row.id,
+      date: row.date,
+      scanned_at: row.scanned_at,
+      scanned_at_cairo: formatDateTimeInCairo(row.scanned_at),
+      status: row.status,
+      valid: row.valid,
+      device_tag: row.device_tag,
+      member_id: row.member_id,
       member_code: member?.member_id ?? null,
       member_email: member?.email ?? null,
       member_first_name: member?.first_name ?? null,
       member_last_name: member?.last_name ?? null,
-      member_name: memberName,
-      scanned_by: r.scanned_by,
+      scanned_by: row.scanned_by,
       scanned_by_role: scanner?.role ?? null,
       scanned_by_email: scanner?.email ?? null,
       scanned_by_first_name: scanner?.first_name ?? null,
       scanned_by_last_name: scanner?.last_name ?? null,
-      scanned_by_name: scannerName,
-      source: r.source,
+      source: row.source,
     }
   })
-}
 
-function applyFilters(rows: ScanAuditRow[], filters: ScanAuditFilters) {
-  let next = rows
-
-  if (filters.scannedByRole) {
-    const wanted = norm(filters.scannedByRole)
-    next = next.filter((r) => norm(r.scanned_by_role) === wanted)
+  if (scannedByRole) {
+    enriched = enriched.filter((row) => norm(row.scanned_by_role) === scannedByRole)
   }
 
-  if (filters.q) {
-    const wanted = norm(filters.q)
-    next = next.filter((r) => buildSearchBlob(r).includes(wanted))
+  if (q) {
+    enriched = enriched.filter((row) => {
+      const blob = [
+        row.member_code,
+        row.member_email,
+        row.member_first_name,
+        row.member_last_name,
+        row.member_id,
+        row.scanned_by_email,
+        row.scanned_by_first_name,
+        row.scanned_by_last_name,
+        row.scanned_by,
+        row.scanned_by_role,
+        row.device_tag,
+      ]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase()
+
+      return blob.includes(q)
+    })
   }
 
-  const sort = filters.sort || 'recent'
-  return [...next].sort((a, b) => compareRows(sort, a, b))
-}
+  if (args.sort === 'device_asc') {
+    enriched.sort((a, b) => compareNullableText(a.device_tag, b.device_tag, true) || compareScannedAtDesc(a, b))
+  } else if (args.sort === 'device_desc') {
+    enriched.sort((a, b) => compareNullableText(a.device_tag, b.device_tag, false) || compareScannedAtDesc(a, b))
+  } else {
+    enriched.sort(compareScannedAtDesc)
+  }
 
-export async function fetchScanAuditPage(
-  supabase: any,
-  filters: ScanAuditFilters & { page: number; perPage: number; limit?: number }
-) {
-  const hardLimit = Math.max(filters.limit ?? 5000, filters.page * filters.perPage)
-  const base = await loadBaseRows(supabase, filters, hardLimit)
-  if (base.error) return { rows: [] as ScanAuditRow[], total: 0, error: base.error }
-
-  const profiles = await loadProfiles(supabase, base.rows)
-  const filtered = applyFilters(enrichRows(base.rows, profiles), filters)
-
-  const startIndex = Math.max(0, (filters.page - 1) * filters.perPage)
-  const endIndex = startIndex + filters.perPage
+  const total = enriched.length
+  const totalPages = Math.max(1, Math.ceil(total / perPage))
+  const startIndex = (page - 1) * perPage
+  const paged = enriched.slice(startIndex, startIndex + perPage)
 
   return {
-    rows: filtered.slice(startIndex, endIndex),
-    total: filtered.length,
-    error: null as string | null,
+    rows: paged,
+    total,
+    totalPages,
+    page,
+    truncated,
   }
 }
 
-export async function fetchScanAuditExportRows(
-  supabase: any,
-  filters: ScanAuditFilters & { limit: number }
-) {
-  const base = await loadBaseRows(supabase, filters, filters.limit)
-  if (base.error) return { rows: [] as ScanAuditRow[], error: base.error }
-
-  const profiles = await loadProfiles(supabase, base.rows)
-  const filtered = applyFilters(enrichRows(base.rows, profiles), filters)
-
-  return {
-    rows: filtered.slice(0, filters.limit),
-    error: null as string | null,
-  }
+export function formatScanAuditMember(row: ScanAuditRecord) {
+  return fmtName(row.member_first_name, row.member_last_name) || row.member_email || row.member_code || row.member_id || '—'
 }
 
-export function formatDateTimeCairo(iso?: string | null) {
-  if (!iso) return '—'
-  const d = new Date(iso)
-  if (Number.isNaN(d.getTime())) return iso
-
-  const parts = new Intl.DateTimeFormat('en-GB', {
-    timeZone: CAIRO_TZ,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hour12: false,
-  }).formatToParts(d)
-
-  const year = parts.find((p) => p.type === 'year')?.value ?? '0000'
-  const month = parts.find((p) => p.type === 'month')?.value ?? '00'
-  const day = parts.find((p) => p.type === 'day')?.value ?? '00'
-  const hour = parts.find((p) => p.type === 'hour')?.value ?? '00'
-  const minute = parts.find((p) => p.type === 'minute')?.value ?? '00'
-  const second = parts.find((p) => p.type === 'second')?.value ?? '00'
-
-  return `${year}-${month}-${day} ${hour}:${minute}:${second}`
-}
-
-export function cairoDateStamp(now = new Date()) {
-  const parts = new Intl.DateTimeFormat('en-CA', {
-    timeZone: CAIRO_TZ,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).formatToParts(now)
-
-  const year = parts.find((p) => p.type === 'year')?.value ?? '0000'
-  const month = parts.find((p) => p.type === 'month')?.value ?? '00'
-  const day = parts.find((p) => p.type === 'day')?.value ?? '00'
-  return `${year}-${month}-${day}`
+export function formatScanAuditScanner(row: ScanAuditRecord) {
+  return fmtName(row.scanned_by_first_name, row.scanned_by_last_name) || row.scanned_by_email || row.scanned_by || '—'
 }

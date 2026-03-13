@@ -27,6 +27,7 @@ type ScanResponse = {
 type AttendanceWrite = {
   member_id?: string
   date?: string
+  scanned_at?: string
   valid?: boolean | null
   status?: string
   from_sessions?: boolean
@@ -34,11 +35,12 @@ type AttendanceWrite = {
   scanned_by?: string | null
   device_tag?: string | null
   source?: string
-  scanned_at?: string
 }
 
 function json(status: number, body: ScanResponse) {
-  return NextResponse.json(body, { status })
+  const res = NextResponse.json(body, { status })
+  res.headers.set('Cache-Control', 'no-store')
+  return res
 }
 
 function parseMemberIdFromCode(code: string): string | null {
@@ -87,13 +89,19 @@ async function persistAttendance(
   existingId: string | null,
   payload: AttendanceWrite,
 ) {
+  const writePayload: AttendanceWrite = {
+    ...payload,
+    scanned_at: new Date().toISOString(),
+    source: 'kiosk',
+  }
+
   if (existingId) {
-    const { error } = await admin.from('attendance').update(payload).eq('id', existingId)
+    const { error } = await admin.from('attendance').update(writePayload).eq('id', existingId)
     if (error) throw new Error(error.message)
     return
   }
 
-  const { error } = await admin.from('attendance').insert(payload)
+  const { error } = await admin.from('attendance').insert(writePayload)
   if (error) throw new Error(error.message)
 }
 
@@ -139,7 +147,6 @@ export async function POST(req: Request) {
   }
 
   const today = todayDateOnlyCairo()
-  const scannedAt = new Date().toISOString()
   const deviceTag = (req.headers.get('x-device-tag') || '').slice(0, 64) || null
 
   try {
@@ -205,8 +212,6 @@ export async function POST(req: Request) {
           subscription_id: timeSub.id,
           scanned_by: actorId,
           device_tag: deviceTag,
-          source: 'kiosk',
-          scanned_at: scannedAt,
         })
 
         return json(200, {
@@ -232,8 +237,6 @@ export async function POST(req: Request) {
         subscription_id: timeSub.id,
         scanned_by: actorId,
         device_tag: deviceTag,
-        source: 'kiosk',
-        scanned_at: scannedAt,
       })
 
       return json(200, {
@@ -292,8 +295,6 @@ export async function POST(req: Request) {
           subscription_id: sessSub.id,
           scanned_by: actorId,
           device_tag: deviceTag,
-          source: 'kiosk',
-          scanned_at: scannedAt,
         })
 
         const remainingAfter = alreadyValidToday ? remaining : remaining - 1
@@ -318,8 +319,6 @@ export async function POST(req: Request) {
         subscription_id: sessSub.id,
         scanned_by: actorId,
         device_tag: deviceTag,
-        source: 'kiosk',
-        scanned_at: scannedAt,
       })
 
       return json(200, {
@@ -357,8 +356,6 @@ export async function POST(req: Request) {
       subscription_id: null,
       scanned_by: actorId,
       device_tag: deviceTag,
-      source: 'kiosk',
-      scanned_at: scannedAt,
     })
 
     return json(200, {

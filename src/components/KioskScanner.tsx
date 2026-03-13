@@ -19,6 +19,35 @@ import { Card, CardContent } from '@/components/ui/Card'
 import Button from '@/components/ui/Button'
 import Badge from '@/components/ui/Badge'
 
+function buildDeviceTag() {
+  if (typeof window === 'undefined') return 'web-kiosk'
+
+  const storageKey = 'atom:kiosk:device-tag'
+  const fallback = 'web-kiosk'
+
+  try {
+    const existing = window.localStorage.getItem(storageKey)
+    if (existing) return existing.slice(0, 64)
+
+    const bits = [
+      'web',
+      typeof navigator !== 'undefined' ? navigator.platform || 'platform' : 'platform',
+      typeof navigator !== 'undefined' ? navigator.userAgent.slice(0, 24) : 'ua',
+      Math.random().toString(36).slice(2, 8),
+    ]
+      .join('-')
+      .replace(/[^a-zA-Z0-9_-]+/g, '-')
+      .replace(/-+/g, '-')
+      .slice(0, 64)
+
+    const tag = bits || fallback
+    window.localStorage.setItem(storageKey, tag)
+    return tag
+  } catch {
+    return fallback
+  }
+}
+
 type ScanResponse = {
   ok: boolean
   valid?: boolean
@@ -55,26 +84,6 @@ function errToString(err: unknown) {
     return JSON.stringify(err)
   } catch {}
   return 'Camera error'
-}
-
-function getStableDeviceTag() {
-  if (typeof window === 'undefined') return 'web-kiosk'
-  try {
-    const key = 'atom:kiosk-device-tag'
-    const existing = window.localStorage.getItem(key)
-    if (existing) return existing
-
-    const seed =
-      typeof crypto !== 'undefined' && 'randomUUID' in crypto
-        ? crypto.randomUUID().slice(0, 8)
-        : Math.random().toString(36).slice(2, 10)
-
-    const tag = `web-kiosk-${seed}`
-    window.localStorage.setItem(key, tag)
-    return tag
-  } catch {
-    return 'web-kiosk'
-  }
 }
 
 type Status = 'idle' | 'checking' | 'ok' | 'invalid' | 'error'
@@ -140,7 +149,6 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className }: 
   const router = useRouter()
   const searchParams = useSearchParams()
   const kioskRequested = searchParams?.get('kiosk') === '1'
-  const deviceTag = useMemo(() => getStableDeviceTag(), [])
 
   const [kioskMode, setKioskMode] = useState(false)
   const wakeLockRef = useRef<any>(null)
@@ -240,28 +248,44 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className }: 
 
     cancelExitHold()
     setExitOpen(false)
-    setExitPin('')
     setKioskMode(false)
+    setFullScreen(false)
     router.replace('/scan')
   }
 
+  function closeExitModal() {
+    cancelExitHold()
+    setExitOpen(false)
+    setExitError(null)
+    setExitPin('')
+  }
+
+  function enterKioskMode() {
+    try {
+      window.localStorage.setItem('atom:kiosk', '1')
+    } catch {}
+    setKioskMode(true)
+    setFullScreen(true)
+    router.replace('/scan?kiosk=1')
+  }
+
   const [ScannerComponent, setScannerComponent] = useState<ComponentType<any> | null>(null)
-  const [status, setStatus] = useState<Status>('idle')
-  const [msg, setMsg] = useState('Ready')
   const [paused, setPaused] = useState(false)
+  const [status, setStatus] = useState<Status>('idle')
+  const [msg, setMsg] = useState<string>('Ready')
   const resumeTimerRef = useRef<number | null>(null)
 
-  const [online, setOnline] = useState<boolean>(typeof navigator === 'undefined' ? true : navigator.onLine)
+  const [online, setOnline] = useState(true)
   const wasOfflineRef = useRef(false)
 
   useEffect(() => {
-    const onOnline = () => setOnline(true)
-    const onOffline = () => setOnline(false)
-    window.addEventListener('online', onOnline)
-    window.addEventListener('offline', onOffline)
+    const update = () => setOnline(typeof navigator !== 'undefined' ? navigator.onLine : true)
+    update()
+    window.addEventListener('online', update)
+    window.addEventListener('offline', update)
     return () => {
-      window.removeEventListener('online', onOnline)
-      window.removeEventListener('offline', onOffline)
+      window.removeEventListener('online', update)
+      window.removeEventListener('offline', update)
     }
   }, [])
 
@@ -282,6 +306,11 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className }: 
 
   const [facingMode, setFacingMode] = useState<FacingMode>('environment')
   const [fullScreen, setFullScreen] = useState(false)
+  const deviceTagRef = useRef<string>('web-kiosk')
+
+  useEffect(() => {
+    deviceTagRef.current = buildDeviceTag()
+  }, [])
 
   useEffect(() => {
     if (!fullScreen) return
@@ -354,7 +383,7 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className }: 
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'x-device-tag': deviceTag,
+            'x-device-tag': deviceTagRef.current || 'web-kiosk',
           },
           body: JSON.stringify(payload),
         })
@@ -399,7 +428,7 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className }: 
         }, 1500)
       }
     },
-    [deviceTag, online, paused, router, kioskMode]
+    [paused, router, kioskMode, online]
   )
 
   function manualRescan() {
@@ -420,177 +449,294 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className }: 
     manualRescan()
   }
 
-  const frameClass = useMemo(() => {
-    if (ratio === '4:3') return 'aspect-[4/3]'
-    return 'aspect-square'
-  }, [ratio])
+  function toggleFacingMode() {
+    manualRescan()
+    setFacingMode((m) => (m === 'environment' ? 'user' : 'environment'))
+  }
 
-  const maxWidthClass = useMemo(() => {
-    if (size === 'lg') return 'max-w-3xl'
-    if (size === 'md') return 'max-w-2xl'
-    return 'max-w-xl'
-  }, [size])
+  const containerWidth = size === 'lg' ? 480 : size === 'md' ? 360 : 280
+  const aspect = ratio === '1:1' ? '1 / 1' : '4 / 3'
+  const scannerKey = `${facingMode}-${fullScreen ? 'fs' : 'normal'}`
 
-  const scanner = ScannerComponent ? (
-    <div className="relative overflow-hidden rounded-[28px] border border-[hsl(var(--border))] bg-black shadow-[0_24px_80px_rgba(0,0,0,0.18)]">
-      <div className={`relative w-full ${frameClass}`}>
-        <ScannerComponent
-          constraints={{ facingMode }}
-          onScan={handleScan}
-          onError={(e: unknown) => {
-            setStatus('error')
-            setMsg(errToString(e))
-          }}
-          scanDelay={700}
-          paused={paused}
-          styles={{
-            container: { width: '100%', height: '100%' },
-            video: { width: '100%', height: '100%', objectFit: 'cover' },
-          }}
-        />
-
-        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_center,transparent_0,transparent_52%,rgba(0,0,0,0.28)_100%)]" />
-
-        <div className="pointer-events-none absolute inset-0 flex items-center justify-center p-6">
-          <div className="relative h-[72%] w-[72%] max-w-[320px] rounded-[28px] border-2 border-white/90 shadow-[0_0_0_9999px_rgba(0,0,0,0.14)]">
-            <span className="absolute -left-[2px] -top-[2px] h-10 w-10 rounded-tl-[28px] border-l-4 border-t-4 border-white" />
-            <span className="absolute -right-[2px] -top-[2px] h-10 w-10 rounded-tr-[28px] border-r-4 border-t-4 border-white" />
-            <span className="absolute -bottom-[2px] -left-[2px] h-10 w-10 rounded-bl-[28px] border-b-4 border-l-4 border-white" />
-            <span className="absolute -bottom-[2px] -right-[2px] h-10 w-10 rounded-br-[28px] border-b-4 border-r-4 border-white" />
-
-            <div className="absolute inset-x-5 top-1/2 h-[2px] -translate-y-1/2 bg-white/85 shadow-[0_0_16px_rgba(255,255,255,0.9)]" />
-          </div>
-        </div>
-
-        <div className="absolute left-4 top-4 inline-flex items-center gap-2 rounded-2xl border border-white/15 bg-black/45 px-3 py-2 text-white backdrop-blur-sm">
-          <ScanLine className="h-4 w-4" />
-          <span className="text-sm font-medium">Align QR inside frame</span>
-        </div>
-
-        <div className="absolute right-4 top-4 inline-flex items-center gap-2 rounded-2xl border border-white/15 bg-black/45 px-3 py-2 text-white backdrop-blur-sm">
-          <StatusPill status={status} />
-          <span className="text-sm opacity-90">{msg}</span>
-        </div>
-      </div>
-    </div>
+  const scannerEl = ScannerComponent ? (
+    <ScannerComponent
+      key={scannerKey}
+      constraints={{ facingMode }}
+      onScan={handleScan}
+      onError={(err: unknown) => {
+        setStatus('error')
+        setMsg(errToString(err))
+      }}
+      components={{ finder: false }}
+      paused={paused}
+      styles={{
+        container: { width: '100%', height: '100%' },
+        video: { width: '100%', height: '100%', objectFit: 'cover' },
+      }}
+    />
   ) : (
-    <div className={`relative w-full ${frameClass} overflow-hidden rounded-[28px] border border-[hsl(var(--border))] bg-[linear-gradient(180deg,#fafafa,#f1f1f1)]`}>
-      <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 text-center px-6">
-        <div className="inline-flex h-14 w-14 items-center justify-center rounded-2xl border border-black/10 bg-white shadow-sm">
-          <Camera className="h-6 w-6" />
-        </div>
-        <div>
-          <p className="text-base font-semibold">Starting camera…</p>
-          <p className="mt-1 text-sm text-[hsl(var(--muted))]">Allow camera access if prompted.</p>
-        </div>
-      </div>
+    <div className="flex h-full w-full items-center justify-center">
+      <div className="text-sm text-[hsl(var(--muted))]">Loading camera…</div>
     </div>
   )
 
-  return (
-    <div className={className}>
-      <div className={`mx-auto w-full ${maxWidthClass} space-y-4`}>
-        <div className="grid gap-3 sm:grid-cols-3">
-          <ActionChip icon={<ShieldCheck className="h-4 w-4" />} label={statusTitle(status, paused)} />
-          <ActionChip icon={<Smartphone className="h-4 w-4" />} label={kioskMode ? `Kiosk • ${deviceTag}` : `Web scan • ${deviceTag}`} />
-          <ActionChip icon={online ? <RefreshCw className="h-4 w-4" /> : <WifiOff className="h-4 w-4" />} label={online ? 'Online' : 'Offline'} />
+  const statusBoxClass = statusToneClass(status)
+  const scannerOverlay =
+    paused || status === 'checking' || status === 'error' ? (
+      <div className="absolute inset-0 z-10 flex items-center justify-center bg-black/35 p-4">
+        <div className="w-full max-w-xs rounded-3xl border border-white/20 bg-black/70 p-4 text-center text-white backdrop-blur-md">
+          <div className="text-sm font-semibold">{statusTitle(status, paused)}</div>
+          <p className="mt-1 text-sm text-white/80">{msg}</p>
+          <div className="mt-3 flex flex-wrap items-center justify-center gap-2">
+            {status === 'error' ? (
+              <Button variant="outline" className="!border-white/30 !bg-transparent !text-white hover:!bg-white/10" onClick={retryNow}>
+                Retry
+              </Button>
+            ) : null}
+            <Button variant="outline" className="!border-white/30 !bg-transparent !text-white hover:!bg-white/10" onClick={manualRescan}>
+              Rescan
+            </Button>
+          </div>
         </div>
+      </div>
+    ) : null
 
-        <Card className="overflow-hidden rounded-[32px] border border-[hsl(var(--border))] bg-[hsl(var(--card))] shadow-[0_24px_70px_rgba(0,0,0,0.08)]">
-          <CardContent className="space-y-4 p-4 sm:p-5">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <h2 className="text-lg font-semibold tracking-tight">ATOM Scan</h2>
-                <p className="mt-1 text-sm text-[hsl(var(--muted))]">Fast kiosk check-in for reception and admins.</p>
+  if (fullScreen) {
+    return (
+      <>
+        <div className="fixed inset-0 z-50 bg-black/90 text-white">
+          <div className="absolute inset-x-0 top-0 z-10 border-b border-white/10 bg-black/50 backdrop-blur-md">
+            <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-3 px-4 py-3">
+              <div className="min-w-[220px]">
+                <div className="flex items-center gap-2">
+                  <div className="text-base font-semibold">Scan member QR</div>
+                  {kioskMode ? (
+                    <span className="rounded-full border border-emerald-400/30 bg-emerald-500/10 px-2 py-0.5 text-xs text-emerald-100">
+                      Kiosk mode
+                    </span>
+                  ) : null}
+                </div>
+                <div className="mt-1 flex flex-wrap items-center gap-2 text-xs">
+                  <span className={(status === 'error' ? 'text-rose-200' : status === 'ok' ? 'text-emerald-200' : status === 'invalid' ? 'text-amber-200' : 'text-white/80') + ' truncate'}>
+                    {msg}
+                  </span>
+                  {!online ? (
+                    <span className="rounded-full border border-rose-400/30 bg-rose-500/10 px-2 py-0.5 text-rose-100">Offline</span>
+                  ) : null}
+                  {!kioskMode ? (
+                    <span className="text-white/50">• Press ESC to exit</span>
+                  ) : (
+                    <span className="text-white/50">• Hold Exit 2s</span>
+                  )}
+                </div>
               </div>
 
-              <div className="flex flex-wrap items-center gap-2">
-                <Button type="button" variant="outline" onClick={() => setFacingMode((v) => (v === 'environment' ? 'user' : 'environment'))}>
-                  <RotateCcw className="mr-2 h-4 w-4" />
-                  Flip camera
-                </Button>
-                <Button type="button" variant="outline" onClick={retryNow}>
-                  <RefreshCw className="mr-2 h-4 w-4" />
-                  Retry
-                </Button>
-                <Button type="button" variant="outline" onClick={() => setFullScreen((v) => !v)}>
-                  {fullScreen ? <Minimize2 className="mr-2 h-4 w-4" /> : <Expand className="mr-2 h-4 w-4" />}
-                  {fullScreen ? 'Exit full screen' : 'Full screen'}
+              <div className="flex items-center gap-2">
+                {!online ? (
+                  <Button
+                    variant="outline"
+                    className="!bg-transparent !text-white !border-white/30 hover:!bg-white/10"
+                    onClick={retryNow}
+                  >
+                    Retry
+                  </Button>
+                ) : null}
+                <Button
+                  variant="outline"
+                  className="!bg-transparent !text-white !border-white/30 hover:!bg-white/10"
+                  onClick={() => {
+                    if (!kioskMode) setFullScreen(false)
+                  }}
+                  onPointerDown={kioskMode ? startExitHold : undefined}
+                  onPointerUp={kioskMode ? cancelExitHold : undefined}
+                  onPointerLeave={kioskMode ? cancelExitHold : undefined}
+                  onPointerCancel={kioskMode ? cancelExitHold : undefined}
+                  title={kioskMode ? 'Hold 2s to exit kiosk' : 'Exit full screen'}
+                >
+                  {kioskMode ? (exitHolding ? 'Holding…' : 'Hold to exit') : 'Exit full screen'}
                 </Button>
               </div>
             </div>
+          </div>
 
-            {scanner}
+          <div className="mx-auto flex h-full max-w-6xl flex-col px-4 pb-4 pt-20">
+            <div className="flex-1">
+              <div className="relative h-full w-full overflow-hidden rounded-3xl border border-white/20 bg-black shadow-soft">
+                {scannerEl}
+                {scannerOverlay}
+              </div>
+            </div>
+          </div>
+        </div>
 
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <p className="text-sm text-[hsl(var(--muted))]">
-                Tip: keep the QR flat, well lit, and centered inside the frame.
-              </p>
+        {exitOpen ? (
+          <div className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/60 p-4">
+            <div className="w-full max-w-sm rounded-2xl border border-[hsl(var(--border))] bg-white p-4 text-gray-900 shadow-soft">
+              <div className="text-base font-semibold">Exit kiosk</div>
+              <p className="mt-1 text-sm text-gray-600">Hold confirmed. Enter PIN to exit kiosk mode.</p>
 
-              {kioskMode ? (
+              <input
+                className="mt-3 w-full rounded-xl border border-[hsl(var(--border))] px-3 py-2 text-sm outline-none"
+                type="password"
+                inputMode="numeric"
+                placeholder="PIN"
+                value={exitPin}
+                onChange={(e) => setExitPin(e.target.value)}
+                autoFocus
+              />
+
+              {exitError ? <p className="mt-2 text-sm text-rose-700">{exitError}</p> : null}
+
+              <div className="mt-4 flex justify-end gap-2">
                 <button
                   type="button"
-                  onMouseDown={startExitHold}
-                  onMouseUp={cancelExitHold}
-                  onMouseLeave={cancelExitHold}
-                  onTouchStart={startExitHold}
-                  onTouchEnd={cancelExitHold}
-                  className="rounded-xl border px-4 py-2 text-sm font-semibold hover:bg-black/[0.03]"
+                  className="rounded-xl border border-[hsl(var(--border))] bg-white px-4 py-2 text-sm font-medium"
+                  onClick={closeExitModal}
                 >
-                  {exitHolding ? 'Keep holding…' : 'Exit kiosk'}
+                  Cancel
                 </button>
-              ) : null}
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-
-      {fullScreen ? (
-        <div className="fixed inset-0 z-[100] bg-black/90 p-3 sm:p-5">
-          <div className="mx-auto flex h-full w-full max-w-6xl flex-col gap-3">
-            <div className="flex items-center justify-between gap-3 rounded-2xl border border-white/10 bg-black/40 px-4 py-3 text-white backdrop-blur-sm">
-              <div>
-                <p className="text-sm font-semibold">ATOM Scan</p>
-                <p className="text-xs text-white/70">Use the rear camera and keep the QR inside the frame.</p>
+                <button
+                  type="button"
+                  className="rounded-xl bg-black px-4 py-2 text-sm font-medium text-white"
+                  onClick={confirmExitKiosk}
+                >
+                  Exit
+                </button>
               </div>
-              <Button type="button" variant="outline" onClick={() => setFullScreen(false)}>
-                <Minimize2 className="mr-2 h-4 w-4" />
-                Close
-              </Button>
             </div>
-            <div className="min-h-0 flex-1">{scanner}</div>
           </div>
-        </div>
-      ) : null}
+        ) : null}
+      </>
+    )
+  }
 
-      {exitOpen ? (
-        <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/50 p-4">
-          <div className="w-full max-w-sm rounded-3xl bg-white p-5 shadow-2xl">
-            <h3 className="text-lg font-semibold">Exit kiosk mode</h3>
-            <p className="mt-1 text-sm text-[hsl(var(--muted))]">Enter the staff PIN to leave kiosk mode.</p>
+  return (
+    <Card className={className}>
+      <CardContent>
+        <div className="flex flex-col gap-4">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <h3 className="text-lg font-semibold tracking-tight">Scan member QR</h3>
+                <StatusPill status={status} />
+                {!online ? <Badge>Offline</Badge> : null}
+                {kioskMode ? <Badge>Kiosk</Badge> : null}
+              </div>
+              <p className="mt-1 text-sm text-[hsl(var(--muted))]">
+                Fast front-desk scanning with full-screen mode, kiosk mode and automatic result pages.
+              </p>
+            </div>
 
-            <input
-              className="mt-4 w-full rounded-xl border border-black/10 px-3 py-3 text-center text-lg tracking-[0.35em] outline-none focus:ring-2 focus:ring-black/50"
-              inputMode="numeric"
-              autoFocus
-              value={exitPin}
-              onChange={(e) => setExitPin(e.target.value.replace(/\D+/g, '').slice(0, 8))}
-              placeholder="••••"
+            <div className={`rounded-2xl border px-3 py-2 text-sm font-medium ${statusBoxClass}`}>
+              {statusTitle(status, paused)}
+            </div>
+          </div>
+
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            <ActionChip
+              icon={<ScanLine size={16} strokeWidth={2.1} />}
+              label={paused ? 'Paused until rescan' : 'Ready for next QR'}
             />
+            <ActionChip
+              icon={<Camera size={16} strokeWidth={2.1} />}
+              label={facingMode === 'environment' ? 'Back camera active' : 'Front camera active'}
+            />
+            <ActionChip
+              icon={<Smartphone size={16} strokeWidth={2.1} />}
+              label={kioskMode ? 'Kiosk mode enabled' : 'Standard scanner view'}
+            />
+            <ActionChip
+              icon={online ? <ShieldCheck size={16} strokeWidth={2.1} /> : <WifiOff size={16} strokeWidth={2.1} />}
+              label={online ? 'Internet connected' : 'Internet required'}
+            />
+          </div>
 
-            {exitError ? <p className="mt-2 text-sm text-rose-700">{exitError}</p> : null}
+          {!online ? (
+            <div className="rounded-2xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800">
+              <div className="font-semibold">Offline</div>
+              <div className="mt-1 text-xs">
+                Internet connection lost. Scanning requires internet access. Reconnect, then tap Retry.
+              </div>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <Button variant="outline" onClick={retryNow}>
+                  Retry
+                </Button>
+                <Button variant="outline" onClick={() => window.location.reload()}>
+                  Reload
+                </Button>
+              </div>
+            </div>
+          ) : null}
 
-            <div className="mt-4 flex items-center justify-end gap-2">
-              <Button type="button" variant="outline" onClick={() => setExitOpen(false)}>
-                Cancel
-              </Button>
-              <Button type="button" onClick={confirmExitKiosk}>
-                Confirm
-              </Button>
+          <div className="flex flex-wrap gap-2">
+            <Button variant="outline" onClick={toggleFacingMode} title="Switch camera">
+              <RotateCcw size={16} className="mr-2" />
+              Flip camera
+            </Button>
+            <Button variant="outline" onClick={() => setFullScreen(true)} title="Open camera in full screen">
+              <Expand size={16} className="mr-2" />
+              Full screen
+            </Button>
+            <Button variant="outline" onClick={enterKioskMode} title="Enter kiosk mode (hide nav + keep awake)">
+              <Smartphone size={16} className="mr-2" />
+              Kiosk mode
+            </Button>
+            <Button variant="outline" onClick={manualRescan} disabled={!paused && status === 'idle'} title="Resume scanning">
+              <RefreshCw size={16} className="mr-2" />
+              Rescan
+            </Button>
+          </div>
+
+          <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_260px]">
+            <div className="flex justify-center xl:justify-start">
+              <div
+                className="relative overflow-hidden rounded-3xl border border-[hsl(var(--border))] bg-[hsl(var(--card))]"
+                style={{ width: containerWidth, aspectRatio: aspect as any }}
+              >
+                <div style={{ width: '100%', height: '100%', aspectRatio: aspect as any }}>{scannerEl}</div>
+                <div className="pointer-events-none absolute inset-0 border-[10px] border-transparent">
+                  <div className="absolute inset-4 rounded-[28px] border-2 border-white/80 shadow-[0_0_0_9999px_rgba(0,0,0,0.18)]" />
+                </div>
+                {scannerOverlay}
+              </div>
+            </div>
+
+            <div className="space-y-3">
+              <div className="rounded-3xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] p-4">
+                <div className="text-sm font-semibold tracking-tight">Current scanner message</div>
+                <p
+                  className={
+                    'mt-2 text-sm ' +
+                    (status === 'ok'
+                      ? 'text-emerald-700'
+                      : status === 'invalid'
+                      ? 'text-amber-800'
+                      : status === 'error'
+                      ? 'text-rose-700'
+                      : 'text-[hsl(var(--muted))]')
+                  }
+                >
+                  {msg}
+                </p>
+              </div>
+
+              <div className="rounded-3xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] p-4">
+                <div className="text-sm font-semibold tracking-tight">Scan tips</div>
+                <ul className="mt-2 space-y-2 text-sm text-[hsl(var(--muted))]">
+                  <li>Keep only one QR code in the frame.</li>
+                  <li>Use the back camera for faster detection.</li>
+                  <li>Tap Rescan after any blocked or invalid attempt.</li>
+                  <li>Use kiosk mode for the academy entrance.</li>
+                </ul>
+              </div>
             </div>
           </div>
+
+          <div className="text-sm text-[hsl(var(--muted))]">
+            The scanner will validate the member and redirect automatically to a result page with the next action.
+          </div>
         </div>
-      ) : null}
-    </div>
+      </CardContent>
+    </Card>
   )
 }

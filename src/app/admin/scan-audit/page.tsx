@@ -6,7 +6,7 @@ import { redirect } from 'next/navigation'
 import AccessDeniedCard from '@/components/AccessDeniedCard'
 import { Table } from '@/components/ui/Table'
 import { getSessionUserCached, getSupabaseAdminClientCached } from '@/lib/requestCache'
-import { fetchScanAuditPage, formatDateTimeCairo } from '@/lib/scanAudit'
+import { formatScanAuditMember, formatScanAuditScanner, getScanAuditData } from '@/lib/scanAudit'
 
 type SearchParams = Record<string, string | string[] | undefined>
 
@@ -47,44 +47,62 @@ export default async function ScanAuditPage({ searchParams }: { searchParams: Se
   const page = Math.max(1, Number(spGet(searchParams, 'page') || '1') || 1)
 
   const supabase = getSupabaseAdminClientCached()
-  const { rows, total, error } = await fetchScanAuditPage(supabase, {
-    q,
-    status,
-    device,
-    scannedByRole,
-    start,
-    end,
-    sort,
-    page,
-    perPage: PER_PAGE,
-  })
 
-  const uiRows = rows.map((r) => ({
-    id: r.id,
-    scanned_at: formatDateTimeCairo(r.scanned_at),
-    status: r.status ?? '—',
-    device: r.device_tag ?? '—',
-    member: r.member_name,
-    scanned_by_role: r.scanned_by_role ?? '—',
-    scanned_by: r.scanned_by_name,
-    valid: r.valid ? 'Yes' : 'No',
-  }))
+  let rows: Record<string, any>[] = []
+  let total = 0
+  let totalPages = 1
+  let truncated = false
+  let errorMessage = ''
 
-  const totalPages = Math.max(1, Math.ceil(total / PER_PAGE))
+  try {
+    const data = await getScanAuditData(supabase, {
+      q,
+      status,
+      device,
+      scannedByRole,
+      start,
+      end,
+      sort,
+      page,
+      perPage: PER_PAGE,
+      maxFetch: 5000,
+    })
+
+    rows = data.rows.map((row) => ({
+      id: row.id,
+      scanned_at: row.scanned_at_cairo,
+      status: row.status ?? '—',
+      valid: row.valid ? 'Yes' : 'No',
+      device: row.device_tag ?? '—',
+      member: formatScanAuditMember(row),
+      scanned_by_role: row.scanned_by_role ?? '—',
+      scanned_by: formatScanAuditScanner(row),
+    }))
+    total = data.total
+    totalPages = data.totalPages
+    truncated = data.truncated
+  } catch (error: any) {
+    errorMessage = error?.message ?? 'Failed to load scan audit'
+  }
+
   const hasPrev = page > 1
   const hasNext = page < totalPages
-
   const exportHref = buildHref('/api/admin/scan-audit/export', searchParams, { page: '' })
 
   return (
     <main className="min-h-[calc(100vh-3rem)] bg-white text-black">
-      <section className="mx-auto max-w-6xl px-4 py-8 space-y-4">
-        <div className="flex items-start justify-between gap-3 flex-wrap">
+      <section className="mx-auto max-w-6xl space-y-4 px-4 py-8">
+        <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <h1 className="text-2xl font-semibold tracking-tight">Scan Audit</h1>
             <p className="mt-1 text-sm text-[hsl(var(--muted))]">
-              Kiosk scan history with staff + device context. Times shown in Egypt time.
+              Kiosk scan history (attendance) with staff + device context. Time shown in Egypt time.
             </p>
+            {truncated ? (
+              <p className="mt-1 text-xs text-amber-700">
+                Showing the latest scan records only. Narrow the date range for a more complete audit.
+              </p>
+            ) : null}
           </div>
 
           <div className="flex items-center gap-2">
@@ -180,8 +198,8 @@ export default async function ScanAuditPage({ searchParams }: { searchParams: Se
               Reset
             </Link>
 
-            {error ? (
-              <span className="ml-auto text-sm text-red-700">{error}</span>
+            {errorMessage ? (
+              <span className="ml-auto text-sm text-red-700">{errorMessage}</span>
             ) : (
               <span className="ml-auto text-sm text-[hsl(var(--muted))]">
                 {total} scan{total === 1 ? '' : 's'}
@@ -193,9 +211,9 @@ export default async function ScanAuditPage({ searchParams }: { searchParams: Se
         <div className="rounded-2xl border border-[hsl(var(--border))] bg-white shadow-soft">
           <Table
             keyField="id"
-            rows={uiRows}
+            rows={rows}
             columns={[
-              { key: 'scanned_at', header: 'Scanned at (Egypt)' },
+              { key: 'scanned_at', header: 'Scanned at (EG)' },
               { key: 'status', header: 'Status' },
               { key: 'valid', header: 'Valid', hideOnMobile: true },
               { key: 'device', header: 'Device' },
@@ -214,14 +232,20 @@ export default async function ScanAuditPage({ searchParams }: { searchParams: Se
           <div className="flex items-center gap-2">
             <Link
               href={buildHref('/admin/scan-audit', searchParams, { page: String(Math.max(1, page - 1)) })}
-              className={'rounded-xl border px-3 py-2 text-sm font-semibold ' + (hasPrev ? 'hover:bg-black/[0.03]' : 'pointer-events-none opacity-50')}
+              className={
+                'rounded-xl border px-3 py-2 text-sm font-semibold ' +
+                (hasPrev ? 'hover:bg-black/[0.03]' : 'pointer-events-none opacity-50')
+              }
             >
               Prev
             </Link>
 
             <Link
               href={buildHref('/admin/scan-audit', searchParams, { page: String(page + 1) })}
-              className={'rounded-xl border px-3 py-2 text-sm font-semibold ' + (hasNext ? 'hover:bg-black/[0.03]' : 'pointer-events-none opacity-50')}
+              className={
+                'rounded-xl border px-3 py-2 text-sm font-semibold ' +
+                (hasNext ? 'hover:bg-black/[0.03]' : 'pointer-events-none opacity-50')
+              }
             >
               Next
             </Link>
