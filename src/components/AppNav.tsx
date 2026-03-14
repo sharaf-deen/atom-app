@@ -30,7 +30,6 @@ type MenuByRole = Record<Role, MenuItem[]>
 
 const MENU_BY_ROLE: MenuByRole = {
   member: [
-    { label: 'Store', href: '/store', icon: 'bag' },
     { label: 'Notifications', href: '/notifications', icon: 'bell' },
     { label: 'Schedule', href: '/schedule', icon: 'calendar' },
     { label: 'My Profile', href: '/profile', icon: 'id' },
@@ -38,14 +37,12 @@ const MENU_BY_ROLE: MenuByRole = {
     { label: 'Contact Admin', href: '/contact', icon: 'user-cog' },
   ],
   assistant_coach: [
-    { label: 'Store', href: '/store', icon: 'bag' },
     { label: 'Notifications', href: '/notifications', icon: 'bell' },
     { label: 'Schedule', href: '/schedule', icon: 'calendar' },
     { label: 'My Profile', href: '/profile', icon: 'id' },
     { label: 'Packages & Promos', href: '/packages-and-promos', icon: 'gift' },
   ],
   coach: [
-    { label: 'Store', href: '/store', icon: 'bag' },
     { label: 'Notifications', href: '/notifications', icon: 'bell' },
     { label: 'Schedule', href: '/schedule', icon: 'calendar' },
     { label: 'My Profile', href: '/profile', icon: 'id' },
@@ -139,7 +136,6 @@ export default async function AppNav() {
 
         {/* Right side */}
         {user ? (
-          // Cache l’info user + bouton logout sur les pages d’auth
           <HideMenuOnRoutes routes={AUTH_ROUTES}>
             <div className="ml-auto flex items-center gap-3">
               {hasNotifications ? <NotificationsBell pollMs={5000} /> : null}
@@ -150,7 +146,6 @@ export default async function AppNav() {
             </div>
           </HideMenuOnRoutes>
         ) : (
-          // Cache le lien Login sur la page /login (sinon lien “Login” sur la page de login)
           <HideMenuOnRoutes routes={AUTH_ROUTES}>
             <div className="ml-auto">
               <NavLoginLink />

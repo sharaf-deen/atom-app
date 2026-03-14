@@ -10,8 +10,6 @@ import PageHeader from '@/components/layout/PageHeader'
 import Section from '@/components/layout/Section'
 import { Card, CardContent } from '@/components/ui/Card'
 import { formatCurrency } from '@/lib/money'
-import AddToCartButton from '@/components/store/AddToCartButton'
-import StoreCartPanel from '@/components/store/StoreCartPanel'
 
 type Category = 'kimono' | 'rashguard' | 'short' | 'belt'
 const CATEGORIES: Array<{ v: 'all' | Category; label: string }> = [
@@ -22,7 +20,7 @@ const CATEGORIES: Array<{ v: 'all' | Category; label: string }> = [
   { v: 'belt', label: 'Belt' },
 ]
 
-const BUYER_ROLES = new Set(['member', 'assistant_coach', 'coach'])
+const HIDDEN_STORE_ROLES = new Set(['member', 'assistant_coach', 'coach'])
 
 type ProductRow = {
   id: string
@@ -49,21 +47,17 @@ const listStoreProductsCached = unstable_cache(
 
     let qry = supa
       .from('store_products')
-      .select('id, category, name, color, size, price_cents, currency, inventory_qty, is_active, created_at', )
+      .select('id, category, name, color, size, price_cents, currency, inventory_qty, is_active, created_at')
       .order('created_at', { ascending: false })
       .range(fromRow, toRow + 1)
 
-    // Buyers & reception/admin: show active products only
     if (!isSuperAdmin) qry = qry.eq('is_active', true)
-
     if (category && category !== 'all') qry = qry.eq('category', category)
 
     if (q) {
       if (q.length >= 3) {
-        // Fast search using FTS (GIN) on generated tsvector column
         qry = qry.textSearch('search_tsv', q, { type: 'websearch', config: 'simple' })
       } else {
-        // Short queries: substring search (trigram index helps)
         const safe = q.replace(/,/g, ' ').trim()
         qry = qry.or(
           [
@@ -80,14 +74,13 @@ const listStoreProductsCached = unstable_cache(
     if (error) throw new Error(error.message)
 
     const rows = (data ?? []) as any[]
-    const hasMore = rows.length > (toRow - fromRow + 1)
-    const sliced = hasMore ? rows.slice(0, (toRow - fromRow + 1)) : rows
+    const hasMore = rows.length > toRow - fromRow + 1
+    const sliced = hasMore ? rows.slice(0, toRow - fromRow + 1) : rows
     return { items: sliced as any, hasMore }
   },
   ['store_products_v2'],
   { revalidate: 120, tags: ['store-products'] }
 )
-
 
 function clampInt(v: unknown, def: number, min: number, max: number) {
   const raw = Array.isArray(v) ? v[0] : v
@@ -95,13 +88,16 @@ function clampInt(v: unknown, def: number, min: number, max: number) {
   if (!Number.isFinite(n)) return def
   return Math.min(max, Math.max(min, Math.floor(n)))
 }
+
 function strParam(v: unknown) {
   const s = Array.isArray(v) ? v[0] : v
   return typeof s === 'string' ? s : ''
 }
+
 function normalizeCat(v: string): 'all' | Category {
   return v === 'kimono' || v === 'rashguard' || v === 'short' || v === 'belt' ? v : 'all'
 }
+
 function buildUrl(base: string, params: Record<string, string>) {
   const qs = new URLSearchParams()
   for (const [k, v] of Object.entries(params)) if (v) qs.set(k, v)
@@ -118,10 +114,10 @@ export default async function StorePage({
   if (!me) redirect('/login?next=/store')
 
   const role = me.role
-  const isBuyer = BUYER_ROLES.has(role)
   const isSuperAdmin = role === 'super_admin'
 
-  // Filters (server-side)
+  if (HIDDEN_STORE_ROLES.has(role)) redirect('/')
+
   const page = clampInt(searchParams?.page, 1, 1, 9999)
   const pageSize = clampInt(searchParams?.page_size, 12, 6, 48)
   const category = normalizeCat(strParam(searchParams?.category))
@@ -130,19 +126,19 @@ export default async function StorePage({
   const fromRow = (page - 1) * pageSize
   const toRow = fromRow + pageSize - 1
 
-let items: ProductRow[] = []
-let errorMsg: string | null = null
-let hasMore = false
+  let items: ProductRow[] = []
+  let errorMsg: string | null = null
+  let hasMore = false
 
-try {
-  const res = await listStoreProductsCached(isSuperAdmin, category, q, fromRow, toRow)
-  items = res.items as any
-  hasMore = Boolean((res as any).hasMore)
-} catch (e: any) {
-  errorMsg = e?.message || String(e)
-}
+  try {
+    const res = await listStoreProductsCached(isSuperAdmin, category, q, fromRow, toRow)
+    items = res.items as any
+    hasMore = Boolean((res as any).hasMore)
+  } catch (e: any) {
+    errorMsg = e?.message || String(e)
+  }
 
-const baseParams = {
+  const baseParams = {
     category: category === 'all' ? '' : category,
     q,
     page_size: String(pageSize),
@@ -150,9 +146,7 @@ const baseParams = {
 
   return (
     <main>
-      <PageHeader
-        title="Store"
-      />
+      <PageHeader title="Store" />
 
       <Section className="space-y-6">
         {isSuperAdmin ? (
@@ -254,6 +248,7 @@ const baseParams = {
             {items.map((p) => {
               const price = formatCurrency(p.price_cents ?? 0, 'en-EG', p.currency ?? 'EGP')
               const stock = Number(p.inventory_qty ?? 0)
+
               return (
                 <Card key={p.id} hover>
                   <CardContent className="py-4 space-y-2">
@@ -274,23 +269,6 @@ const baseParams = {
                         Stock: <b>{stock}</b>
                         {!p.is_active ? <span className="ml-2 text-red-600">Inactive</span> : null}
                       </div>
-                      <div className="ml-auto">
-                        {isBuyer ? (
-                          <AddToCartButton
-                            product={{
-                              id: p.id,
-                              name: p.name,
-                              price_cents: p.price_cents,
-                              currency: p.currency ?? 'EGP',
-                              inventory_qty: p.inventory_qty,
-                              color: p.color,
-                              size: p.size,
-                            }}
-                          />
-                        ) : (
-                          <div className="text-xs text-[hsl(var(--muted))]">Sign-in as member to order</div>
-                        )}
-                      </div>
                     </div>
                   </CardContent>
                 </Card>
@@ -299,7 +277,6 @@ const baseParams = {
           </div>
         )}
 
-        {/* Pagination */}
         {!errorMsg && (page > 1 || hasMore) ? (
           <div className="flex items-center gap-2">
             <Link
@@ -322,28 +299,6 @@ const baseParams = {
               Next
             </Link>
           </div>
-        ) : null}
-
-        {/* Cart + quick link to orders (buyers only) */}
-        {isBuyer ? (
-          <Card>
-            <CardContent className="space-y-3">
-              <div className="flex flex-wrap items-center gap-3">
-                <div>
-                  <h2 className="text-base font-semibold">Cart</h2>
-                  <p className="text-sm text-gray-600">Place your order then you will be redirected to /orders.</p>
-                </div>
-                <Link
-                  prefetch={false}
-                  href="/orders"
-                  className="ml-auto inline-flex items-center rounded-xl border px-4 py-2 text-sm font-medium hover:bg-gray-50"
-                >
-                  View my orders
-                </Link>
-              </div>
-              <StoreCartPanel />
-            </CardContent>
-          </Card>
         ) : null}
       </Section>
     </main>
