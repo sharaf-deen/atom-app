@@ -8,7 +8,7 @@ import { revalidateTag, revalidatePath } from 'next/cache'
 import type { Role } from '@/lib/session'
 import { createSupabaseServerActionClient } from '@/lib/supabaseServer'
 import { createClient } from '@supabase/supabase-js'
-import { sendMemberInviteEmailWithQr, type InviteEmailMode } from '@/lib/memberInviteEmail'
+import { extractActionLink, sendMemberInviteEmailWithQr } from '@/lib/memberInviteEmail'
 
 type Body =
   | {
@@ -28,6 +28,8 @@ type CreateOutcome =
   | 'invited_new_user'
   | 'existing_profile'
   | 'existing_auth_user'
+
+type InviteMode = 'custom_qr' | 'custom_qr_failed' | 'supabase_default' | 'none'
 
 const STAFF: Role[] = ['reception', 'admin', 'super_admin']
 const can = (r: Role) => STAFF.includes(r)
@@ -209,46 +211,43 @@ export async function POST(req: Request) {
 
     const redirectTo = `${APP_URL.replace(/\/$/, '')}/auth/complete-invite`
 
-    // 6) Tentative d’inviter l’utilisateur
-    //    - si Resend est configuré : on génère nous-mêmes le lien d’invitation pour envoyer un email custom avec QR
-    //    - sinon : fallback sur l’invitation standard Supabase
+    // 6) Tentative d’inviter l’utilisateur (email + lien)
     let userId: string | null = null
     let outcome: CreateOutcome = 'invited_new_user'
     let inviteSent = false
-    let inviteEmailMode: InviteEmailMode = 'none'
-    let generatedInviteLink: string | null = null
-    let inviteDetails: string | null = null
-    let usedCustomInviteFlow = false
+    let inviteMode: InviteMode = 'none'
+    let containsQr = false
+    let inviteWarning: string | null = null
+    let customActionLink = ''
 
-    if (process.env.RESEND_API_KEY) {
-      const { data: generated, error: generateErr } = await (admin.auth.admin as any).generateLink({
+    const canUseCustomEmail = !!process.env.RESEND_API_KEY
+
+    if (canUseCustomEmail) {
+      const { data: linkData, error: linkErr } = await (admin.auth.admin as any).generateLink({
         type: 'invite',
         email,
-        options: {
-          redirectTo,
-          data: { first_name, last_name, phone, role: 'member' },
-        },
+        redirectTo,
+        data: { first_name, last_name, phone, role: 'member' },
       })
 
-      const generatedUserId =
-        generated?.user?.id ??
-        generated?.properties?.user?.id ??
-        null
+      if (!linkErr) {
+        customActionLink = extractActionLink(linkData)
+        userId = linkData?.user?.id ?? null
 
-      const actionLink =
-        generated?.properties?.action_link ??
-        generated?.properties?.actionLink ??
-        generated?.action_link ??
-        generated?.actionLink ??
-        null
+        if (!userId) {
+          const { data: usersData } = await admin.auth.admin.listUsers({
+            page: 1,
+            perPage: 1000,
+          })
+          const existingAuth =
+            usersData?.users?.find((u: any) => u.email && u.email.toLowerCase() === email) ?? null
+          userId = existingAuth?.id ?? null
+        }
 
-      if (!generateErr && generatedUserId) {
-        userId = generatedUserId
-        outcome = 'invited_new_user'
-        generatedInviteLink = actionLink
-        usedCustomInviteFlow = true
-      } else {
-        inviteDetails = generateErr?.message ?? null
+        if (userId) {
+          outcome = 'invited_new_user'
+          inviteMode = 'custom_qr'
+        }
       }
     }
 
@@ -260,13 +259,11 @@ export async function POST(req: Request) {
         })
 
       if (!inviteErr && invited?.user?.id) {
-        // Cas standard : Supabase envoie l’email d’invitation
         userId = invited.user.id
         outcome = 'invited_new_user'
         inviteSent = true
-        inviteEmailMode = 'supabase_default'
+        inviteMode = 'supabase_default'
       } else {
-        // Cas où l’utilisateur existe déjà dans Auth → on le cherche par email
         const { data: usersData, error: listErr } = await admin.auth.admin.listUsers({
           page: 1,
           perPage: 1000,
@@ -283,7 +280,7 @@ export async function POST(req: Request) {
               {
                 ok: false,
                 error: 'CREATE_USER_FAILED',
-                details: inviteErr?.message ?? inviteDetails ?? listErr?.message ?? 'unknown',
+                details: inviteErr?.message ?? listErr?.message ?? 'unknown',
               },
               { status: 500 },
             ),
@@ -293,6 +290,7 @@ export async function POST(req: Request) {
         userId = existingAuth.id
         outcome = 'existing_auth_user'
         inviteSent = false
+        inviteMode = 'none'
       }
     }
 
@@ -362,45 +360,33 @@ export async function POST(req: Request) {
       }
     }
 
-    // 8) Si on a généré un lien custom, on envoie maintenant notre email avec le QR code
-    if (usedCustomInviteFlow && outcome === 'invited_new_user') {
-      const { data: profileForInvite } = await admin
-        .from('profiles')
-        .select('member_id, qr_code, first_name, last_name')
-        .eq('user_id', userId!)
-        .maybeSingle<{
-          member_id: string | null
-          qr_code: string | null
-          first_name: string | null
-          last_name: string | null
-        }>()
+    const { data: savedProfile } = await admin
+      .from('profiles')
+      .select('user_id, member_id, qr_code, email, first_name, last_name')
+      .eq('user_id', userId!)
+      .maybeSingle()
 
-      const qrValue = profileForInvite?.qr_code ?? `atom:${userId}`
+    if (outcome === 'invited_new_user' && inviteMode === 'custom_qr' && customActionLink) {
+      const qrValue = savedProfile?.qr_code || `atom:${userId}`
+      const customEmail = await sendMemberInviteEmailWithQr({
+        to: email,
+        actionLink: customActionLink,
+        qrValue,
+        firstName: savedProfile?.first_name ?? first_name,
+        lastName: savedProfile?.last_name ?? last_name,
+        memberId: savedProfile?.member_id ?? null,
+        mode: 'invite',
+      })
 
-      if (generatedInviteLink) {
-        const emailResult = await sendMemberInviteEmailWithQr({
-          to: email,
-          inviteLink: generatedInviteLink,
-          qrValue,
-          memberId: profileForInvite?.member_id ?? null,
-          firstName: profileForInvite?.first_name ?? first_name,
-          lastName: profileForInvite?.last_name ?? last_name,
-          appUrl: APP_URL,
-        })
-
-        if (emailResult.sent) {
-          inviteSent = true
-          inviteEmailMode = 'custom_qr'
-          inviteDetails = null
-        } else {
-          inviteSent = false
-          inviteEmailMode = 'none'
-          inviteDetails = emailResult.reason
-        }
+      if (customEmail.sent) {
+        inviteSent = true
+        containsQr = true
+        inviteMode = 'custom_qr'
       } else {
         inviteSent = false
-        inviteEmailMode = 'none'
-        inviteDetails = inviteDetails || 'INVITE_LINK_MISSING'
+        containsQr = false
+        inviteMode = 'custom_qr_failed'
+        inviteWarning = customEmail.reason ?? 'CUSTOM_INVITE_EMAIL_FAILED'
       }
     }
 
@@ -411,29 +397,28 @@ export async function POST(req: Request) {
       revalidatePath('/members')
     } catch {}
 
-    const message =
-      outcome === 'invited_new_user'
-        ? inviteEmailMode === 'custom_qr'
-          ? 'Member created. Invite email with QR code sent.'
-          : inviteEmailMode === 'supabase_default'
-            ? 'Member created. Invite email sent.'
-            : 'Member created, but the invite email could not be sent. Open the member profile to resend the invite.'
-        : outcome === 'existing_auth_user'
-          ? 'Member profile saved, but no new invite email was sent because the auth account already exists.'
-          : 'Existing member found. No invite email was sent.'
-
     return noStore(
       NextResponse.json({
         ok: true,
         outcome,
         invite_sent: inviteSent,
-        invite_email_mode: inviteEmailMode,
-        invite_details: inviteDetails,
+        invite_mode: inviteMode,
+        contains_qr: containsQr,
+        invite_warning: inviteWarning,
         profile_action: profileAction,
         next_action: inviteSent ? 'none' : 'open_profile',
         user_id: userId,
         user: { id: userId, email, first_name, last_name, phone, date_of_birth },
-        message,
+        message:
+          outcome === 'invited_new_user'
+            ? inviteMode === 'custom_qr'
+              ? 'Member created. Invite email with QR code sent.'
+              : inviteMode === 'custom_qr_failed'
+                ? 'Member created, but the custom invite email with QR code could not be sent.'
+                : 'Member created. Invite email sent.'
+            : outcome === 'existing_auth_user'
+              ? 'Member profile saved, but no new invite email was sent because the auth account already exists.'
+              : 'Existing member found. No invite email was sent.',
       }),
     )
   } catch (e: any) {
