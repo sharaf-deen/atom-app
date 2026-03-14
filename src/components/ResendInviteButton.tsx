@@ -233,8 +233,15 @@ export default function ResendInviteButton({ userId, email, className }: Props) 
       const j = await r.json().catch(() => ({} as any))
 
       if (r.ok) {
+        const containsQr = !!j?.contains_qr
         toast.success('Invite resent', {
-          description: emailNorm ? `Sent to ${emailNorm}` : undefined,
+          description: containsQr
+            ? emailNorm
+              ? `Invite email with QR code sent to ${emailNorm}`
+              : 'Invite email with QR code sent.'
+            : emailNorm
+              ? `Sent to ${emailNorm}`
+              : undefined,
         })
 
         setLastSentAt(new Date().toISOString())

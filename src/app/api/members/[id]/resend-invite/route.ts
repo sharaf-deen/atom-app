@@ -6,6 +6,7 @@ import { NextResponse } from 'next/server'
 import type { Role } from '@/lib/session'
 import { createSupabaseServerActionClient } from '@/lib/supabaseServer'
 import { createClient } from '@supabase/supabase-js'
+import { extractActionLink, sendMemberInviteEmailWithQr } from '@/lib/memberInviteEmail'
 
 const STAFF: Role[] = ['reception', 'admin', 'super_admin']
 const can = (r: Role) => STAFF.includes(r)
@@ -241,7 +242,7 @@ export async function POST(req: Request, ctx: { params: { id: string } }) {
     // 3) Profil cible
     const { data: prof, error: profErr } = await admin
       .from('profiles')
-      .select('user_id, email, first_name, last_name, phone, role')
+      .select('user_id, email, first_name, last_name, phone, role, member_id, qr_code')
       .eq('user_id', memberUserId)
       .maybeSingle()
 
@@ -440,6 +441,64 @@ export async function POST(req: Request, ctx: { params: { id: string } }) {
     // 7) Resend invite
     const redirectTo = `${getAppUrl()}/auth/complete-invite`
 
+    let inviteMode: 'custom_qr' | 'supabase_default' = 'supabase_default'
+    let containsQr = false
+
+    if (process.env.RESEND_API_KEY) {
+      const { data: linkData, error: linkErr } = await (admin.auth.admin as any).generateLink({
+        type: 'recovery',
+        email: targetEmail,
+        redirectTo,
+      })
+
+      const actionLink = !linkErr ? extractActionLink(linkData) : ''
+
+      if (!linkErr && actionLink) {
+        const customEmail = await sendMemberInviteEmailWithQr({
+          to: targetEmail,
+          actionLink,
+          qrValue: prof.qr_code || `atom:${memberUserId}`,
+          firstName: prof.first_name ?? null,
+          lastName: prof.last_name ?? null,
+          memberId: prof.member_id ?? null,
+          mode: 'resend',
+        })
+
+        if (customEmail.sent) {
+          inviteMode = 'custom_qr'
+          containsQr = true
+
+          await safeAudit(admin, {
+            actor_user_id: actor.id,
+            target_user_id: memberUserId,
+            action: ACTION_RESEND,
+            action_details: {
+              request_id: requestId,
+              actor_email: actor.email ?? null,
+              target_email: targetEmail,
+              ip,
+              user_agent: userAgent,
+              outcome: 'ok',
+              details: 'Invite resent with QR email',
+              invite_mode: inviteMode,
+              ms: Date.now() - startedAt,
+            },
+          })
+
+          return noStore(
+            NextResponse.json({
+              ok: true,
+              outcome: 'invite_resent' as ResendOutcome,
+              invite_mode: inviteMode,
+              contains_qr: containsQr,
+              email: targetEmail,
+              details: 'Invite email with QR code sent.',
+            }),
+          )
+        }
+      }
+    }
+
     const { error: inviteErr } = await admin.auth.admin.inviteUserByEmail(targetEmail, {
       redirectTo,
       data: {
@@ -468,7 +527,6 @@ export async function POST(req: Request, ctx: { params: { id: string } }) {
         },
       })
 
-      // Optionnel: map vers 409 si message indique déjà actif
       const m = String(inviteErr.message || '').toLowerCase()
       if (m.includes('already') || m.includes('registered') || m.includes('confirmed')) {
         return noStore(
@@ -510,6 +568,7 @@ export async function POST(req: Request, ctx: { params: { id: string } }) {
         user_agent: userAgent,
         outcome: 'ok',
         details: 'Invite resent',
+        invite_mode: inviteMode,
         ms: Date.now() - startedAt,
       },
     })
@@ -518,6 +577,8 @@ export async function POST(req: Request, ctx: { params: { id: string } }) {
       NextResponse.json({
         ok: true,
         outcome: 'invite_resent' as ResendOutcome,
+        invite_mode: inviteMode,
+        contains_qr: containsQr,
         invite_sent: true,
         user_id: memberUserId,
         email: targetEmail,

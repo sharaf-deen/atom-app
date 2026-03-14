@@ -25,6 +25,8 @@ type CreateOutcome =
   | 'existing_profile'
   | 'existing_auth_user'
 
+type InviteMode = 'custom_qr' | 'custom_qr_failed' | 'supabase_default' | 'none'
+
 function ageFromDob(dob?: string) {
   if (!dob || !/^\d{4}-\d{2}-\d{2}$/.test(dob)) return null
   const [y, m, d] = dob.split('-').map(Number)
@@ -71,8 +73,7 @@ export default function CreateMemberForm() {
   const [postCreateOpen, setPostCreateOpen] = useState(false)
   const [createdEmail, setCreatedEmail] = useState<string | null>(null)
   const [createOutcome, setCreateOutcome] = useState<CreateOutcome | null>(null)
-  const [inviteSentState, setInviteSentState] = useState(false)
-  const [inviteEmailMode, setInviteEmailMode] = useState<'custom_qr' | 'supabase_default' | 'none'>('none')
+  const [inviteMode, setInviteMode] = useState<InviteMode>('none')
 
   function update<K extends keyof NewMemberPayload>(k: K, v: NewMemberPayload[K]) {
     setForm((f) => ({ ...f, [k]: v }))
@@ -85,8 +86,7 @@ export default function CreateMemberForm() {
     setCreatedId(null)
     setCreatedEmail(null)
     setCreateOutcome(null)
-    setInviteSentState(false)
-    setInviteEmailMode('none')
+    setInviteMode('none')
   }
 
   const emailOk = !!(form.email || '').trim()
@@ -102,8 +102,7 @@ export default function CreateMemberForm() {
     setCreatedId(null)
     setCreatedEmail(null)
     setCreateOutcome(null)
-    setInviteSentState(false)
-    setInviteEmailMode('none')
+    setInviteMode('none')
 
     const email = (form.email || '').trim().toLowerCase()
 
@@ -138,27 +137,26 @@ export default function CreateMemberForm() {
       const id: string = j.user?.id || j.id || j.user_id
       const outcome = (j?.outcome || 'invited_new_user') as CreateOutcome
       const inviteSent = !!j?.invite_sent
-      const inviteEmailMode = (j?.invite_email_mode || 'none') as 'custom_qr' | 'supabase_default' | 'none'
+      const nextInviteMode = (j?.invite_mode || 'none') as InviteMode
 
       setCreatedId(id || null)
       setCreatedEmail(email)
       setCreateOutcome(outcome)
-      setInviteSentState(inviteSent)
-      setInviteEmailMode(inviteEmailMode)
+      setInviteMode(nextInviteMode)
 
       if (outcome === 'invited_new_user' && inviteSent) {
-        const sentWithQr = inviteEmailMode === 'custom_qr'
-        setStatus({ kind: 'success', msg: sentWithQr ? 'Member created. Invite email with QR code sent.' : 'Member created. Invite email sent.' })
+        const description = nextInviteMode === 'custom_qr' ? 'Invite email with QR code sent.' : 'Invite email sent.'
+        setStatus({ kind: 'success', msg: `Member created. ${description}` })
         toast.success('Member created', {
-          description: sentWithQr ? 'Invite email with QR code sent.' : 'Invite email sent.',
+          description,
         })
-      } else if (outcome === 'invited_new_user') {
+      } else if (outcome === 'invited_new_user' && !inviteSent && nextInviteMode === 'custom_qr_failed') {
         setStatus({
           kind: 'warning',
-          msg: 'Member created, but the invite email could not be sent. Open the member profile to resend the invite.',
+          msg: 'Member created, but the custom invite email with QR code could not be sent.',
         })
         toast.success('Member created', {
-          description: 'Invite email not sent. Use Resend invite from the member profile.',
+          description: 'Open the member profile and use Resend invite if needed.',
         })
       } else if (outcome === 'existing_profile') {
         setStatus({
@@ -361,22 +359,12 @@ export default function CreateMemberForm() {
         <div className="grid gap-3">
           <p className="text-sm text-[hsl(var(--muted))]">
             {createOutcome === 'invited_new_user' ? (
-              inviteSentState ? (
-                createdEmail ? (
-                  <>
-                    {inviteEmailMode === 'custom_qr' ? 'Invite email with QR code sent to ' : 'Invite email sent to '}
-                    <span className="font-medium text-black">{createdEmail}</span>.
-                  </>
-                ) : (
-                  <>
-                    {inviteEmailMode === 'custom_qr' ? 'Invite email with QR code has been sent.' : 'Invite email has been sent.'}
-                  </>
-                )
-              ) : (
+              createdEmail ? (
                 <>
-                  Member created, but the invite email could not be sent. Open the member profile to use{' '}
-                  <span className="font-medium text-black">Resend invite</span>.
+                  {inviteMode === 'custom_qr' ? 'Invite email with QR code sent to ' : 'Invite email sent to '}<span className="font-medium text-black">{createdEmail}</span>.
                 </>
+              ) : (
+                <>{inviteMode === 'custom_qr' ? 'Invite email with QR code has been sent.' : 'Invite email has been sent.'}</>
               )
             ) : createOutcome === 'existing_profile' ? (
               <>This email already belongs to an existing member. No new invite email was sent.</>
@@ -397,8 +385,7 @@ export default function CreateMemberForm() {
                 setCreatedId(null)
                 setCreatedEmail(null)
                 setCreateOutcome(null)
-    setInviteSentState(false)
-    setInviteEmailMode('none')
+                setInviteMode('none')
                 setTimeout(() => emailRef.current?.focus(), 50)
               }}
             >
