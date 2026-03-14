@@ -29,6 +29,7 @@ import QrImage from '@/components/QrImage'
 import SubscribeDialog, { type Plan } from '@/components/SubscribeDialog'
 import SubscriptionManageRowActions from '@/components/SubscriptionManageRowActions'
 import ResendInviteButton from '@/components/ResendInviteButton'
+import DeleteUserButton from '@/components/DeleteUserButton'
 
 type ProfileRow = {
   user_id: string
@@ -583,6 +584,7 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
   if (!profile) return notFound()
 
   const isSelf = me.id === profile.user_id
+  const canDeleteUser = me.role === 'super_admin' && !isSelf
   const isCoachViewingOtherMember = me.role === 'coach' && !isSelf
   const receptionDeskView = me.role === 'reception' && !isSelf
 
@@ -996,6 +998,9 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
                 ) : null}
 
                 {canResendInvite ? <ResendInviteButton userId={profile.user_id} email={profile.email} /> : null}
+                {canDeleteUser ? (
+                  <DeleteUserButton userId={profile.user_id} email={profile.email} memberId={profile.member_id} />
+                ) : null}
               </div>
             </div>
           </Surface>
