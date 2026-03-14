@@ -4,11 +4,21 @@ export const revalidate = 0
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import AccessDeniedCard from '@/components/AccessDeniedCard'
-import { Table } from '@/components/ui/Table'
 import { getSessionUserCached, getSupabaseAdminClientCached } from '@/lib/requestCache'
 import { formatScanAuditMember, formatScanAuditScanner, getScanAuditData } from '@/lib/scanAudit'
 
 type SearchParams = Record<string, string | string[] | undefined>
+
+type ScanAuditRowView = {
+  id: string
+  scanned_at: string
+  status: string
+  valid: string
+  device: string
+  member: string
+  scanned_by_role: string
+  scanned_by: string
+}
 
 function spGet(sp: SearchParams, key: string): string {
   const v = sp[key]
@@ -48,7 +58,7 @@ export default async function ScanAuditPage({ searchParams }: { searchParams: Se
 
   const supabase = getSupabaseAdminClientCached()
 
-  let rows: Record<string, any>[] = []
+  let rows: ScanAuditRowView[] = []
   let total = 0
   let totalPages = 1
   let truncated = false
@@ -209,19 +219,98 @@ export default async function ScanAuditPage({ searchParams }: { searchParams: Se
         </form>
 
         <div className="rounded-2xl border border-[hsl(var(--border))] bg-white shadow-soft">
-          <Table
-            keyField="id"
-            rows={rows}
-            columns={[
-              { key: 'scanned_at', header: 'Scanned at (EG)' },
-              { key: 'status', header: 'Status' },
-              { key: 'valid', header: 'Valid', hideOnMobile: true },
-              { key: 'device', header: 'Device' },
-              { key: 'member', header: 'Member' },
-              { key: 'scanned_by_role', header: 'Scanner role', hideOnMobile: true },
-              { key: 'scanned_by', header: 'Scanned by' },
-            ]}
-          />
+          {rows.length === 0 ? (
+            <div className="px-4 py-8 text-center text-sm text-[hsl(var(--muted))]">No results</div>
+          ) : (
+            <>
+              {/* Mobile cards */}
+              <div className="space-y-3 p-3 sm:hidden">
+                {rows.map((row) => (
+                  <div
+                    key={row.id}
+                    className="rounded-2xl border border-[hsl(var(--border))] bg-white p-3 shadow-soft"
+                  >
+                    <div className="space-y-2">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="shrink-0 text-[11px] font-medium text-[hsl(var(--muted))]">Scanned at (EG)</div>
+                        <div className="min-w-0 break-words text-right text-[13px] font-medium">{row.scanned_at}</div>
+                      </div>
+
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="shrink-0 text-[11px] font-medium text-[hsl(var(--muted))]">Status</div>
+                        <div className="min-w-0 break-words text-right text-[13px] font-medium">{row.status}</div>
+                      </div>
+
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="shrink-0 text-[11px] font-medium text-[hsl(var(--muted))]">Device</div>
+                        <div className="min-w-0 break-words text-right text-[13px] font-medium">{row.device}</div>
+                      </div>
+
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="shrink-0 text-[11px] font-medium text-[hsl(var(--muted))]">Member</div>
+                        <div className="min-w-0 break-words text-right text-[13px] font-medium">{row.member}</div>
+                      </div>
+
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="shrink-0 text-[11px] font-medium text-[hsl(var(--muted))]">Scanned by</div>
+                        <div className="min-w-0 break-words text-right text-[13px] font-medium">{row.scanned_by}</div>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Tablet / desktop table */}
+              <div className="hidden sm:block">
+                <div className="overflow-x-auto">
+                  <table className="min-w-[980px] w-full text-left text-[13px] leading-5">
+                    <thead>
+                      <tr className="border-b border-[hsl(var(--border))] bg-white">
+                        <th className="px-3 py-3 font-semibold whitespace-nowrap">Scanned at (EG)</th>
+                        <th className="px-3 py-3 font-semibold whitespace-nowrap">Status</th>
+                        <th className="px-3 py-3 font-semibold whitespace-nowrap">Valid</th>
+                        <th className="px-3 py-3 font-semibold whitespace-nowrap">Device</th>
+                        <th className="px-3 py-3 font-semibold whitespace-nowrap">Member</th>
+                        <th className="px-3 py-3 font-semibold whitespace-nowrap">Scanner role</th>
+                        <th className="px-3 py-3 font-semibold whitespace-nowrap">Scanned by</th>
+                      </tr>
+                    </thead>
+
+                    <tbody>
+                      {rows.map((row, index) => (
+                        <tr
+                          key={row.id}
+                          className={index % 2 === 0 ? 'bg-white' : 'bg-[hsl(var(--bg))]'}
+                        >
+                          <td className="border-t border-[hsl(var(--border))] px-3 py-3 align-top whitespace-nowrap">
+                            {row.scanned_at}
+                          </td>
+                          <td className="border-t border-[hsl(var(--border))] px-3 py-3 align-top whitespace-nowrap">
+                            {row.status}
+                          </td>
+                          <td className="border-t border-[hsl(var(--border))] px-3 py-3 align-top whitespace-nowrap">
+                            {row.valid}
+                          </td>
+                          <td className="border-t border-[hsl(var(--border))] px-3 py-3 align-top">
+                            <div className="max-w-[220px] break-words">{row.device}</div>
+                          </td>
+                          <td className="border-t border-[hsl(var(--border))] px-3 py-3 align-top">
+                            <div className="min-w-[220px] break-words">{row.member}</div>
+                          </td>
+                          <td className="border-t border-[hsl(var(--border))] px-3 py-3 align-top whitespace-nowrap">
+                            {row.scanned_by_role}
+                          </td>
+                          <td className="border-t border-[hsl(var(--border))] px-3 py-3 align-top">
+                            <div className="min-w-[220px] break-words">{row.scanned_by}</div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </>
+          )}
         </div>
 
         <div className="flex items-center justify-between gap-3">
