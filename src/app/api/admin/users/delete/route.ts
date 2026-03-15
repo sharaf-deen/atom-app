@@ -1,60 +1,14 @@
-export const runtime = 'nodejs'
-export const dynamic = 'force-dynamic'
-export const revalidate = 0
-
 import { NextResponse } from 'next/server'
-import type { Role } from '@/lib/session'
-import { createSupabaseServerActionClient } from '@/lib/supabaseServer'
-import { createSupabaseAdminClient } from '@/lib/supabaseAdmin'
+import { getSessionUserCached, getSupabaseAdminClientCached } from '@/lib/requestCache'
 
-type DeleteOutcome =
-  | 'deleted'
-  | 'forbidden'
-  | 'self_delete_blocked'
-  | 'last_super_admin_blocked'
-  | 'not_found'
-  | 'invalid_user_id'
-  | 'delete_failed'
-
-function noStore(res: NextResponse) {
-  res.headers.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate')
-  return res
-}
-
-function isUuid(v: string) {
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(v)
-}
-
-async function removeIdPhotoIfAny(admin: any, idPhotoPath?: string | null) {
-  const path = String(idPhotoPath ?? '').trim()
-  if (!path) return
+async function insertAuditLog(admin: ReturnType<typeof getSupabaseAdminClientCached>, payload: {
+  actor_user_id: string
+  target_user_id: string
+  action: string
+  action_details: Record<string, unknown>
+}) {
   try {
-    await admin.storage.from('id-photos').remove([path])
-  } catch {
-    // best effort only
-  }
-}
-
-async function removeInvoiceFilesForUser(admin: any, userId: string) {
-  const prefix = String(userId || '').trim()
-  if (!prefix) return
-
-  try {
-    const { data, error } = await admin.storage.from('invoices').list(prefix, {
-      limit: 100,
-      offset: 0,
-      sortBy: { column: 'name', order: 'asc' },
-    })
-
-    if (error || !Array.isArray(data) || data.length === 0) return
-
-    const files = data
-      .filter((item: any) => item && typeof item.name === 'string' && item.name)
-      .map((item: any) => `${prefix}/${item.name}`)
-
-    if (files.length > 0) {
-      await admin.storage.from('invoices').remove(files)
-    }
+    await admin.from('audit_logs').insert(payload)
   } catch {
     // best effort only
   }
@@ -62,172 +16,112 @@ async function removeInvoiceFilesForUser(admin: any, userId: string) {
 
 export async function POST(req: Request) {
   try {
-    const body = await req.json().catch(() => ({} as any))
-    const userId = String(body?.userId ?? '').trim()
-
-    if (!isUuid(userId)) {
-      return noStore(
-        NextResponse.json(
-          {
-            ok: false,
-            outcome: 'invalid_user_id' as DeleteOutcome,
-            error: 'INVALID_USER_ID',
-            details: 'Invalid user id.',
-          },
-          { status: 400 },
-        ),
-      )
+    const me = await getSessionUserCached()
+    if (!me || me.role !== 'super_admin') {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     }
 
-    const supa = createSupabaseServerActionClient()
-    const { data: authData, error: authErr } = await supa.auth.getUser()
-    if (authErr) {
-      return noStore(NextResponse.json({ ok: false, error: `AUTH_ERROR: ${authErr.message}` }, { status: 401 }))
+    const body = await req.json().catch(() => null)
+    const userId = typeof body?.userId === 'string' ? body.userId.trim() : ''
+
+    if (!userId) {
+      return NextResponse.json({ error: 'Missing userId' }, { status: 400 })
     }
 
-    const actor = authData.user
-    if (!actor) {
-      return noStore(NextResponse.json({ ok: false, error: 'NOT_AUTHENTICATED' }, { status: 401 }))
+    if (userId === me.id) {
+      return NextResponse.json({ error: 'You cannot delete your own account.' }, { status: 400 })
     }
 
-    const { data: actorProfile, error: actorErr } = await supa
+    const admin = getSupabaseAdminClientCached()
+
+    const { data: targetProfile, error: profileError } = await admin
       .from('profiles')
-      .select('user_id, role')
-      .eq('user_id', actor.id)
-      .maybeSingle<{ user_id: string; role: Role | null }>()
-
-    if (actorErr) {
-      return noStore(NextResponse.json({ ok: false, error: actorErr.message }, { status: 500 }))
-    }
-
-    const actorRole = (actorProfile?.role ?? 'member') as Role
-    if (actorRole !== 'super_admin') {
-      return noStore(
-        NextResponse.json(
-          {
-            ok: false,
-            outcome: 'forbidden' as DeleteOutcome,
-            error: 'FORBIDDEN',
-            details: 'Only super admin can permanently delete users.',
-          },
-          { status: 403 },
-        ),
-      )
-    }
-
-    if (userId === actor.id) {
-      return noStore(
-        NextResponse.json(
-          {
-            ok: false,
-            outcome: 'self_delete_blocked' as DeleteOutcome,
-            error: 'SELF_DELETE_BLOCKED',
-            details: 'You cannot delete your own account.',
-          },
-          { status: 400 },
-        ),
-      )
-    }
-
-    const admin = createSupabaseAdminClient()
-
-    const { data: targetProfile, error: targetErr } = await admin
-      .from('profiles')
-      .select('user_id, email, role, member_id, id_photo_path')
+      .select('user_id, email, role, member_id')
       .eq('user_id', userId)
-      .maybeSingle<{
-        user_id: string
-        email: string | null
-        role: Role | null
-        member_id: string | null
-        id_photo_path: string | null
-      }>()
+      .maybeSingle()
 
-    if (targetErr) {
-      return noStore(NextResponse.json({ ok: false, error: targetErr.message }, { status: 500 }))
+    if (profileError) {
+      return NextResponse.json({ error: profileError.message }, { status: 400 })
     }
 
     if (!targetProfile) {
-      return noStore(
-        NextResponse.json(
-          {
-            ok: false,
-            outcome: 'not_found' as DeleteOutcome,
-            error: 'NOT_FOUND',
-            details: 'User profile not found.',
-          },
-          { status: 404 },
-        ),
-      )
+      return NextResponse.json({ error: 'User profile not found.' }, { status: 404 })
     }
 
     if (targetProfile.role === 'super_admin') {
-      const { count, error: countErr } = await admin
+      const { count, error: countError } = await admin
         .from('profiles')
         .select('*', { count: 'exact', head: true })
         .eq('role', 'super_admin')
 
-      if (countErr) {
-        return noStore(NextResponse.json({ ok: false, error: countErr.message }, { status: 500 }))
+      if (countError) {
+        return NextResponse.json({ error: countError.message }, { status: 400 })
       }
 
       if ((count ?? 0) <= 1) {
-        return noStore(
-          NextResponse.json(
-            {
-              ok: false,
-              outcome: 'last_super_admin_blocked' as DeleteOutcome,
-              error: 'LAST_SUPER_ADMIN_BLOCKED',
-              details: 'Cannot delete the last super admin.',
-            },
-            { status: 400 },
-          ),
-        )
+        return NextResponse.json({ error: 'Cannot delete the last super admin.' }, { status: 400 })
       }
     }
 
-    await removeIdPhotoIfAny(admin, targetProfile.id_photo_path)
-    await removeInvoiceFilesForUser(admin, userId)
+    const authLookup = await admin.auth.admin.getUserById(userId)
+    const authUserExists = !authLookup.error && !!authLookup.data?.user
 
-    const { error: delErr } = await admin.auth.admin.deleteUser(userId)
+    if (!authUserExists) {
+      const { error: deleteProfileError } = await admin
+        .from('profiles')
+        .delete()
+        .eq('user_id', userId)
 
-    if (delErr) {
-      return noStore(
-        NextResponse.json(
-          {
-            ok: false,
-            outcome: 'delete_failed' as DeleteOutcome,
-            error: 'DELETE_FAILED',
-            details: delErr.message,
-          },
-          { status: 400 },
-        ),
-      )
-    }
+      if (deleteProfileError) {
+        return NextResponse.json({ error: deleteProfileError.message }, { status: 400 })
+      }
 
-    return noStore(
-      NextResponse.json({
-        ok: true,
-        outcome: 'deleted' as DeleteOutcome,
-        deleted: {
-          user_id: targetProfile.user_id,
+      await insertAuditLog(admin, {
+        actor_user_id: me.id,
+        target_user_id: userId,
+        action: 'delete_orphan_profile',
+        action_details: {
           email: targetProfile.email,
           role: targetProfile.role,
           member_id: targetProfile.member_id,
         },
-      }),
-    )
+      })
+
+      return NextResponse.json({
+        ok: true,
+        deleted: 'orphan_profile',
+        userId,
+        email: targetProfile.email,
+      })
+    }
+
+    const { error: deleteAuthError } = await admin.auth.admin.deleteUser(userId)
+
+    if (deleteAuthError) {
+      return NextResponse.json({ error: deleteAuthError.message }, { status: 400 })
+    }
+
+    await insertAuditLog(admin, {
+      actor_user_id: me.id,
+      target_user_id: userId,
+      action: 'delete_user',
+      action_details: {
+        email: targetProfile.email,
+        role: targetProfile.role,
+        member_id: targetProfile.member_id,
+      },
+    })
+
+    return NextResponse.json({
+      ok: true,
+      deleted: 'auth_user',
+      userId,
+      email: targetProfile.email,
+    })
   } catch (e: any) {
-    console.error('admin/users/delete error:', e)
-    return noStore(
-      NextResponse.json(
-        {
-          ok: false,
-          error: 'SERVER_ERROR',
-          details: e?.message ?? 'Unexpected error',
-        },
-        { status: 500 },
-      ),
+    return NextResponse.json(
+      { error: e?.message ?? 'Unexpected delete error' },
+      { status: 500 }
     )
   }
 }
