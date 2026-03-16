@@ -151,15 +151,15 @@ export async function GET(req: Request) {
     const { searchParams } = new URL(req.url)
     const range = resolveRange(searchParams)
 
-    // Income from subscription_payments (created_at UTC bounds)
+    // Income from subscription_payments (paid_at UTC bounds)
     const { data: pays, error: payErr } = await admin
       .from('subscription_payments')
       .select(
-        'id, amount, payment_method, note, created_at, member:profiles!subscription_payments_member_id_fkey(first_name,last_name,email,member_id)'
+        'id, amount, payment_method, note, paid_at, created_at, member:profiles!subscription_payments_member_id_fkey(first_name,last_name,email,member_id)'
       )
-      .gte('created_at', range.startISO)
-      .lt('created_at', range.endISO)
-      .order('created_at', { ascending: false })
+      .gte('paid_at', range.startISO)
+      .lt('paid_at', range.endISO)
+      .order('paid_at', { ascending: false })
       .limit(10000)
 
     if (payErr) return json(500, { ok: false, error: 'PAYMENTS_QUERY_FAILED', details: payErr.message })
@@ -322,7 +322,7 @@ export async function GET(req: Request) {
         if (y < marginBottom + 80) newPage()
         const memberName =
           `${r.member?.first_name ?? ''} ${r.member?.last_name ?? ''}`.trim() || r.member?.email || '—'
-        page.drawText(truncate(fmtTimeCairo(r.created_at), 18), { x: colWhen, y, size: 9, font })
+        page.drawText(truncate(fmtTimeCairo(r.paid_at || r.created_at), 18), { x: colWhen, y, size: 9, font })
         page.drawText(truncate(memberName, 28), { x: colMember, y, size: 9, font })
         page.drawText(labelMethod(normMethod(r.payment_method)), { x: colMethod, y, size: 9, font })
         page.drawText(fmtMoneyEGP(Number(r.amount ?? 0)), { x: colAmount, y, size: 9, font: fontBold })

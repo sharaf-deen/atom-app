@@ -121,11 +121,12 @@ export default async function AdminCashReportPage({
 
   const { startISO, endISO } = cairoRangeBoundsUTC(safeFrom, safeTo)
 
+  // Income from subscription_payments (paid_at in UTC bounds for Cairo day)
   const { data: pays, error: payErr } = await admin
     .from('subscription_payments')
     .select('amount, payment_method')
-    .gte('created_at', startISO)
-    .lt('created_at', endISO)
+    .gte('paid_at', startISO)
+    .lt('paid_at', endISO)
     .limit(10000)
 
   const incomeBy: Record<Method, number> = { cash: 0, instapay: 0, card: 0, bank_transfer: 0 }
@@ -135,6 +136,7 @@ export default async function AdminCashReportPage({
     incomeBy[normMethod(r.payment_method)] += amt
   }
 
+  // Expenses for the same Cairo date range (expenses.date is YYYY-MM-DD)
   const { data: exps, error: expErr } = await admin
     .from('expenses')
     .select('id, date, category_key, description, amount, payment_method')
@@ -153,16 +155,18 @@ export default async function AdminCashReportPage({
   const totalExpenses = METHODS.reduce((s, m) => s + expenseBy[m], 0)
   const net = totalIncome - totalExpenses
 
+  // Recent payments (top 10 by time)
   const { data: recentPays } = await admin
     .from('subscription_payments')
     .select(
-      'id, amount, payment_method, note, created_at, member_id, member:profiles!subscription_payments_member_id_fkey(first_name,last_name,email,member_id)'
+      'id, amount, payment_method, note, paid_at, created_at, member_id, member:profiles!subscription_payments_member_id_fkey(first_name,last_name,email,member_id)'
     )
-    .gte('created_at', startISO)
-    .lt('created_at', endISO)
-    .order('created_at', { ascending: false })
+    .gte('paid_at', startISO)
+    .lt('paid_at', endISO)
+    .order('paid_at', { ascending: false })
     .limit(10)
 
+  // "Recent" expenses for the range: highest 10 amounts
   const topExpenses = (exps ?? [])
     .slice()
     .sort((a: any, b: any) => Number(b.amount ?? 0) - Number(a.amount ?? 0))
@@ -201,7 +205,7 @@ export default async function AdminCashReportPage({
     const name = `${r.member?.first_name ?? ''} ${r.member?.last_name ?? ''}`.trim() || r.member?.email || '—'
     return {
       id: String(r.id),
-      when: new Date(r.created_at).toLocaleTimeString('en-GB', { timeZone: 'Africa/Cairo' }),
+      when: new Date(r.paid_at || r.created_at).toLocaleTimeString('en-GB', { timeZone: 'Africa/Cairo' }),
       member: (
         <div className="space-y-0.5">
           <div className="font-medium">{name}</div>
@@ -359,12 +363,7 @@ export default async function AdminCashReportPage({
 
       <div className="space-y-3">
         <h2 className="text-lg font-semibold">Breakdown</h2>
-        <Table
-          columns={breakdownColumns}
-          rows={breakdownRows as any}
-          keyField="id"
-          stickyTopClassName="top-0"
-        />
+        <Table columns={breakdownColumns} rows={breakdownRows as any} keyField="id" />
       </div>
 
       <div className="grid gap-6 lg:grid-cols-2">
