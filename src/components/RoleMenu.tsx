@@ -64,6 +64,7 @@ function pickQuick(items: MenuItem[]) {
     '/admin/expiring-soon',
     '/admin/attendance',
     '/admin/scan-audit',
+    '/admin/health-monitor',
     '/admin/outstanding-dues',
     '/admin/cash-report',
     '/admin/payments',
