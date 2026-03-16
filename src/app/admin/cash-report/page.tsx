@@ -121,7 +121,6 @@ export default async function AdminCashReportPage({
 
   const { startISO, endISO } = cairoRangeBoundsUTC(safeFrom, safeTo)
 
-  // Income from subscription_payments (created_at in UTC bounds for Cairo day)
   const { data: pays, error: payErr } = await admin
     .from('subscription_payments')
     .select('amount, payment_method')
@@ -136,7 +135,6 @@ export default async function AdminCashReportPage({
     incomeBy[normMethod(r.payment_method)] += amt
   }
 
-  // Expenses for the same Cairo date range (expenses.date is YYYY-MM-DD)
   const { data: exps, error: expErr } = await admin
     .from('expenses')
     .select('id, date, category_key, description, amount, payment_method')
@@ -155,7 +153,6 @@ export default async function AdminCashReportPage({
   const totalExpenses = METHODS.reduce((s, m) => s + expenseBy[m], 0)
   const net = totalIncome - totalExpenses
 
-  // Recent payments (top 10 by time)
   const { data: recentPays } = await admin
     .from('subscription_payments')
     .select(
@@ -166,7 +163,6 @@ export default async function AdminCashReportPage({
     .order('created_at', { ascending: false })
     .limit(10)
 
-  // "Recent" expenses for the range: highest 10 amounts
   const topExpenses = (exps ?? [])
     .slice()
     .sort((a: any, b: any) => Number(b.amount ?? 0) - Number(a.amount ?? 0))
@@ -363,7 +359,12 @@ export default async function AdminCashReportPage({
 
       <div className="space-y-3">
         <h2 className="text-lg font-semibold">Breakdown</h2>
-        <Table columns={breakdownColumns} rows={breakdownRows as any} keyField="id" />
+        <Table
+          columns={breakdownColumns}
+          rows={breakdownRows as any}
+          keyField="id"
+          stickyTopClassName="top-0"
+        />
       </div>
 
       <div className="grid gap-6 lg:grid-cols-2">
