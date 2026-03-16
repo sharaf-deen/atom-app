@@ -187,6 +187,9 @@ export default async function AdminPage() {
           <Button asChild variant="outline" href="/admin/scan-audit">
             Scan Audit
           </Button>
+          <Button asChild variant="outline" href="/admin/health-monitor">
+            Health Monitor
+          </Button>
         </div>
 
         <div className="grid gap-4 lg:grid-cols-2">
