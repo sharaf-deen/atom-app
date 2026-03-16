@@ -40,6 +40,21 @@ function isAllowedPaymentMethod(v: any) {
   return v === 'cash' || v === 'instapay' || v === 'card' || v === 'bank_transfer'
 }
 
+function parsePaidAtInput(v: unknown): string | null {
+  if (typeof v !== 'string') return null
+  const s = v.trim()
+  if (!s) return null
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) {
+    const [y, m, d] = s.split('-').map(Number)
+    return new Date(Date.UTC(y, m - 1, d, 12, 0, 0)).toISOString()
+  }
+
+  const dt = new Date(s)
+  if (Number.isNaN(dt.getTime())) return null
+  return dt.toISOString()
+}
+
 async function trySendResendEmail(args: { to: string; subject: string; text: string }) {
   const apiKey = process.env.RESEND_API_KEY
   const from = process.env.MAIL_FROM || 'noreply@example.com'
@@ -87,6 +102,7 @@ export async function POST(req: Request) {
   const invoiceRequested = body?.invoice?.generate === true
   const invoiceEmailRequested = body?.invoice?.email === true
   const noteRaw = body?.note
+  const paymentDateRaw = body?.payment_date ?? body?.paymentDate ?? body?.paid_at ?? body?.paidAt
 
   // Role (to allow staff to settle for any member)
   const { data: prof } = await supabase
@@ -144,6 +160,7 @@ export async function POST(req: Request) {
   // Determine new due
   let newDue: number | null = null
   let paidNow: number | null = null
+  let effectivePaidAt: string | null = null
 
   if (amountPaidRaw !== undefined && amountPaidRaw !== null && String(amountPaidRaw) !== '') {
     if (!isFiniteNumber(amountPaidRaw)) return json(400, { ok: false, error: 'Invalid amount_paid' })
@@ -151,6 +168,7 @@ export async function POST(req: Request) {
     if (paidNow <= 0) return json(400, { ok: false, error: 'amount_paid must be > 0' })
     if (paidNow > due) return json(400, { ok: false, error: 'amount_paid cannot exceed current due' })
     newDue = Math.max(0, due - paidNow)
+    effectivePaidAt = parsePaidAtInput(paymentDateRaw) ?? new Date().toISOString()
   } else if (amountDueRaw !== undefined && amountDueRaw !== null && String(amountDueRaw) !== '') {
     // Direct set (staff only)
     if (!isFiniteNumber(amountDueRaw)) return json(400, { ok: false, error: 'Invalid amount_due' })
@@ -179,6 +197,7 @@ export async function POST(req: Request) {
   // This keeps the total (paid + due) consistent.
   if (paidNow && paidNow > 0) {
     update.amount = Math.max(0, amountPaidSoFar + paidNow)
+    if (effectivePaidAt) update.paid_at = effectivePaidAt
   }
   if (payment_method) update.payment_method = payment_method
 
@@ -204,6 +223,7 @@ await safeAudit(admin, {
     old_due: due,
     new_due: newDue,
     payment_method: payment_method ?? current.payment_method ?? null,
+    paid_at: effectivePaidAt,
     invoice_requested: invoiceRequested,
     invoice_email_requested: invoiceEmailRequested,
   },
@@ -225,6 +245,7 @@ if (paidNow && paidNow > 0) {
       amount: paidNow,
       payment_method: pm,
       note: note || null,
+      paid_at: effectivePaidAt ?? new Date().toISOString(),
       created_by: actorId,
     })
   } catch {
@@ -260,7 +281,7 @@ if (paidNow && paidNow > 0) {
       if (mErr) throw mErr
       if (!member) throw new Error('MEMBER_NOT_FOUND')
 
-      const paid_at = (updated as any)?.paid_at ?? current.paid_at ?? new Date().toISOString()
+      const paid_at = (updated as any)?.paid_at ?? effectivePaidAt ?? current.paid_at ?? new Date().toISOString()
       const issued_at = new Date().toISOString()
       const invoice_number = makeInvoiceNumber({ paidAtISO: paid_at, subscriptionId: id })
 
