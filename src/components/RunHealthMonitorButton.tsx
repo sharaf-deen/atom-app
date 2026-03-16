@@ -1,0 +1,71 @@
+'use client'
+
+import { useMemo, useState } from 'react'
+import { toast } from 'sonner'
+import Button from '@/components/ui/Button'
+
+type Props = {
+  sendEmail?: boolean
+}
+
+export default function RunHealthMonitorButton({ sendEmail = false }: Props) {
+  const [loading, setLoading] = useState(false)
+
+  const label = useMemo(() => {
+    if (loading) return sendEmail ? 'Running + emailing…' : 'Running…'
+    return sendEmail ? 'Run + email' : 'Run now'
+  }, [loading, sendEmail])
+
+  async function run() {
+    if (loading) return
+    setLoading(true)
+    try {
+      const path = `/api/admin/health-monitor/run${sendEmail ? '?send_email=1' : ''}`
+      const res = await fetch(path, {
+        method: 'GET',
+        headers: { 'cache-control': 'no-store' },
+      })
+      const json = await res.json().catch(() => null)
+
+      if (!res.ok) {
+        const msg = json?.details || json?.error || 'Failed'
+        toast.error(`Health monitor: ${msg}`)
+        return
+      }
+
+      const status = String(json?.summary?.overall_status ?? 'healthy')
+      const scans = Number(json?.summary?.counts?.scans_today ?? 0)
+      const orphan = Number(json?.summary?.counts?.orphan_profiles ?? 0)
+      const emailSent = !!json?.email_sent
+      const persistError = json?.persist_error
+
+      const suffix = sendEmail
+        ? emailSent
+          ? ' Email sent.'
+          : ' Email not sent.'
+        : ''
+
+      const base = `Status ${status}. Scans today ${scans}. Orphans ${orphan}.${suffix}`
+
+      if (persistError) {
+        toast.warning(base, { description: `Report save warning: ${persistError}` })
+      } else if (status === 'critical') {
+        toast.error(base)
+      } else if (status === 'warning') {
+        toast.warning(base)
+      } else {
+        toast.success(base)
+      }
+    } catch (e: any) {
+      toast.error(e?.message ?? 'Health monitor failed')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <Button onClick={run} disabled={loading} variant={sendEmail ? 'outline' : 'solid'}>
+      {label}
+    </Button>
+  )
+}

@@ -8,6 +8,10 @@
     {
       "path": "/api/admin/billing/outstanding-reminders/run",
       "schedule": "0 7 * * *"
+    },
+    {
+      "path": "/api/admin/health-monitor/run",
+      "schedule": "15 5 * * *"
     }
   ]
 }
