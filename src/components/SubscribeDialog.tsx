@@ -109,6 +109,7 @@ export default function SubscribeDialog({
   const [sessions, setSessions] = useState<number>(Math.min(Math.max(defaultSessions ?? 10, 1), 10))
   const [amount, setAmount] = useState<string>('0')
   const [paymentMethod, setPaymentMethod] = useState<SubscriptionPaymentMethod>('cash')
+  const [paymentDate, setPaymentDate] = useState<string>(todayLocalDateStr())
   const [amountDue, setAmountDue] = useState<string>('0')
   const [startDate, setStartDate] = useState<string>(defaultStartDate ?? todayLocalDateStr())
   const [busy, setBusy] = useState(false)
@@ -123,6 +124,7 @@ export default function SubscribeDialog({
     setStartDate(defaultStartDate ?? todayLocalDateStr())
     setAmount('0')
     setPaymentMethod('cash')
+    setPaymentDate(todayLocalDateStr())
     setAmountDue('0')
     setBusy(false)
     setStatus({ kind: '', msg: '' })
@@ -206,6 +208,7 @@ export default function SubscribeDialog({
         plan,
         amount: amountNum,
         payment_method: paymentMethod,
+        payment_date: paymentDate,
         amount_due: amountDueNum,
       }
       if (isTimePlan) body.start_date = startDate
@@ -384,6 +387,17 @@ export default function SubscribeDialog({
                     <option value="card">{humanPaymentMethod('card')}</option>
                     <option value="bank_transfer">{humanPaymentMethod('bank_transfer')}</option>
                   </Select>
+
+                  <Input
+                    label="Payment date"
+                    type="date"
+                    value={paymentDate}
+                    onChange={(e) => setPaymentDate(e.target.value)}
+                    disabled={busy || status.kind === 'success'}
+                  />
+                  <p className="text-xs text-[hsl(var(--muted))] -mt-2">
+                    Use the real payment date for historical imports. This does not change the technical record creation time.
+                  </p>
 
                   <Input
                     label="Remaining due (EGP)"

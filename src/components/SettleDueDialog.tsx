@@ -65,6 +65,13 @@ export default function SettleDueDialog({
 
   const [amountPaid, setAmountPaid] = useState<string>(String(due))
   const [method, setMethod] = useState<PaymentMethod>(initialMethod)
+  const [paymentDate, setPaymentDate] = useState<string>(() => {
+    const d = new Date()
+    const y = d.getFullYear()
+    const m = String(d.getMonth() + 1).padStart(2, '0')
+    const day = String(d.getDate()).padStart(2, '0')
+    return `${y}-${m}-${day}`
+  })
   const [genInvoice, setGenInvoice] = useState(true)
   const [emailInvoice, setEmailInvoice] = useState(false)
   const [status, setStatus] = useState<{ kind: StatusKind; msg: string }>({ kind: '', msg: '' })
@@ -75,6 +82,11 @@ export default function SettleDueDialog({
     setBusy(false)
     setAmountPaid(String(due))
     setMethod(initialMethod)
+    const d = new Date()
+    const y = d.getFullYear()
+    const m = String(d.getMonth() + 1).padStart(2, '0')
+    const day = String(d.getDate()).padStart(2, '0')
+    setPaymentDate(`${y}-${m}-${day}`)
     setGenInvoice(true)
     setEmailInvoice(false)
     setStatus({ kind: '', msg: '' })
@@ -125,6 +137,7 @@ export default function SettleDueDialog({
         id: subId,
         amount_paid: paidNum,
         payment_method: method,
+        payment_date: paymentDate,
       }
       if (genInvoice) payload.invoice = { generate: true, email: allowEmailOption ? !!emailInvoice : false }
 
@@ -226,6 +239,17 @@ export default function SettleDueDialog({
                       </Select>
                       <div className="mt-1 text-[11px] text-[hsl(var(--muted))]">Current: {humanPayment(sub.payment_method ?? null)}</div>
                     </div>
+                  </div>
+
+                  <div>
+                    <div className="text-sm font-medium mb-1">Payment date</div>
+                    <Input
+                      type="date"
+                      value={paymentDate}
+                      onChange={(e) => setPaymentDate(e.target.value)}
+                      disabled={busy}
+                    />
+                    <div className="mt-1 text-[11px] text-[hsl(var(--muted))]">Use the real payment date for historical imports.</div>
                   </div>
 
                   <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))]/40 p-4">

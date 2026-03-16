@@ -38,6 +38,21 @@ function isISODateOnly(s?: string | null) {
   return !!s && /^\d{4}-\d{2}-\d{2}$/.test(s)
 }
 
+function parsePaidAtInput(v: unknown): string | null {
+  if (typeof v !== 'string') return null
+  const s = v.trim()
+  if (!s) return null
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) {
+    const [y, m, d] = s.split('-').map(Number)
+    return new Date(Date.UTC(y, m - 1, d, 12, 0, 0)).toISOString()
+  }
+
+  const dt = new Date(s)
+  if (Number.isNaN(dt.getTime())) return null
+  return dt.toISOString()
+}
+
 function dateOnlyUTC(d = new Date()) {
   return d.toISOString().slice(0, 10) // YYYY-MM-DD (UTC)
 }
@@ -332,7 +347,9 @@ export async function POST(req: Request) {
     }
 
     // 4) Build insert payload
-    const paid_at = new Date().toISOString()
+    const paid_at =
+      parsePaidAtInput(body?.payment_date ?? body?.paymentDate ?? body?.paid_at ?? body?.paidAt) ??
+      new Date().toISOString()
     const subscription_type = plan === 'sessions' ? 'sessions' : 'time'
     const status = 'active' as const
 
@@ -397,6 +414,7 @@ if (inserted?.id && amount > 0) {
       member_id: memberId,
       amount,
       payment_method,
+      paid_at,
       note: 'Initial payment',
       created_by: auth.user.id,
     })
@@ -424,6 +442,7 @@ await safeAudit(admin, {
     amount_due,
     payment_method,
     currency: 'EGP',
+    paid_at,
   },
 })
 

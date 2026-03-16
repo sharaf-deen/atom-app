@@ -31,6 +31,7 @@ type PaymentRow = {
   amount: number
   payment_method: string
   note: string | null
+  paid_at: string
   created_at: string
   member: ProfileLite | null
   actor: { user_id: string; email: string | null; first_name: string | null; last_name: string | null } | null
@@ -141,12 +142,12 @@ export default async function AdminPaymentsPage({
   let query = admin
     .from('subscription_payments')
     .select(
-      'id, subscription_id, member_id, amount, payment_method, note, created_at, member:profiles!subscription_payments_member_id_fkey(user_id,member_id,email,first_name,last_name,phone), actor:profiles!subscription_payments_created_by_fkey(user_id,email,first_name,last_name)',
+      'id, subscription_id, member_id, amount, payment_method, note, paid_at, created_at, member:profiles!subscription_payments_member_id_fkey(user_id,member_id,email,first_name,last_name,phone), actor:profiles!subscription_payments_created_by_fkey(user_id,email,first_name,last_name)',
       { count: 'exact' }
     )
-    .gte('created_at', startISO)
-    .lt('created_at', endISO)
-    .order('created_at', { ascending: false })
+    .gte('paid_at', startISO)
+    .lt('paid_at', endISO)
+    .order('paid_at', { ascending: false })
 
   if (payment_method && payment_method !== 'all') query = query.eq('payment_method', payment_method)
   if (memberIds) {
@@ -163,6 +164,7 @@ export default async function AdminPaymentsPage({
     amount: Number(r.amount ?? 0),
     payment_method: String(r.payment_method ?? 'cash'),
     note: r.note ?? null,
+    paid_at: String(r.paid_at ?? r.created_at),
     created_at: String(r.created_at),
     member: (r.member ?? null) as any,
     actor: (r.actor ?? null) as any,
@@ -175,8 +177,8 @@ export default async function AdminPaymentsPage({
     let q2 = admin
       .from('subscription_payments')
       .select('amount, payment_method, member_id')
-      .gte('created_at', startISO)
-      .lt('created_at', endISO)
+      .gte('paid_at', startISO)
+      .lt('paid_at', endISO)
       .limit(10000)
 
     if (payment_method && payment_method !== 'all') q2 = q2.eq('payment_method', payment_method)
@@ -230,7 +232,7 @@ export default async function AdminPaymentsPage({
     const by = `${r.actor?.first_name ?? ''} ${r.actor?.last_name ?? ''}`.trim() || r.actor?.email || '—'
     return {
       id: r.id,
-      when: new Date(r.created_at).toLocaleString('en-GB', { timeZone: 'Africa/Cairo' }),
+      when: new Date(r.paid_at || r.created_at).toLocaleString('en-GB', { timeZone: 'Africa/Cairo' }),
       member: (
         <div className="space-y-0.5">
           <div className="font-medium">{name}</div>
