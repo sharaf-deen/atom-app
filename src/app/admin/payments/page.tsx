@@ -8,6 +8,7 @@ import AccessDeniedCard from '@/components/AccessDeniedCard'
 import Badge from '@/components/ui/Badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card'
 import { Table } from '@/components/ui/Table'
+import EditPaymentDateButton from '@/components/EditPaymentDateButton'
 import { addDaysDateOnly, cairoDayBoundsUTC, cairoTodayDateOnly, isISODateOnly } from '@/lib/cairoTime'
 import type { Role } from '@/lib/session'
 import { getSessionUserCached, getSupabaseAdminClientCached } from '@/lib/requestCache'
@@ -52,7 +53,6 @@ function labelMethod(m: string) {
   if (s === 'instapay') return 'Instapay'
   if (s === 'card') return 'Card'
   if (s === 'bank_transfer') return 'Bank transfer'
-  // legacy
   if (s === 'visa') return 'Card'
   return s
 }
@@ -68,7 +68,6 @@ function badgeClassForMethod(m: string) {
 
 function safeQ(v: unknown) {
   const s = typeof v === 'string' ? v.trim() : ''
-  // keep short to avoid abusive LIKE scans
   return s.slice(0, 80)
 }
 
@@ -77,6 +76,22 @@ function sp1(sp: Record<string, string | string[] | undefined>, key: string): st
   if (typeof v === 'string') return v
   if (Array.isArray(v) && typeof v[0] === 'string') return v[0]
   return null
+}
+
+function formatCairoDateTime(iso?: string | null) {
+  const raw = String(iso ?? '').trim()
+  if (!raw) return '—'
+  const dt = new Date(raw)
+  if (Number.isNaN(dt.getTime())) return '—'
+  return new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Africa/Cairo',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).format(dt)
 }
 
 export default async function AdminPaymentsPage({
@@ -119,11 +134,9 @@ export default async function AdminPaymentsPage({
 
   const admin = getSupabaseAdminClientCached()
 
-  // Build bounds using Cairo calendar dates
   const startISO = cairoDayBoundsUTC(from).startISO
   const endISO = cairoDayBoundsUTC(addDaysDateOnly(to, 1)).startISO
 
-  // Optional member search -> list of user_ids
   let memberIds: string[] | null = null
   if (q) {
     const like = `%${q.replace(/%/g, '')}%`
@@ -170,7 +183,6 @@ export default async function AdminPaymentsPage({
     actor: (r.actor ?? null) as any,
   }))
 
-  // Totals (same filters but without pagination)
   let totals = { all: 0, cash: 0, instapay: 0, card: 0, bank_transfer: 0 }
 
   try {
@@ -218,21 +230,25 @@ export default async function AdminPaymentsPage({
   }
 
   const tableColumns = [
-    { key: 'when', header: 'When' },
+    { key: 'paid_when', header: 'Paid at (EG)' },
+    { key: 'recorded_when', header: 'Recorded at', hideOnMobile: true },
     { key: 'member', header: 'Member' },
     { key: 'amount', header: 'Amount' },
     { key: 'method', header: 'Method' },
-    { key: 'note', header: 'Note' },
-    { key: 'by', header: 'By' },
+    { key: 'note', header: 'Note', hideOnMobile: true },
+    { key: 'by', header: 'By', hideOnMobile: true },
+    { key: 'edit_date', header: '', tdClassName: 'whitespace-normal' },
     { key: 'open', header: '' },
   ]
 
   const tableRows = rows.map((r) => {
     const name = `${r.member?.first_name ?? ''} ${r.member?.last_name ?? ''}`.trim() || r.member?.email || '—'
     const by = `${r.actor?.first_name ?? ''} ${r.actor?.last_name ?? ''}`.trim() || r.actor?.email || '—'
+    const memberLabel = `${name}${r.member?.member_id ? ` · ${r.member.member_id}` : ''}`
     return {
       id: r.id,
-      when: new Date(r.paid_at || r.created_at).toLocaleString('en-GB', { timeZone: 'Africa/Cairo' }),
+      paid_when: <span className="font-medium">{formatCairoDateTime(r.paid_at)}</span>,
+      recorded_when: <span className="text-sm text-[hsl(var(--muted))]">{formatCairoDateTime(r.created_at)}</span>,
       member: (
         <div className="space-y-0.5">
           <div className="font-medium">{name}</div>
@@ -243,6 +259,13 @@ export default async function AdminPaymentsPage({
       method: <Badge className={badgeClassForMethod(r.payment_method)}>{labelMethod(r.payment_method)}</Badge>,
       note: <span className="text-sm text-[hsl(var(--muted))]">{r.note ?? '—'}</span>,
       by: <span className="text-sm">{by}</span>,
+      edit_date: (
+        <EditPaymentDateButton
+          paymentId={r.id}
+          memberLabel={memberLabel}
+          currentPaidAt={r.paid_at || r.created_at}
+        />
+      ),
       open: (
         <Link className="underline" href={`/members/${r.member_id}`} prefetch={false}>
           Open
@@ -330,6 +353,15 @@ export default async function AdminPaymentsPage({
         </CardContent>
       </Card>
 
+      <Card>
+        <CardContent className="py-4">
+          <div className="text-sm text-[hsl(var(--muted))]">
+            <strong>Payment date</strong> is the real accounting date. <strong>Recorded at</strong> is when the payment was entered in ATOM App.
+            Use <strong>Edit date</strong> for historical imports already entered with today&apos;s date.
+          </div>
+        </CardContent>
+      </Card>
+
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
         <Card>
           <div className="text-sm text-[hsl(var(--muted))]">Total</div>
@@ -348,40 +380,48 @@ export default async function AdminPaymentsPage({
           <div className="mt-1 text-xl font-semibold">{formatEGP(totals.card)}</div>
         </Card>
         <Card>
-          <div className="text-sm text-[hsl(var(--muted))]">Bank</div>
+          <div className="text-sm text-[hsl(var(--muted))]">Bank transfer</div>
           <div className="mt-1 text-xl font-semibold">{formatEGP(totals.bank_transfer)}</div>
         </Card>
       </div>
 
-      {err ? <p className="text-sm text-rose-700">❌ {err.message || 'Failed to load payments'}</p> : null}
+      {err ? <p className="text-sm text-rose-700">❌ Failed to load payments: {err.message}</p> : null}
 
-      <Table columns={tableColumns} rows={tableRows as any} keyField="id" />
+      <Card>
+        <CardHeader>
+          <CardTitle>Payments</CardTitle>
+          <div className="text-sm text-[hsl(var(--muted))]">
+            {count ?? 0} result{Number(count ?? 0) === 1 ? '' : 's'}
+          </div>
+        </CardHeader>
+        <CardContent>
+          <Table columns={tableColumns} rows={tableRows as any} keyField="id" />
 
-      <div className="flex items-center justify-between text-sm">
-        <div className="text-[hsl(var(--muted))]">
-          Page <span className="font-medium">{page}</span> / <span className="font-medium">{totalPages}</span> · Rows:{' '}
-          <span className="font-medium">{count ?? rows.length}</span>
-        </div>
-
-        <div className="flex gap-2">
-          <Link
-            className={`border px-3 py-1.5 rounded-lg ${page <= 1 ? 'pointer-events-none opacity-50' : 'hover:bg-gray-50'}`}
-            href={navLink(Math.max(1, page - 1))}
-            prefetch={false}
-          >
-            Prev
-          </Link>
-          <Link
-            className={`border px-3 py-1.5 rounded-lg ${
-              page >= totalPages ? 'pointer-events-none opacity-50' : 'hover:bg-gray-50'
-            }`}
-            href={navLink(Math.min(totalPages, page + 1))}
-            prefetch={false}
-          >
-            Next
-          </Link>
-        </div>
-      </div>
+          <div className="mt-4 flex items-center justify-between gap-3">
+            <div className="text-sm text-[hsl(var(--muted))]">
+              Page {page} / {totalPages}
+            </div>
+            <div className="flex items-center gap-2">
+              <Link
+                prefetch={false}
+                href={navLink(Math.max(1, page - 1))}
+                aria-disabled={page <= 1}
+                className={`rounded-xl border px-3 py-2 text-sm font-semibold ${page <= 1 ? 'pointer-events-none opacity-50' : 'hover:bg-black/[0.03]'}`}
+              >
+                Prev
+              </Link>
+              <Link
+                prefetch={false}
+                href={navLink(Math.min(totalPages, page + 1))}
+                aria-disabled={page >= totalPages}
+                className={`rounded-xl border px-3 py-2 text-sm font-semibold ${page >= totalPages ? 'pointer-events-none opacity-50' : 'hover:bg-black/[0.03]'}`}
+              >
+                Next
+              </Link>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
     </main>
   )
 }
