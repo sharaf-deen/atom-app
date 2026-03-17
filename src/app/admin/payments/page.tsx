@@ -395,7 +395,7 @@ export default async function AdminPaymentsPage({
           </div>
         </CardHeader>
         <CardContent>
-          <Table columns={tableColumns} rows={tableRows as any} keyField="id" />
+          <Table columns={tableColumns} rows={tableRows as any} keyField="id" stickyTopClassName="top-0"/>
 
           <div className="mt-4 flex items-center justify-between gap-3">
             <div className="text-sm text-[hsl(var(--muted))]">
