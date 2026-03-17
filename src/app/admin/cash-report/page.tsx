@@ -363,7 +363,7 @@ export default async function AdminCashReportPage({
 
       <div className="space-y-3">
         <h2 className="text-lg font-semibold">Breakdown</h2>
-        <Table columns={breakdownColumns} rows={breakdownRows as any} keyField="id" />
+        <Table columns={breakdownColumns} rows={breakdownRows as any} keyField="id" stickyTopClassName="top-0"/>
       </div>
 
       <div className="grid gap-6 lg:grid-cols-2">
