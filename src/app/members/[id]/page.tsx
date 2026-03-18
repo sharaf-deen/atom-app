@@ -201,6 +201,42 @@ function daysUntil(endDate?: string | null, today: string = cairoToday()) {
   return diffDays(today, endDate)
 }
 
+function getSubscriptionDisplayState(
+  sub: Pick<SubscriptionRow, 'subscription_type' | 'plan' | 'status' | 'end_date' | 'frozen_from' | 'frozen_until' | 'sessions_total' | 'sessions_used'>,
+  today: string,
+) {
+  const type = (sub.subscription_type ?? (sub.plan === 'sessions' ? 'sessions' : 'time')) as 'time' | 'sessions'
+  const isSessions = type === 'sessions'
+  const frozen = !isSessions && isFrozenNow(sub, today)
+  const left = !isSessions ? daysUntil(sub.end_date, today) : null
+  const expired = !isSessions && left !== null && left < 0
+  const remaining = isSessions
+    ? Math.max(Number(sub.sessions_total ?? 0) - Number(sub.sessions_used ?? 0), 0)
+    : null
+
+  const rawStatus = String(sub.status ?? '').toLowerCase()
+
+  let displayStatus = rawStatus || '—'
+  if (!isSessions && rawStatus === 'active' && expired) displayStatus = 'expired'
+  else if (!isSessions && rawStatus === 'active' && frozen) displayStatus = 'frozen'
+
+  let statusTone: SummaryTone = 'neutral'
+  if (displayStatus === 'active') statusTone = 'success'
+  else if (displayStatus === 'frozen') statusTone = 'warning'
+  else if (displayStatus === 'expired') statusTone = 'danger'
+
+  return {
+    type,
+    isSessions,
+    frozen,
+    left,
+    expired,
+    remaining,
+    displayStatus,
+    statusTone,
+  }
+}
+
 function toneClasses(tone: SummaryTone) {
   if (tone === 'success') return 'border-emerald-200 bg-emerald-50 text-emerald-700'
   if (tone === 'warning') return 'border-amber-200 bg-amber-50 text-amber-800'
@@ -684,29 +720,49 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
 
   const subPlanById = new Map<string, Plan | null>(subs.map((s) => [s.id, s.plan]))
 
+  const hasAnyCurrentPlanNow = subs.some((s) => {
+  const state = getSubscriptionDisplayState(s, today)
+  const rawStatus = String(s.status ?? '').toLowerCase()
+  if (rawStatus !== 'active') return false
+
+  if (state.type === 'time') {
+    if (state.expired) return false
+    return true
+  }
+
+  return (state.remaining ?? 0) > 0
+})
+
   const alerts: Array<{ kind: SummaryTone; text: string }> = []
   for (const s of subs) {
-    const type = (s.subscription_type ?? (s.plan === 'sessions' ? 'sessions' : 'time')) as 'time' | 'sessions'
-    if (String(s.status ?? '').toLowerCase() !== 'active') continue
+    const rawStatus = String(s.status ?? '').toLowerCase()
+    if (rawStatus !== 'active') continue
 
-    if (type === 'time') {
-      if (isFrozenNow(s, today)) {
+    const state = getSubscriptionDisplayState(s, today)
+
+    if (state.type === 'time') {
+      if (state.frozen) {
         alerts.push({ kind: 'warning', text: `${humanPlan(s.plan)} is frozen until ${fmtDate(s.frozen_until)}` })
         continue
       }
-      const left = daysUntil(s.end_date, today)
-      if (left !== null && left <= 7 && left >= 0) {
-        alerts.push({ kind: 'warning', text: `${humanPlan(s.plan)} expires in ${left} day(s)` })
+
+      if (state.left !== null && state.left <= 7 && state.left >= 0) {
+        alerts.push({ kind: 'warning', text: `${humanPlan(s.plan)} expires in ${state.left} day(s)` })
       }
-      if (left !== null && left < 0) {
+
+      if (state.expired && !hasAnyCurrentPlanNow) {
         alerts.push({ kind: 'danger', text: `${humanPlan(s.plan)} is expired.` })
       }
+
       continue
     }
 
-    const remaining = Math.max(Number(s.sessions_total ?? 0) - Number(s.sessions_used ?? 0), 0)
+    const remaining = state.remaining ?? 0
     if (remaining <= 2) {
-      alerts.push({ kind: remaining === 0 ? 'danger' : 'warning', text: `Sessions plan has ${remaining} session(s) left.` })
+      alerts.push({
+        kind: remaining === 0 ? 'danger' : 'warning',
+        text: `Sessions plan has ${remaining} session(s) left.`,
+      })
     }
   }
 
@@ -1119,21 +1175,20 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
           ) : (
             <div className="mt-4 grid gap-3">
               {subs.map((s) => {
-                const type = (s.subscription_type ?? (s.plan === 'sessions' ? 'sessions' : 'time')) as 'time' | 'sessions'
-                const isSessions = type === 'sessions'
-                const remaining = Math.max(Number(s.sessions_total ?? 0) - Number(s.sessions_used ?? 0), 0)
-                const left = !isSessions ? daysUntil(s.end_date, today) : null
-                const frozen = !isSessions && isFrozenNow(s, today)
-                const expired = !isSessions && left !== null && left < 0
+                const state = getSubscriptionDisplayState(s, today)
+                const isSessions = state.isSessions
+                const remaining = state.remaining ?? 0
+                const left = state.left
+                const frozen = state.frozen
                 const due = Math.max(Number(s.amount_due ?? 0), 0)
 
                 return (
                   <div key={s.id} className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4 shadow-soft">
                     <div className="flex flex-wrap items-center gap-2">
                       <TinyBadge>{humanPlan(s.plan)}</TinyBadge>
-                      <TinyBadge tone={String(s.status ?? '').toLowerCase() === 'active' ? 'success' : expired ? 'danger' : 'neutral'}>
-                        {s.status ?? '—'}
-                      </TinyBadge>
+                      <TinyBadge tone={state.statusTone}>
+                      {state.displayStatus}
+                    </TinyBadge>
                       {left !== null && left >= 0 && !isSessions && !frozen ? (
                         <TinyBadge tone={left <= 7 ? 'warning' : 'success'}>{left} day(s) left</TinyBadge>
                       ) : null}
