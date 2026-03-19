@@ -1,7 +1,12 @@
 'use client'
 
 import { useMemo, useState } from 'react'
+import { useRouter } from 'next/navigation'
+import { toast } from 'sonner'
 import Modal from '@/components/ui/Modal'
+import Button from '@/components/ui/Button'
+import Input from '@/components/ui/Input'
+import Select from '@/components/ui/Select'
 
 export type ExpenseRow = {
   id: string
@@ -18,6 +23,15 @@ export type ExpenseRow = {
 type Props = {
   expenses: ExpenseRow[]
   labelByKey: Record<string, string>
+}
+
+type EditableExpense = {
+  id: string
+  date: string
+  category_key: string
+  description: string
+  amount: string
+  payment_method: string
 }
 
 function formatEGP(n: number) {
@@ -47,6 +61,7 @@ function paymentLabel(v?: string | null) {
 }
 
 export default function ExpensesTableClient({ expenses, labelByKey }: Props) {
+  const router = useRouter()
   const [open, setOpen] = useState(false)
   const [active, setActive] = useState<
     | null
@@ -58,11 +73,21 @@ export default function ExpensesTableClient({ expenses, labelByKey }: Props) {
         path?: string | null
       }
   >(null)
+  const [editOpen, setEditOpen] = useState(false)
+  const [editing, setEditing] = useState<EditableExpense | null>(null)
+  const [saving, setSaving] = useState(false)
+  const [deletingId, setDeletingId] = useState<string | null>(null)
 
   const activeIsImage = useMemo(() => {
     if (!active) return false
     return isImageReceipt(active.mime, active.path)
   }, [active])
+
+  const categoryOptions = useMemo(() => {
+    return Object.entries(labelByKey)
+      .sort((a, b) => a[1].localeCompare(b[1]))
+      .map(([value, label]) => ({ value, label }))
+  }, [labelByKey])
 
   function openPreview(e: ExpenseRow) {
     const url = `/api/expenses/${e.id}/receipt`
@@ -73,6 +98,70 @@ export default function ExpensesTableClient({ expenses, labelByKey }: Props) {
   function close() {
     setOpen(false)
     // keep active to avoid iframe reload flicker if reopened quickly
+  }
+
+  function openEdit(e: ExpenseRow) {
+    setEditing({
+      id: e.id,
+      date: e.date,
+      category_key: e.category_key ?? '',
+      description: e.description ?? '',
+      amount: String(Number.isFinite(e.amount) ? e.amount : 0),
+      payment_method: e.payment_method ?? 'cash',
+    })
+    setEditOpen(true)
+  }
+
+  async function submitEdit() {
+    if (!editing) return
+    setSaving(true)
+    try {
+      const r = await fetch(`/api/expenses/${editing.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          date: editing.date,
+          category_key: editing.category_key,
+          description: editing.description,
+          amount: Number(editing.amount),
+          payment_method: editing.payment_method,
+        }),
+      })
+
+      const data = await r.json().catch(() => ({}))
+      if (!r.ok) {
+        throw new Error(data?.details || data?.error || 'Failed to update expense.')
+      }
+
+      toast.success('Expense updated.')
+      setEditOpen(false)
+      router.refresh()
+    } catch (e: any) {
+      toast.error(e?.message || 'Failed to update expense.')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function deleteExpense(e: ExpenseRow) {
+    const ok = window.confirm('Delete this expense permanently?')
+    if (!ok) return
+
+    setDeletingId(e.id)
+    try {
+      const r = await fetch(`/api/expenses/${e.id}`, { method: 'DELETE' })
+      const data = await r.json().catch(() => ({}))
+      if (!r.ok) {
+        throw new Error(data?.details || data?.error || 'Failed to delete expense.')
+      }
+
+      toast.success('Expense deleted.')
+      router.refresh()
+    } catch (err: any) {
+      toast.error(err?.message || 'Failed to delete expense.')
+    } finally {
+      setDeletingId(null)
+    }
   }
 
   return (
@@ -90,11 +179,12 @@ export default function ExpensesTableClient({ expenses, labelByKey }: Props) {
                 <th className="py-2 pr-3">Payment</th>
                 <th className="py-2 pr-3">Receipt</th>
                 <th className="py-2 text-right">Amount</th>
+                <th className="py-2 pl-3 text-right">Actions</th>
               </tr>
             </thead>
             <tbody>
               {expenses.map((e) => (
-                <tr key={e.id} className="border-b border-[hsl(var(--border))]/60">
+                <tr key={e.id} className="border-b border-[hsl(var(--border))]/60 align-top">
                   <td className="py-2 pr-3 whitespace-nowrap">{e.date}</td>
                   <td className="py-2 pr-3">
                     {e.category_key ? labelByKey[e.category_key] ?? e.category_key : '—'}
@@ -138,7 +228,26 @@ export default function ExpensesTableClient({ expenses, labelByKey }: Props) {
                       <span className="text-[hsl(var(--muted))]">—</span>
                     )}
                   </td>
-                  <td className="py-2 text-right font-medium">{formatEGP(e.amount)}</td>
+                  <td className="py-2 text-right font-medium whitespace-nowrap">{formatEGP(e.amount)}</td>
+                  <td className="py-2 pl-3 text-right whitespace-nowrap">
+                    <div className="flex items-center justify-end gap-2">
+                      <button
+                        type="button"
+                        onClick={() => openEdit(e)}
+                        className="rounded-xl border border-[hsl(var(--border))] px-2.5 py-1.5 text-xs font-medium hover:bg-[hsl(var(--bg))]/80"
+                      >
+                        Edit
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => deleteExpense(e)}
+                        disabled={deletingId === e.id}
+                        className="rounded-xl border border-rose-200 px-2.5 py-1.5 text-xs font-medium text-rose-700 hover:bg-rose-50 disabled:opacity-50"
+                      >
+                        {deletingId === e.id ? 'Deleting…' : 'Delete'}
+                      </button>
+                    </div>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -190,6 +299,85 @@ export default function ExpensesTableClient({ expenses, labelByKey }: Props) {
                 className="w-full h-[70vh] rounded-xl border border-[hsl(var(--border))]"
               />
             )}
+          </div>
+        )}
+      </Modal>
+
+      <Modal
+        open={editOpen}
+        onClose={() => !saving && setEditOpen(false)}
+        title="Edit expense"
+      >
+        {!editing ? null : (
+          <div className="space-y-4">
+            <div className="grid gap-3 sm:grid-cols-2">
+              <label className="block">
+                <span className="mb-1 block text-sm font-medium">Date</span>
+                <Input
+                  type="date"
+                  value={editing.date}
+                  onChange={(e) => setEditing((prev) => (prev ? { ...prev, date: e.target.value } : prev))}
+                />
+              </label>
+
+              <label className="block">
+                <span className="mb-1 block text-sm font-medium">Category</span>
+                <Select
+                  value={editing.category_key}
+                  onChange={(e) => setEditing((prev) => (prev ? { ...prev, category_key: e.target.value } : prev))}
+                >
+                  <option value="">Choose…</option>
+                  {categoryOptions.map((c) => (
+                    <option key={c.value} value={c.value}>
+                      {c.label}
+                    </option>
+                  ))}
+                </Select>
+              </label>
+
+              <label className="block">
+                <span className="mb-1 block text-sm font-medium">Amount</span>
+                <Input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={editing.amount}
+                  onChange={(e) => setEditing((prev) => (prev ? { ...prev, amount: e.target.value } : prev))}
+                />
+              </label>
+
+              <label className="block">
+                <span className="mb-1 block text-sm font-medium">Payment method</span>
+                <Select
+                  value={editing.payment_method}
+                  onChange={(e) => setEditing((prev) => (prev ? { ...prev, payment_method: e.target.value } : prev))}
+                >
+                  <option value="cash">Cash</option>
+                  <option value="visa">Visa card</option>
+                  <option value="instapay">Instapay</option>
+                  <option value="bank_transfer">Bank transfer</option>
+                </Select>
+              </label>
+            </div>
+
+            <label className="block">
+              <span className="mb-1 block text-sm font-medium">Description</span>
+              <textarea
+                value={editing.description}
+                onChange={(e) => setEditing((prev) => (prev ? { ...prev, description: e.target.value } : prev))}
+                rows={3}
+                className="w-full rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-[hsl(var(--bg))]"
+              />
+            </label>
+
+            <div className="flex items-center justify-end gap-2">
+              <Button variant="outline" onClick={() => setEditOpen(false)} disabled={saving}>
+                Cancel
+              </Button>
+              <Button onClick={submitEdit} loading={saving} loadingText="Saving…">
+                Save changes
+              </Button>
+            </div>
           </div>
         )}
       </Modal>
