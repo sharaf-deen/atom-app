@@ -6,6 +6,7 @@ export const revalidate = 0
 import { NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { createSupabaseServerActionClient } from '@/lib/supabaseServer'
+import { expensePaymentLabel, parseExpenseFilters, sanitizeExpenseSearch } from '@/lib/expenseFilters'
 
 type Role = 'member' | 'assistant_coach' | 'coach' | 'reception' | 'admin' | 'super_admin'
 
@@ -13,10 +14,6 @@ function json(status: number, body: any) {
   const res = NextResponse.json(body, { status })
   res.headers.set('Cache-Control', 'no-store')
   return res
-}
-
-function isISODateOnly(s?: string | null) {
-  return !!s && /^\d{4}-\d{2}-\d{2}$/.test(s)
 }
 
 function csvCell(v: any) {
@@ -31,21 +28,13 @@ function makeAdminClient() {
   return createClient(url, key, { auth: { autoRefreshToken: false, persistSession: false } })
 }
 
-function sanitizeSearch(v: string) {
-  // Keep it compatible with Supabase .or() string syntax
-  return (v || '').replace(/[%,_]/g, ' ').replace(/\s+/g, ' ').trim()
-}
-
 export async function GET(req: Request) {
   try {
     const supa = createSupabaseServerActionClient()
-
-    // Auth
     const { data: auth, error: authErr } = await supa.auth.getUser()
     if (authErr) return json(401, { ok: false, error: 'AUTH_ERROR', details: authErr.message })
     if (!auth.user) return json(401, { ok: false, error: 'NOT_AUTHENTICATED' })
 
-    // Only admin / super_admin
     const { data: me, error: meErr } = await supa
       .from('profiles')
       .select('role')
@@ -59,50 +48,38 @@ export async function GET(req: Request) {
     const admin = makeAdminClient()
     if (!admin) return json(500, { ok: false, error: 'SERVICE_ROLE_MISSING' })
 
-    const { searchParams } = new URL(req.url)
-    const from = searchParams.get('from') ?? ''
-    const to = searchParams.get('to') ?? ''
-    const category = searchParams.get('category') ?? 'all'
-    const payment_method = searchParams.get('payment_method') ?? 'all'
-    const qRaw = searchParams.get('q') ?? ''
-    const qText = sanitizeSearch(qRaw)
-
-    if (!isISODateOnly(from) || !isISODateOnly(to) || from > to) {
-      return json(400, {
-        ok: false,
-        error: 'INVALID_RANGE',
-        hint: 'Use ?from=YYYY-MM-DD&to=YYYY-MM-DD with from ≤ to',
-      })
-    }
+    const url = new URL(req.url)
+    const filters = parseExpenseFilters(Object.fromEntries(url.searchParams.entries()))
+    const { from, to, category, payment_method, qRaw } = filters
+    const qText = sanitizeExpenseSearch(qRaw)
 
     const allowedMethods = new Set(['all', 'cash', 'visa', 'instapay', 'bank_transfer'])
     if (!allowedMethods.has(payment_method)) {
       return json(400, { ok: false, error: 'INVALID_PAYMENT_METHOD' })
     }
 
-    // Category labels
     const { data: cats } = await admin.from('expense_categories').select('key,label').eq('is_active', true)
-
     const labelByKey = new Map<string, string>()
     for (const c of cats ?? []) labelByKey.set(c.key, c.label)
 
-    let q = admin
+    let query = admin
       .from('expenses')
       .select('id,date,category_key,description,amount,payment_method,receipt_filename,receipt_path')
       .gte('date', from)
       .lte('date', to)
       .order('date', { ascending: false })
+      .order('id', { ascending: false })
       .limit(100000)
 
-    if (category && category !== 'all') q = q.eq('category_key', category)
-    if (payment_method && payment_method !== 'all') q = q.eq('payment_method', payment_method)
+    if (category && category !== 'all') query = query.eq('category_key', category)
+    if (payment_method && payment_method !== 'all') query = query.eq('payment_method', payment_method)
 
     if (qText) {
       const like = `%${qText}%`
-      q = q.or(`description.ilike.${like},category_key.ilike.${like},payment_method.ilike.${like}`)
+      query = query.or(`description.ilike.${like},category_key.ilike.${like},payment_method.ilike.${like}`)
     }
 
-    const { data: rows, error: qErr } = await q
+    const { data: rows, error: qErr } = await query
     if (qErr) return json(500, { ok: false, error: 'QUERY_FAILED', details: qErr.message })
 
     const header = [
@@ -113,13 +90,14 @@ export async function GET(req: Request) {
       'description',
       'amount',
       'payment_method',
+      'payment_label',
       'receipt_filename',
       'receipt_path',
     ]
 
     const lines: string[] = [header.map(csvCell).join(',')]
-
     let total = 0
+
     for (const r of rows ?? []) {
       const key = r.category_key ?? ''
       const label = key ? labelByKey.get(key) ?? '' : ''
@@ -135,42 +113,27 @@ export async function GET(req: Request) {
           r.description ?? '',
           r.amount ?? '',
           r.payment_method ?? '',
+          expensePaymentLabel(String(r.payment_method ?? 'all')),
           r.receipt_filename ?? '',
           r.receipt_path ?? '',
         ].map(csvCell).join(',')
       )
     }
 
-    // ✅ Total on last line (as requested)
-    lines.push(
-      [
-        'TOTAL',
-        '',
-        '',
-        '',
-        '',
-        total.toFixed(2),
-        '',
-        '',
-        '',
-      ].map(csvCell).join(',')
-    )
+    lines.push(['TOTAL', '', '', '', '', total.toFixed(2), '', '', '', ''].map(csvCell).join(','))
 
-    const csv = lines.join('\r\n')
+    const filenameBits = [
+      `expenses_${from}_to_${to}`,
+      category && category !== 'all' ? category : '',
+      payment_method && payment_method !== 'all' ? payment_method : '',
+      qText ? 'search' : '',
+    ].filter(Boolean)
 
-    const suffix = [
-      payment_method && payment_method !== 'all' ? `_${payment_method}` : '',
-      category && category !== 'all' ? `_${category}` : '',
-      qText ? `_search` : '',
-    ].join('')
-
-    const filename = `expenses_${from}_to_${to}${suffix}.csv`
-
-    return new NextResponse(csv, {
+    return new NextResponse(lines.join('\r\n'), {
       status: 200,
       headers: {
         'Content-Type': 'text/csv; charset=utf-8',
-        'Content-Disposition': `attachment; filename="${filename}"`,
+        'Content-Disposition': `attachment; filename="${filenameBits.join('_')}.csv"`,
         'Cache-Control': 'no-store',
       },
     })

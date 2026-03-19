@@ -6,6 +6,7 @@ export const revalidate = 0
 import { NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { createSupabaseServerActionClient } from '@/lib/supabaseServer'
+import { expensePaymentLabel, parseExpenseFilters, sanitizeExpenseSearch } from '@/lib/expenseFilters'
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib'
 
 type Role = 'member' | 'assistant_coach' | 'coach' | 'reception' | 'admin' | 'super_admin'
@@ -23,15 +24,6 @@ function json(status: number, body: any) {
   const res = NextResponse.json(body, { status })
   res.headers.set('Cache-Control', 'no-store')
   return res
-}
-
-function isISODateOnly(s?: string | null) {
-  return !!s && /^\d{4}-\d{2}-\d{2}$/.test(s)
-}
-
-function sanitizeSearch(v: string) {
-  // Keep it compatible with Supabase .or() string syntax
-  return (v || '').replace(/[%,_]/g, ' ').replace(/\s+/g, ' ').trim()
 }
 
 function makeAdminClient() {
@@ -56,22 +48,6 @@ function fmtDate(isoDateOnly: string) {
   const dt = new Date(Date.UTC(y, (m || 1) - 1, d || 1))
   if (Number.isNaN(dt.getTime())) return isoDateOnly
   return dt.toLocaleDateString('en-GB', { year: 'numeric', month: 'short', day: '2-digit' })
-}
-
-function paymentLabel(v?: string | null) {
-  if (!v) return '—'
-  switch (v) {
-    case 'cash':
-      return 'Cash'
-    case 'visa':
-      return 'Visa'
-    case 'instapay':
-      return 'Instapay'
-    case 'bank_transfer':
-      return 'Bank transfer'
-    default:
-      return v
-  }
 }
 
 function truncate(s: string, max: number) {
@@ -105,20 +81,9 @@ export async function GET(req: Request) {
     if (!admin) return json(500, { ok: false, error: 'SERVICE_ROLE_MISSING' })
 
     const { searchParams } = new URL(req.url)
-    const from = searchParams.get('from') ?? ''
-    const to = searchParams.get('to') ?? ''
-    const category = searchParams.get('category') ?? 'all'
-    const payment_method = searchParams.get('payment_method') ?? 'all'
-    const qRaw = searchParams.get('q') ?? ''
-    const qText = sanitizeSearch(qRaw)
-
-    if (!isISODateOnly(from) || !isISODateOnly(to) || from > to) {
-      return json(400, {
-        ok: false,
-        error: 'INVALID_RANGE',
-        hint: 'Use ?from=YYYY-MM-DD&to=YYYY-MM-DD with from ≤ to',
-      })
-    }
+    const filters = parseExpenseFilters(Object.fromEntries(searchParams.entries()))
+    const { from, to, category, payment_method, qRaw } = filters
+    const qText = sanitizeExpenseSearch(qRaw)
 
     const allowedMethods = new Set(['all', 'cash', 'visa', 'instapay', 'bank_transfer'])
     if (!allowedMethods.has(payment_method)) {
@@ -181,7 +146,7 @@ export async function GET(req: Request) {
 
       const filters: string[] = []
       if (category && category !== 'all') filters.push(`Category: ${category}`)
-      if (payment_method && payment_method !== 'all') filters.push(`Payment: ${paymentLabel(payment_method)}`)
+      if (payment_method && payment_method !== 'all') filters.push(`Payment: ${expensePaymentLabel(payment_method)}`)
       if (qText) filters.push(`Search: ${truncate(qText, 40)}`)
       if (filters.length) {
         page.drawText(filters.join(' · '), { x: marginX, y: topY - 34, size: 9, font })
@@ -237,7 +202,7 @@ export async function GET(req: Request) {
 
       const dateCell = fmtDate(r.date)
       const catCell = truncate(label, maxCatChars)
-      const payCell = paymentLabel(r.payment_method)
+      const payCell = expensePaymentLabel(String(r.payment_method ?? 'all'))
       const amtCell = fmtMoneyEGP(Number(r.amount))
       const descCell = truncate(r.description ?? '', maxDescChars) || '—'
 
