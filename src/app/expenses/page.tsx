@@ -70,6 +70,12 @@ function buildQS(params: Record<string, string>) {
   return sp.toString()
 }
 
+function normalizeReturnQSForSave(returnQS: string) {
+  const sp = new URLSearchParams(returnQS || '')
+  sp.delete('page')
+  return sp.toString()
+}
+
 function sanitizeSearch(v: string) {
   // Keep it simple & safe for Supabase .or() syntax
   return (v || '').replace(/[%,_]/g, ' ').replace(/\s+/g, ' ').trim()
@@ -82,7 +88,7 @@ async function addExpenseAction(formData: FormData) {
   if (!me) redirect('/login?next=/expenses')
   if (!isAdmin(me.role)) redirect('/expenses?error=Access%20denied')
 
-  const return_qs = safeStr(formData.get('return_qs'))
+  const return_qs = normalizeReturnQSForSave(safeStr(formData.get('return_qs')))
 
   const category_key = safeStr(formData.get('category_key')).trim()
   const description = safeStr(formData.get('description')).trim()
@@ -308,7 +314,7 @@ const nextHref = hasNext ? `/expenses?${buildQS({ ...basePageQS, page: String(pa
 
       {saved ? (
         <InlineAlert variant="success" title="Saved">
-          Expense added.
+          Expense added. Showing first page.
         </InlineAlert>
       ) : null}
 
@@ -575,7 +581,7 @@ const nextHref = hasNext ? `/expenses?${buildQS({ ...basePageQS, page: String(pa
               >
                 Save
               </button>
-              <span className="text-xs text-[hsl(var(--muted))]">After saving, you’ll stay on the same filtered view.</span>
+              <span className="text-xs text-[hsl(var(--muted))]">After saving, you’ll return to the first page of the current filtered view.</span>
             </div>
           </form>
         </CardContent>
