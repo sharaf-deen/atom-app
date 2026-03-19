@@ -9,48 +9,19 @@ import AccessDeniedPage from '@/components/AccessDeniedPage'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card'
 import InlineAlert from '@/components/ui/InlineAlert'
 import ExpensesTableClient, { type ExpenseRow } from '@/components/ExpensesTableClient'
-
-type RangePreset = 'today' | '7d' | 'month' | 'custom'
+import {
+  buildQS,
+  expensePaymentLabel,
+  expensePresetLabel,
+  parseExpenseFilters,
+  safeStr,
+  toISODate,
+} from '@/lib/expenseFilters'
 
 const PER_PAGE = 50
 
-function parsePositiveInt(v: unknown, fallback: number) {
-  const n = typeof v === 'string' ? Number.parseInt(v, 10) : NaN
-  return Number.isFinite(n) && n > 0 ? n : fallback
-}
-
 function isAdmin(role?: string | null) {
   return role === 'admin' || role === 'super_admin'
-}
-
-function toISODate(d: Date) {
-  // YYYY-MM-DD in local time (not UTC) to match typical date columns
-  const year = d.getFullYear()
-  const month = String(d.getMonth() + 1).padStart(2, '0')
-  const day = String(d.getDate()).padStart(2, '0')
-  return `${year}-${month}-${day}`
-}
-
-function addDays(d: Date, days: number) {
-  const x = new Date(d)
-  x.setDate(x.getDate() + days)
-  return x
-}
-
-function startOfMonth(d: Date) {
-  return new Date(d.getFullYear(), d.getMonth(), 1)
-}
-
-function endOfMonth(d: Date) {
-  return new Date(d.getFullYear(), d.getMonth() + 1, 0)
-}
-
-function parsePreset(v: unknown): RangePreset {
-  return v === 'today' || v === '7d' || v === 'month' || v === 'custom' ? v : 'month'
-}
-
-function safeStr(v: unknown) {
-  return typeof v === 'string' ? v : ''
 }
 
 function formatEGP(n: number) {
@@ -62,25 +33,6 @@ function formatEGP(n: number) {
   }).format(safe)
 }
 
-function buildQS(params: Record<string, string>) {
-  const sp = new URLSearchParams()
-  for (const [k, v] of Object.entries(params)) {
-    if (v !== undefined && v !== null && String(v).length) sp.set(k, String(v))
-  }
-  return sp.toString()
-}
-
-function normalizeReturnQSForSave(returnQS: string) {
-  const sp = new URLSearchParams(returnQS || '')
-  sp.delete('page')
-  return sp.toString()
-}
-
-function sanitizeSearch(v: string) {
-  // Keep it simple & safe for Supabase .or() syntax
-  return (v || '').replace(/[%,_]/g, ' ').replace(/\s+/g, ' ').trim()
-}
-
 async function addExpenseAction(formData: FormData) {
   'use server'
 
@@ -88,37 +40,37 @@ async function addExpenseAction(formData: FormData) {
   if (!me) redirect('/login?next=/expenses')
   if (!isAdmin(me.role)) redirect('/expenses?error=Access%20denied')
 
-  const return_qs = normalizeReturnQSForSave(safeStr(formData.get('return_qs')))
-
   const category_key = safeStr(formData.get('category_key')).trim()
   const description = safeStr(formData.get('description')).trim()
   const dateRaw = safeStr(formData.get('date')).trim()
   const amountRaw = safeStr(formData.get('amount')).trim()
   const payment_method = safeStr(formData.get('payment_method')).trim()
-
-  const receipt = formData.get('receipt')
+  const preset = safeStr(formData.get('preset')).trim() || 'month'
+  const from = safeStr(formData.get('from')).trim()
+  const to = safeStr(formData.get('to')).trim()
+  const category = safeStr(formData.get('category')).trim() || 'all'
+  const paymentFilter = safeStr(formData.get('payment_method_filter')).trim() || 'all'
+  const q = safeStr(formData.get('q')).trim()
 
   if (!category_key) {
-    redirect(`/expenses?${return_qs}&error=${encodeURIComponent('Please choose a category.')}`)
+    redirect(`/expenses?${buildQS({ preset, from, to, category, payment_method: paymentFilter, q, saved: '', error: 'Please choose a category.' })}`)
   }
 
   const amount = Number(amountRaw)
   if (!Number.isFinite(amount)) {
-    redirect(`/expenses?${return_qs}&error=${encodeURIComponent('Invalid amount.')}`)
+    redirect(`/expenses?${buildQS({ preset, from, to, category, payment_method: paymentFilter, q, saved: '', error: 'Invalid amount.' })}`)
   }
 
   const today = toISODate(new Date())
   const date = dateRaw || today
 
   const admin = getSupabaseAdminClientCached()
-
-  // Validate payment method
   const allowedMethods = new Set(['cash', 'visa', 'instapay', 'bank_transfer'])
   if (!allowedMethods.has(payment_method)) {
-    redirect(`/expenses?${return_qs}&error=${encodeURIComponent('Please choose a payment method.')}`)
+    redirect(`/expenses?${buildQS({ preset, from, to, category, payment_method: paymentFilter, q, saved: '', error: 'Please choose a payment method.' })}`)
   }
 
-  // Optional receipt upload
+  const receipt = formData.get('receipt')
   let receipt_path: string | null = null
   let receipt_mime: string | null = null
   let receipt_filename: string | null = null
@@ -126,17 +78,15 @@ async function addExpenseAction(formData: FormData) {
   if (receipt && typeof (receipt as any)?.arrayBuffer === 'function') {
     const file = receipt as File
     if (file.size > 0) {
-      const max = 8 * 1024 * 1024 // 8MB
+      const max = 8 * 1024 * 1024
       if (file.size > max) {
-        redirect(`/expenses?${return_qs}&error=${encodeURIComponent('Receipt file is too large (max 8MB).')}`)
+        redirect(`/expenses?${buildQS({ preset, from, to, category, payment_method: paymentFilter, q, error: 'Receipt file is too large (max 8MB).' })}`)
       }
 
       const mime = (file.type || '').toLowerCase()
       const ok = mime.startsWith('image/') || mime === 'application/pdf'
       if (!ok) {
-        redirect(
-          `/expenses?${return_qs}&error=${encodeURIComponent('Receipt must be an image (JPG/PNG/WEBP) or PDF.')}`
-        )
+        redirect(`/expenses?${buildQS({ preset, from, to, category, payment_method: paymentFilter, q, error: 'Receipt must be an image (JPG/PNG/WEBP) or PDF.' })}`)
       }
 
       const originalName = (file.name || 'receipt').replace(/[^a-zA-Z0-9._-]+/g, '_')
@@ -150,7 +100,7 @@ async function addExpenseAction(formData: FormData) {
       })
 
       if (up.error) {
-        redirect(`/expenses?${return_qs}&error=${encodeURIComponent(up.error.message || 'Receipt upload failed.')}`)
+        redirect(`/expenses?${buildQS({ preset, from, to, category, payment_method: paymentFilter, q, error: up.error.message || 'Receipt upload failed.' })}`)
       }
 
       receipt_path = path
@@ -173,10 +123,10 @@ async function addExpenseAction(formData: FormData) {
   ])
 
   if (error) {
-    redirect(`/expenses?${return_qs}&error=${encodeURIComponent(error.message || 'Save failed.')}`)
+    redirect(`/expenses?${buildQS({ preset, from, to, category, payment_method: paymentFilter, q, error: error.message || 'Save failed.' })}`)
   }
 
-  redirect(`/expenses?${return_qs}&saved=1`)
+  redirect(`/expenses?${buildQS({ preset, from, to, category, payment_method: paymentFilter, q, saved: '1' })}`)
 }
 
 export default async function ExpensesPage({
@@ -203,33 +153,8 @@ export default async function ExpensesPage({
   }
 
   const now = new Date()
-  const preset = parsePreset(typeof searchParams.preset === 'string' ? searchParams.preset : 'month')
-
-  // Compute range
-  let from = safeStr(searchParams.from)
-  let to = safeStr(searchParams.to)
-
-  if (preset === 'today') {
-    from = toISODate(now)
-    to = from
-  } else if (preset === '7d') {
-    to = toISODate(now)
-    from = toISODate(addDays(now, -6))
-  } else if (preset === 'month') {
-    from = toISODate(startOfMonth(now))
-    to = toISODate(endOfMonth(now))
-  } else {
-    // custom: fallback to current month if empty/invalid-ish
-    if (!from) from = toISODate(startOfMonth(now))
-    if (!to) to = toISODate(endOfMonth(now))
-  }
-
-  const category = typeof searchParams.category === 'string' ? searchParams.category : 'all'
-  const paymentFilter = typeof searchParams.payment_method === 'string' ? searchParams.payment_method : 'all'
-  const qTextRaw = typeof searchParams.q === 'string' ? searchParams.q : ''
-  const qText = sanitizeSearch(qTextRaw)
-
-  const page = parsePositiveInt(searchParams.page, 1)
+  const filters = parseExpenseFilters(searchParams, now)
+  const { preset, from, to, category, payment_method: paymentFilter, qRaw, qText, page } = filters
   const offset = (page - 1) * PER_PAGE
 
   const saved = typeof searchParams.saved === 'string' ? searchParams.saved : ''
@@ -260,39 +185,43 @@ export default async function ExpensesPage({
   let query = admin
     .from('expenses')
     .select('id,date,category_key,description,amount,payment_method,receipt_path,receipt_mime,receipt_filename', { count: 'exact' })
+    .gte('date', from)
+    .lte('date', to)
     .order('date', { ascending: false })
+    .order('id', { ascending: false })
 
-  if (from) query = query.gte('date', from)
-  if (to) query = query.lte('date', to)
   if (category && category !== 'all') query = query.eq('category_key', category)
   if (paymentFilter && paymentFilter !== 'all') query = query.eq('payment_method', paymentFilter)
 
-  // Server-side text search (fast, no client filtering)
   if (qText) {
     const like = `%${qText}%`
     query = query.or(`description.ilike.${like},category_key.ilike.${like},payment_method.ilike.${like}`)
   }
 
-const { data: rows, error: rowsError, count } = await query
-  .range(offset, offset + PER_PAGE - 1)
+  const { data: rows, error: rowsError, count } = await query.range(offset, offset + PER_PAGE - 1)
 
-const expenses = (rows || []) as ExpenseRow[]
-const pageTotal = expenses.reduce((sum, e) => sum + (Number.isFinite(e.amount) ? e.amount : 0), 0)
+  const expenses = (rows || []) as ExpenseRow[]
+  const pageTotal = expenses.reduce((sum, e) => sum + (Number.isFinite(e.amount) ? e.amount : 0), 0)
 
-const totalCount = typeof count === 'number' ? count : undefined
-const totalPages = totalCount ? Math.max(1, Math.ceil(totalCount / PER_PAGE)) : undefined
-const hasPrev = page > 1
-const hasNext = totalPages ? page < totalPages : expenses.length === PER_PAGE
+  const totalCount = typeof count === 'number' ? count : undefined
+  const totalPages = totalCount ? Math.max(1, Math.ceil(totalCount / PER_PAGE)) : undefined
+  const hasPrev = page > 1
+  const hasNext = totalPages ? page < totalPages : expenses.length === PER_PAGE
 
-const returnQS = buildQS({ preset, from, to, category, payment_method: paymentFilter, q: qTextRaw, page: String(page) })
-const exportQS = buildQS({ from, to, category, payment_method: paymentFilter, q: qTextRaw })
-const basePageQS = { preset, from, to, category, payment_method: paymentFilter, q: qTextRaw }
-const prevHref = hasPrev ? `/expenses?${buildQS({ ...basePageQS, page: String(page - 1) })}` : ''
-const nextHref = hasNext ? `/expenses?${buildQS({ ...basePageQS, page: String(page + 1) })}` : ''
+  const exportQS = buildQS({ preset, from, to, category, payment_method: paymentFilter, q: qRaw })
+  const basePageQS = { preset, from, to, category, payment_method: paymentFilter, q: qRaw }
+  const prevHref = hasPrev ? `/expenses?${buildQS({ ...basePageQS, page: String(page - 1) })}` : ''
+  const nextHref = hasNext ? `/expenses?${buildQS({ ...basePageQS, page: String(page + 1) })}` : ''
+  const activeCategoryLabel = category !== 'all' ? labelByKey.get(category) ?? category : 'All categories'
 
   return (
     <main className="p-6 max-w-5xl mx-auto space-y-6">
-      <h1 className="text-2xl font-semibold text-center">Atom Expenses</h1>
+      <div className="space-y-1 text-center">
+        <h1 className="text-2xl font-semibold">Atom Expenses</h1>
+        <p className="text-sm text-[hsl(var(--muted))]">
+          {expensePresetLabel(preset)} · {from} → {to}
+        </p>
+      </div>
 
       {errorMsg ? (
         <InlineAlert variant="error" title="Error">
@@ -314,19 +243,27 @@ const nextHref = hasNext ? `/expenses?${buildQS({ ...basePageQS, page: String(pa
 
       {saved ? (
         <InlineAlert variant="success" title="Saved">
-          Expense added. Showing first page.
+          Expense added. Showing first page for the current filtered view.
         </InlineAlert>
       ) : null}
 
       <Card>
         <CardHeader>
-          <CardTitle>Filters</CardTitle>
+          <CardTitle>Filters & export</CardTitle>
           <div className="text-sm text-[hsl(var(--muted))]">
-            Page total: <span className="font-medium text-[hsl(var(--fg))]">{formatEGP(pageTotal)}</span>
+            Current page total: <span className="font-medium text-[hsl(var(--fg))]">{formatEGP(pageTotal)}</span>
           </div>
         </CardHeader>
 
-        <CardContent>
+        <CardContent className="space-y-4">
+          <div className="flex flex-wrap gap-2">
+            <a href="/expenses?preset=today" className="inline-flex items-center justify-center rounded-2xl border px-3 py-2 text-sm shadow-soft hover:bg-[hsl(var(--bg))]/80">Today</a>
+            <a href="/expenses?preset=7d" className="inline-flex items-center justify-center rounded-2xl border px-3 py-2 text-sm shadow-soft hover:bg-[hsl(var(--bg))]/80">Last 7 days</a>
+            <a href="/expenses?preset=month" className="inline-flex items-center justify-center rounded-2xl border px-3 py-2 text-sm shadow-soft hover:bg-[hsl(var(--bg))]/80">This month</a>
+            <a href="/expenses?preset=custom&from=${from}&to=${to}" className="inline-flex items-center justify-center rounded-2xl border px-3 py-2 text-sm shadow-soft hover:bg-[hsl(var(--bg))]/80">Custom</a>
+            <a href="/expenses" className="inline-flex items-center justify-center rounded-2xl border px-3 py-2 text-sm shadow-soft hover:bg-[hsl(var(--bg))]/80">Reset all</a>
+          </div>
+
           <form method="get" className="grid gap-3 sm:grid-cols-6">
             <label className="block">
               <span className="mb-1 block text-sm font-medium">Preset</span>
@@ -369,7 +306,7 @@ const nextHref = hasNext ? `/expenses?${buildQS({ ...basePageQS, page: String(pa
                 defaultValue={category}
                 className="w-full rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-[hsl(var(--bg))]"
               >
-                <option value="all">All</option>
+                <option value="all">All categories</option>
                 {categories.map((c) => (
                   <option key={c.key} value={c.key}>
                     {c.group_name} · {c.label}
@@ -385,7 +322,7 @@ const nextHref = hasNext ? `/expenses?${buildQS({ ...basePageQS, page: String(pa
                 defaultValue={paymentFilter}
                 className="w-full rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-[hsl(var(--bg))]"
               >
-                <option value="all">All</option>
+                <option value="all">All payments</option>
                 <option value="cash">Cash</option>
                 <option value="visa">Visa card</option>
                 <option value="instapay">Instapay</option>
@@ -397,11 +334,11 @@ const nextHref = hasNext ? `/expenses?${buildQS({ ...basePageQS, page: String(pa
               <span className="mb-1 block text-sm font-medium">Search</span>
               <input
                 name="q"
-                defaultValue={qTextRaw}
+                defaultValue={qRaw}
                 placeholder="description, category key, payment…"
                 className="w-full rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm placeholder:text-[hsl(var(--muted))] outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-[hsl(var(--bg))]"
               />
-              <span className="mt-1 block text-[11px] text-[hsl(var(--muted))]">Server-side filter (fast).</span>
+              <span className="mt-1 block text-[11px] text-[hsl(var(--muted))]">Use category or payment filters first, then search inside the result.</span>
             </label>
 
             <div className="sm:col-span-6 flex flex-wrap items-center gap-2 pt-2">
@@ -409,7 +346,7 @@ const nextHref = hasNext ? `/expenses?${buildQS({ ...basePageQS, page: String(pa
                 type="submit"
                 className="inline-flex items-center justify-center rounded-2xl shadow-soft transition ease-soft focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-[hsl(var(--bg))] bg-black text-white hover:opacity-95 px-4 py-2 text-sm"
               >
-                Apply
+                Apply filters
               </button>
 
               <a
@@ -423,20 +360,25 @@ const nextHref = hasNext ? `/expenses?${buildQS({ ...basePageQS, page: String(pa
                 href={`/api/expenses/export?${exportQS}`}
                 className="inline-flex items-center justify-center rounded-2xl shadow-soft transition ease-soft focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-[hsl(var(--bg))] bg-white text-black border border-[hsl(var(--border))] hover:bg-[hsl(var(--bg))]/80 px-4 py-2 text-sm"
               >
-                Export CSV
+                Export current CSV
               </a>
-
-
 
               <a
                 href={`/api/expenses/export-pdf?${exportQS}`}
                 className="inline-flex items-center justify-center rounded-2xl shadow-soft transition ease-soft focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-[hsl(var(--bg))] bg-white text-black border border-[hsl(var(--border))] hover:bg-[hsl(var(--bg))]/80 px-4 py-2 text-sm"
               >
-                Export PDF
+                Export current PDF
               </a>
-              <span className="text-xs text-[hsl(var(--muted))]">Tip: choose “Custom” if you want manual dates.</span>
             </div>
           </form>
+
+          <div className="flex flex-wrap gap-2 text-xs">
+            <span className="rounded-full border px-3 py-1">Preset: {expensePresetLabel(preset)}</span>
+            <span className="rounded-full border px-3 py-1">Range: {from} → {to}</span>
+            <span className="rounded-full border px-3 py-1">Category: {activeCategoryLabel}</span>
+            <span className="rounded-full border px-3 py-1">Payment: {expensePaymentLabel(paymentFilter)}</span>
+            {qRaw ? <span className="rounded-full border px-3 py-1">Search: {qRaw}</span> : null}
+          </div>
         </CardContent>
       </Card>
 
@@ -451,42 +393,41 @@ const nextHref = hasNext ? `/expenses?${buildQS({ ...basePageQS, page: String(pa
         <CardContent>
           <ExpensesTableClient expenses={expenses} labelByKey={labelByKeyObj} />
 
-<div className="mt-4 flex items-center justify-between gap-3">
-  <a
-    href={hasPrev ? prevHref : '#'}
-    aria-disabled={!hasPrev}
-    className={`inline-flex items-center justify-center rounded-2xl px-4 py-2 text-sm font-medium border shadow-soft ${
-      hasPrev
-        ? 'bg-white text-black border-[hsl(var(--border))] hover:bg-[hsl(var(--bg))]/80'
-        : 'bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed pointer-events-none'
-    }`}
-  >
-    Prev
-  </a>
+          <div className="mt-4 flex items-center justify-between gap-3">
+            <a
+              href={hasPrev ? prevHref : '#'}
+              aria-disabled={!hasPrev}
+              className={`inline-flex items-center justify-center rounded-2xl px-4 py-2 text-sm font-medium border shadow-soft ${
+                hasPrev
+                  ? 'bg-white text-black border-[hsl(var(--border))] hover:bg-[hsl(var(--bg))]/80'
+                  : 'bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed pointer-events-none'
+              }`}
+            >
+              Prev
+            </a>
 
-  <div className="text-xs text-[hsl(var(--muted))]">
-    Page <span className="font-medium text-[hsl(var(--fg))]">{page}</span>
-    {totalPages ? (
-      <>
-        {' '}
-        / <span className="font-medium text-[hsl(var(--fg))]">{totalPages}</span>
-      </>
-    ) : null}
-  </div>
+            <div className="text-xs text-[hsl(var(--muted))]">
+              Page <span className="font-medium text-[hsl(var(--fg))]">{page}</span>
+              {totalPages ? (
+                <>
+                  {' '}
+                  / <span className="font-medium text-[hsl(var(--fg))]">{totalPages}</span>
+                </>
+              ) : null}
+            </div>
 
-  <a
-    href={hasNext ? nextHref : '#'}
-    aria-disabled={!hasNext}
-    className={`inline-flex items-center justify-center rounded-2xl px-4 py-2 text-sm font-medium border shadow-soft ${
-      hasNext
-        ? 'bg-white text-black border-[hsl(var(--border))] hover:bg-[hsl(var(--bg))]/80'
-        : 'bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed pointer-events-none'
-    }`}
-  >
-    Next
-  </a>
-</div>
-
+            <a
+              href={hasNext ? nextHref : '#'}
+              aria-disabled={!hasNext}
+              className={`inline-flex items-center justify-center rounded-2xl px-4 py-2 text-sm font-medium border shadow-soft ${
+                hasNext
+                  ? 'bg-white text-black border-[hsl(var(--border))] hover:bg-[hsl(var(--bg))]/80'
+                  : 'bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed pointer-events-none'
+              }`}
+            >
+              Next
+            </a>
+          </div>
         </CardContent>
       </Card>
 
@@ -497,7 +438,12 @@ const nextHref = hasNext ? `/expenses?${buildQS({ ...basePageQS, page: String(pa
         </CardHeader>
         <CardContent>
           <form action={addExpenseAction} className="grid gap-3 sm:grid-cols-4">
-            <input type="hidden" name="return_qs" value={returnQS} />
+            <input type="hidden" name="preset" value={preset} />
+            <input type="hidden" name="from" value={from} />
+            <input type="hidden" name="to" value={to} />
+            <input type="hidden" name="category" value={category} />
+            <input type="hidden" name="payment_method_filter" value={paymentFilter} />
+            <input type="hidden" name="q" value={qRaw} />
             <label className="block">
               <span className="mb-1 block text-sm font-medium">Date</span>
               <input
@@ -564,24 +510,20 @@ const nextHref = hasNext ? `/expenses?${buildQS({ ...basePageQS, page: String(pa
             </label>
 
             <label className="block sm:col-span-4">
-              <span className="mb-1 block text-sm font-medium">Receipt (optional)</span>
+              <span className="mb-1 block text-sm font-medium">Receipt (image or PDF)</span>
               <input
                 type="file"
                 name="receipt"
                 accept="image/*,application/pdf"
-                className="w-full rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm"
+                className="block w-full rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm file:mr-3 file:rounded-lg file:border-0 file:bg-black file:px-3 file:py-2 file:text-white"
               />
-              <span className="mt-1 block text-xs text-[hsl(var(--muted))]">Max 8MB. JPG/PNG/WEBP or PDF.</span>
+              <span className="mt-1 block text-xs text-[hsl(var(--muted))]">Optional. Max 8MB.</span>
             </label>
 
-            <div className="sm:col-span-4 flex items-center gap-2 pt-2">
-              <button
-                type="submit"
-                className="inline-flex items-center justify-center rounded-2xl shadow-soft transition ease-soft focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-[hsl(var(--bg))] bg-black text-white hover:opacity-95 px-4 py-2 text-sm"
-              >
-                Save
+            <div className="sm:col-span-4 flex justify-end">
+              <button className="inline-flex items-center justify-center rounded-2xl shadow-soft transition ease-soft focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-[hsl(var(--bg))] bg-black text-white hover:opacity-95 px-4 py-2 text-sm">
+                Save expense
               </button>
-              <span className="text-xs text-[hsl(var(--muted))]">After saving, you’ll return to the first page of the current filtered view.</span>
             </div>
           </form>
         </CardContent>
