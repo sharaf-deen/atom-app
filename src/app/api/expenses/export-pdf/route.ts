@@ -6,11 +6,9 @@ export const revalidate = 0
 import { NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { createSupabaseServerActionClient } from '@/lib/supabaseServer'
-import { expensePaymentLabel, parseExpenseFilters, sanitizeExpenseSearch } from '@/lib/expenseFilters'
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib'
 
 type Role = 'member' | 'assistant_coach' | 'coach' | 'reception' | 'admin' | 'super_admin'
-
 type ExpenseRow = {
   id: string
   date: string
@@ -26,6 +24,14 @@ function json(status: number, body: any) {
   return res
 }
 
+function isISODateOnly(s?: string | null) {
+  return !!s && /^\d{4}-\d{2}-\d{2}$/.test(s)
+}
+
+function sanitizeSearch(v: string) {
+  return (v || '').replace(/[%,_]/g, ' ').replace(/\s+/g, ' ').trim()
+}
+
 function makeAdminClient() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY
@@ -35,19 +41,23 @@ function makeAdminClient() {
 
 function fmtMoneyEGP(n: number) {
   const safe = Number.isFinite(n) ? n : 0
-  return new Intl.NumberFormat('en-EG', {
-    style: 'currency',
-    currency: 'EGP',
-    maximumFractionDigits: 2,
-  }).format(safe)
+  return new Intl.NumberFormat('en-EG', { style: 'currency', currency: 'EGP', maximumFractionDigits: 2 }).format(safe)
 }
 
 function fmtDate(isoDateOnly: string) {
-  // isoDateOnly: YYYY-MM-DD
   const [y, m, d] = isoDateOnly.split('-').map((x) => Number(x))
   const dt = new Date(Date.UTC(y, (m || 1) - 1, d || 1))
   if (Number.isNaN(dt.getTime())) return isoDateOnly
   return dt.toLocaleDateString('en-GB', { year: 'numeric', month: 'short', day: '2-digit' })
+}
+
+function paymentLabel(v?: string | null) {
+  if (!v) return '—'
+  if (v === 'cash') return 'Cash'
+  if (v === 'visa') return 'Visa'
+  if (v === 'instapay') return 'Instapay'
+  if (v === 'bank_transfer') return 'Bank transfer'
+  return v
 }
 
 function truncate(s: string, max: number) {
@@ -59,13 +69,10 @@ function truncate(s: string, max: number) {
 export async function GET(req: Request) {
   try {
     const supa = createSupabaseServerActionClient()
-
-    // Auth
     const { data: auth, error: authErr } = await supa.auth.getUser()
     if (authErr) return json(401, { ok: false, error: 'AUTH_ERROR', details: authErr.message })
     if (!auth.user) return json(401, { ok: false, error: 'NOT_AUTHENTICATED' })
 
-    // Only admin / super_admin
     const { data: me, error: meErr } = await supa
       .from('profiles')
       .select('role')
@@ -81,16 +88,20 @@ export async function GET(req: Request) {
     if (!admin) return json(500, { ok: false, error: 'SERVICE_ROLE_MISSING' })
 
     const { searchParams } = new URL(req.url)
-    const filters = parseExpenseFilters(Object.fromEntries(searchParams.entries()))
-    const { from, to, category, payment_method, qRaw } = filters
-    const qText = sanitizeExpenseSearch(qRaw)
+    const from = searchParams.get('from') ?? ''
+    const to = searchParams.get('to') ?? ''
+    const category = searchParams.get('category') ?? 'all'
+    const payment_method = searchParams.get('payment_method') ?? 'all'
+    const qRaw = searchParams.get('q') ?? ''
+    const qText = sanitizeSearch(qRaw)
 
-    const allowedMethods = new Set(['all', 'cash', 'visa', 'instapay', 'bank_transfer'])
-    if (!allowedMethods.has(payment_method)) {
-      return json(400, { ok: false, error: 'INVALID_PAYMENT_METHOD' })
+    if (!isISODateOnly(from) || !isISODateOnly(to) || from > to) {
+      return json(400, { ok: false, error: 'INVALID_RANGE', hint: 'Use ?from=YYYY-MM-DD&to=YYYY-MM-DD with from ≤ to' })
     }
 
-    // Category labels
+    const allowedMethods = new Set(['all', 'cash', 'visa', 'instapay', 'bank_transfer'])
+    if (!allowedMethods.has(payment_method)) return json(400, { ok: false, error: 'INVALID_PAYMENT_METHOD' })
+
     const { data: cats } = await admin.from('expense_categories').select('key,label').eq('is_active', true)
     const labelByKey = new Map<string, string>()
     for (const c of cats ?? []) labelByKey.set(c.key, c.label)
@@ -101,11 +112,11 @@ export async function GET(req: Request) {
       .gte('date', from)
       .lte('date', to)
       .order('date', { ascending: false })
+      .order('id', { ascending: false })
       .limit(100000)
 
     if (category && category !== 'all') q = q.eq('category_key', category)
     if (payment_method && payment_method !== 'all') q = q.eq('payment_method', payment_method)
-
     if (qText) {
       const like = `%${qText}%`
       q = q.or(`description.ilike.${like},category_key.ilike.${like},payment_method.ilike.${like}`)
@@ -116,57 +127,60 @@ export async function GET(req: Request) {
 
     const expenses = (rows || []) as ExpenseRow[]
     const total = expenses.reduce((sum, r) => sum + (Number.isFinite(Number(r.amount)) ? Number(r.amount) : 0), 0)
+    const breakdown = { cash: 0, visa: 0, instapay: 0, bank_transfer: 0 }
+    for (const r of expenses) {
+      const amt = Number(r.amount || 0)
+      if (!Number.isFinite(amt)) continue
+      const method = String(r.payment_method || 'cash')
+      if (method === 'visa') breakdown.visa += amt
+      else if (method === 'instapay') breakdown.instapay += amt
+      else if (method === 'bank_transfer') breakdown.bank_transfer += amt
+      else breakdown.cash += amt
+    }
 
-    // --- PDF ---
     const pdfDoc = await PDFDocument.create()
     const font = await pdfDoc.embedFont(StandardFonts.Helvetica)
     const fontBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold)
 
-    const pageSize: [number, number] = [595.28, 841.89] // A4
+    const pageSize: [number, number] = [595.28, 841.89]
     const marginX = 40
     const marginTop = 46
     const marginBottom = 40
 
-    // Column layout
     const colDateX = marginX
-    const colCatX = colDateX + 70
-    const colPayX = colCatX + 120
-    const colAmtX = colPayX + 90
-    const colDescX = colAmtX + 90
-
+    const colCatX = colDateX + 72
+    const colPayX = colCatX + 118
+    const colAmtX = colPayX + 86
+    const colDescX = colAmtX + 86
     const rowH = 14
 
     const drawHeader = (page: any, pageIndex: number) => {
       const { width, height } = page.getSize()
       const topY = height - marginTop
 
-      const title = 'Expenses Report'
-      page.drawText(title, { x: marginX, y: topY, size: 18, font: fontBold })
+      page.drawText('Expenses Report', { x: marginX, y: topY, size: 18, font: fontBold })
       page.drawText(`From: ${fmtDate(from)}   To: ${fmtDate(to)}`, { x: marginX, y: topY - 18, size: 10, font })
 
       const filters: string[] = []
       if (category && category !== 'all') filters.push(`Category: ${category}`)
-      if (payment_method && payment_method !== 'all') filters.push(`Payment: ${expensePaymentLabel(payment_method)}`)
-      if (qText) filters.push(`Search: ${truncate(qText, 40)}`)
+      if (payment_method && payment_method !== 'all') filters.push(`Payment: ${paymentLabel(payment_method)}`)
+      if (qText) filters.push(`Search: ${truncate(qText, 36)}`)
       if (filters.length) {
-        page.drawText(filters.join(' · '), { x: marginX, y: topY - 34, size: 9, font })
+        page.drawText(filters.join(' · '), { x: marginX, y: topY - 32, size: 9, font })
       }
 
-      page.drawText(`Items: ${expenses.length}   Total: ${fmtMoneyEGP(total)}`, {
-        x: marginX,
-        y: topY - 50,
-        size: 10,
-        font: fontBold,
-      })
+      page.drawText(`Items: ${expenses.length}   Total: ${fmtMoneyEGP(total)}`, { x: marginX, y: topY - 48, size: 10, font: fontBold })
+      page.drawText(
+        `Cash: ${fmtMoneyEGP(breakdown.cash)}   Visa: ${fmtMoneyEGP(breakdown.visa)}   Instapay: ${fmtMoneyEGP(breakdown.instapay)}   Bank: ${fmtMoneyEGP(breakdown.bank_transfer)}`,
+        { x: marginX, y: topY - 62, size: 8, font }
+      )
 
-      // Table header
-      const headerY = topY - 74
-      const headerSize = 10
-      page.drawText('Date', { x: colDateX, y: headerY, size: headerSize, font: fontBold })
-      page.drawText('Category', { x: colCatX, y: headerY, size: headerSize, font: fontBold })
-      page.drawText('Payment', { x: colPayX, y: headerY, size: headerSize, font: fontBold })
-      page.drawText('Amount', { x: colAmtX, y: headerY, size: headerSize, font: fontBold })
-      page.drawText('Description', { x: colDescX, y: headerY, size: headerSize, font: fontBold })
+      const headerY = topY - 86
+      page.drawText('Date', { x: colDateX, y: headerY, size: 10, font: fontBold })
+      page.drawText('Category', { x: colCatX, y: headerY, size: 10, font: fontBold })
+      page.drawText('Payment', { x: colPayX, y: headerY, size: 10, font: fontBold })
+      page.drawText('Amount', { x: colAmtX, y: headerY, size: 10, font: fontBold })
+      page.drawText('Description', { x: colDescX, y: headerY, size: 10, font: fontBold })
 
       page.drawLine({
         start: { x: marginX, y: headerY - 4 },
@@ -175,9 +189,7 @@ export async function GET(req: Request) {
         color: rgb(0.85, 0.85, 0.85),
       })
 
-      // Page number
       page.drawText(`Page ${pageIndex}`, { x: width - marginX - 60, y: marginBottom - 10, size: 9, font })
-
       return headerY - 18
     }
 
@@ -185,55 +197,29 @@ export async function GET(req: Request) {
     let pageIndex = 1
     let y = drawHeader(page, pageIndex)
 
-    const maxDescChars = 46
-    const maxCatChars = 18
-
     for (const r of expenses) {
-      const { width } = page.getSize()
-
-      if (y < marginBottom + rowH) {
+      if (y <= marginBottom + 20) {
         page = pdfDoc.addPage(pageSize)
         pageIndex += 1
         y = drawHeader(page, pageIndex)
       }
 
-      const key = r.category_key ?? ''
-      const label = key ? labelByKey.get(key) ?? key : '—'
+      const cat = labelByKey.get(r.category_key ?? '') ?? r.category_key ?? '—'
+      const desc = truncate(r.description ?? '—', 34)
 
-      const dateCell = fmtDate(r.date)
-      const catCell = truncate(label, maxCatChars)
-      const payCell = expensePaymentLabel(String(r.payment_method ?? 'all'))
-      const amtCell = fmtMoneyEGP(Number(r.amount))
-      const descCell = truncate(r.description ?? '', maxDescChars) || '—'
-
-      page.drawText(dateCell, { x: colDateX, y, size: 9, font })
-      page.drawText(catCell, { x: colCatX, y, size: 9, font })
-      page.drawText(truncate(payCell, 14), { x: colPayX, y, size: 9, font })
-
-      // Right align amount
-      const amtWidth = font.widthOfTextAtSize(amtCell, 9)
-      const amtRight = colDescX - 8
-      page.drawText(amtCell, { x: Math.min(colAmtX, amtRight - amtWidth), y, size: 9, font })
-
-      // Description (truncate)
-      const descMaxWidth = width - marginX - colDescX
-      // If long, still truncate by chars to keep stable.
-      page.drawText(descCell, { x: colDescX, y, size: 9, font })
+      page.drawText(fmtDate(r.date), { x: colDateX, y, size: 9, font })
+      page.drawText(truncate(cat, 18), { x: colCatX, y, size: 9, font })
+      page.drawText(truncate(paymentLabel(r.payment_method), 14), { x: colPayX, y, size: 9, font })
+      page.drawText(truncate(fmtMoneyEGP(Number(r.amount ?? 0)), 14), { x: colAmtX, y, size: 9, font: fontBold })
+      page.drawText(desc, { x: colDescX, y, size: 9, font })
 
       y -= rowH
     }
 
-    const bytes = await pdfDoc.save()
+    const pdfBytes = await pdfDoc.save()
+    const filename = `expenses_${from}_to_${to}.pdf`
 
-    const suffix = [
-      payment_method && payment_method !== 'all' ? `_${payment_method}` : '',
-      category && category !== 'all' ? `_${category}` : '',
-      qText ? `_search` : '',
-    ].join('')
-
-    const filename = `expenses_${from}_to_${to}${suffix}.pdf`
-
-    return new NextResponse(bytes, {
+    return new NextResponse(Buffer.from(pdfBytes), {
       status: 200,
       headers: {
         'Content-Type': 'application/pdf',
