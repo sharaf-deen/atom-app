@@ -8,6 +8,7 @@ import AccessDeniedPage from '@/components/AccessDeniedPage'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card'
 import InlineAlert from '@/components/ui/InlineAlert'
 import ExpensesTableClient, { type ExpenseRow } from '@/components/ExpensesTableClient'
+import ExpenseSubmitButton from '@/components/ExpenseSubmitButton'
 
 type RangePreset = 'today' | '7d' | 'month' | 'custom'
 
@@ -321,6 +322,7 @@ export default async function ExpensesPage({
   const totalPages = totalCount ? Math.max(1, Math.ceil(totalCount / PER_PAGE)) : undefined
   const hasPrev = page > 1
   const hasNext = totalPages ? page < totalPages : expenses.length === PER_PAGE
+  const showPagination = totalPages ? totalPages > 1 : hasPrev || hasNext
 
   const filterReturnQS = buildQS({ preset, from, to, category, payment_method: paymentFilter, q: qTextRaw })
   const exportQS = buildQS({ from, to, category, payment_method: paymentFilter, q: qTextRaw })
@@ -573,41 +575,43 @@ export default async function ExpensesPage({
             </div>
           )}
 
-          <div className="mt-4 flex items-center justify-between gap-3">
-            <a
-              href={hasPrev ? prevHref : '#'}
-              aria-disabled={!hasPrev}
-              className={`inline-flex items-center justify-center rounded-2xl px-4 py-2 text-sm font-medium border shadow-soft ${
-                hasPrev
-                  ? 'bg-white text-black border-[hsl(var(--border))] hover:bg-[hsl(var(--bg))]/80'
-                  : 'bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed pointer-events-none'
-              }`}
-            >
-              Prev
-            </a>
+          {showPagination ? (
+            <div className="mt-4 flex items-center justify-between gap-3">
+              <a
+                href={hasPrev ? prevHref : '#'}
+                aria-disabled={!hasPrev}
+                className={`inline-flex items-center justify-center rounded-2xl px-4 py-2 text-sm font-medium border shadow-soft ${
+                  hasPrev
+                    ? 'bg-white text-black border-[hsl(var(--border))] hover:bg-[hsl(var(--bg))]/80'
+                    : 'bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed pointer-events-none'
+                }`}
+              >
+                Prev
+              </a>
 
-            <div className="text-xs text-[hsl(var(--muted))]">
-              Page <span className="font-medium text-[hsl(var(--fg))]">{page}</span>
-              {totalPages ? (
-                <>
-                  {' '}
-                  / <span className="font-medium text-[hsl(var(--fg))]">{totalPages}</span>
-                </>
-              ) : null}
+              <div className="text-xs text-[hsl(var(--muted))]">
+                Page <span className="font-medium text-[hsl(var(--fg))]">{page}</span>
+                {totalPages ? (
+                  <>
+                    {' '}
+                    / <span className="font-medium text-[hsl(var(--fg))]">{totalPages}</span>
+                  </>
+                ) : null}
+              </div>
+
+              <a
+                href={hasNext ? nextHref : '#'}
+                aria-disabled={!hasNext}
+                className={`inline-flex items-center justify-center rounded-2xl px-4 py-2 text-sm font-medium border shadow-soft ${
+                  hasNext
+                    ? 'bg-white text-black border-[hsl(var(--border))] hover:bg-[hsl(var(--bg))]/80'
+                    : 'bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed pointer-events-none'
+                }`}
+              >
+                Next
+              </a>
             </div>
-
-            <a
-              href={hasNext ? nextHref : '#'}
-              aria-disabled={!hasNext}
-              className={`inline-flex items-center justify-center rounded-2xl px-4 py-2 text-sm font-medium border shadow-soft ${
-                hasNext
-                  ? 'bg-white text-black border-[hsl(var(--border))] hover:bg-[hsl(var(--bg))]/80'
-                  : 'bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed pointer-events-none'
-              }`}
-            >
-              Next
-            </a>
-          </div>
+          ) : null}
         </CardContent>
       </Card>
 
@@ -681,9 +685,7 @@ export default async function ExpensesPage({
             </label>
 
             <div className="sm:col-span-4">
-              <button className="inline-flex items-center justify-center rounded-2xl shadow-soft bg-black text-white px-5 py-2.5 text-sm font-medium hover:opacity-95">
-                Save expense
-              </button>
+              <ExpenseSubmitButton />
             </div>
           </form>
         </CardContent>
