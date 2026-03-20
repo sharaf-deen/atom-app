@@ -19,7 +19,7 @@ import { Card, CardContent } from '@/components/ui/Card'
 import Button from '@/components/ui/Button'
 import AccessDeniedPage from '@/components/AccessDeniedPage'
 import { getSessionUserCached, getSupabaseAdminClientCached } from '@/lib/requestCache'
-import type { Role } from '@/lib/session'
+import { canAccessScan } from '@/lib/rbac'
 import AutoReturn from './AutoReturn'
 import ResultSound from './ResultSound'
 
@@ -34,10 +34,6 @@ type SearchParams = {
   frozenUntil?: string
   freezeDaysRemaining?: string
   kiosk?: string
-}
-
-function canAccess(role: Role) {
-  return role === 'reception' || role === 'admin' || role === 'super_admin'
 }
 
 function isUuid(v?: string | null) {
@@ -103,7 +99,7 @@ export default async function ScanResultPage({ searchParams }: { searchParams: S
   const me = await getSessionUserCached()
   if (!me) redirect('/login?next=/scan')
 
-  if (!canAccess(me.role)) {
+  if (!canAccessScan(me.role)) {
     return (
       <AccessDeniedPage
         title="Scan — Check-in & Validity"

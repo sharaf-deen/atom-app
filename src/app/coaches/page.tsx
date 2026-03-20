@@ -4,6 +4,7 @@ export const revalidate = 0
 
 import { redirect } from 'next/navigation'
 import { getSessionUser } from '@/lib/session'
+import { canAccessCoaches } from '@/lib/rbac'
 import AccessDeniedPage from '@/components/AccessDeniedPage'
 import PageHeader from '@/components/layout/PageHeader'
 import Section from '@/components/layout/Section'
@@ -13,7 +14,7 @@ export default async function CoachesPage() {
   const sessionUser = await getSessionUser()
   if (!sessionUser) redirect('/login?next=/coaches')
 
-  const allowed = sessionUser.role === 'admin' || sessionUser.role === 'super_admin'
+  const allowed = canAccessCoaches(sessionUser.role)
   if (!allowed) {
     return (
       <AccessDeniedPage

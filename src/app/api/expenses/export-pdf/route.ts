@@ -6,9 +6,9 @@ export const revalidate = 0
 import { NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { createSupabaseServerActionClient } from '@/lib/supabaseServer'
+import { canAccessExpenses, normalizeRole, type Role } from '@/lib/rbac'
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib'
 
-type Role = 'member' | 'assistant_coach' | 'coach' | 'reception' | 'admin' | 'super_admin'
 type ExpenseRow = {
   id: string
   date: string
@@ -81,8 +81,8 @@ export async function GET(req: Request) {
 
     if (meErr) return json(500, { ok: false, error: 'PROFILE_LOOKUP_FAILED', details: meErr.message })
 
-    const role: Role = (me?.role as Role) ?? 'member'
-    if (!['admin', 'super_admin'].includes(role)) return json(403, { ok: false, error: 'FORBIDDEN' })
+    const role = normalizeRole(me?.role)
+    if (!canAccessExpenses(role)) return json(403, { ok: false, error: 'FORBIDDEN' })
 
     const admin = makeAdminClient()
     if (!admin) return json(500, { ok: false, error: 'SERVICE_ROLE_MISSING' })

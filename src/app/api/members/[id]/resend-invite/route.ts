@@ -3,13 +3,10 @@ export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
 import { NextResponse } from 'next/server'
-import type { Role } from '@/lib/session'
+import { canAccessKiosk, normalizeRole, type Role } from '@/lib/rbac'
 import { createSupabaseServerActionClient } from '@/lib/supabaseServer'
 import { createClient } from '@supabase/supabase-js'
 import { extractActionLink, sendMemberInviteEmailWithQr } from '@/lib/memberInviteEmail'
-
-const STAFF: Role[] = ['reception', 'admin', 'super_admin']
-const can = (r: Role) => STAFF.includes(r)
 
 // Audit action name (stable)
 const ACTION_RESEND = 'member_invite_resend'
@@ -187,8 +184,8 @@ export async function POST(req: Request, ctx: { params: { id: string } }) {
       )
     }
 
-    const role = (me?.role ?? 'member') as Role
-    if (!can(role)) {
+    const role = normalizeRole(me?.role)
+    if (!canAccessKiosk(role)) {
       return noStore(
         NextResponse.json(
           {

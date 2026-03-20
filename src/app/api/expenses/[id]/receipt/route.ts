@@ -6,8 +6,7 @@ export const revalidate = 0
 import { NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { createSupabaseServerActionClient } from '@/lib/supabaseServer'
-
-type Role = 'member' | 'assistant_coach' | 'coach' | 'reception' | 'admin' | 'super_admin'
+import { canAccessExpenses, normalizeRole, type Role } from '@/lib/rbac'
 
 function json(status: number, body: any) {
   const res = NextResponse.json(body, { status })
@@ -42,9 +41,8 @@ export async function GET(_req: Request, ctx: { params: { id: string } }) {
       .eq('user_id', auth.user.id)
       .maybeSingle<{ role: Role | null }>()
 
-    const role: Role = (me?.role as Role) ?? 'member'
-    const isStaff = ['admin', 'super_admin', 'reception'].includes(role)
-    if (!isStaff) return json(403, { ok: false, error: 'FORBIDDEN' })
+    const role = normalizeRole(me?.role)
+    if (!canAccessExpenses(role)) return json(403, { ok: false, error: 'FORBIDDEN' })
 
     // Fetch expense row with service role
     const { data: exp, error: expErr } = await admin

@@ -5,8 +5,7 @@ export const revalidate = 0
 import { NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { createSupabaseServerActionClient } from '@/lib/supabaseServer'
-
-type Role = 'member' | 'assistant_coach' | 'coach' | 'reception' | 'admin' | 'super_admin'
+import { canAccessPersonalFunds, normalizeRole, type Role } from '@/lib/rbac'
 
 function json(status: number, body: any) {
   const res = NextResponse.json(body, { status })
@@ -40,9 +39,8 @@ export async function GET(req: Request, ctx: { params: { id: string } }) {
       .eq('user_id', auth.user.id)
       .maybeSingle<{ role: Role | null }>()
 
-    const role: Role = (me?.role as Role) ?? 'member'
-    const isAllowed = role === 'admin' || role === 'super_admin'
-    if (!isAllowed) return json(403, { ok: false, error: 'FORBIDDEN' })
+    const role = normalizeRole(me?.role)
+    if (!canAccessPersonalFunds(role)) return json(403, { ok: false, error: 'FORBIDDEN' })
 
     const { data: entry, error: entryErr } = await admin
       .from('personal_fund_entries')

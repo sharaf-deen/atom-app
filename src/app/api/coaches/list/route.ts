@@ -4,6 +4,7 @@ export const revalidate = 0
 
 import { NextResponse } from 'next/server'
 import { createSupabaseServerActionClient } from '@/lib/supabaseServer'
+import { canAccessCoaches, normalizeRole } from '@/lib/rbac'
 
 type Role = 'coach' | 'assistant_coach'
 type Kind = 'all' | 'coach' | 'assistant_coach'
@@ -60,9 +61,8 @@ export async function GET(req: Request) {
       return NextResponse.json({ ok: false, error: meErr.message }, { status: 403 })
     }
 
-    const myRole = (meProfile?.role ?? 'member') as string
-    const allowed = myRole === 'admin' || myRole === 'super_admin'
-    if (!allowed) {
+    const myRole = normalizeRole(meProfile?.role)
+    if (!canAccessCoaches(myRole)) {
       return NextResponse.json({ ok: false, error: 'Forbidden' }, { status: 403 })
     }
 

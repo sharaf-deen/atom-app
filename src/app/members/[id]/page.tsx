@@ -24,6 +24,7 @@ import AccessDeniedPage from '@/components/AccessDeniedPage'
 import { createSupabaseRSC } from '@/lib/supabaseServer'
 import { createSupabaseAdminClient } from '@/lib/supabaseAdmin'
 import { getSessionUser, type Role } from '@/lib/session'
+import { canAccessMemberProfile, canAccessMembersList, canCreateSubscription, canDeleteUser, canManageSubscriptions, canOpenOtherMemberProfile, canResendInvite } from '@/lib/rbac'
 import { addDays, cairoToday, diffDays } from '@/lib/cairoDate'
 import QrImage from '@/components/QrImage'
 import SubscribeDialog, { type Plan } from '@/components/SubscribeDialog'
@@ -583,12 +584,11 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
     redirect(`/login?next=${encodeURIComponent(nextPath)}`)
   }
 
-  const STAFF: Role[] = ['reception', 'admin', 'super_admin']
-  const canViewMembersList = STAFF.includes(me.role)
-  const canOpenOtherProfiles = canViewMembersList || me.role === 'coach'
-  const canManageSubscriptions = ['admin', 'super_admin'].includes(me.role)
-  const canCreateSubscription = STAFF.includes(me.role)
-  const canResendInvite = STAFF.includes(me.role)
+  const canViewMembersList = canAccessMembersList(me.role)
+  const canOpenOtherProfiles = canOpenOtherMemberProfile(me.role)
+  const canManageSubs = canManageSubscriptions(me.role)
+  const canCreateSub = canCreateSubscription(me.role)
+  const canResendMemberInvite = canResendInvite(me.role)
 
   const sessionDb = createSupabaseRSC()
   const adminDb = createSupabaseAdminClient()
@@ -620,11 +620,11 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
   if (!profile) return notFound()
 
   const isSelf = me.id === profile.user_id
-  const canDeleteUser = me.role === 'super_admin' && !isSelf
+  const canDeleteMemberUser = canDeleteUser(me.role, { isSelf })
   const isCoachViewingOtherMember = me.role === 'coach' && !isSelf
   const receptionDeskView = me.role === 'reception' && !isSelf
 
-  if (!canOpenOtherProfiles && !isSelf) {
+  if (!canAccessMemberProfile(me.role, { viewerUserId: me.id, targetUserId: profile.user_id, targetRole: profile.role })) {
     return (
       <AccessDeniedPage
         title="Member"
@@ -776,7 +776,7 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
   const fullName = `${profile.first_name ?? ''} ${profile.last_name ?? ''}`.trim() || '—'
   const age = ageYears(profile.date_of_birth)
   const viewedRole = profile.role ?? 'member'
-  const showSubscriptionActions = canCreateSubscription && viewedRole === 'member' && !coachSafeView
+  const showSubscriptionActions = canCreateSub && viewedRole === 'member' && !coachSafeView
 
   const subtitle = coachSafeView
     ? 'Read-only coach view with only safe member information.'
@@ -993,7 +993,7 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
           </Surface>
         ) : null}
 
-        {(showSubscriptionActions || canResendInvite || receptionDeskView) ? (
+        {(showSubscriptionActions || canResendMemberInvite || receptionDeskView) ? (
           <Surface className="p-4 sm:p-5">
             <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
               <div className="min-w-0 flex-1">
@@ -1053,8 +1053,8 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
                   </>
                 ) : null}
 
-                {canResendInvite ? <ResendInviteButton userId={profile.user_id} email={profile.email} /> : null}
-                {canDeleteUser ? (
+                {canResendMemberInvite ? <ResendInviteButton userId={profile.user_id} email={profile.email} /> : null}
+                {canDeleteMemberUser ? (
                   <DeleteUserButton userId={profile.user_id} email={profile.email} memberId={profile.member_id} />
                 ) : null}
               </div>
@@ -1233,7 +1233,7 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
                       ) : null}
                     </div>
 
-                    {!coachSafeView && canManageSubscriptions && viewedRole === 'member' ? (
+                    {!coachSafeView && canManageSubs && viewedRole === 'member' ? (
                       <div className="mt-4 border-t border-[hsl(var(--border))] pt-4">
                         <SubscriptionManageRowActions sub={s} />
                       </div>

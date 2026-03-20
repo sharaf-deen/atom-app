@@ -6,6 +6,7 @@ import { NextResponse } from 'next/server'
 import { createSupabaseAdminClient } from '@/lib/supabaseAdmin'
 import { createSupabaseServerActionClient } from '@/lib/supabaseServer'
 import { collectHealthMonitorSummary, sendHealthMonitorEmail } from '@/lib/healthMonitor'
+import { canAccessHealthMonitor, normalizeRole } from '@/lib/rbac'
 
 function noStore(res: NextResponse) {
   res.headers.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate')
@@ -25,8 +26,8 @@ async function getActorFromSession() {
     .maybeSingle<{ role: string | null }>()
 
   if (meErr) return { ok: false as const, status: 500, error: 'PROFILE_LOOKUP_FAILED', details: meErr.message }
-  const role = (me?.role ?? '').toLowerCase()
-  if (!role || (role !== 'admin' && role !== 'super_admin')) {
+  const role = normalizeRole(me?.role)
+  if (!canAccessHealthMonitor(role)) {
     return { ok: false as const, status: 403, error: 'FORBIDDEN' }
   }
 
