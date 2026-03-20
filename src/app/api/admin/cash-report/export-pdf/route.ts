@@ -21,6 +21,18 @@ type Role = 'member' | 'assistant_coach' | 'coach' | 'reception' | 'admin' | 'su
 type Method = 'cash' | 'instapay' | 'card' | 'bank_transfer'
 const METHODS: Method[] = ['cash', 'instapay', 'card', 'bank_transfer']
 type RangeMode = 'day' | 'week' | 'month' | 'range'
+type PersonalKind = 'advance_to_gym' | 'expense_paid_personally' | 'reimbursement_from_gym'
+
+type PersonalEntry = {
+  id: string
+  entry_date: string
+  person_id: string
+  kind: PersonalKind
+  amount: number
+  payment_method: string | null
+  note: string | null
+  created_at: string
+}
 
 function json(status: number, body: any) {
   const res = NextResponse.json(body, { status })
@@ -49,6 +61,18 @@ function labelMethod(m: Method) {
   if (m === 'instapay') return 'Instapay'
   if (m === 'card') return 'Card'
   return 'Bank transfer'
+}
+
+function personalKindLabel(kind: PersonalKind) {
+  if (kind === 'advance_to_gym') return 'Advance to gym'
+  if (kind === 'reimbursement_from_gym') return 'Reimbursement from gym'
+  return 'Expense paid personally'
+}
+
+function personalCashEffectLabel(kind: PersonalKind) {
+  if (kind === 'advance_to_gym') return 'Cash in'
+  if (kind === 'reimbursement_from_gym') return 'Cash out'
+  return 'Off-cash'
 }
 
 function fmtMoneyEGP(n: number) {
@@ -162,13 +186,6 @@ export async function GET(req: Request) {
 
     if (payErr) return json(500, { ok: false, error: 'PAYMENTS_QUERY_FAILED', details: payErr.message })
 
-    const incomeBy: Record<Method, number> = { cash: 0, instapay: 0, card: 0, bank_transfer: 0 }
-    for (const r of (pays ?? []) as any[]) {
-      const amt = Number(r.amount ?? 0)
-      if (!Number.isFinite(amt)) continue
-      incomeBy[normMethod(r.payment_method)] += amt
-    }
-
     const { data: exps, error: expErr } = await admin
       .from('expenses')
       .select('id, date, category_key, description, amount, payment_method')
@@ -178,15 +195,62 @@ export async function GET(req: Request) {
 
     if (expErr) return json(500, { ok: false, error: 'EXPENSES_QUERY_FAILED', details: expErr.message })
 
-    const expenseBy: Record<Method, number> = { cash: 0, instapay: 0, card: 0, bank_transfer: 0 }
+    const { data: rawPersonalEntries, error: pfErr } = await admin
+      .from('personal_fund_entries')
+      .select('id, entry_date, person_id, kind, amount, payment_method, note, created_at')
+      .gte('entry_date', range.from)
+      .lte('entry_date', range.to)
+      .order('entry_date', { ascending: false })
+      .limit(10000)
+
+    const personalEntries = ((rawPersonalEntries ?? []) as any[]).filter(
+      (row) => row.kind === 'advance_to_gym' || row.kind === 'expense_paid_personally' || row.kind === 'reimbursement_from_gym'
+    ) as PersonalEntry[]
+
+    const personIds = [...new Set(personalEntries.map((row) => row.person_id).filter(Boolean))]
+    const { data: pfPeople } = personIds.length
+      ? await admin.from('personal_fund_people').select('id,label').in('id', personIds)
+      : { data: [] as Array<{ id: string; label: string }> }
+    const personById = new Map(((pfPeople ?? []) as Array<{ id: string; label: string }>).map((row) => [row.id, row.label]))
+
+    const subscriptionIncomeBy: Record<Method, number> = { cash: 0, instapay: 0, card: 0, bank_transfer: 0 }
+    const businessExpenseBy: Record<Method, number> = { cash: 0, instapay: 0, card: 0, bank_transfer: 0 }
+    const personalCashInBy: Record<Method, number> = { cash: 0, instapay: 0, card: 0, bank_transfer: 0 }
+    const personalCashOutBy: Record<Method, number> = { cash: 0, instapay: 0, card: 0, bank_transfer: 0 }
+
+    for (const r of (pays ?? []) as any[]) {
+      const amt = Number(r.amount ?? 0)
+      if (!Number.isFinite(amt)) continue
+      subscriptionIncomeBy[normMethod(r.payment_method)] += amt
+    }
+
     for (const r of (exps ?? []) as any[]) {
       const amt = Number(r.amount ?? 0)
       if (!Number.isFinite(amt)) continue
-      expenseBy[normMethod(r.payment_method)] += amt
+      businessExpenseBy[normMethod(r.payment_method)] += amt
     }
 
-    const totalIncome = METHODS.reduce((s, m) => s + incomeBy[m], 0)
-    const totalExpenses = METHODS.reduce((s, m) => s + expenseBy[m], 0)
+    for (const row of personalEntries) {
+      const amt = Number(row.amount ?? 0)
+      if (!Number.isFinite(amt)) continue
+      const method = normMethod(row.payment_method)
+      if (row.kind === 'advance_to_gym') personalCashInBy[method] += amt
+      if (row.kind === 'reimbursement_from_gym') personalCashOutBy[method] += amt
+    }
+
+    const incomeBy: Record<Method, number> = { cash: 0, instapay: 0, card: 0, bank_transfer: 0 }
+    const expenseBy: Record<Method, number> = { cash: 0, instapay: 0, card: 0, bank_transfer: 0 }
+    for (const method of METHODS) {
+      incomeBy[method] = subscriptionIncomeBy[method] + personalCashInBy[method]
+      expenseBy[method] = businessExpenseBy[method] + personalCashOutBy[method]
+    }
+
+    const totalSubscriptionIncome = METHODS.reduce((sum, method) => sum + subscriptionIncomeBy[method], 0)
+    const totalPersonalCashIn = METHODS.reduce((sum, method) => sum + personalCashInBy[method], 0)
+    const totalIncome = METHODS.reduce((sum, method) => sum + incomeBy[method], 0)
+    const totalBusinessExpenses = METHODS.reduce((sum, method) => sum + businessExpenseBy[method], 0)
+    const totalPersonalCashOut = METHODS.reduce((sum, method) => sum + personalCashOutBy[method], 0)
+    const totalExpenses = METHODS.reduce((sum, method) => sum + expenseBy[method], 0)
     const net = totalIncome - totalExpenses
 
     const recentPays = ((pays ?? []) as any[]).slice(0, 10)
@@ -194,6 +258,11 @@ export async function GET(req: Request) {
       .slice()
       .sort((a: any, b: any) => Number(b.amount ?? 0) - Number(a.amount ?? 0))
       .slice(0, 10)
+    const personalCashMovements = personalEntries.filter((row) => row.kind !== 'expense_paid_personally').slice(0, 10)
+    const personalOffCash = personalEntries.filter((row) => row.kind === 'expense_paid_personally').slice(0, 10)
+    const personalOffCashTotal = personalEntries
+      .filter((row) => row.kind === 'expense_paid_personally')
+      .reduce((sum, row) => sum + Number(row.amount ?? 0), 0)
 
     const pdfDoc = await PDFDocument.create()
     const font = await pdfDoc.embedFont(StandardFonts.Helvetica)
@@ -234,7 +303,25 @@ export async function GET(req: Request) {
       page.drawText(range.label, { x: marginX, y, size: 10, font })
       y -= 14
       page.drawText(`Timezone: ${CAIRO_TZ}`, { x: marginX, y, size: 9, font, color: rgb(0.35, 0.35, 0.35) })
+      y -= 12
+      page.drawText('Includes Personal Funds cash in/out. Personal expenses paid personally remain off-cash context until reimbursement.', {
+        x: marginX,
+        y,
+        size: 8.5,
+        font,
+        color: rgb(0.35, 0.35, 0.35),
+      })
       y -= 14
+      if (pfErr) {
+        page.drawText(`Personal Funds status: unavailable fallback (${truncate(pfErr.message, 70)})`, {
+          x: marginX,
+          y,
+          size: 8.5,
+          font,
+          color: rgb(0.7, 0.45, 0.05),
+        })
+        y -= 14
+      }
       drawHLine(y)
       y -= 16
     }
@@ -242,26 +329,51 @@ export async function GET(req: Request) {
     const drawSummary = () => {
       page.drawText(`Income: ${fmtMoneyEGP(totalIncome)}`, { x: marginX, y, size: 12, font: fontBold })
       page.drawText(`Expenses: ${fmtMoneyEGP(totalExpenses)}`, { x: marginX + 210, y, size: 12, font: fontBold })
-      page.drawText(`Net: ${fmtMoneyEGP(net)}`, {
-        x: marginX + 410,
+      page.drawText(`Net cash: ${fmtMoneyEGP(net)}`, {
+        x: marginX + 400,
         y,
         size: 12,
         font: fontBold,
         color: net < 0 ? rgb(0.8, 0.1, 0.1) : rgb(0.05, 0.5, 0.2),
       })
       y -= 18
-      page.drawText(`Filtered payments: ${(pays ?? []).length}   Filtered expense lines: ${(exps ?? []).length}`, {
+      page.drawText(`Subscription income: ${fmtMoneyEGP(totalSubscriptionIncome)}   Personal Funds cash in: ${fmtMoneyEGP(totalPersonalCashIn)}`, {
+        x: marginX,
+        y,
+        size: 9,
+        font,
+      })
+      y -= 14
+      page.drawText(`Business expenses: ${fmtMoneyEGP(totalBusinessExpenses)}   Personal Funds cash out: ${fmtMoneyEGP(totalPersonalCashOut)}`, {
+        x: marginX,
+        y,
+        size: 9,
+        font,
+      })
+      y -= 14
+      page.drawText(`Personal expenses paid personally (off-cash context): ${fmtMoneyEGP(personalOffCashTotal)}`, {
         x: marginX,
         y,
         size: 9,
         font,
         color: rgb(0.35, 0.35, 0.35),
       })
+      y -= 14
+      page.drawText(
+        `Filtered payments: ${(pays ?? []).length}   Filtered business expense lines: ${(exps ?? []).length}   PF cash movements: ${personalEntries.filter((row) => row.kind !== 'expense_paid_personally').length}   PF off-cash: ${personalEntries.filter((row) => row.kind === 'expense_paid_personally').length}`,
+        {
+          x: marginX,
+          y,
+          size: 8.5,
+          font,
+          color: rgb(0.35, 0.35, 0.35),
+        }
+      )
       y -= 16
     }
 
     const drawBreakdown = () => {
-      ensureSpace(120)
+      ensureSpace(140)
       page.drawText('Breakdown by payment method', { x: marginX, y, size: 12, font: fontBold })
       y -= 16
 
@@ -291,7 +403,14 @@ export async function GET(req: Request) {
           font,
           color: v < 0 ? rgb(0.8, 0.1, 0.1) : rgb(0.05, 0.5, 0.2),
         })
-        y -= rowH
+        y -= 11
+        const parts = []
+        if (personalCashInBy[m] > 0) parts.push(`PF in ${fmtMoneyEGP(personalCashInBy[m])}`)
+        if (personalCashOutBy[m] > 0) parts.push(`PF out ${fmtMoneyEGP(personalCashOutBy[m])}`)
+        if (parts.length) {
+          page.drawText(parts.join(' · '), { x: colMethod + 20, y, size: 8, font, color: rgb(0.35, 0.35, 0.35) })
+          y -= 11
+        }
       }
 
       y -= 6
@@ -301,7 +420,7 @@ export async function GET(req: Request) {
 
     const drawPaymentsTable = () => {
       ensureSpace(160)
-      page.drawText('Filtered payments (latest 10)', { x: marginX, y, size: 12, font: fontBold })
+      page.drawText('Subscription income (latest 10)', { x: marginX, y, size: 12, font: fontBold })
       y -= 16
 
       const colWhen = marginX
@@ -328,7 +447,7 @@ export async function GET(req: Request) {
       }
 
       if (!recentPays.length) {
-        page.drawText('No payments in this period.', { x: marginX, y, size: 9, font, color: rgb(0.35, 0.35, 0.35) })
+        page.drawText('No subscription payments in this period.', { x: marginX, y, size: 9, font, color: rgb(0.35, 0.35, 0.35) })
         y -= rowH
       }
 
@@ -339,7 +458,7 @@ export async function GET(req: Request) {
 
     const drawExpensesTable = () => {
       ensureSpace(160)
-      page.drawText('Filtered expenses (highest 10)', { x: marginX, y, size: 12, font: fontBold })
+      page.drawText('Top business expenses (highest 10)', { x: marginX, y, size: 12, font: fontBold })
       y -= 16
 
       const colDate = marginX
@@ -368,7 +487,91 @@ export async function GET(req: Request) {
       }
 
       if (!topExpenses.length) {
-        page.drawText('No expenses in this period.', { x: marginX, y, size: 9, font, color: rgb(0.35, 0.35, 0.35) })
+        page.drawText('No business expenses in this period.', { x: marginX, y, size: 9, font, color: rgb(0.35, 0.35, 0.35) })
+        y -= rowH
+      }
+
+      y -= 6
+      drawHLine(y)
+      y -= 18
+    }
+
+    const drawPersonalCashTable = () => {
+      ensureSpace(180)
+      page.drawText('Personal Funds cash movements (latest 10)', { x: marginX, y, size: 12, font: fontBold })
+      y -= 16
+
+      const colDate = marginX
+      const colPerson = marginX + 80
+      const colType = marginX + 220
+      const colMethod = marginX + 350
+      const colAmount = marginX + 450
+
+      page.drawText('Date', { x: colDate, y, size: 10, font: fontBold })
+      page.drawText('Person', { x: colPerson, y, size: 10, font: fontBold })
+      page.drawText('Type', { x: colType, y, size: 10, font: fontBold })
+      page.drawText('Method', { x: colMethod, y, size: 10, font: fontBold })
+      page.drawText('Amount', { x: colAmount, y, size: 10, font: fontBold })
+      y -= 10
+      drawHLine(y)
+      y -= 12
+
+      for (const row of personalCashMovements) {
+        ensureSpace(34)
+        page.drawText(fmtDate(row.entry_date), { x: colDate, y, size: 9, font })
+        page.drawText(truncate(personById.get(row.person_id) ?? 'Unknown person', 20), { x: colPerson, y, size: 9, font })
+        page.drawText(truncate(`${personalKindLabel(row.kind)} · ${personalCashEffectLabel(row.kind)}`, 24), { x: colType, y, size: 9, font })
+        page.drawText(labelMethod(normMethod(row.payment_method)), { x: colMethod, y, size: 9, font })
+        page.drawText(fmtMoneyEGP(Number(row.amount ?? 0)), { x: colAmount, y, size: 9, font: fontBold })
+        y -= 11
+        if (row.note) {
+          page.drawText(truncate(row.note, 62), { x: colPerson, y, size: 8, font, color: rgb(0.35, 0.35, 0.35) })
+          y -= 11
+        }
+      }
+
+      if (!personalCashMovements.length) {
+        page.drawText('No Personal Funds cash movements in this period.', { x: marginX, y, size: 9, font, color: rgb(0.35, 0.35, 0.35) })
+        y -= rowH
+      }
+
+      y -= 6
+      drawHLine(y)
+      y -= 18
+    }
+
+    const drawPersonalOffCashTable = () => {
+      ensureSpace(180)
+      page.drawText('Personal expenses paid personally (latest 10 · off-cash)', { x: marginX, y, size: 12, font: fontBold })
+      y -= 16
+
+      const colDate = marginX
+      const colPerson = marginX + 80
+      const colMethod = marginX + 300
+      const colAmount = marginX + 400
+      const colNote = marginX + 470
+
+      page.drawText('Date', { x: colDate, y, size: 10, font: fontBold })
+      page.drawText('Person', { x: colPerson, y, size: 10, font: fontBold })
+      page.drawText('Method', { x: colMethod, y, size: 10, font: fontBold })
+      page.drawText('Amount', { x: colAmount, y, size: 10, font: fontBold })
+      page.drawText('Note', { x: colNote, y, size: 10, font: fontBold })
+      y -= 10
+      drawHLine(y)
+      y -= 12
+
+      for (const row of personalOffCash) {
+        ensureSpace(30)
+        page.drawText(fmtDate(row.entry_date), { x: colDate, y, size: 9, font })
+        page.drawText(truncate(personById.get(row.person_id) ?? 'Unknown person', 28), { x: colPerson, y, size: 9, font })
+        page.drawText(labelMethod(normMethod(row.payment_method)), { x: colMethod, y, size: 9, font })
+        page.drawText(fmtMoneyEGP(Number(row.amount ?? 0)), { x: colAmount, y, size: 9, font: fontBold })
+        page.drawText(truncate(row.note ?? '', 18), { x: colNote, y, size: 9, font })
+        y -= rowH
+      }
+
+      if (!personalOffCash.length) {
+        page.drawText('No off-cash personal expenses in this period.', { x: marginX, y, size: 9, font, color: rgb(0.35, 0.35, 0.35) })
         y -= rowH
       }
     }
@@ -378,6 +581,8 @@ export async function GET(req: Request) {
     drawBreakdown()
     drawPaymentsTable()
     drawExpensesTable()
+    drawPersonalCashTable()
+    drawPersonalOffCashTable()
 
     const pdfBytes = await pdfDoc.save()
     const filename = `cash-report_${range.from}_${range.to}.pdf`
