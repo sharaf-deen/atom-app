@@ -42,6 +42,7 @@ export default function RunHealthMonitorButton({ sendEmail = false }: Props) {
       const emailSent = !!json?.email_sent
       const persistError = json?.persist_error
       const reportId = String(json?.report_id ?? '').trim()
+      const needsReview = status === 'warning' || status === 'critical'
 
       const suffix = sendEmail
         ? emailSent
@@ -49,7 +50,8 @@ export default function RunHealthMonitorButton({ sendEmail = false }: Props) {
           : ' Email not sent.'
         : ''
 
-      const base = `Status ${status}. Warnings ${warnings}. Scans today ${scans}. Orphans ${orphan}.${suffix}`
+      const triage = needsReview ? ' Needs review.' : ' Looks normal.'
+      const base = `Status ${status}. Warnings ${warnings}. Scans today ${scans}. Orphans ${orphan}.${triage}${suffix}`
 
       if (persistError) {
         toast.warning(base, { description: `Report save warning: ${persistError}` })
@@ -62,7 +64,11 @@ export default function RunHealthMonitorButton({ sendEmail = false }: Props) {
       }
 
       if (reportId) {
-        router.push(`/admin/health-monitor?report=${reportId}`)
+        const params = new URLSearchParams()
+        params.set('report', reportId)
+        if (status === 'warning' || status === 'critical') params.set('status', status)
+        const query = params.toString()
+        router.push(query ? `/admin/health-monitor?${query}` : '/admin/health-monitor')
         router.refresh()
       } else {
         router.refresh()
