@@ -10,146 +10,109 @@ import { Card, CardContent } from '@/components/ui/Card'
 import Button from '@/components/ui/Button'
 import RunHealthMonitorButton from '@/components/RunHealthMonitorButton'
 import { getSessionUserCached, getSupabaseAdminClientCached } from '@/lib/requestCache'
-import {
-  collectHealthMonitorSummary,
-  getHealthMonitorRecipients,
-  type HealthMonitorStoredReport,
-  type HealthMonitorSummary,
-} from '@/lib/healthMonitor'
+import { collectHealthMonitorSummary, getHealthMonitorRecipients, type HealthMonitorStoredReport } from '@/lib/healthMonitor'
 
-type StatusKey = 'healthy' | 'warning' | 'critical'
-
-type StatusMeta = {
-  label: string
-  tone: string
-  description: string
-  badgeClass: string
-  accentClass: string
+type SearchParams = {
+  report?: string | string[]
 }
 
-type WarningAction = {
-  title: string
-  details: string
-  href: string
-  cta: string
-}
-
-const STATUS_GUIDE: Array<{ status: StatusKey; example: string }> = [
-  { status: 'healthy', example: 'Normal activity, no orphan profiles, no invalid roles.' },
-  { status: 'warning', example: 'No scans after midday, or recent invite resend failures.' },
-  { status: 'critical', example: 'Orphan profiles or invalid role profiles detected.' },
-]
-
-function statusMeta(status: string): StatusMeta {
+function getStatusMeta(status: string) {
   if (status === 'healthy') {
     return {
-      label: 'Healthy',
-      tone: 'Looks normal',
-      description: 'No important issue detected. Core checks currently look normal.',
-      badgeClass: 'bg-emerald-100 text-emerald-800 border-emerald-200',
-      accentClass: 'text-emerald-700',
+      label: 'Healthy · Looks normal',
+      short: 'Healthy',
+      description: 'No important issue detected in the main checks.',
+      className: 'bg-emerald-100 text-emerald-800 border-emerald-200',
     }
   }
 
   if (status === 'warning') {
     return {
-      label: 'Warning',
-      tone: 'Needs attention',
+      label: 'Warning · Needs attention',
+      short: 'Warning',
       description: 'Something needs attention, but there is no major structural issue yet.',
-      badgeClass: 'bg-amber-100 text-amber-800 border-amber-200',
-      accentClass: 'text-amber-700',
+      className: 'bg-amber-100 text-amber-800 border-amber-200',
     }
   }
 
   return {
-    label: 'Critical',
-    tone: 'Urgent review',
+    label: 'Critical · Urgent review',
+    short: 'Critical',
     description: 'A serious data consistency or account integrity issue was detected.',
-    badgeClass: 'bg-red-100 text-red-800 border-red-200',
-    accentClass: 'text-red-700',
+    className: 'bg-red-100 text-red-800 border-red-200',
   }
 }
 
-function emailBadgeClass(state: 'sent' | 'failed' | 'skipped') {
-  if (state === 'sent') return 'bg-emerald-100 text-emerald-800 border-emerald-200'
-  if (state === 'failed') return 'bg-red-100 text-red-800 border-red-200'
-  return 'bg-zinc-100 text-zinc-700 border-zinc-200'
-}
-
-function getEmailState(row: HealthMonitorStoredReport): 'sent' | 'failed' | 'skipped' {
-  if (row.email_sent) return 'sent'
-  if (row.email_error) return 'failed'
-  return 'skipped'
-}
-
-function getWarningAction(item: string): WarningAction {
-  const text = item.toLowerCase()
-
-  if (text.includes('no scans recorded today')) {
+function getEmailMeta(emailSent: boolean, emailError: string | null) {
+  if (emailSent) {
     return {
-      title: 'Check scan activity',
-      details: 'Confirm the kiosk or tablet is working and verify whether scans were recorded on the correct device today.',
-      href: '/admin/scan-audit',
-      cta: 'Open Scan Audit',
+      label: 'Email sent',
+      className: 'bg-emerald-100 text-emerald-800 border-emerald-200',
     }
   }
 
+  if (emailError) {
+    return {
+      label: 'Email failed',
+      className: 'bg-red-100 text-red-800 border-red-200',
+    }
+  }
+
+  return {
+    label: 'Email skipped',
+    className: 'bg-zinc-100 text-zinc-700 border-zinc-200',
+  }
+}
+
+function getWarningAction(item: string) {
+  const text = item.toLowerCase()
+
   if (text.includes('orphan profile')) {
     return {
-      title: 'Review orphan profiles',
-      details: 'Compare recent members against auth users and delete or repair any profile that no longer has a valid account.',
+      title: 'Review profile integrity',
+      description: 'One or more profiles exist without a matching auth user. Review the affected accounts and clean them up.',
       href: '/admin/members',
-      cta: 'Open Members',
+      label: 'Open Members',
     }
   }
 
   if (text.includes('invalid role')) {
     return {
-      title: 'Review profile roles',
-      details: 'Check role consistency on affected profiles and correct any account using an invalid or missing role.',
+      title: 'Review invalid roles',
+      description: 'Some profiles have a role that is missing or invalid. Check the affected accounts and fix their role.',
       href: '/admin/members',
-      cta: 'Open Members',
+      label: 'Open Members',
+    }
+  }
+
+  if (text.includes('no scans')) {
+    return {
+      title: 'Check attendance flow',
+      description: 'No scans were recorded after midday Cairo time. Confirm kiosk usage, staff process, and scan flow.',
+      href: '/admin/scan-audit',
+      label: 'Open Scan Audit',
     }
   }
 
   if (text.includes('invite resend failure')) {
     return {
       title: 'Review invite resend failures',
-      details: 'Check recent member invite attempts, email delivery settings, and retry only after confirming the email path is healthy.',
+      description: 'Recent invite resend attempts failed. Check mail settings, audit logs, and retry from the member profile if needed.',
       href: '/admin/members',
-      cta: 'Open Members',
+      label: 'Open Members',
     }
   }
 
   return {
     title: 'Review this warning',
-    details: 'Open the related admin area and confirm whether this issue needs manual action.',
+    description: 'Open the relevant admin area and review the related records.',
     href: '/admin',
-    cta: 'Open Admin',
+    label: 'Open Admin',
   }
 }
 
-function getWarningSeverity(item: string) {
-  return /orphan|invalid role/i.test(item) ? 'critical' : 'warning'
-}
-
-function countCriticalWarnings(summary: HealthMonitorSummary) {
-  return summary.warnings.filter((item) => getWarningSeverity(item) === 'critical').length
-}
-
-function statusSummaryLine(summary: HealthMonitorSummary) {
-  const totalWarnings = summary.warnings.length
-  const criticalWarnings = countCriticalWarnings(summary)
-
-  if (summary.overall_status === 'healthy') {
-    return 'No active warnings. Daily checks currently look normal.'
-  }
-
-  if (summary.overall_status === 'critical') {
-    return `${criticalWarnings} critical warning(s) detected. Review account and profile consistency as soon as possible.`
-  }
-
-  return `${totalWarnings} active warning(s) detected. Review the items below before the end of the day.`
+function formatCairoDateTime(value: string) {
+  return new Date(value).toLocaleString('en-GB', { timeZone: 'Africa/Cairo' })
 }
 
 function StatCard({ label, value, hint }: { label: string; value: string | number; hint?: string }) {
@@ -164,25 +127,165 @@ function StatCard({ label, value, hint }: { label: string; value: string | numbe
   )
 }
 
-function StatusGuideCard({ status, example }: { status: StatusKey; example: string }) {
-  const meta = statusMeta(status)
+function WarningList({
+  warnings,
+  useActions = false,
+}: {
+  warnings: string[]
+  useActions?: boolean
+}) {
+  if (warnings.length === 0) {
+    return <p className="mt-3 text-sm text-[hsl(var(--muted))]">No active warnings.</p>
+  }
+
+  if (!useActions) {
+    return (
+      <ul className="mt-3 list-disc space-y-2 pl-5 text-sm">
+        {warnings.map((item) => (
+          <li key={item}>{item}</li>
+        ))}
+      </ul>
+    )
+  }
+
+  return (
+    <div className="mt-3 space-y-3">
+      {warnings.map((item) => {
+        const action = getWarningAction(item)
+        return (
+          <div key={item} className="rounded-2xl border border-[hsl(var(--border))] bg-white p-4">
+            <div className="text-sm font-semibold">{item}</div>
+            <div className="mt-1 text-sm text-[hsl(var(--muted))]">{action.title}</div>
+            <p className="mt-2 text-sm text-[hsl(var(--muted))]">{action.description}</p>
+            <div className="mt-3">
+              <Button asChild variant="outline" size="sm" href={action.href}>
+                {action.label}
+              </Button>
+            </div>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+function HighlightsList({ highlights }: { highlights: string[] }) {
+  return (
+    <ul className="mt-3 list-disc space-y-2 pl-5 text-sm">
+      {highlights.map((item) => (
+        <li key={item}>{item}</li>
+      ))}
+    </ul>
+  )
+}
+
+function StoredReportDetails({ report }: { report: HealthMonitorStoredReport | null }) {
+  if (!report) {
+    return (
+      <Card>
+        <CardContent>
+          <div className="text-sm text-[hsl(var(--muted))]">
+            No stored report yet. Run the monitor once or wait for the daily cron to generate one.
+          </div>
+        </CardContent>
+      </Card>
+    )
+  }
+
+  const status = getStatusMeta(report.overall_status)
+  const email = getEmailMeta(report.email_sent, report.email_error)
+  const warningCount = Array.isArray(report.summary?.warnings) ? report.summary.warnings.length : 0
+  const highlightCount = Array.isArray(report.summary?.highlights) ? report.summary.highlights.length : 0
+
   return (
     <Card>
-      <CardContent className="space-y-3">
-        <div className="flex items-center gap-2">
-          <span className={`inline-flex rounded-full border px-3 py-1 text-xs font-semibold ${meta.badgeClass}`}>
-            {meta.label.toUpperCase()}
-          </span>
-          <span className={`text-sm font-medium ${meta.accentClass}`}>{meta.tone}</span>
+      <CardContent className="space-y-4">
+        <div className="flex flex-wrap items-start gap-3">
+          <div className="min-w-0 flex-1">
+            <div className="text-sm text-[hsl(var(--muted))]">Stored report details</div>
+            <div className="mt-1 text-lg font-semibold">
+              {formatCairoDateTime(report.created_at)} · {report.mode}
+            </div>
+            <p className="mt-1 text-sm text-[hsl(var(--muted))]">
+              Open a stored report to inspect the full warnings and highlights without running a new check.
+            </p>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <span className={`inline-flex rounded-full border px-3 py-1 text-xs font-semibold ${status.className}`}>
+              {status.label}
+            </span>
+            <span className={`inline-flex rounded-full border px-3 py-1 text-xs font-semibold ${email.className}`}>
+              {email.label}
+            </span>
+            <Button asChild variant="outline" size="sm" href="/admin/health-monitor">
+              View latest
+            </Button>
+          </div>
         </div>
-        <p className="text-sm leading-6">{meta.description}</p>
-        <p className="text-xs text-[hsl(var(--muted))]">Example: {example}</p>
+
+        <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4">
+          <div className="text-sm font-medium">What this means</div>
+          <p className="mt-2 text-sm text-[hsl(var(--muted))]">{status.description}</p>
+          <div className="mt-3 flex flex-wrap gap-2 text-xs text-[hsl(var(--muted))]">
+            <span className="rounded-full border border-[hsl(var(--border))] px-3 py-1">Warnings: {warningCount}</span>
+            <span className="rounded-full border border-[hsl(var(--border))] px-3 py-1">Highlights: {highlightCount}</span>
+            <span className="rounded-full border border-[hsl(var(--border))] px-3 py-1">
+              Generated for {report.summary?.generated_date_cairo ?? '—'}
+            </span>
+          </div>
+        </div>
+
+        <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 xl:grid-cols-4">
+          <StatCard label="Scans today" value={report.summary?.counts?.scans_today ?? 0} hint={`Yesterday: ${report.summary?.counts?.scans_yesterday ?? 0}`} />
+          <StatCard label="Active members" value={report.summary?.counts?.active_members ?? 0} hint={`Expiring in 7 days: ${report.summary?.counts?.expiring_7d ?? 0}`} />
+          <StatCard
+            label="Outstanding total"
+            value={`${Number(report.summary?.counts?.outstanding_total_egp ?? 0).toFixed(0)} EGP`}
+            hint={`${report.summary?.counts?.outstanding_members ?? 0} member(s)`}
+          />
+          <StatCard
+            label="Members created 24h"
+            value={report.summary?.counts?.members_created_24h ?? 0}
+            hint={`Invite resends 24h: ${report.summary?.counts?.invite_resends_24h ?? 0}`}
+          />
+        </div>
+
+        <div className="grid gap-4 lg:grid-cols-2">
+          <Card>
+            <CardContent>
+              <h3 className="text-base font-semibold">Warnings from this report</h3>
+              <WarningList warnings={Array.isArray(report.summary?.warnings) ? report.summary.warnings : []} useActions />
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardContent>
+              <h3 className="text-base font-semibold">Highlights from this report</h3>
+              <HighlightsList highlights={Array.isArray(report.summary?.highlights) ? report.summary.highlights : []} />
+              <div className="mt-4 grid gap-2 text-sm sm:grid-cols-2">
+                <div>Orphan profiles: <strong>{report.summary?.counts?.orphan_profiles ?? 0}</strong></div>
+                <div>Invalid role profiles: <strong>{report.summary?.counts?.invalid_role_profiles ?? 0}</strong></div>
+                <div>Invite resend failures 24h: <strong>{report.summary?.counts?.invite_resend_failures_24h ?? 0}</strong></div>
+                <div>Delete actions 24h: <strong>{report.summary?.counts?.delete_actions_24h ?? 0}</strong></div>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+
+        <div className="rounded-2xl border border-[hsl(var(--border))] bg-white p-4">
+          <div className="text-sm font-medium">Email recipients</div>
+          <div className="mt-2 text-sm text-[hsl(var(--muted))] break-words">
+            {Array.isArray(report.email_recipients) && report.email_recipients.length > 0 ? report.email_recipients.join(', ') : 'No recipients stored for this run.'}
+          </div>
+          {report.email_error ? <div className="mt-2 text-sm text-red-700">{report.email_error}</div> : null}
+        </div>
       </CardContent>
     </Card>
   )
 }
 
-export default async function HealthMonitorPage() {
+export default async function HealthMonitorPage({ searchParams }: { searchParams?: SearchParams }) {
   const me = await getSessionUserCached()
   if (!me) redirect('/login?next=/admin/health-monitor')
 
@@ -205,7 +308,6 @@ export default async function HealthMonitorPage() {
   const admin = getSupabaseAdminClientCached()
   const summary = await collectHealthMonitorSummary(admin)
   const recipients = getHealthMonitorRecipients()
-  const currentMeta = statusMeta(summary.overall_status)
 
   let reports: HealthMonitorStoredReport[] = []
   let reportsError: string | null = null
@@ -219,11 +321,20 @@ export default async function HealthMonitorPage() {
   if (error) reportsError = error.message
   else reports = ((rawReports ?? []) as any[]) as HealthMonitorStoredReport[]
 
+  const requestedReportId = typeof searchParams?.report === 'string'
+    ? searchParams.report
+    : Array.isArray(searchParams?.report)
+      ? searchParams?.report[0]
+      : ''
+
+  const selectedReport = reports.find((row) => row.id === requestedReportId) ?? reports[0] ?? null
+  const liveStatus = getStatusMeta(summary.overall_status)
+
   return (
     <main>
       <PageHeader
         title="Health Monitor"
-        subtitle="Daily app health snapshot and automated report status."
+        subtitle="Daily app health snapshot, stored reports, and actionable admin follow-up."
         right={
           <div className="flex flex-wrap items-center gap-2">
             <RunHealthMonitorButton />
@@ -236,31 +347,46 @@ export default async function HealthMonitorPage() {
       />
 
       <Section className="space-y-4">
-        <Card>
-          <CardContent className="space-y-4">
-            <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-              <div className="space-y-3">
-                <div className="text-sm text-[hsl(var(--muted))]">Current status</div>
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className={`inline-flex rounded-full border px-3 py-1 text-xs font-semibold ${currentMeta.badgeClass}`}>
-                    {currentMeta.label.toUpperCase()}
+        <div className="grid gap-4 xl:grid-cols-[1.25fr_0.75fr]">
+          <Card>
+            <CardContent className="flex flex-wrap items-center gap-3">
+              <div className="min-w-0 flex-1">
+                <div className="text-sm text-[hsl(var(--muted))]">Current live status</div>
+                <div className="mt-1 flex flex-wrap items-center gap-2">
+                  <span className={`inline-flex rounded-full border px-3 py-1 text-xs font-semibold ${liveStatus.className}`}>
+                    {liveStatus.label}
                   </span>
-                  <span className={`text-sm font-medium ${currentMeta.accentClass}`}>{currentMeta.tone}</span>
-                  <span className="text-sm text-[hsl(var(--muted))]">{summary.generated_date_cairo} · {summary.time_zone}</span>
+                  <span className="text-sm text-[hsl(var(--muted))]">
+                    {summary.generated_date_cairo} · {summary.time_zone}
+                  </span>
                 </div>
-                <p className="max-w-2xl text-sm leading-6">{currentMeta.description}</p>
-                <p className="text-sm text-[hsl(var(--muted))]">{statusSummaryLine(summary)}</p>
+                <p className="mt-2 text-sm text-[hsl(var(--muted))]">{liveStatus.description}</p>
               </div>
+              <div className="text-sm text-[hsl(var(--muted))] xl:text-right">
+                Email recipients: {recipients.length > 0 ? recipients.join(', ') : 'not configured'}
+              </div>
+            </CardContent>
+          </Card>
 
-              <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] px-4 py-3 text-sm">
-                <div className="font-medium">Email recipients</div>
-                <div className="mt-2 max-w-[420px] break-words text-[hsl(var(--muted))]">
-                  {recipients.length > 0 ? recipients.join(', ') : 'Not configured'}
-                </div>
+          <Card>
+            <CardContent>
+              <div className="text-sm font-medium">Status guide</div>
+              <div className="mt-3 flex flex-wrap gap-2">
+                {(['healthy', 'warning', 'critical'] as const).map((status) => {
+                  const meta = getStatusMeta(status)
+                  return (
+                    <span key={status} className={`inline-flex rounded-full border px-3 py-1 text-xs font-semibold ${meta.className}`}>
+                      {meta.label}
+                    </span>
+                  )
+                })}
               </div>
-            </div>
-          </CardContent>
-        </Card>
+              <p className="mt-3 text-sm text-[hsl(var(--muted))]">
+                Status reflects system health. Email only shows whether the report email was delivered for that run.
+              </p>
+            </CardContent>
+          </Card>
+        </div>
 
         <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-4">
           <StatCard label="Scans today" value={summary.counts.scans_today} hint={`Yesterday: ${summary.counts.scans_yesterday}`} />
@@ -268,76 +394,19 @@ export default async function HealthMonitorPage() {
           <StatCard label="Outstanding total" value={`${summary.counts.outstanding_total_egp.toFixed(0)} EGP`} hint={`${summary.counts.outstanding_members} member(s)`} />
           <StatCard label="Members created 24h" value={summary.counts.members_created_24h} hint={`Invite resends 24h: ${summary.counts.invite_resends_24h}`} />
         </div>
-      </Section>
 
-      <Section className="space-y-4">
-        <div className="flex items-center justify-between gap-3">
-          <h2 className="text-lg font-semibold">Status guide</h2>
-          <div className="text-sm text-[hsl(var(--muted))]">Use this legend to understand what the badge means.</div>
-        </div>
-        <div className="grid gap-4 md:grid-cols-3">
-          {STATUS_GUIDE.map((item) => (
-            <StatusGuideCard key={item.status} status={item.status} example={item.example} />
-          ))}
-        </div>
-      </Section>
-
-      <Section className="space-y-4">
         <div className="grid gap-4 lg:grid-cols-2">
           <Card>
             <CardContent>
-              <div className="flex items-center justify-between gap-3">
-                <h2 className="text-lg font-semibold">Warnings</h2>
-                <div className="text-sm text-[hsl(var(--muted))]">Actionable next steps</div>
-              </div>
-
-              {summary.warnings.length > 0 ? (
-                <div className="mt-4 space-y-3">
-                  {summary.warnings.map((item) => {
-                    const action = getWarningAction(item)
-                    const severity = getWarningSeverity(item)
-                    const meta = statusMeta(severity)
-
-                    return (
-                      <div key={item} className="rounded-2xl border border-[hsl(var(--border))] p-4">
-                        <div className="flex flex-wrap items-start justify-between gap-3">
-                          <div className="space-y-2">
-                            <div className="flex flex-wrap items-center gap-2">
-                              <span className={`inline-flex rounded-full border px-2.5 py-1 text-[11px] font-semibold ${meta.badgeClass}`}>
-                                {meta.label.toUpperCase()}
-                              </span>
-                              <span className="text-sm font-medium">{action.title}</span>
-                            </div>
-                            <p className="text-sm leading-6">{item}</p>
-                            <p className="text-xs leading-5 text-[hsl(var(--muted))]">Recommended action: {action.details}</p>
-                          </div>
-                          <Button asChild variant="outline" size="sm" href={action.href}>
-                            {action.cta}
-                          </Button>
-                        </div>
-                      </div>
-                    )
-                  })}
-                </div>
-              ) : (
-                <div className="mt-4 rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-900">
-                  No active warnings. Continue daily checks and run the monitor again if you want to store a fresh report.
-                </div>
-              )}
+              <h2 className="text-lg font-semibold">Live warnings</h2>
+              <WarningList warnings={summary.warnings} useActions />
             </CardContent>
           </Card>
 
           <Card>
             <CardContent>
-              <div className="flex items-center justify-between gap-3">
-                <h2 className="text-lg font-semibold">Highlights</h2>
-                <Link href="/admin/scan-audit" className="text-sm underline text-[hsl(var(--muted))]">Scan Audit</Link>
-              </div>
-              <ul className="mt-3 list-disc space-y-2 pl-5 text-sm">
-                {summary.highlights.map((item) => (
-                  <li key={item}>{item}</li>
-                ))}
-              </ul>
+              <h2 className="text-lg font-semibold">Live highlights</h2>
+              <HighlightsList highlights={summary.highlights} />
               <div className="mt-4 grid gap-2 text-sm sm:grid-cols-2">
                 <div>Orphan profiles: <strong>{summary.counts.orphan_profiles}</strong></div>
                 <div>Invalid role profiles: <strong>{summary.counts.invalid_role_profiles}</strong></div>
@@ -350,10 +419,35 @@ export default async function HealthMonitorPage() {
       </Section>
 
       <Section className="space-y-4">
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 className="text-lg font-semibold">Stored report details</h2>
+            <p className="mt-1 text-sm text-[hsl(var(--muted))]">
+              Review a recent run in detail without launching a new one.
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            {selectedReport ? (
+              <Button asChild variant="outline" size="sm" href={`/admin/health-monitor?report=${selectedReport.id}`}>
+                Refresh selected
+              </Button>
+            ) : null}
+            <Button asChild variant="outline" size="sm" href="/admin/scan-audit">
+              Open Scan Audit
+            </Button>
+          </div>
+        </div>
+
+        <StoredReportDetails report={selectedReport} />
+      </Section>
+
+      <Section className="space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h2 className="text-lg font-semibold">Recent reports</h2>
-            <p className="text-sm text-[hsl(var(--muted))]">Status = health result. Email = report delivery result.</p>
+            <p className="mt-1 text-sm text-[hsl(var(--muted))]">
+              Status = system health. Email = delivery result for that report only.
+            </p>
           </div>
           <Link href="/admin/scan-audit" className="text-sm underline text-[hsl(var(--muted))]">Scan Audit</Link>
         </div>
@@ -371,60 +465,106 @@ export default async function HealthMonitorPage() {
             </CardContent>
           </Card>
         ) : (
-          <Card>
-            <CardContent className="overflow-x-auto">
-              <table className="min-w-[920px] w-full text-left text-sm">
-                <thead>
-                  <tr className="border-b border-[hsl(var(--border))]">
-                    <th className="sticky top-0 z-10 bg-[hsl(var(--card))] px-2 py-3 font-semibold">Created at</th>
-                    <th className="sticky top-0 z-10 bg-[hsl(var(--card))] px-2 py-3 font-semibold">Mode</th>
-                    <th className="sticky top-0 z-10 bg-[hsl(var(--card))] px-2 py-3 font-semibold">Status</th>
-                    <th className="sticky top-0 z-10 bg-[hsl(var(--card))] px-2 py-3 font-semibold">Warnings</th>
-                    <th className="sticky top-0 z-10 bg-[hsl(var(--card))] px-2 py-3 font-semibold">Scans today</th>
-                    <th className="sticky top-0 z-10 bg-[hsl(var(--card))] px-2 py-3 font-semibold">Orphans</th>
-                    <th className="sticky top-0 z-10 bg-[hsl(var(--card))] px-2 py-3 font-semibold">Email</th>
-                    <th className="sticky top-0 z-10 bg-[hsl(var(--card))] px-2 py-3 font-semibold">Recipients</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {reports.map((row) => {
-                    const meta = statusMeta(row.overall_status)
-                    const emailState = getEmailState(row)
-                    const warningCount = Array.isArray(row.summary?.warnings) ? row.summary.warnings.length : 0
-
-                    return (
-                      <tr key={row.id} className="border-b border-[hsl(var(--border))] last:border-0">
-                        <td className="px-2 py-3 align-top whitespace-nowrap">{new Date(row.created_at).toLocaleString('en-GB', { timeZone: 'Africa/Cairo' })}</td>
-                        <td className="px-2 py-3 align-top whitespace-nowrap">{row.mode}</td>
-                        <td className="px-2 py-3 align-top whitespace-nowrap">
-                          <div className="flex flex-col gap-1">
-                            <span className={`inline-flex w-fit rounded-full border px-2 py-0.5 text-xs font-semibold ${meta.badgeClass}`}>
-                              {meta.label.toUpperCase()}
-                            </span>
-                            <span className="text-xs text-[hsl(var(--muted))]">{meta.tone}</span>
-                          </div>
-                        </td>
-                        <td className="px-2 py-3 align-top whitespace-nowrap">{warningCount}</td>
-                        <td className="px-2 py-3 align-top whitespace-nowrap">{row.summary?.counts?.scans_today ?? 0}</td>
-                        <td className="px-2 py-3 align-top whitespace-nowrap">{row.summary?.counts?.orphan_profiles ?? 0}</td>
-                        <td className="px-2 py-3 align-top whitespace-nowrap">
-                          <span className={`inline-flex rounded-full border px-2 py-0.5 text-xs font-semibold ${emailBadgeClass(emailState)}`}>
-                            {emailState.toUpperCase()}
+          <>
+            <div className="grid gap-3 md:hidden">
+              {reports.map((row) => {
+                const status = getStatusMeta(row.overall_status)
+                const email = getEmailMeta(row.email_sent, row.email_error)
+                const isSelected = selectedReport?.id === row.id
+                return (
+                  <Card key={row.id}>
+                    <CardContent className="space-y-3">
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <div className="text-sm font-semibold">{formatCairoDateTime(row.created_at)}</div>
+                          <div className="text-xs text-[hsl(var(--muted))]">{row.mode}</div>
+                        </div>
+                        {isSelected ? (
+                          <span className="inline-flex rounded-full border border-black/10 bg-black/5 px-2 py-1 text-[11px] font-semibold">
+                            Opened
                           </span>
-                        </td>
-                        <td className="px-2 py-3 align-top">
-                          <div className="max-w-[260px] break-words text-xs text-[hsl(var(--muted))]">
-                            {Array.isArray(row.email_recipients) && row.email_recipients.length > 0 ? row.email_recipients.join(', ') : '—'}
-                            {row.email_error ? <div className="mt-1 text-red-700">{row.email_error}</div> : null}
-                          </div>
-                        </td>
-                      </tr>
-                    )
-                  })}
-                </tbody>
-              </table>
-            </CardContent>
-          </Card>
+                        ) : null}
+                      </div>
+
+                      <div className="flex flex-wrap gap-2">
+                        <span className={`inline-flex rounded-full border px-3 py-1 text-xs font-semibold ${status.className}`}>
+                          {status.short}
+                        </span>
+                        <span className={`inline-flex rounded-full border px-3 py-1 text-xs font-semibold ${email.className}`}>
+                          {email.label}
+                        </span>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-2 text-sm">
+                        <div className="rounded-xl border border-[hsl(var(--border))] p-3">
+                          <div className="text-xs text-[hsl(var(--muted))]">Warnings</div>
+                          <div className="mt-1 font-semibold">{Array.isArray(row.summary?.warnings) ? row.summary.warnings.length : 0}</div>
+                        </div>
+                        <div className="rounded-xl border border-[hsl(var(--border))] p-3">
+                          <div className="text-xs text-[hsl(var(--muted))]">Scans today</div>
+                          <div className="mt-1 font-semibold">{row.summary?.counts?.scans_today ?? 0}</div>
+                        </div>
+                      </div>
+
+                      <Button asChild variant={isSelected ? 'solid' : 'outline'} size="sm" href={`/admin/health-monitor?report=${row.id}`}>
+                        {isSelected ? 'Opened' : 'Open details'}
+                      </Button>
+                    </CardContent>
+                  </Card>
+                )
+              })}
+            </div>
+
+            <Card className="hidden md:block">
+              <CardContent className="overflow-x-auto">
+                <table className="min-w-[920px] w-full text-left text-sm">
+                  <thead className="sticky top-0 z-10 bg-white">
+                    <tr className="border-b border-[hsl(var(--border))]">
+                      <th className="px-2 py-3 font-semibold">Created at</th>
+                      <th className="px-2 py-3 font-semibold">Mode</th>
+                      <th className="px-2 py-3 font-semibold">Status</th>
+                      <th className="px-2 py-3 font-semibold">Warnings</th>
+                      <th className="px-2 py-3 font-semibold">Highlights</th>
+                      <th className="px-2 py-3 font-semibold">Scans today</th>
+                      <th className="px-2 py-3 font-semibold">Email</th>
+                      <th className="px-2 py-3 font-semibold">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {reports.map((row) => {
+                      const status = getStatusMeta(row.overall_status)
+                      const email = getEmailMeta(row.email_sent, row.email_error)
+                      const isSelected = selectedReport?.id === row.id
+                      return (
+                        <tr key={row.id} className={`border-b border-[hsl(var(--border))] last:border-0 ${isSelected ? 'bg-black/[0.03]' : ''}`}>
+                          <td className="px-2 py-3 align-top whitespace-nowrap">{formatCairoDateTime(row.created_at)}</td>
+                          <td className="px-2 py-3 align-top whitespace-nowrap">{row.mode}</td>
+                          <td className="px-2 py-3 align-top whitespace-nowrap">
+                            <span className={`inline-flex rounded-full border px-2 py-0.5 text-xs font-semibold ${status.className}`}>
+                              {status.short}
+                            </span>
+                          </td>
+                          <td className="px-2 py-3 align-top whitespace-nowrap">{Array.isArray(row.summary?.warnings) ? row.summary.warnings.length : 0}</td>
+                          <td className="px-2 py-3 align-top whitespace-nowrap">{Array.isArray(row.summary?.highlights) ? row.summary.highlights.length : 0}</td>
+                          <td className="px-2 py-3 align-top whitespace-nowrap">{row.summary?.counts?.scans_today ?? 0}</td>
+                          <td className="px-2 py-3 align-top whitespace-nowrap">
+                            <span className={`inline-flex rounded-full border px-2 py-0.5 text-xs font-semibold ${email.className}`}>
+                              {email.label}
+                            </span>
+                          </td>
+                          <td className="px-2 py-3 align-top whitespace-nowrap">
+                            <Button asChild variant={isSelected ? 'solid' : 'outline'} size="sm" href={`/admin/health-monitor?report=${row.id}`}>
+                              {isSelected ? 'Opened' : 'Open details'}
+                            </Button>
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </CardContent>
+            </Card>
+          </>
         )}
       </Section>
     </main>
