@@ -15,6 +15,7 @@ import { getSessionUserCached, getSupabaseAdminClientCached } from '@/lib/reques
 
 const ALLOWED: Role[] = ['admin', 'super_admin']
 const PAGE_SIZE = 50
+const IMPOSSIBLE_MEMBER_ID = '00000000-0000-0000-0000-000000000000'
 
 type RangePreset = 'today' | '7d' | 'month' | 'custom'
 
@@ -53,9 +54,8 @@ function labelMethod(m: string) {
   const s = String(m || 'cash')
   if (s === 'cash') return 'Cash'
   if (s === 'instapay') return 'Instapay'
-  if (s === 'card') return 'Card'
+  if (s === 'card' || s === 'visa') return 'Card'
   if (s === 'bank_transfer') return 'Bank transfer'
-  if (s === 'visa') return 'Card'
   return s
 }
 
@@ -117,6 +117,19 @@ function buildQS(params: Record<string, string>) {
     if (value.length) sp.set(k, value)
   }
   return sp.toString()
+}
+
+function applyPaymentMethodFilter<T extends { eq: Function; in: Function }>(query: T, method: string) {
+  if (!method || method === 'all') return query
+  if (method === 'card') return query.in('payment_method', ['card', 'visa'])
+  return query.eq('payment_method', method)
+}
+
+function presetLabel(preset: RangePreset) {
+  if (preset === '7d') return 'Last 7 days'
+  if (preset === 'month') return 'This month'
+  if (preset === 'custom') return 'Custom'
+  return 'Today'
 }
 
 export default async function AdminPaymentsPage({
@@ -206,9 +219,9 @@ export default async function AdminPaymentsPage({
     .lt('paid_at', endISO)
     .order('paid_at', { ascending: false })
 
-  if (payment_method && payment_method !== 'all') query = query.eq('payment_method', payment_method)
+  query = applyPaymentMethodFilter(query as any, payment_method) as any
   if (memberIds) {
-    if (!memberIds.length) query = query.in('member_id', ['00000000-0000-0000-0000-000000000000'])
+    if (!memberIds.length) query = query.in('member_id', [IMPOSSIBLE_MEMBER_ID])
     else query = query.in('member_id', memberIds)
   }
 
@@ -230,20 +243,20 @@ export default async function AdminPaymentsPage({
   let totals = { all: 0, cash: 0, instapay: 0, card: 0, bank_transfer: 0 }
 
   try {
-    let q2 = admin
+    let totalsQuery = admin
       .from('subscription_payments')
       .select('amount, payment_method, member_id')
       .gte('paid_at', startISO)
       .lt('paid_at', endISO)
       .limit(10000)
 
-    if (payment_method && payment_method !== 'all') q2 = q2.eq('payment_method', payment_method)
+    totalsQuery = applyPaymentMethodFilter(totalsQuery as any, payment_method) as any
     if (memberIds) {
-      if (!memberIds.length) q2 = q2.in('member_id', ['00000000-0000-0000-0000-000000000000'])
-      else q2 = q2.in('member_id', memberIds)
+      if (!memberIds.length) totalsQuery = totalsQuery.in('member_id', [IMPOSSIBLE_MEMBER_ID])
+      else totalsQuery = totalsQuery.in('member_id', memberIds)
     }
 
-    const { data: allRows } = await q2
+    const { data: allRows } = await totalsQuery
     for (const r of (allRows ?? []) as any[]) {
       const amt = Number(r.amount ?? 0)
       if (!Number.isFinite(amt)) continue
@@ -279,11 +292,11 @@ export default async function AdminPaymentsPage({
     reset: '/admin/payments',
   }
 
+  const exportQS = buildQS({ from, to, payment_method, q })
+
   const activeFilters = [
     `Range: ${from} → ${to}`,
-    preset !== 'custom'
-      ? `Preset: ${preset === '7d' ? 'Last 7 days' : preset === 'month' ? 'This month' : 'Today'}`
-      : '',
+    preset !== 'custom' ? `Preset: ${presetLabel(preset)}` : '',
     payment_method !== 'all' ? `Method: ${labelMethod(payment_method)}` : '',
     q ? `Search: ${q}` : '',
   ].filter(Boolean)
@@ -347,7 +360,7 @@ export default async function AdminPaymentsPage({
         <div className="space-y-1">
           <h1 className="text-2xl font-semibold">Admin · Payments</h1>
           <p className="text-sm text-[hsl(var(--muted))]">
-            Egypt-time accounting view for real payment dates, with quick filters and clearer mobile scanning of results.
+            Egypt-time accounting view for real payment dates, with quick filters, export shortcuts, and clearer mobile scanning of results.
           </p>
           <p className="text-sm text-[hsl(var(--muted))]">
             Signed in as <span className="font-medium">{me.email || 'unknown'}</span>
@@ -452,6 +465,12 @@ export default async function AdminPaymentsPage({
               <button className="inline-flex items-center justify-center rounded-2xl bg-black text-white px-4 py-2 text-sm font-medium hover:opacity-95">
                 Apply filters
               </button>
+              <a href={`/api/admin/payments/export?${exportQS}`} className="inline-flex items-center justify-center rounded-2xl shadow-soft border border-[hsl(var(--border))] bg-white px-4 py-2 text-sm font-medium hover:bg-[hsl(var(--bg))]/80">
+                Export current CSV
+              </a>
+              <a href={`/api/admin/payments/export-pdf?${exportQS}`} className="inline-flex items-center justify-center rounded-2xl shadow-soft border border-[hsl(var(--border))] bg-white px-4 py-2 text-sm font-medium hover:bg-[hsl(var(--bg))]/80">
+                Export current PDF
+              </a>
               <Link
                 prefetch={false}
                 href="/admin/payments"
@@ -478,10 +497,13 @@ export default async function AdminPaymentsPage({
       </Card>
 
       <Card>
-        <CardContent className="py-4">
+        <CardContent className="py-4 space-y-1">
           <div className="text-sm text-[hsl(var(--muted))]">
             <strong>Payment date</strong> is the real accounting date. <strong>Recorded at</strong> is when the payment was entered in ATOM App.
             Use <strong>Edit date</strong> for historical imports already entered with today&apos;s date.
+          </div>
+          <div className="text-xs text-[hsl(var(--muted))]">
+            CSV/PDF exports always follow the current filtered result, not only the visible page.
           </div>
         </CardContent>
       </Card>
