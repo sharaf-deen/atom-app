@@ -152,6 +152,16 @@ function balanceImpact(kind: EntryKind, amount: number) {
   return <span className="inline-flex rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-900">Gym owes {formatEGP(amount)}</span>
 }
 
+function cashEffectBadge(kind: EntryKind) {
+  if (kind === 'advance_to_gym') {
+    return <span className="inline-flex rounded-full border border-sky-200 bg-sky-50 px-2 py-0.5 text-xs font-medium text-sky-800">Cash in</span>
+  }
+  if (kind === 'reimbursement_from_gym') {
+    return <span className="inline-flex rounded-full border border-rose-200 bg-rose-50 px-2 py-0.5 text-xs font-medium text-rose-800">Cash out</span>
+  }
+  return <span className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-xs font-medium text-slate-700">Off-cash until reimbursed</span>
+}
+
 function actionLinkClass() {
   return 'inline-flex items-center justify-center rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-1.5 text-sm shadow-soft transition hover:bg-[hsl(var(--bg))]/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-[hsl(var(--bg))]'
 }
@@ -709,6 +719,7 @@ export default async function PersonalFundsPage({
     { key: 'date', header: 'Date' },
     { key: 'person', header: 'Person' },
     { key: 'type', header: 'Type' },
+    { key: 'cash', header: 'Cash effect' },
     { key: 'impact', header: 'Balance impact' },
     { key: 'amount', header: 'Amount' },
     { key: 'method', header: 'Method', hideOnMobile: true },
@@ -723,6 +734,7 @@ export default async function PersonalFundsPage({
     date: entry.entry_date,
     person: personById.get(entry.person_id)?.label ?? 'Unknown person',
     type: kindBadge(entry.kind),
+    cash: cashEffectBadge(entry.kind),
     impact: balanceImpact(entry.kind, Number(entry.amount ?? 0)),
     amount: formatEGP(Number(entry.amount ?? 0)),
     method: paymentLabel(entry.payment_method),
@@ -771,7 +783,7 @@ export default async function PersonalFundsPage({
     <main>
       <PageHeader
         title="Personal Funds"
-        subtitle="Track partner advances, gym expenses paid personally, reimbursements, and attached proof. V1.2 adds edit entry + replace receipt while still staying separate from Cash Report for stability."
+        subtitle="Track partner advances, gym expenses paid personally, reimbursements, and attached proof. V2 keeps editing and receipts, and now makes cash-affecting personal fund entries visible in Cash Report without changing Payments or Expenses flows."
         right={
           <div className="flex flex-wrap items-center gap-2">
             <Button asChild variant="outline" href="/admin">
@@ -839,10 +851,11 @@ export default async function PersonalFundsPage({
           </InlineAlert>
         ) : null}
 
-        <InlineAlert variant="info" title="How balances work">
+        <InlineAlert variant="info" title="How balances and cash visibility work">
           <div className="space-y-1">
             <div><strong>Advance to gym</strong> and <strong>Expense paid personally</strong> increase what the gym owes to that person.</div>
             <div><strong>Reimbursement from gym</strong> decreases what the gym still owes.</div>
+            <div><strong>Cash Report visibility:</strong> <strong>Advance to gym</strong> is treated as <strong>cash in</strong>, <strong>Reimbursement from gym</strong> is treated as <strong>cash out</strong>, and <strong>Expense paid personally</strong> stays <strong>off-cash</strong> until the gym reimburses it.</div>
             <div><strong>Receipt / invoice</strong> is optional proof, stays private in storage, and can be replaced later.</div>
           </div>
         </InlineAlert>
@@ -966,6 +979,10 @@ export default async function PersonalFundsPage({
                   />
                 </div>
 
+                <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] px-4 py-3 text-sm text-[hsl(var(--muted))]">
+                  <div><strong className="text-[hsl(var(--fg))]">Cash Report effect:</strong> Advance to gym = cash in, Reimbursement from gym = cash out, Expense paid personally = off-cash until reimbursed.</div>
+                </div>
+
                 {editEntry?.receipt_path ? (
                   <label className="flex items-start gap-2 rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] px-3 py-2 text-sm">
                     <input type="checkbox" name="remove_receipt" value="1" className="mt-0.5" />
@@ -1006,7 +1023,7 @@ export default async function PersonalFundsPage({
               <form action={addPersonAction} className="flex flex-col gap-3 sm:flex-row sm:items-end">
                 <input type="hidden" name="return_qs" value={returnQS} />
                 <div className="min-w-0 flex-1">
-                  <Input label="Add person" name="label" placeholder="e.g. Charaf, Ahmed, Partner 2" />
+                  <Input label="Add person" name="label" />
                 </div>
                 <Button type="submit">Add person</Button>
               </form>
