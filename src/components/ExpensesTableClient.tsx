@@ -4,9 +4,6 @@ import { useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import Modal from '@/components/ui/Modal'
-import Button from '@/components/ui/Button'
-import Input from '@/components/ui/Input'
-import Select from '@/components/ui/Select'
 
 export type ExpenseRow = {
   id: string
@@ -23,6 +20,7 @@ export type ExpenseRow = {
 type Props = {
   expenses: ExpenseRow[]
   labelByKey: Record<string, string>
+  returnQueryString?: string
 }
 
 type EditableExpense = {
@@ -60,9 +58,40 @@ function paymentLabel(v?: string | null) {
   return s.replaceAll('_', ' ')
 }
 
-export default function ExpensesTableClient({ expenses, labelByKey }: Props) {
+function paymentBadgeClass(v?: string | null) {
+  const s = (v || '').trim()
+  if (s === 'cash') return 'bg-emerald-50 text-emerald-700 border-emerald-200'
+  if (s === 'visa') return 'bg-violet-50 text-violet-700 border-violet-200'
+  if (s === 'instapay') return 'bg-sky-50 text-sky-700 border-sky-200'
+  if (s === 'bank_transfer') return 'bg-amber-50 text-amber-800 border-amber-200'
+  return 'bg-[hsl(var(--bg))] text-[hsl(var(--muted))] border-[hsl(var(--border))]'
+}
+
+function receiptUrl(id: string) {
+  return `/api/expenses/${id}/receipt`
+}
+
+function redirectHref(returnQueryString?: string, patch?: Record<string, string>) {
+  const sp = new URLSearchParams(returnQueryString || '')
+  if (patch) {
+    for (const [key, value] of Object.entries(patch)) {
+      if (!value) sp.delete(key)
+      else sp.set(key, value)
+    }
+  }
+  const s = sp.toString()
+  return s ? `/expenses?${s}` : '/expenses'
+}
+
+function parseErrorMessage(data: any, fallback: string) {
+  return data?.details || data?.error || fallback
+}
+
+export default function ExpensesTableClient({ expenses, labelByKey, returnQueryString = '' }: Props) {
   const router = useRouter()
-  const [open, setOpen] = useState(false)
+  const [previewOpen, setPreviewOpen] = useState(false)
+  const [editOpen, setEditOpen] = useState(false)
+  const [deleteOpen, setDeleteOpen] = useState(false)
   const [active, setActive] = useState<
     | null
     | {
@@ -73,191 +102,267 @@ export default function ExpensesTableClient({ expenses, labelByKey }: Props) {
         path?: string | null
       }
   >(null)
-  const [editOpen, setEditOpen] = useState(false)
   const [editing, setEditing] = useState<EditableExpense | null>(null)
+  const [deletingExpense, setDeletingExpense] = useState<ExpenseRow | null>(null)
   const [saving, setSaving] = useState(false)
-  const [deletingId, setDeletingId] = useState<string | null>(null)
+  const [deleting, setDeleting] = useState(false)
 
   const activeIsImage = useMemo(() => {
     if (!active) return false
     return isImageReceipt(active.mime, active.path)
   }, [active])
 
-  const categoryOptions = useMemo(() => {
-    return Object.entries(labelByKey)
-      .sort((a, b) => a[1].localeCompare(b[1]))
-      .map(([value, label]) => ({ value, label }))
-  }, [labelByKey])
-
   function openPreview(e: ExpenseRow) {
-    const url = `/api/expenses/${e.id}/receipt`
-    setActive({ id: e.id, url, filename: e.receipt_filename, mime: e.receipt_mime, path: e.receipt_path })
-    setOpen(true)
-  }
-
-  function close() {
-    setOpen(false)
-    // keep active to avoid iframe reload flicker if reopened quickly
+    setActive({
+      id: e.id,
+      url: receiptUrl(e.id),
+      filename: e.receipt_filename,
+      mime: e.receipt_mime,
+      path: e.receipt_path,
+    })
+    setPreviewOpen(true)
   }
 
   function openEdit(e: ExpenseRow) {
     setEditing({
       id: e.id,
       date: e.date,
-      category_key: e.category_key ?? '',
-      description: e.description ?? '',
-      amount: String(Number.isFinite(e.amount) ? e.amount : 0),
-      payment_method: e.payment_method ?? 'cash',
+      category_key: e.category_key || '',
+      description: e.description || '',
+      amount: String(e.amount ?? ''),
+      payment_method: e.payment_method || 'cash',
     })
     setEditOpen(true)
   }
 
-  async function submitEdit() {
+  function openDelete(e: ExpenseRow) {
+    setDeletingExpense(e)
+    setDeleteOpen(true)
+  }
+
+  async function onSaveEdit() {
     if (!editing) return
-    setSaving(true)
+
+    const amount = Number(editing.amount)
+    if (!editing.category_key) {
+      toast.error('Please choose a category.')
+      return
+    }
+    if (!Number.isFinite(amount)) {
+      toast.error('Invalid amount.')
+      return
+    }
+
     try {
-      const r = await fetch(`/api/expenses/${editing.id}`, {
+      setSaving(true)
+      const res = await fetch(`/api/expenses/${editing.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           date: editing.date,
           category_key: editing.category_key,
-          description: editing.description,
-          amount: Number(editing.amount),
+          description: editing.description.trim() || null,
+          amount,
           payment_method: editing.payment_method,
         }),
       })
 
-      const data = await r.json().catch(() => ({}))
-      if (!r.ok) {
-        throw new Error(data?.details || data?.error || 'Failed to update expense.')
-      }
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(parseErrorMessage(data, 'Update failed.'))
 
-      toast.success('Expense updated.')
-      setEditOpen(false)
+      toast.success('Expense updated')
+      const href = redirectHref(returnQueryString, { updated: '1', deleted: '', saved: '' })
+      router.push(href)
       router.refresh()
-    } catch (e: any) {
-      toast.error(e?.message || 'Failed to update expense.')
+      setEditOpen(false)
+    } catch (error: any) {
+      toast.error(error?.message || 'Update failed.')
     } finally {
       setSaving(false)
     }
   }
 
-  async function deleteExpense(e: ExpenseRow) {
-    const ok = window.confirm('Delete this expense permanently?')
-    if (!ok) return
+  async function onDeleteExpense() {
+    if (!deletingExpense) return
 
-    setDeletingId(e.id)
     try {
-      const r = await fetch(`/api/expenses/${e.id}`, { method: 'DELETE' })
-      const data = await r.json().catch(() => ({}))
-      if (!r.ok) {
-        throw new Error(data?.details || data?.error || 'Failed to delete expense.')
-      }
+      setDeleting(true)
+      const res = await fetch(`/api/expenses/${deletingExpense.id}`, {
+        method: 'DELETE',
+      })
 
-      toast.success('Expense deleted.')
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(parseErrorMessage(data, 'Delete failed.'))
+
+      toast.success('Expense deleted')
+      const href = redirectHref(returnQueryString, { deleted: '1', updated: '', saved: '' })
+      router.push(href)
       router.refresh()
-    } catch (err: any) {
-      toast.error(err?.message || 'Failed to delete expense.')
+      setDeleteOpen(false)
+    } catch (error: any) {
+      toast.error(error?.message || 'Delete failed.')
     } finally {
-      setDeletingId(null)
+      setDeleting(false)
     }
   }
 
   return (
     <>
-      {expenses.length === 0 ? (
-        <p className="text-sm text-[hsl(var(--muted))]">No expenses in this range.</p>
-      ) : (
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="text-left border-b border-[hsl(var(--border))]">
-                <th className="py-2 pr-3">Date</th>
-                <th className="py-2 pr-3">Category</th>
-                <th className="py-2 pr-3">Description</th>
-                <th className="py-2 pr-3">Payment</th>
-                <th className="py-2 pr-3">Receipt</th>
-                <th className="py-2 text-right">Amount</th>
-                <th className="py-2 pl-3 text-right">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {expenses.map((e) => (
-                <tr key={e.id} className="border-b border-[hsl(var(--border))]/60 align-top">
-                  <td className="py-2 pr-3 whitespace-nowrap">{e.date}</td>
-                  <td className="py-2 pr-3">
-                    {e.category_key ? labelByKey[e.category_key] ?? e.category_key : '—'}
-                  </td>
-                  <td className="py-2 pr-3 text-[hsl(var(--muted))]">{e.description ?? '—'}</td>
-                  <td className="py-2 pr-3 whitespace-nowrap">{paymentLabel(e.payment_method)}</td>
-                  <td className="py-2 pr-3 whitespace-nowrap">
-                    {e.receipt_path ? (
-                      <div className="flex items-center gap-2">
-                        {isImageReceipt(e.receipt_mime, e.receipt_path) ? (
-                          <button
-                            type="button"
-                            onClick={() => openPreview(e)}
-                            className="rounded-lg border border-[hsl(var(--border))] overflow-hidden h-8 w-8"
-                            title="Preview receipt"
-                          >
-                            {/* eslint-disable-next-line @next/next/no-img-element */}
-                            <img
-                              src={`/api/expenses/${e.id}/receipt`}
-                              alt={e.receipt_filename ? `Receipt ${e.receipt_filename}` : 'Receipt'}
-                              className="h-8 w-8 object-cover"
-                              loading="lazy"
-                            />
-                          </button>
-                        ) : (
-                          <button
-                            type="button"
-                            onClick={() => openPreview(e)}
-                            className="text-[11px] px-2 py-1 rounded-xl border border-[hsl(var(--border))] bg-white"
-                            title="Preview receipt (PDF)"
-                          >
-                            PDF
-                          </button>
-                        )}
+      {expenses.length > 0 ? (
+        <>
+          <div className="space-y-3 md:hidden">
+            {expenses.map((e) => {
+              const categoryLabel = e.category_key ? labelByKey[e.category_key] ?? e.category_key : '—'
+              const hasReceipt = Boolean(e.receipt_path)
+              return (
+                <div key={e.id} className="rounded-2xl border border-[hsl(var(--border))] bg-white p-4 shadow-soft">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <div className="text-xs text-[hsl(var(--muted))]">{e.date}</div>
+                      <div className="mt-1 font-semibold">{categoryLabel}</div>
+                    </div>
+                    <div className="text-right">
+                      <div className="text-lg font-semibold">{formatEGP(e.amount)}</div>
+                      <span className={`mt-1 inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-medium ${paymentBadgeClass(e.payment_method)}`}>
+                        {paymentLabel(e.payment_method)}
+                      </span>
+                    </div>
+                  </div>
 
-                        <button type="button" className="text-xs underline" onClick={() => openPreview(e)}>
-                          Preview
+                  <div className="mt-3 text-sm text-[hsl(var(--muted))]">
+                    {e.description?.trim() ? e.description : 'No description'}
+                  </div>
+
+                  <div className="mt-4 flex flex-wrap items-center gap-2">
+                    {hasReceipt ? (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => openPreview(e)}
+                          className="rounded-xl border border-[hsl(var(--border))] px-3 py-2 text-xs font-medium hover:bg-[hsl(var(--bg))]/80"
+                        >
+                          View receipt
                         </button>
-                      </div>
+                        <a
+                          href={receiptUrl(e.id)}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="rounded-xl border border-[hsl(var(--border))] px-3 py-2 text-xs font-medium hover:bg-[hsl(var(--bg))]/80"
+                        >
+                          Open receipt
+                        </a>
+                      </>
                     ) : (
-                      <span className="text-[hsl(var(--muted))]">—</span>
+                      <span className="rounded-full border border-[hsl(var(--border))] bg-[hsl(var(--bg))] px-3 py-1 text-[11px] font-medium text-[hsl(var(--muted))]">
+                        No receipt
+                      </span>
                     )}
-                  </td>
-                  <td className="py-2 text-right font-medium whitespace-nowrap">{formatEGP(e.amount)}</td>
-                  <td className="py-2 pl-3 text-right whitespace-nowrap">
-                    <div className="flex items-center justify-end gap-2">
+
+                    <div className="ml-auto flex items-center gap-2">
                       <button
                         type="button"
                         onClick={() => openEdit(e)}
-                        className="rounded-xl border border-[hsl(var(--border))] px-2.5 py-1.5 text-xs font-medium hover:bg-[hsl(var(--bg))]/80"
+                        className="rounded-xl border border-[hsl(var(--border))] px-3 py-2 text-xs font-medium hover:bg-[hsl(var(--bg))]/80"
                       >
                         Edit
                       </button>
                       <button
                         type="button"
-                        onClick={() => deleteExpense(e)}
-                        disabled={deletingId === e.id}
-                        className="rounded-xl border border-rose-200 px-2.5 py-1.5 text-xs font-medium text-rose-700 hover:bg-rose-50 disabled:opacity-50"
+                        onClick={() => openDelete(e)}
+                        className="rounded-xl border border-rose-200 px-3 py-2 text-xs font-medium text-rose-700 hover:bg-rose-50"
                       >
-                        {deletingId === e.id ? 'Deleting…' : 'Delete'}
+                        Delete
                       </button>
                     </div>
-                  </td>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+
+          <div className="hidden md:block overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-[hsl(var(--border))] text-left">
+                  <th className="py-3 pr-3 font-semibold">Date</th>
+                  <th className="py-3 pr-3 font-semibold">Category</th>
+                  <th className="py-3 pr-3 font-semibold">Description</th>
+                  <th className="py-3 pr-3 font-semibold">Payment</th>
+                  <th className="py-3 pr-3 font-semibold">Receipt</th>
+                  <th className="py-3 pr-3 font-semibold">Actions</th>
+                  <th className="py-3 text-right font-semibold">Amount</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
+              </thead>
+              <tbody>
+                {expenses.map((e) => {
+                  const categoryLabel = e.category_key ? labelByKey[e.category_key] ?? e.category_key : '—'
+                  const hasReceipt = Boolean(e.receipt_path)
+                  return (
+                    <tr key={e.id} className="border-b border-[hsl(var(--border))]/60 align-top">
+                      <td className="py-3 pr-3 whitespace-nowrap">{e.date}</td>
+                      <td className="py-3 pr-3 font-medium">{categoryLabel}</td>
+                      <td className="py-3 pr-3 text-[hsl(var(--muted))] max-w-[24rem]">
+                        <div className="line-clamp-2">{e.description?.trim() ? e.description : 'No description'}</div>
+                      </td>
+                      <td className="py-3 pr-3 whitespace-nowrap">
+                        <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-medium ${paymentBadgeClass(e.payment_method)}`}>
+                          {paymentLabel(e.payment_method)}
+                        </span>
+                      </td>
+                      <td className="py-3 pr-3 whitespace-nowrap">
+                        {hasReceipt ? (
+                          <div className="flex flex-wrap items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => openPreview(e)}
+                              className="rounded-xl border border-[hsl(var(--border))] px-3 py-1.5 text-xs font-medium hover:bg-[hsl(var(--bg))]/80"
+                            >
+                              View
+                            </button>
+                            <a
+                              href={receiptUrl(e.id)}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="rounded-xl border border-[hsl(var(--border))] px-3 py-1.5 text-xs font-medium hover:bg-[hsl(var(--bg))]/80"
+                            >
+                              Open
+                            </a>
+                          </div>
+                        ) : (
+                          <span className="text-[hsl(var(--muted))]">No receipt</span>
+                        )}
+                      </td>
+                      <td className="py-3 pr-3 whitespace-nowrap">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => openEdit(e)}
+                            className="rounded-xl border border-[hsl(var(--border))] px-3 py-1.5 text-xs font-medium hover:bg-[hsl(var(--bg))]/80"
+                          >
+                            Edit
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => openDelete(e)}
+                            className="rounded-xl border border-rose-200 px-3 py-1.5 text-xs font-medium text-rose-700 hover:bg-rose-50"
+                          >
+                            Delete
+                          </button>
+                        </div>
+                      </td>
+                      <td className="py-3 text-right text-base font-semibold whitespace-nowrap">{formatEGP(e.amount)}</td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        </>
+      ) : null}
 
       <Modal
-        open={open}
-        onClose={close}
+        open={previewOpen}
+        onClose={() => setPreviewOpen(false)}
         title={active?.filename ? `Receipt · ${active.filename}` : 'Receipt'}
         className="w-[min(95vw,56rem)]"
       >
@@ -277,7 +382,7 @@ export default function ExpensesTableClient({ expenses, labelByKey }: Props) {
                 </a>
                 <button
                   type="button"
-                  onClick={close}
+                  onClick={() => setPreviewOpen(false)}
                   className="rounded-xl border border-[hsl(var(--border))] px-3 py-1 text-xs"
                 >
                   Close
@@ -307,76 +412,125 @@ export default function ExpensesTableClient({ expenses, labelByKey }: Props) {
         open={editOpen}
         onClose={() => !saving && setEditOpen(false)}
         title="Edit expense"
+        className="w-[min(95vw,40rem)]"
       >
         {!editing ? null : (
           <div className="space-y-4">
             <div className="grid gap-3 sm:grid-cols-2">
               <label className="block">
                 <span className="mb-1 block text-sm font-medium">Date</span>
-                <Input
+                <input
                   type="date"
                   value={editing.date}
-                  onChange={(e) => setEditing((prev) => (prev ? { ...prev, date: e.target.value } : prev))}
-                />
-              </label>
-
-              <label className="block">
-                <span className="mb-1 block text-sm font-medium">Category</span>
-                <Select
-                  value={editing.category_key}
-                  onChange={(e) => setEditing((prev) => (prev ? { ...prev, category_key: e.target.value } : prev))}
-                >
-                  <option value="">Choose…</option>
-                  {categoryOptions.map((c) => (
-                    <option key={c.value} value={c.value}>
-                      {c.label}
-                    </option>
-                  ))}
-                </Select>
-              </label>
-
-              <label className="block">
-                <span className="mb-1 block text-sm font-medium">Amount</span>
-                <Input
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  value={editing.amount}
-                  onChange={(e) => setEditing((prev) => (prev ? { ...prev, amount: e.target.value } : prev))}
+                  onChange={(e) => setEditing((cur) => (cur ? { ...cur, date: e.target.value } : cur))}
+                  className="w-full rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 />
               </label>
 
               <label className="block">
                 <span className="mb-1 block text-sm font-medium">Payment method</span>
-                <Select
+                <select
                   value={editing.payment_method}
-                  onChange={(e) => setEditing((prev) => (prev ? { ...prev, payment_method: e.target.value } : prev))}
+                  onChange={(e) => setEditing((cur) => (cur ? { ...cur, payment_method: e.target.value } : cur))}
+                  className="w-full rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 >
                   <option value="cash">Cash</option>
                   <option value="visa">Visa card</option>
                   <option value="instapay">Instapay</option>
                   <option value="bank_transfer">Bank transfer</option>
-                </Select>
+                </select>
+              </label>
+
+              <label className="block sm:col-span-2">
+                <span className="mb-1 block text-sm font-medium">Category</span>
+                <select
+                  value={editing.category_key}
+                  onChange={(e) => setEditing((cur) => (cur ? { ...cur, category_key: e.target.value } : cur))}
+                  className="w-full rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                  <option value="">Choose…</option>
+                  {Object.entries(labelByKey).map(([key, label]) => (
+                    <option key={key} value={key}>
+                      {label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="block">
+                <span className="mb-1 block text-sm font-medium">Amount (EGP)</span>
+                <input
+                  type="number"
+                  step="0.01"
+                  value={editing.amount}
+                  onChange={(e) => setEditing((cur) => (cur ? { ...cur, amount: e.target.value } : cur))}
+                  className="w-full rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                />
+              </label>
+
+              <label className="block sm:col-span-2">
+                <span className="mb-1 block text-sm font-medium">Description</span>
+                <input
+                  value={editing.description}
+                  onChange={(e) => setEditing((cur) => (cur ? { ...cur, description: e.target.value } : cur))}
+                  placeholder="Optional note…"
+                  className="w-full rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                />
               </label>
             </div>
 
-            <label className="block">
-              <span className="mb-1 block text-sm font-medium">Description</span>
-              <textarea
-                value={editing.description}
-                onChange={(e) => setEditing((prev) => (prev ? { ...prev, description: e.target.value } : prev))}
-                rows={3}
-                className="w-full rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-[hsl(var(--bg))]"
-              />
-            </label>
+            <div className="flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setEditOpen(false)}
+                disabled={saving}
+                className="rounded-xl border border-[hsl(var(--border))] px-4 py-2 text-sm font-medium hover:bg-[hsl(var(--bg))]/80 disabled:opacity-60"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={onSaveEdit}
+                disabled={saving}
+                className="rounded-xl bg-black px-4 py-2 text-sm font-medium text-white hover:opacity-95 disabled:opacity-60"
+              >
+                {saving ? 'Saving…' : 'Save changes'}
+              </button>
+            </div>
+          </div>
+        )}
+      </Modal>
+
+      <Modal
+        open={deleteOpen}
+        onClose={() => !deleting && setDeleteOpen(false)}
+        title="Delete expense"
+      >
+        {!deletingExpense ? null : (
+          <div className="space-y-4">
+            <p className="text-sm text-[hsl(var(--muted))]">
+              This will permanently delete the expense on <span className="font-medium text-[hsl(var(--fg))]">{deletingExpense.date}</span>{' '}
+              for <span className="font-medium text-[hsl(var(--fg))]">{formatEGP(deletingExpense.amount)}</span>.
+            </p>
+            <p className="text-sm text-[hsl(var(--muted))]">The linked receipt will also be removed when possible.</p>
 
             <div className="flex items-center justify-end gap-2">
-              <Button variant="outline" onClick={() => setEditOpen(false)} disabled={saving}>
+              <button
+                type="button"
+                onClick={() => setDeleteOpen(false)}
+                disabled={deleting}
+                className="rounded-xl border border-[hsl(var(--border))] px-4 py-2 text-sm font-medium hover:bg-[hsl(var(--bg))]/80 disabled:opacity-60"
+              >
                 Cancel
-              </Button>
-              <Button onClick={submitEdit} loading={saving} loadingText="Saving…">
-                Save changes
-              </Button>
+              </button>
+              <button
+                type="button"
+                onClick={onDeleteExpense}
+                disabled={deleting}
+                className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-2 text-sm font-medium text-rose-700 hover:bg-rose-100 disabled:opacity-60"
+              >
+                {deleting ? 'Deleting…' : 'Delete expense'}
+              </button>
             </div>
           </div>
         )}
