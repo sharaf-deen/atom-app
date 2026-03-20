@@ -20,6 +20,7 @@ import {
 type Role = 'member' | 'assistant_coach' | 'coach' | 'reception' | 'admin' | 'super_admin'
 type Method = 'cash' | 'instapay' | 'card' | 'bank_transfer'
 const METHODS: Method[] = ['cash', 'instapay', 'card', 'bank_transfer']
+type RangeMode = 'day' | 'week' | 'month' | 'range'
 
 function json(status: number, body: any) {
   const res = NextResponse.json(body, { status })
@@ -87,8 +88,6 @@ function truncate(s: string, max: number) {
   return t.slice(0, Math.max(0, max - 1)).trimEnd() + '…'
 }
 
-type RangeMode = 'day' | 'week' | 'month' | 'range'
-
 function resolveRange(params: URLSearchParams): {
   mode: RangeMode
   anchorDate: string
@@ -139,7 +138,7 @@ export async function GET(req: Request) {
       .from('profiles')
       .select('role')
       .eq('user_id', auth.user.id)
-      .maybeSingle<{ role: Role | null }>()
+      .maybeSingle()
 
     if (meErr) return json(500, { ok: false, error: 'PROFILE_LOOKUP_FAILED', details: meErr.message })
     const role: Role = (me?.role as Role) ?? 'member'
@@ -151,7 +150,6 @@ export async function GET(req: Request) {
     const { searchParams } = new URL(req.url)
     const range = resolveRange(searchParams)
 
-    // Income from subscription_payments (paid_at UTC bounds)
     const { data: pays, error: payErr } = await admin
       .from('subscription_payments')
       .select(
@@ -171,7 +169,6 @@ export async function GET(req: Request) {
       incomeBy[normMethod(r.payment_method)] += amt
     }
 
-    // Expenses for Cairo date range (date-only)
     const { data: exps, error: expErr } = await admin
       .from('expenses')
       .select('id, date, category_key, description, amount, payment_method')
@@ -192,21 +189,17 @@ export async function GET(req: Request) {
     const totalExpenses = METHODS.reduce((s, m) => s + expenseBy[m], 0)
     const net = totalIncome - totalExpenses
 
-    // Recent income (top 15)
-    const recentPays = ((pays ?? []) as any[]).slice(0, 15)
-
-    // Top expenses by amount (top 15)
+    const recentPays = ((pays ?? []) as any[]).slice(0, 10)
     const topExpenses = (exps ?? [])
       .slice()
       .sort((a: any, b: any) => Number(b.amount ?? 0) - Number(a.amount ?? 0))
-      .slice(0, 15)
+      .slice(0, 10)
 
-    // --- PDF ---
     const pdfDoc = await PDFDocument.create()
     const font = await pdfDoc.embedFont(StandardFonts.Helvetica)
     const fontBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold)
 
-    const pageSize: [number, number] = [595.28, 841.89] // A4
+    const pageSize: [number, number] = [595.28, 841.89]
     const marginX = 40
     const marginTop = 46
     const marginBottom = 40
@@ -231,6 +224,10 @@ export async function GET(req: Request) {
       })
     }
 
+    const ensureSpace = (minHeight: number) => {
+      if (y < marginBottom + minHeight) newPage()
+    }
+
     const drawTitle = () => {
       page.drawText('Cash Report', { x: marginX, y, size: 18, font: fontBold })
       y -= 18
@@ -244,9 +241,9 @@ export async function GET(req: Request) {
 
     const drawSummary = () => {
       page.drawText(`Income: ${fmtMoneyEGP(totalIncome)}`, { x: marginX, y, size: 12, font: fontBold })
-      page.drawText(`Expenses: ${fmtMoneyEGP(totalExpenses)}`, { x: marginX + 220, y, size: 12, font: fontBold })
+      page.drawText(`Expenses: ${fmtMoneyEGP(totalExpenses)}`, { x: marginX + 210, y, size: 12, font: fontBold })
       page.drawText(`Net: ${fmtMoneyEGP(net)}`, {
-        x: marginX + 430,
+        x: marginX + 410,
         y,
         size: 12,
         font: fontBold,
@@ -264,6 +261,7 @@ export async function GET(req: Request) {
     }
 
     const drawBreakdown = () => {
+      ensureSpace(120)
       page.drawText('Breakdown by payment method', { x: marginX, y, size: 12, font: fontBold })
       y -= 16
 
@@ -281,7 +279,7 @@ export async function GET(req: Request) {
       y -= 12
 
       for (const m of METHODS) {
-        if (y < marginBottom + 80) newPage()
+        ensureSpace(40)
         page.drawText(labelMethod(m), { x: colMethod, y, size: 10, font })
         page.drawText(fmtMoneyEGP(incomeBy[m]), { x: colIncome, y, size: 10, font })
         page.drawText(fmtMoneyEGP(expenseBy[m]), { x: colExpenses, y, size: 10, font })
@@ -302,7 +300,8 @@ export async function GET(req: Request) {
     }
 
     const drawPaymentsTable = () => {
-      page.drawText('Recent income (payments)', { x: marginX, y, size: 12, font: fontBold })
+      ensureSpace(160)
+      page.drawText('Recent income (latest 10)', { x: marginX, y, size: 12, font: fontBold })
       y -= 16
 
       const colWhen = marginX
@@ -319,13 +318,17 @@ export async function GET(req: Request) {
       y -= 12
 
       for (const r of recentPays) {
-        if (y < marginBottom + 80) newPage()
-        const memberName =
-          `${r.member?.first_name ?? ''} ${r.member?.last_name ?? ''}`.trim() || r.member?.email || '—'
+        ensureSpace(30)
+        const memberName = `${r.member?.first_name ?? ''} ${r.member?.last_name ?? ''}`.trim() || r.member?.email || '—'
         page.drawText(truncate(fmtTimeCairo(r.paid_at || r.created_at), 18), { x: colWhen, y, size: 9, font })
         page.drawText(truncate(memberName, 28), { x: colMember, y, size: 9, font })
         page.drawText(labelMethod(normMethod(r.payment_method)), { x: colMethod, y, size: 9, font })
         page.drawText(fmtMoneyEGP(Number(r.amount ?? 0)), { x: colAmount, y, size: 9, font: fontBold })
+        y -= rowH
+      }
+
+      if (!recentPays.length) {
+        page.drawText('No payments in this period.', { x: marginX, y, size: 9, font, color: rgb(0.35, 0.35, 0.35) })
         y -= rowH
       }
 
@@ -335,7 +338,8 @@ export async function GET(req: Request) {
     }
 
     const drawExpensesTable = () => {
-      page.drawText('Top expenses (by amount)', { x: marginX, y, size: 12, font: fontBold })
+      ensureSpace(160)
+      page.drawText('Top expenses (highest 10)', { x: marginX, y, size: 12, font: fontBold })
       y -= 16
 
       const colDate = marginX
@@ -354,12 +358,17 @@ export async function GET(req: Request) {
       y -= 12
 
       for (const r of topExpenses as any[]) {
-        if (y < marginBottom + 80) newPage()
+        ensureSpace(30)
         page.drawText(fmtDate(String(r.date ?? '—')), { x: colDate, y, size: 9, font })
         page.drawText(truncate(String(r.category_key ?? '—'), 18), { x: colCat, y, size: 9, font })
         page.drawText(labelMethod(normMethod(r.payment_method)), { x: colMethod, y, size: 9, font })
         page.drawText(fmtMoneyEGP(Number(r.amount ?? 0)), { x: colAmount, y, size: 9, font: fontBold })
         page.drawText(truncate(String(r.description ?? ''), 18), { x: colDesc, y, size: 9, font })
+        y -= rowH
+      }
+
+      if (!topExpenses.length) {
+        page.drawText('No expenses in this period.', { x: marginX, y, size: 9, font, color: rgb(0.35, 0.35, 0.35) })
         y -= rowH
       }
     }
@@ -373,7 +382,7 @@ export async function GET(req: Request) {
     const pdfBytes = await pdfDoc.save()
     const filename = `cash-report_${range.from}_${range.to}.pdf`
 
-    const res = new NextResponse(pdfBytes, {
+    return new NextResponse(pdfBytes, {
       status: 200,
       headers: {
         'Content-Type': 'application/pdf',
@@ -381,7 +390,6 @@ export async function GET(req: Request) {
         'Cache-Control': 'no-store',
       },
     })
-    return res
   } catch (e: any) {
     return json(500, { ok: false, error: 'UNEXPECTED', details: String(e?.message || e) })
   }
