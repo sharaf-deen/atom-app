@@ -184,6 +184,9 @@ export default async function AdminPage() {
           <Button asChild variant="outline" href="/expenses">
             Expenses
           </Button>
+          <Button asChild variant="outline" href="/admin/personal-funds">
+            Personal Funds
+          </Button>
           <Button asChild variant="outline" href="/admin/scan-audit">
             Scan Audit
           </Button>
