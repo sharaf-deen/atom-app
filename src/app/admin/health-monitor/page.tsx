@@ -14,7 +14,10 @@ import { collectHealthMonitorSummary, getHealthMonitorRecipients, type HealthMon
 
 type SearchParams = {
   report?: string | string[]
+  status?: string | string[]
 }
+
+type ReportFilterStatus = 'all' | 'healthy' | 'warning' | 'critical'
 
 function getStatusMeta(status: string) {
   if (status === 'healthy') {
@@ -23,6 +26,8 @@ function getStatusMeta(status: string) {
       short: 'Healthy',
       description: 'No important issue detected in the main checks.',
       className: 'bg-emerald-100 text-emerald-800 border-emerald-200',
+      reviewClassName: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+      reviewLabel: 'Looks normal',
     }
   }
 
@@ -32,6 +37,8 @@ function getStatusMeta(status: string) {
       short: 'Warning',
       description: 'Something needs attention, but there is no major structural issue yet.',
       className: 'bg-amber-100 text-amber-800 border-amber-200',
+      reviewClassName: 'bg-amber-100 text-amber-800 border-amber-200',
+      reviewLabel: 'Needs review',
     }
   }
 
@@ -40,6 +47,8 @@ function getStatusMeta(status: string) {
     short: 'Critical',
     description: 'A serious data consistency or account integrity issue was detected.',
     className: 'bg-red-100 text-red-800 border-red-200',
+    reviewClassName: 'bg-red-100 text-red-800 border-red-200',
+    reviewLabel: 'Needs urgent review',
   }
 }
 
@@ -115,6 +124,30 @@ function formatCairoDateTime(value: string) {
   return new Date(value).toLocaleString('en-GB', { timeZone: 'Africa/Cairo' })
 }
 
+function parseReportFilter(raw: string | string[] | undefined): ReportFilterStatus {
+  const value = typeof raw === 'string'
+    ? raw
+    : Array.isArray(raw)
+      ? raw[0]
+      : 'all'
+
+  if (value === 'healthy' || value === 'warning' || value === 'critical') return value
+  return 'all'
+}
+
+function reportMatchesFilter(report: HealthMonitorStoredReport, filter: ReportFilterStatus) {
+  if (filter === 'all') return true
+  return report.overall_status === filter
+}
+
+function buildMonitorHref({ status = 'all', reportId }: { status?: ReportFilterStatus; reportId?: string | null }) {
+  const params = new URLSearchParams()
+  if (status !== 'all') params.set('status', status)
+  if (reportId) params.set('report', reportId)
+  const query = params.toString()
+  return query ? `/admin/health-monitor?${query}` : '/admin/health-monitor'
+}
+
 function StatCard({ label, value, hint }: { label: string; value: string | number; hint?: string }) {
   return (
     <Card>
@@ -124,6 +157,33 @@ function StatCard({ label, value, hint }: { label: string; value: string | numbe
         {hint ? <div className="mt-1 text-xs text-[hsl(var(--muted))]">{hint}</div> : null}
       </CardContent>
     </Card>
+  )
+}
+
+function FilterChip({
+  label,
+  value,
+  active,
+  href,
+}: {
+  label: string
+  value: number
+  active?: boolean
+  href: string
+}) {
+  return (
+    <Link
+      href={href}
+      className={[
+        'inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-semibold transition',
+        active
+          ? 'border-black bg-black text-white'
+          : 'border-[hsl(var(--border))] bg-white text-black hover:bg-black/5',
+      ].join(' ')}
+    >
+      <span>{label}</span>
+      <span className={active ? 'text-white/85' : 'text-[hsl(var(--muted))]'}>{value}</span>
+    </Link>
   )
 }
 
@@ -179,7 +239,17 @@ function HighlightsList({ highlights }: { highlights: string[] }) {
   )
 }
 
-function StoredReportDetails({ report }: { report: HealthMonitorStoredReport | null }) {
+function StoredReportDetails({
+  report,
+  filterStatus,
+  autoFocusMessage,
+  selectedOutsideFilter,
+}: {
+  report: HealthMonitorStoredReport | null
+  filterStatus: ReportFilterStatus
+  autoFocusMessage?: string | null
+  selectedOutsideFilter?: boolean
+}) {
   if (!report) {
     return (
       <Card>
@@ -200,6 +270,18 @@ function StoredReportDetails({ report }: { report: HealthMonitorStoredReport | n
   return (
     <Card>
       <CardContent className="space-y-4">
+        {autoFocusMessage ? (
+          <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4 text-sm text-[hsl(var(--muted))]">
+            {autoFocusMessage}
+          </div>
+        ) : null}
+
+        {selectedOutsideFilter ? (
+          <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
+            The opened report is outside the current list filter. Change the filter to see it in Recent reports.
+          </div>
+        ) : null}
+
         <div className="flex flex-wrap items-start gap-3">
           <div className="min-w-0 flex-1">
             <div className="text-sm text-[hsl(var(--muted))]">Stored report details</div>
@@ -218,8 +300,13 @@ function StoredReportDetails({ report }: { report: HealthMonitorStoredReport | n
             <span className={`inline-flex rounded-full border px-3 py-1 text-xs font-semibold ${email.className}`}>
               {email.label}
             </span>
-            <Button asChild variant="outline" size="sm" href="/admin/health-monitor">
-              View latest
+            {report.overall_status !== 'healthy' ? (
+              <span className={`inline-flex rounded-full border px-3 py-1 text-xs font-semibold ${status.reviewClassName}`}>
+                {status.reviewLabel}
+              </span>
+            ) : null}
+            <Button asChild variant="outline" size="sm" href={buildMonitorHref({ status: filterStatus })}>
+              View latest in filter
             </Button>
           </div>
         </div>
@@ -275,7 +362,7 @@ function StoredReportDetails({ report }: { report: HealthMonitorStoredReport | n
 
         <div className="rounded-2xl border border-[hsl(var(--border))] bg-white p-4">
           <div className="text-sm font-medium">Email recipients</div>
-          <div className="mt-2 text-sm text-[hsl(var(--muted))] break-words">
+          <div className="mt-2 break-words text-sm text-[hsl(var(--muted))]">
             {Array.isArray(report.email_recipients) && report.email_recipients.length > 0 ? report.email_recipients.join(', ') : 'No recipients stored for this run.'}
           </div>
           {report.email_error ? <div className="mt-2 text-sm text-red-700">{report.email_error}</div> : null}
@@ -324,17 +411,42 @@ export default async function HealthMonitorPage({ searchParams }: { searchParams
   const requestedReportId = typeof searchParams?.report === 'string'
     ? searchParams.report
     : Array.isArray(searchParams?.report)
-      ? searchParams?.report[0]
+      ? searchParams.report[0]
       : ''
 
-  const selectedReport = reports.find((row) => row.id === requestedReportId) ?? reports[0] ?? null
+  const filterStatus = parseReportFilter(searchParams?.status)
+  const filteredReports = reports.filter((row) => reportMatchesFilter(row, filterStatus))
+  const latestNeedsReviewOverall = reports.find((row) => row.overall_status !== 'healthy') ?? null
+  const latestNeedsReviewVisible = filteredReports.find((row) => row.overall_status !== 'healthy') ?? null
+  const requestedReport = reports.find((row) => row.id === requestedReportId) ?? null
+  const autoSelectedReport = requestedReport
+    ?? (filterStatus === 'all'
+      ? latestNeedsReviewOverall ?? reports[0] ?? null
+      : filteredReports[0] ?? latestNeedsReviewOverall ?? reports[0] ?? null)
+
+  const selectedReport = autoSelectedReport
+  const selectedOutsideFilter = !!selectedReport && filterStatus !== 'all' && !reportMatchesFilter(selectedReport, filterStatus)
   const liveStatus = getStatusMeta(summary.overall_status)
+
+  const visibleHealthyCount = filteredReports.filter((row) => row.overall_status === 'healthy').length
+  const visibleWarningCount = filteredReports.filter((row) => row.overall_status === 'warning').length
+  const visibleCriticalCount = filteredReports.filter((row) => row.overall_status === 'critical').length
+  const visibleNeedsReviewCount = visibleWarningCount + visibleCriticalCount
+
+  let autoFocusMessage: string | null = null
+  if (!requestedReportId && selectedReport) {
+    if (filterStatus === 'all' && selectedReport.overall_status !== 'healthy') {
+      autoFocusMessage = 'Auto-focused the latest report that needs review so admins can triage faster.'
+    } else if (filterStatus !== 'all') {
+      autoFocusMessage = `Auto-focused the latest ${filterStatus} report in the current list.`
+    }
+  }
 
   return (
     <main>
       <PageHeader
         title="Health Monitor"
-        subtitle="Daily app health snapshot, stored reports, and actionable admin follow-up."
+        subtitle="Daily app health snapshot, stored reports, and faster admin triage."
         right={
           <div className="flex flex-wrap items-center gap-2">
             <RunHealthMonitorButton />
@@ -419,6 +531,102 @@ export default async function HealthMonitorPage({ searchParams }: { searchParams
       </Section>
 
       <Section className="space-y-4">
+        <div className="grid gap-4 xl:grid-cols-[1fr_1fr]">
+          <Card>
+            <CardContent className="space-y-4">
+              <div>
+                <div className="text-sm font-medium">Triage queue</div>
+                <p className="mt-1 text-sm text-[hsl(var(--muted))]">
+                  Filter the last 12 stored reports to focus only on what needs review.
+                </p>
+              </div>
+
+              <div className="flex flex-wrap gap-2">
+                <FilterChip label="All" value={reports.length} active={filterStatus === 'all'} href={buildMonitorHref({ status: 'all' })} />
+                <FilterChip label="Healthy" value={reports.filter((row) => row.overall_status === 'healthy').length} active={filterStatus === 'healthy'} href={buildMonitorHref({ status: 'healthy' })} />
+                <FilterChip label="Warning" value={reports.filter((row) => row.overall_status === 'warning').length} active={filterStatus === 'warning'} href={buildMonitorHref({ status: 'warning' })} />
+                <FilterChip label="Critical" value={reports.filter((row) => row.overall_status === 'critical').length} active={filterStatus === 'critical'} href={buildMonitorHref({ status: 'critical' })} />
+              </div>
+
+              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                <div className="rounded-2xl border border-[hsl(var(--border))] p-4">
+                  <div className="text-xs text-[hsl(var(--muted))]">Visible reports</div>
+                  <div className="mt-1 text-xl font-semibold">{filteredReports.length}</div>
+                </div>
+                <div className="rounded-2xl border border-[hsl(var(--border))] p-4">
+                  <div className="text-xs text-[hsl(var(--muted))]">Needs review</div>
+                  <div className="mt-1 text-xl font-semibold">{visibleNeedsReviewCount}</div>
+                </div>
+                <div className="rounded-2xl border border-[hsl(var(--border))] p-4">
+                  <div className="text-xs text-[hsl(var(--muted))]">Warning</div>
+                  <div className="mt-1 text-xl font-semibold">{visibleWarningCount}</div>
+                </div>
+                <div className="rounded-2xl border border-[hsl(var(--border))] p-4">
+                  <div className="text-xs text-[hsl(var(--muted))]">Critical</div>
+                  <div className="mt-1 text-xl font-semibold">{visibleCriticalCount}</div>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardContent className="space-y-4">
+              <div>
+                <div className="text-sm font-medium">Latest needs review</div>
+                <p className="mt-1 text-sm text-[hsl(var(--muted))]">
+                  Jump directly to the most recent report that is not healthy.
+                </p>
+              </div>
+
+              {latestNeedsReviewOverall ? (
+                <>
+                  <div className="rounded-2xl border border-[hsl(var(--border))] bg-white p-4">
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div>
+                        <div className="text-sm font-semibold">{formatCairoDateTime(latestNeedsReviewOverall.created_at)}</div>
+                        <div className="mt-1 text-sm text-[hsl(var(--muted))]">{latestNeedsReviewOverall.mode}</div>
+                      </div>
+                      <span className={`inline-flex rounded-full border px-3 py-1 text-xs font-semibold ${getStatusMeta(latestNeedsReviewOverall.overall_status).reviewClassName}`}>
+                        {getStatusMeta(latestNeedsReviewOverall.overall_status).reviewLabel}
+                      </span>
+                    </div>
+                    <div className="mt-3 flex flex-wrap gap-2 text-xs text-[hsl(var(--muted))]">
+                      <span className="rounded-full border border-[hsl(var(--border))] px-3 py-1">
+                        Warnings: {Array.isArray(latestNeedsReviewOverall.summary?.warnings) ? latestNeedsReviewOverall.summary.warnings.length : 0}
+                      </span>
+                      <span className="rounded-full border border-[hsl(var(--border))] px-3 py-1">
+                        Highlights: {Array.isArray(latestNeedsReviewOverall.summary?.highlights) ? latestNeedsReviewOverall.summary.highlights.length : 0}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-wrap gap-2">
+                    <Button asChild variant="solid" size="sm" href={buildMonitorHref({ status: latestNeedsReviewOverall.overall_status, reportId: latestNeedsReviewOverall.id })}>
+                      Open latest needs review
+                    </Button>
+                    <Button asChild variant="outline" size="sm" href={buildMonitorHref({ status: latestNeedsReviewOverall.overall_status })}>
+                      Show only {latestNeedsReviewOverall.overall_status}
+                    </Button>
+                  </div>
+                </>
+              ) : (
+                <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4 text-sm text-[hsl(var(--muted))]">
+                  No warning or critical report found in the latest stored runs.
+                </div>
+              )}
+
+              {filterStatus !== 'all' && latestNeedsReviewVisible ? (
+                <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4 text-sm text-[hsl(var(--muted))]">
+                  Current filter is <strong>{filterStatus}</strong>. Latest visible report needing review was generated at{' '}
+                  <strong>{formatCairoDateTime(latestNeedsReviewVisible.created_at)}</strong>.
+                </div>
+              ) : null}
+            </CardContent>
+          </Card>
+        </div>
+      </Section>
+
+      <Section className="space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h2 className="text-lg font-semibold">Stored report details</h2>
@@ -428,7 +636,7 @@ export default async function HealthMonitorPage({ searchParams }: { searchParams
           </div>
           <div className="flex flex-wrap items-center gap-2">
             {selectedReport ? (
-              <Button asChild variant="outline" size="sm" href={`/admin/health-monitor?report=${selectedReport.id}`}>
+              <Button asChild variant="outline" size="sm" href={buildMonitorHref({ status: filterStatus, reportId: selectedReport.id })}>
                 Refresh selected
               </Button>
             ) : null}
@@ -438,7 +646,12 @@ export default async function HealthMonitorPage({ searchParams }: { searchParams
           </div>
         </div>
 
-        <StoredReportDetails report={selectedReport} />
+        <StoredReportDetails
+          report={selectedReport}
+          filterStatus={filterStatus}
+          autoFocusMessage={autoFocusMessage}
+          selectedOutsideFilter={selectedOutsideFilter}
+        />
       </Section>
 
       <Section className="space-y-4">
@@ -449,7 +662,10 @@ export default async function HealthMonitorPage({ searchParams }: { searchParams
               Status = system health. Email = delivery result for that report only.
             </p>
           </div>
-          <Link href="/admin/scan-audit" className="text-sm underline text-[hsl(var(--muted))]">Scan Audit</Link>
+          <div className="flex flex-wrap items-center gap-2 text-sm text-[hsl(var(--muted))]">
+            <span>Showing {filteredReports.length} report(s)</span>
+            <Link href="/admin/scan-audit" className="underline">Scan Audit</Link>
+          </div>
         </div>
 
         {reportsError ? (
@@ -464,10 +680,24 @@ export default async function HealthMonitorPage({ searchParams }: { searchParams
               <div className="text-sm text-[hsl(var(--muted))]">No stored health reports yet. Run the monitor once or wait for the daily cron.</div>
             </CardContent>
           </Card>
+        ) : filteredReports.length === 0 ? (
+          <Card>
+            <CardContent className="space-y-3">
+              <div className="text-sm font-medium">No reports match this filter.</div>
+              <p className="text-sm text-[hsl(var(--muted))]">
+                Try another status filter or run the monitor again to generate a fresh report.
+              </p>
+              <div>
+                <Button asChild variant="outline" size="sm" href={buildMonitorHref({ status: 'all' })}>
+                  Show all reports
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
         ) : (
           <>
             <div className="grid gap-3 md:hidden">
-              {reports.map((row) => {
+              {filteredReports.map((row) => {
                 const status = getStatusMeta(row.overall_status)
                 const email = getEmailMeta(row.email_sent, row.email_error)
                 const isSelected = selectedReport?.id === row.id
@@ -479,11 +709,18 @@ export default async function HealthMonitorPage({ searchParams }: { searchParams
                           <div className="text-sm font-semibold">{formatCairoDateTime(row.created_at)}</div>
                           <div className="text-xs text-[hsl(var(--muted))]">{row.mode}</div>
                         </div>
-                        {isSelected ? (
-                          <span className="inline-flex rounded-full border border-black/10 bg-black/5 px-2 py-1 text-[11px] font-semibold">
-                            Opened
-                          </span>
-                        ) : null}
+                        <div className="flex flex-col items-end gap-2">
+                          {isSelected ? (
+                            <span className="inline-flex rounded-full border border-black/10 bg-black/5 px-2 py-1 text-[11px] font-semibold">
+                              Opened
+                            </span>
+                          ) : null}
+                          {row.overall_status !== 'healthy' ? (
+                            <span className={`inline-flex rounded-full border px-2 py-1 text-[11px] font-semibold ${status.reviewClassName}`}>
+                              {status.reviewLabel}
+                            </span>
+                          ) : null}
+                        </div>
                       </div>
 
                       <div className="flex flex-wrap gap-2">
@@ -506,7 +743,7 @@ export default async function HealthMonitorPage({ searchParams }: { searchParams
                         </div>
                       </div>
 
-                      <Button asChild variant={isSelected ? 'solid' : 'outline'} size="sm" href={`/admin/health-monitor?report=${row.id}`}>
+                      <Button asChild variant={isSelected ? 'solid' : 'outline'} size="sm" href={buildMonitorHref({ status: filterStatus, reportId: row.id })}>
                         {isSelected ? 'Opened' : 'Open details'}
                       </Button>
                     </CardContent>
@@ -517,12 +754,13 @@ export default async function HealthMonitorPage({ searchParams }: { searchParams
 
             <Card className="hidden md:block">
               <CardContent className="overflow-x-auto">
-                <table className="min-w-[920px] w-full text-left text-sm">
+                <table className="min-w-[1080px] w-full text-left text-sm">
                   <thead className="sticky top-0 z-10 bg-white">
                     <tr className="border-b border-[hsl(var(--border))]">
                       <th className="px-2 py-3 font-semibold">Created at</th>
                       <th className="px-2 py-3 font-semibold">Mode</th>
                       <th className="px-2 py-3 font-semibold">Status</th>
+                      <th className="px-2 py-3 font-semibold">Review</th>
                       <th className="px-2 py-3 font-semibold">Warnings</th>
                       <th className="px-2 py-3 font-semibold">Highlights</th>
                       <th className="px-2 py-3 font-semibold">Scans today</th>
@@ -531,7 +769,7 @@ export default async function HealthMonitorPage({ searchParams }: { searchParams
                     </tr>
                   </thead>
                   <tbody>
-                    {reports.map((row) => {
+                    {filteredReports.map((row) => {
                       const status = getStatusMeta(row.overall_status)
                       const email = getEmailMeta(row.email_sent, row.email_error)
                       const isSelected = selectedReport?.id === row.id
@@ -544,6 +782,17 @@ export default async function HealthMonitorPage({ searchParams }: { searchParams
                               {status.short}
                             </span>
                           </td>
+                          <td className="px-2 py-3 align-top whitespace-nowrap">
+                            {row.overall_status !== 'healthy' ? (
+                              <span className={`inline-flex rounded-full border px-2 py-0.5 text-xs font-semibold ${status.reviewClassName}`}>
+                                {status.reviewLabel}
+                              </span>
+                            ) : (
+                              <span className="inline-flex rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-xs font-semibold text-emerald-700">
+                                Looks normal
+                              </span>
+                            )}
+                          </td>
                           <td className="px-2 py-3 align-top whitespace-nowrap">{Array.isArray(row.summary?.warnings) ? row.summary.warnings.length : 0}</td>
                           <td className="px-2 py-3 align-top whitespace-nowrap">{Array.isArray(row.summary?.highlights) ? row.summary.highlights.length : 0}</td>
                           <td className="px-2 py-3 align-top whitespace-nowrap">{row.summary?.counts?.scans_today ?? 0}</td>
@@ -553,7 +802,7 @@ export default async function HealthMonitorPage({ searchParams }: { searchParams
                             </span>
                           </td>
                           <td className="px-2 py-3 align-top whitespace-nowrap">
-                            <Button asChild variant={isSelected ? 'solid' : 'outline'} size="sm" href={`/admin/health-monitor?report=${row.id}`}>
+                            <Button asChild variant={isSelected ? 'solid' : 'outline'} size="sm" href={buildMonitorHref({ status: filterStatus, reportId: row.id })}>
                               {isSelected ? 'Opened' : 'Open details'}
                             </Button>
                           </td>
@@ -564,6 +813,10 @@ export default async function HealthMonitorPage({ searchParams }: { searchParams
                 </table>
               </CardContent>
             </Card>
+
+            <div className="text-xs text-[hsl(var(--muted))]">
+              Visible list summary: {visibleHealthyCount} healthy · {visibleWarningCount} warning · {visibleCriticalCount} critical.
+            </div>
           </>
         )}
       </Section>
