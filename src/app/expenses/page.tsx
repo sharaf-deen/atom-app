@@ -205,6 +205,8 @@ export default async function ExpensesPage({
 
   const now = new Date()
   const today = toISODate(now)
+  const thisMonthFrom = toISODate(startOfMonth(now))
+  const thisMonthTo = toISODate(endOfMonth(now))
   const preset = parsePreset(typeof searchParams.preset === 'string' ? searchParams.preset : 'month')
 
   let from = safeStr(searchParams.from)
@@ -217,11 +219,11 @@ export default async function ExpensesPage({
     to = today
     from = toISODate(addDays(now, -6))
   } else if (preset === 'month') {
-    from = toISODate(startOfMonth(now))
-    to = toISODate(endOfMonth(now))
+    from = thisMonthFrom
+    to = thisMonthTo
   } else {
-    if (!from) from = toISODate(startOfMonth(now))
-    if (!to) to = toISODate(endOfMonth(now))
+    if (!from) from = thisMonthFrom
+    if (!to) to = thisMonthTo
   }
 
   const category = typeof searchParams.category === 'string' ? searchParams.category : 'all'
@@ -233,6 +235,8 @@ export default async function ExpensesPage({
   const offset = (page - 1) * PER_PAGE
 
   const saved = typeof searchParams.saved === 'string' ? searchParams.saved : ''
+  const updated = typeof searchParams.updated === 'string' ? searchParams.updated : ''
+  const deleted = typeof searchParams.deleted === 'string' ? searchParams.deleted : ''
   const errorMsg = typeof searchParams.error === 'string' ? searchParams.error : ''
 
   const admin = getSupabaseAdminClientCached()
@@ -335,15 +339,17 @@ export default async function ExpensesPage({
   const quickLinks = {
     today: `/expenses?${buildQS({ preset: 'today', from: today, to: today, category, payment_method: paymentFilter, q: qTextRaw })}`,
     seven: `/expenses?${buildQS({ preset: '7d', from: toISODate(addDays(now, -6)), to: today, category, payment_method: paymentFilter, q: qTextRaw })}`,
-    month: `/expenses?${buildQS({ preset: 'month', from: toISODate(startOfMonth(now)), to: toISODate(endOfMonth(now)), category, payment_method: paymentFilter, q: qTextRaw })}`,
+    month: `/expenses?${buildQS({ preset: 'month', from: thisMonthFrom, to: thisMonthTo, category, payment_method: paymentFilter, q: qTextRaw })}`,
     custom: `/expenses?${buildQS({ preset: 'custom', from, to, category, payment_method: paymentFilter, q: qTextRaw })}`,
   }
+
+  const hasCustomFilters = preset !== 'month' || category !== 'all' || paymentFilter !== 'all' || !!qTextRaw.trim()
 
   return (
     <main className="p-4 sm:p-6 max-w-6xl mx-auto space-y-6">
       <div className="space-y-1">
         <h1 className="text-2xl font-semibold">Atom Expenses</h1>
-        <p className="text-sm text-[hsl(var(--muted))]">Mobile-first expense tracking with faster filters, clear totals, and exports aligned with the current view.</p>
+        <p className="text-sm text-[hsl(var(--muted))]">Mobile-first expense tracking with faster filters, clearer actions, and exports aligned with the current view.</p>
       </div>
 
       {errorMsg ? (
@@ -367,6 +373,18 @@ export default async function ExpensesPage({
       {saved ? (
         <InlineAlert variant="success" title="Saved">
           Expense added. Showing first page.
+        </InlineAlert>
+      ) : null}
+
+      {updated ? (
+        <InlineAlert variant="success" title="Updated">
+          Expense updated successfully.
+        </InlineAlert>
+      ) : null}
+
+      {deleted ? (
+        <InlineAlert variant="success" title="Deleted">
+          Expense deleted successfully.
         </InlineAlert>
       ) : null}
 
@@ -528,7 +546,32 @@ export default async function ExpensesPage({
         </CardHeader>
 
         <CardContent>
-          <ExpensesTableClient expenses={expenses} labelByKey={labelByKeyObj} />
+          {expenses.length > 0 ? (
+            <ExpensesTableClient expenses={expenses} labelByKey={labelByKeyObj} returnQueryString={filterReturnQS} />
+          ) : (
+            <div className="rounded-2xl border border-dashed border-[hsl(var(--border))] bg-[hsl(var(--bg))]/40 p-6 text-center">
+              <div className="text-base font-medium">No expenses found for the current filters.</div>
+              <p className="mt-2 text-sm text-[hsl(var(--muted))]">
+                Try a broader date range, remove one filter, or reset all filters.
+              </p>
+              <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
+                {hasCustomFilters ? (
+                  <a
+                    href="/expenses"
+                    className="inline-flex items-center justify-center rounded-2xl border border-[hsl(var(--border))] bg-white px-4 py-2 text-sm font-medium hover:bg-[hsl(var(--bg))]/80"
+                  >
+                    Reset filters
+                  </a>
+                ) : null}
+                <a
+                  href={quickLinks.month}
+                  className="inline-flex items-center justify-center rounded-2xl border border-[hsl(var(--border))] bg-white px-4 py-2 text-sm font-medium hover:bg-[hsl(var(--bg))]/80"
+                >
+                  This month
+                </a>
+              </div>
+            </div>
+          )}
 
           <div className="mt-4 flex items-center justify-between gap-3">
             <a
