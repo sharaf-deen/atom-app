@@ -16,6 +16,8 @@ import { getSessionUserCached, getSupabaseAdminClientCached } from '@/lib/reques
 const ALLOWED: Role[] = ['admin', 'super_admin']
 const PAGE_SIZE = 50
 
+type RangePreset = 'today' | '7d' | 'month' | 'custom'
+
 type ProfileLite = {
   user_id: string
   member_id: string | null
@@ -94,6 +96,29 @@ function formatCairoDateTime(iso?: string | null) {
   }).format(dt)
 }
 
+function parsePreset(v?: string | null): RangePreset {
+  return v === 'today' || v === '7d' || v === 'month' || v === 'custom' ? v : 'today'
+}
+
+function startOfMonthDateOnly(isoDate: string) {
+  return `${isoDate.slice(0, 7)}-01`
+}
+
+function endOfMonthDateOnly(isoDate: string) {
+  const [year, month] = isoDate.split('-').map((x) => Number(x))
+  const dt = new Date(Date.UTC(year, month, 0))
+  return dt.toISOString().slice(0, 10)
+}
+
+function buildQS(params: Record<string, string>) {
+  const sp = new URLSearchParams()
+  for (const [k, v] of Object.entries(params)) {
+    const value = String(v ?? '')
+    if (value.length) sp.set(k, value)
+  }
+  return sp.toString()
+}
+
 export default async function AdminPaymentsPage({
   searchParams,
 }: {
@@ -120,10 +145,29 @@ export default async function AdminPaymentsPage({
   }
 
   const todayCairo = cairoTodayDateOnly()
+  const monthFrom = startOfMonthDateOnly(todayCairo)
+  const monthTo = endOfMonthDateOnly(todayCairo)
+
+  const presetRaw = sp1(searchParams, 'preset')
   const fromRaw = sp1(searchParams, 'from')
   const toRaw = sp1(searchParams, 'to')
-  const from = isISODateOnly(fromRaw) ? fromRaw! : todayCairo
-  const to = isISODateOnly(toRaw) ? toRaw! : from
+
+  const preset: RangePreset =
+    presetRaw ? parsePreset(presetRaw) : isISODateOnly(fromRaw) || isISODateOnly(toRaw) ? 'custom' : 'today'
+
+  let from = todayCairo
+  let to = todayCairo
+
+  if (preset === '7d') {
+    from = addDaysDateOnly(todayCairo, -6)
+    to = todayCairo
+  } else if (preset === 'month') {
+    from = monthFrom
+    to = monthTo
+  } else if (preset === 'custom') {
+    from = isISODateOnly(fromRaw) ? fromRaw! : todayCairo
+    to = isISODateOnly(toRaw) ? toRaw! : from
+  }
 
   const payment_method = sp1(searchParams, 'payment_method') ?? 'all'
   const q = safeQ(sp1(searchParams, 'q'))
@@ -215,19 +259,34 @@ export default async function AdminPaymentsPage({
   }
 
   const totalPages = Math.max(1, Math.ceil(Number(count ?? 0) / PAGE_SIZE))
+  const pageTotal = rows.reduce((sum, r) => sum + (Number.isFinite(r.amount) ? r.amount : 0), 0)
 
-  const qsBase = new URLSearchParams({
+  const qsBase = {
+    preset,
     from,
     to,
     payment_method,
     q,
-  })
-
-  const navLink = (p: number) => {
-    const sp = new URLSearchParams(qsBase)
-    sp.set('page', String(p))
-    return `/admin/payments?${sp.toString()}`
   }
+
+  const navLink = (p: number) => `/admin/payments?${buildQS({ ...qsBase, page: String(p) })}`
+
+  const quickLinks = {
+    today: `/admin/payments?${buildQS({ preset: 'today', from: todayCairo, to: todayCairo, payment_method, q })}`,
+    seven: `/admin/payments?${buildQS({ preset: '7d', from: addDaysDateOnly(todayCairo, -6), to: todayCairo, payment_method, q })}`,
+    month: `/admin/payments?${buildQS({ preset: 'month', from: monthFrom, to: monthTo, payment_method, q })}`,
+    custom: `/admin/payments?${buildQS({ preset: 'custom', from, to, payment_method, q })}`,
+    reset: '/admin/payments',
+  }
+
+  const activeFilters = [
+    `Range: ${from} → ${to}`,
+    preset !== 'custom'
+      ? `Preset: ${preset === '7d' ? 'Last 7 days' : preset === 'month' ? 'This month' : 'Today'}`
+      : '',
+    payment_method !== 'all' ? `Method: ${labelMethod(payment_method)}` : '',
+    q ? `Search: ${q}` : '',
+  ].filter(Boolean)
 
   const tableColumns = [
     { key: 'paid_when', header: 'Paid at (EG)' },
@@ -252,7 +311,11 @@ export default async function AdminPaymentsPage({
       member: (
         <div className="space-y-0.5">
           <div className="font-medium">{name}</div>
-          <div className="text-xs text-[hsl(var(--muted))]">{r.member?.member_id ?? ''}</div>
+          {r.member?.member_id ? (
+            <div className="text-xs text-[hsl(var(--muted))]">{r.member.member_id}</div>
+          ) : r.member?.email ? (
+            <div className="text-xs text-[hsl(var(--muted))]">{r.member.email}</div>
+          ) : null}
         </div>
       ),
       amount: <span className="font-semibold">{formatEGP(r.amount)}</span>,
@@ -267,7 +330,11 @@ export default async function AdminPaymentsPage({
         />
       ),
       open: (
-        <Link className="underline" href={`/members/${r.member_id}`} prefetch={false}>
+        <Link
+          className="inline-flex items-center justify-center rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm font-semibold hover:bg-black/[0.03]"
+          href={`/members/${r.member_id}`}
+          prefetch={false}
+        >
           Open
         </Link>
       ),
@@ -275,10 +342,13 @@ export default async function AdminPaymentsPage({
   })
 
   return (
-    <main className="p-6 space-y-6">
+    <main className="p-4 sm:p-6 max-w-6xl mx-auto space-y-6">
       <div className="flex items-center justify-between gap-3 flex-wrap">
-        <div>
-          <h1 className="text-2xl font-bold">Admin · Payments</h1>
+        <div className="space-y-1">
+          <h1 className="text-2xl font-semibold">Admin · Payments</h1>
+          <p className="text-sm text-[hsl(var(--muted))]">
+            Egypt-time accounting view for real payment dates, with quick filters and clearer mobile scanning of results.
+          </p>
           <p className="text-sm text-[hsl(var(--muted))]">
             Signed in as <span className="font-medium">{me.email || 'unknown'}</span>
           </p>
@@ -296,11 +366,43 @@ export default async function AdminPaymentsPage({
 
       <Card>
         <CardHeader>
-          <CardTitle>Filters</CardTitle>
+          <CardTitle>Quick filters</CardTitle>
           <div className="text-sm text-[hsl(var(--muted))]">Egypt time (Africa/Cairo)</div>
         </CardHeader>
-        <CardContent>
-          <form method="get" className="grid gap-3 sm:grid-cols-6">
+        <CardContent className="space-y-4">
+          <div className="flex flex-wrap gap-2">
+            <Link prefetch={false} href={quickLinks.today} className="inline-flex items-center justify-center rounded-2xl border border-[hsl(var(--border))] bg-white px-4 py-2 text-sm font-medium hover:bg-[hsl(var(--bg))]/80">
+              Today
+            </Link>
+            <Link prefetch={false} href={quickLinks.seven} className="inline-flex items-center justify-center rounded-2xl border border-[hsl(var(--border))] bg-white px-4 py-2 text-sm font-medium hover:bg-[hsl(var(--bg))]/80">
+              Last 7 days
+            </Link>
+            <Link prefetch={false} href={quickLinks.month} className="inline-flex items-center justify-center rounded-2xl border border-[hsl(var(--border))] bg-white px-4 py-2 text-sm font-medium hover:bg-[hsl(var(--bg))]/80">
+              This month
+            </Link>
+            <Link prefetch={false} href={quickLinks.custom} className="inline-flex items-center justify-center rounded-2xl border border-[hsl(var(--border))] bg-white px-4 py-2 text-sm font-medium hover:bg-[hsl(var(--bg))]/80">
+              Custom
+            </Link>
+            <Link prefetch={false} href={quickLinks.reset} className="inline-flex items-center justify-center rounded-2xl border border-[hsl(var(--border))] bg-white px-4 py-2 text-sm font-medium hover:bg-[hsl(var(--bg))]/80">
+              Reset all
+            </Link>
+          </div>
+
+          <form method="get" className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
+            <label className="block">
+              <span className="mb-1 block text-sm font-medium">Preset</span>
+              <select
+                name="preset"
+                defaultValue={preset}
+                className="w-full rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                <option value="today">Today</option>
+                <option value="7d">Last 7 days</option>
+                <option value="month">This month</option>
+                <option value="custom">Custom</option>
+              </select>
+            </label>
+
             <label className="block">
               <span className="mb-1 block text-sm font-medium">From</span>
               <input
@@ -336,7 +438,7 @@ export default async function AdminPaymentsPage({
               </select>
             </label>
 
-            <label className="block sm:col-span-2">
+            <label className="block sm:col-span-2 xl:col-span-2">
               <span className="mb-1 block text-sm font-medium">Search member</span>
               <input
                 name="q"
@@ -346,10 +448,32 @@ export default async function AdminPaymentsPage({
               />
             </label>
 
-            <div className="flex items-end">
-              <button className="w-full rounded-xl bg-black text-white px-4 py-2 text-sm font-medium">Apply</button>
+            <div className="sm:col-span-2 xl:col-span-6 flex flex-wrap items-center gap-2 pt-1">
+              <button className="inline-flex items-center justify-center rounded-2xl bg-black text-white px-4 py-2 text-sm font-medium hover:opacity-95">
+                Apply filters
+              </button>
+              <Link
+                prefetch={false}
+                href="/admin/payments"
+                className="inline-flex items-center justify-center rounded-2xl border border-[hsl(var(--border))] bg-white px-4 py-2 text-sm font-medium hover:bg-[hsl(var(--bg))]/80"
+              >
+                Reset
+              </Link>
             </div>
           </form>
+
+          {activeFilters.length ? (
+            <div className="flex flex-wrap gap-2">
+              {activeFilters.map((label) => (
+                <span
+                  key={label}
+                  className="inline-flex items-center rounded-full border border-[hsl(var(--border))] bg-[hsl(var(--bg))] px-3 py-1 text-xs font-medium text-[hsl(var(--muted))]"
+                >
+                  {label}
+                </span>
+              ))}
+            </div>
+          ) : null}
         </CardContent>
       </Card>
 
@@ -362,26 +486,42 @@ export default async function AdminPaymentsPage({
         </CardContent>
       </Card>
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6">
         <Card>
-          <div className="text-sm text-[hsl(var(--muted))]">Total</div>
-          <div className="mt-1 text-xl font-semibold">{formatEGP(totals.all)}</div>
+          <CardContent className="py-4">
+            <div className="text-xs text-[hsl(var(--muted))]">Filtered total</div>
+            <div className="mt-1 text-xl font-semibold">{formatEGP(totals.all)}</div>
+          </CardContent>
         </Card>
         <Card>
-          <div className="text-sm text-[hsl(var(--muted))]">Cash</div>
-          <div className="mt-1 text-xl font-semibold">{formatEGP(totals.cash)}</div>
+          <CardContent className="py-4">
+            <div className="text-xs text-[hsl(var(--muted))]">Results</div>
+            <div className="mt-1 text-xl font-semibold">{count ?? 0}</div>
+          </CardContent>
         </Card>
         <Card>
-          <div className="text-sm text-[hsl(var(--muted))]">Instapay</div>
-          <div className="mt-1 text-xl font-semibold">{formatEGP(totals.instapay)}</div>
+          <CardContent className="py-4">
+            <div className="text-xs text-[hsl(var(--muted))]">Cash</div>
+            <div className="mt-1 text-xl font-semibold">{formatEGP(totals.cash)}</div>
+          </CardContent>
         </Card>
         <Card>
-          <div className="text-sm text-[hsl(var(--muted))]">Card</div>
-          <div className="mt-1 text-xl font-semibold">{formatEGP(totals.card)}</div>
+          <CardContent className="py-4">
+            <div className="text-xs text-[hsl(var(--muted))]">Instapay</div>
+            <div className="mt-1 text-xl font-semibold">{formatEGP(totals.instapay)}</div>
+          </CardContent>
         </Card>
         <Card>
-          <div className="text-sm text-[hsl(var(--muted))]">Bank transfer</div>
-          <div className="mt-1 text-xl font-semibold">{formatEGP(totals.bank_transfer)}</div>
+          <CardContent className="py-4">
+            <div className="text-xs text-[hsl(var(--muted))]">Card</div>
+            <div className="mt-1 text-xl font-semibold">{formatEGP(totals.card)}</div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="py-4">
+            <div className="text-xs text-[hsl(var(--muted))]">Bank transfer</div>
+            <div className="mt-1 text-xl font-semibold">{formatEGP(totals.bank_transfer)}</div>
+          </CardContent>
         </Card>
       </div>
 
@@ -391,35 +531,43 @@ export default async function AdminPaymentsPage({
         <CardHeader>
           <CardTitle>Payments</CardTitle>
           <div className="text-sm text-[hsl(var(--muted))]">
-            {count ?? 0} result{Number(count ?? 0) === 1 ? '' : 's'}
+            {count ?? 0} result{Number(count ?? 0) === 1 ? '' : 's'} · Current page total {formatEGP(pageTotal)}
           </div>
         </CardHeader>
         <CardContent>
-          <Table columns={tableColumns} rows={tableRows as any} keyField="id" stickyTopClassName="top-0"/>
+          {!rows.length ? (
+            <div className="mb-4 rounded-2xl border border-dashed border-[hsl(var(--border))] bg-[hsl(var(--bg))] p-4 text-sm text-[hsl(var(--muted))]">
+              No payments found for the current filters. Try another date range, change the payment method, or reset all filters.
+            </div>
+          ) : null}
 
-          <div className="mt-4 flex items-center justify-between gap-3">
-            <div className="text-sm text-[hsl(var(--muted))]">
-              Page {page} / {totalPages}
+          <Table columns={tableColumns} rows={tableRows as any} keyField="id" stickyTopClassName="top-0" />
+
+          {totalPages > 1 ? (
+            <div className="mt-4 flex items-center justify-between gap-3">
+              <div className="text-sm text-[hsl(var(--muted))]">
+                Page {page} / {totalPages}
+              </div>
+              <div className="flex items-center gap-2">
+                <Link
+                  prefetch={false}
+                  href={navLink(Math.max(1, page - 1))}
+                  aria-disabled={page <= 1}
+                  className={`rounded-xl border px-3 py-2 text-sm font-semibold ${page <= 1 ? 'pointer-events-none opacity-50' : 'hover:bg-black/[0.03]'}`}
+                >
+                  Prev
+                </Link>
+                <Link
+                  prefetch={false}
+                  href={navLink(Math.min(totalPages, page + 1))}
+                  aria-disabled={page >= totalPages}
+                  className={`rounded-xl border px-3 py-2 text-sm font-semibold ${page >= totalPages ? 'pointer-events-none opacity-50' : 'hover:bg-black/[0.03]'}`}
+                >
+                  Next
+                </Link>
+              </div>
             </div>
-            <div className="flex items-center gap-2">
-              <Link
-                prefetch={false}
-                href={navLink(Math.max(1, page - 1))}
-                aria-disabled={page <= 1}
-                className={`rounded-xl border px-3 py-2 text-sm font-semibold ${page <= 1 ? 'pointer-events-none opacity-50' : 'hover:bg-black/[0.03]'}`}
-              >
-                Prev
-              </Link>
-              <Link
-                prefetch={false}
-                href={navLink(Math.min(totalPages, page + 1))}
-                aria-disabled={page >= totalPages}
-                className={`rounded-xl border px-3 py-2 text-sm font-semibold ${page >= totalPages ? 'pointer-events-none opacity-50' : 'hover:bg-black/[0.03]'}`}
-              >
-                Next
-              </Link>
-            </div>
-          </div>
+          ) : null}
         </CardContent>
       </Card>
     </main>
