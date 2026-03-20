@@ -229,7 +229,7 @@ export async function GET(req: Request) {
     }
 
     const drawTitle = () => {
-      page.drawText('Cash Report', { x: marginX, y, size: 18, font: fontBold })
+      page.drawText('Filtered Cash Report', { x: marginX, y, size: 18, font: fontBold })
       y -= 18
       page.drawText(range.label, { x: marginX, y, size: 10, font })
       y -= 14
@@ -250,7 +250,7 @@ export async function GET(req: Request) {
         color: net < 0 ? rgb(0.8, 0.1, 0.1) : rgb(0.05, 0.5, 0.2),
       })
       y -= 18
-      page.drawText(`Payments: ${(pays ?? []).length}   Expenses: ${(exps ?? []).length}`, {
+      page.drawText(`Filtered payments: ${(pays ?? []).length}   Filtered expense lines: ${(exps ?? []).length}`, {
         x: marginX,
         y,
         size: 9,
@@ -301,7 +301,7 @@ export async function GET(req: Request) {
 
     const drawPaymentsTable = () => {
       ensureSpace(160)
-      page.drawText('Recent income (latest 10)', { x: marginX, y, size: 12, font: fontBold })
+      page.drawText('Filtered payments (latest 10)', { x: marginX, y, size: 12, font: fontBold })
       y -= 16
 
       const colWhen = marginX
@@ -339,7 +339,7 @@ export async function GET(req: Request) {
 
     const drawExpensesTable = () => {
       ensureSpace(160)
-      page.drawText('Top expenses (highest 10)', { x: marginX, y, size: 12, font: fontBold })
+      page.drawText('Filtered expenses (highest 10)', { x: marginX, y, size: 12, font: fontBold })
       y -= 16
 
       const colDate = marginX
