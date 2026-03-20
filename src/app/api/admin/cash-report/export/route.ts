@@ -17,8 +17,19 @@ import {
 type Role = 'member' | 'assistant_coach' | 'coach' | 'reception' | 'admin' | 'super_admin'
 type Method = 'cash' | 'instapay' | 'card' | 'bank_transfer'
 const METHODS: Method[] = ['cash', 'instapay', 'card', 'bank_transfer']
-
 type RangeMode = 'day' | 'week' | 'month' | 'range'
+type PersonalKind = 'advance_to_gym' | 'expense_paid_personally' | 'reimbursement_from_gym'
+
+type PersonalEntry = {
+  id: string
+  entry_date: string
+  person_id: string
+  kind: PersonalKind
+  amount: number
+  payment_method: string | null
+  note: string | null
+  created_at: string
+}
 
 function json(status: number, body: any) {
   const res = NextResponse.json(body, { status })
@@ -52,6 +63,18 @@ function labelMethod(m: Method) {
   if (m === 'instapay') return 'Instapay'
   if (m === 'card') return 'Card'
   return 'Bank transfer'
+}
+
+function personalKindLabel(kind: PersonalKind) {
+  if (kind === 'advance_to_gym') return 'Advance to gym'
+  if (kind === 'reimbursement_from_gym') return 'Reimbursement from gym'
+  return 'Expense paid personally'
+}
+
+function personalCashEffect(kind: PersonalKind) {
+  if (kind === 'advance_to_gym') return 'cash_in'
+  if (kind === 'reimbursement_from_gym') return 'cash_out'
+  return 'off_cash'
 }
 
 function formatCairoDateTime(iso?: string | null) {
@@ -154,47 +177,108 @@ export async function GET(req: Request) {
 
     if (expErr) return json(500, { ok: false, error: 'EXPENSES_QUERY_FAILED', details: expErr.message })
 
-    const incomeBy: Record<Method, number> = { cash: 0, instapay: 0, card: 0, bank_transfer: 0 }
-    const expenseBy: Record<Method, number> = { cash: 0, instapay: 0, card: 0, bank_transfer: 0 }
+    const { data: rawPersonalEntries, error: pfErr } = await admin
+      .from('personal_fund_entries')
+      .select('id, entry_date, person_id, kind, amount, payment_method, note, created_at')
+      .gte('entry_date', range.from)
+      .lte('entry_date', range.to)
+      .order('entry_date', { ascending: false })
+      .limit(100000)
+
+    const personalEntries = ((rawPersonalEntries ?? []) as any[]).filter(
+      (row) => row.kind === 'advance_to_gym' || row.kind === 'expense_paid_personally' || row.kind === 'reimbursement_from_gym'
+    ) as PersonalEntry[]
+
+    const personIds = [...new Set(personalEntries.map((row) => row.person_id).filter(Boolean))]
+    const { data: pfPeople } = personIds.length
+      ? await admin.from('personal_fund_people').select('id,label').in('id', personIds)
+      : { data: [] as Array<{ id: string; label: string }> }
+    const personById = new Map(((pfPeople ?? []) as Array<{ id: string; label: string }>).map((row) => [row.id, row.label]))
+
+    const subscriptionIncomeBy: Record<Method, number> = { cash: 0, instapay: 0, card: 0, bank_transfer: 0 }
+    const businessExpenseBy: Record<Method, number> = { cash: 0, instapay: 0, card: 0, bank_transfer: 0 }
+    const personalCashInBy: Record<Method, number> = { cash: 0, instapay: 0, card: 0, bank_transfer: 0 }
+    const personalCashOutBy: Record<Method, number> = { cash: 0, instapay: 0, card: 0, bank_transfer: 0 }
 
     for (const r of (pays ?? []) as any[]) {
       const amt = Number(r.amount ?? 0)
       if (!Number.isFinite(amt)) continue
-      incomeBy[normMethod(r.payment_method)] += amt
+      subscriptionIncomeBy[normMethod(r.payment_method)] += amt
     }
 
     for (const r of (exps ?? []) as any[]) {
       const amt = Number(r.amount ?? 0)
       if (!Number.isFinite(amt)) continue
-      expenseBy[normMethod(r.payment_method)] += amt
+      businessExpenseBy[normMethod(r.payment_method)] += amt
     }
 
+    for (const row of personalEntries) {
+      const amt = Number(row.amount ?? 0)
+      if (!Number.isFinite(amt)) continue
+      const method = normMethod(row.payment_method)
+      if (row.kind === 'advance_to_gym') personalCashInBy[method] += amt
+      if (row.kind === 'reimbursement_from_gym') personalCashOutBy[method] += amt
+    }
+
+    const incomeBy: Record<Method, number> = { cash: 0, instapay: 0, card: 0, bank_transfer: 0 }
+    const expenseBy: Record<Method, number> = { cash: 0, instapay: 0, card: 0, bank_transfer: 0 }
+    for (const method of METHODS) {
+      incomeBy[method] = subscriptionIncomeBy[method] + personalCashInBy[method]
+      expenseBy[method] = businessExpenseBy[method] + personalCashOutBy[method]
+    }
+
+    const totalSubscriptionIncome = METHODS.reduce((sum, method) => sum + subscriptionIncomeBy[method], 0)
+    const totalPersonalCashIn = METHODS.reduce((sum, method) => sum + personalCashInBy[method], 0)
     const totalIncome = METHODS.reduce((sum, method) => sum + incomeBy[method], 0)
+    const totalBusinessExpenses = METHODS.reduce((sum, method) => sum + businessExpenseBy[method], 0)
+    const totalPersonalCashOut = METHODS.reduce((sum, method) => sum + personalCashOutBy[method], 0)
     const totalExpenses = METHODS.reduce((sum, method) => sum + expenseBy[method], 0)
     const net = totalIncome - totalExpenses
+    const personalOffCash = personalEntries.filter((row) => row.kind === 'expense_paid_personally')
+    const personalOffCashTotal = personalOffCash.reduce((sum, row) => sum + Number(row.amount ?? 0), 0)
+    const personalCashMovements = personalEntries.filter((row) => row.kind !== 'expense_paid_personally')
 
     const lines: string[] = []
     lines.push(['Filtered cash report export', range.label].map(csvCell).join(','))
     lines.push(['Timezone', 'Africa/Cairo'].map(csvCell).join(','))
     lines.push(['From', range.from, 'To', range.to].map(csvCell).join(','))
-    lines.push(['Filtered payments count', (pays ?? []).length, 'Filtered expense lines count', (exps ?? []).length].map(csvCell).join(','))
+    lines.push([
+      'Filtered payments count', (pays ?? []).length,
+      'Filtered business expense lines count', (exps ?? []).length,
+      'Filtered personal fund cash movement lines count', personalCashMovements.length,
+      'Filtered personal off-cash lines count', personalOffCash.length,
+    ].map(csvCell).join(','))
+    if (pfErr) lines.push(['Personal funds status', `Unavailable in export fallback: ${pfErr.message}`].map(csvCell).join(','))
     lines.push('')
 
     lines.push(['Summary', 'Amount'].map(csvCell).join(','))
-    lines.push(['Filtered income', totalIncome.toFixed(2)].map(csvCell).join(','))
-    lines.push(['Filtered expenses', totalExpenses.toFixed(2)].map(csvCell).join(','))
-    lines.push(['Filtered net', net.toFixed(2)].map(csvCell).join(','))
+    lines.push(['Subscription income', totalSubscriptionIncome.toFixed(2)].map(csvCell).join(','))
+    lines.push(['Personal Funds cash in', totalPersonalCashIn.toFixed(2)].map(csvCell).join(','))
+    lines.push(['Total income', totalIncome.toFixed(2)].map(csvCell).join(','))
+    lines.push(['Business expenses', totalBusinessExpenses.toFixed(2)].map(csvCell).join(','))
+    lines.push(['Personal Funds cash out', totalPersonalCashOut.toFixed(2)].map(csvCell).join(','))
+    lines.push(['Total expenses', totalExpenses.toFixed(2)].map(csvCell).join(','))
+    lines.push(['Net cash', net.toFixed(2)].map(csvCell).join(','))
+    lines.push(['Personal expenses paid personally (off-cash context only)', personalOffCashTotal.toFixed(2)].map(csvCell).join(','))
+    lines.push('')
+
+    lines.push(['Breakdown by payment method'].map(csvCell).join(','))
+    lines.push(['payment_method', 'subscription_income', 'personal_funds_cash_in', 'total_income', 'business_expenses', 'personal_funds_cash_out', 'total_expenses', 'net_cash'].map(csvCell).join(','))
     for (const method of METHODS) {
       lines.push([
-        `${labelMethod(method)} income`,
+        labelMethod(method),
+        subscriptionIncomeBy[method].toFixed(2),
+        personalCashInBy[method].toFixed(2),
         incomeBy[method].toFixed(2),
-        `${labelMethod(method)} expenses`,
+        businessExpenseBy[method].toFixed(2),
+        personalCashOutBy[method].toFixed(2),
         expenseBy[method].toFixed(2),
+        (incomeBy[method] - expenseBy[method]).toFixed(2),
       ].map(csvCell).join(','))
     }
     lines.push('')
 
-    lines.push(['Filtered payments'].map(csvCell).join(','))
+    lines.push(['Filtered subscription payments'].map(csvCell).join(','))
     lines.push(
       ['paid_at_egypt', 'recorded_at_egypt', 'member_id', 'member_name', 'member_email', 'amount', 'payment_method', 'note']
         .map(csvCell)
@@ -220,7 +304,7 @@ export async function GET(req: Request) {
     }
     lines.push('')
 
-    lines.push(['Filtered expenses'].map(csvCell).join(','))
+    lines.push(['Filtered business expenses'].map(csvCell).join(','))
     lines.push(['date_egypt', 'category', 'description', 'amount', 'payment_method'].map(csvCell).join(','))
     for (const r of (exps ?? []) as any[]) {
       const amount = Number(r.amount ?? 0)
@@ -235,6 +319,38 @@ export async function GET(req: Request) {
           .map(csvCell)
           .join(',')
       )
+    }
+    lines.push('')
+
+    lines.push(['Filtered Personal Funds cash movements'].map(csvCell).join(','))
+    lines.push(['entry_date_egypt', 'person', 'type', 'cash_effect', 'amount', 'payment_method', 'note', 'recorded_at_egypt'].map(csvCell).join(','))
+    for (const row of personalCashMovements) {
+      const amount = Number(row.amount ?? 0)
+      lines.push([
+        row.entry_date ?? '',
+        personById.get(row.person_id) ?? '',
+        personalKindLabel(row.kind),
+        personalCashEffect(row.kind),
+        Number.isFinite(amount) ? amount.toFixed(2) : '',
+        labelMethod(normMethod(row.payment_method)),
+        row.note ?? '',
+        formatCairoDateTime(row.created_at),
+      ].map(csvCell).join(','))
+    }
+    lines.push('')
+
+    lines.push(['Filtered Personal Funds personal expenses paid personally (off-cash context)'].map(csvCell).join(','))
+    lines.push(['entry_date_egypt', 'person', 'amount', 'payment_method', 'note', 'recorded_at_egypt'].map(csvCell).join(','))
+    for (const row of personalOffCash) {
+      const amount = Number(row.amount ?? 0)
+      lines.push([
+        row.entry_date ?? '',
+        personById.get(row.person_id) ?? '',
+        Number.isFinite(amount) ? amount.toFixed(2) : '',
+        labelMethod(normMethod(row.payment_method)),
+        row.note ?? '',
+        formatCairoDateTime(row.created_at),
+      ].map(csvCell).join(','))
     }
 
     const filename = `cash-report_${range.from}_${range.to}.csv`
