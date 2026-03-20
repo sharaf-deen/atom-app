@@ -174,16 +174,16 @@ export async function GET(req: Request) {
     const net = totalIncome - totalExpenses
 
     const lines: string[] = []
-    lines.push(['Cash report', range.label].map(csvCell).join(','))
+    lines.push(['Filtered cash report export', range.label].map(csvCell).join(','))
     lines.push(['Timezone', 'Africa/Cairo'].map(csvCell).join(','))
     lines.push(['From', range.from, 'To', range.to].map(csvCell).join(','))
-    lines.push(['Payments count', (pays ?? []).length, 'Expenses count', (exps ?? []).length].map(csvCell).join(','))
+    lines.push(['Filtered payments count', (pays ?? []).length, 'Filtered expense lines count', (exps ?? []).length].map(csvCell).join(','))
     lines.push('')
 
     lines.push(['Summary', 'Amount'].map(csvCell).join(','))
-    lines.push(['Income', totalIncome.toFixed(2)].map(csvCell).join(','))
-    lines.push(['Expenses', totalExpenses.toFixed(2)].map(csvCell).join(','))
-    lines.push(['Net', net.toFixed(2)].map(csvCell).join(','))
+    lines.push(['Filtered income', totalIncome.toFixed(2)].map(csvCell).join(','))
+    lines.push(['Filtered expenses', totalExpenses.toFixed(2)].map(csvCell).join(','))
+    lines.push(['Filtered net', net.toFixed(2)].map(csvCell).join(','))
     for (const method of METHODS) {
       lines.push([
         `${labelMethod(method)} income`,
@@ -194,7 +194,7 @@ export async function GET(req: Request) {
     }
     lines.push('')
 
-    lines.push(['Payments'].map(csvCell).join(','))
+    lines.push(['Filtered payments'].map(csvCell).join(','))
     lines.push(
       ['paid_at_egypt', 'recorded_at_egypt', 'member_id', 'member_name', 'member_email', 'amount', 'payment_method', 'note']
         .map(csvCell)
@@ -220,7 +220,7 @@ export async function GET(req: Request) {
     }
     lines.push('')
 
-    lines.push(['Expenses'].map(csvCell).join(','))
+    lines.push(['Filtered expenses'].map(csvCell).join(','))
     lines.push(['date_egypt', 'category', 'description', 'amount', 'payment_method'].map(csvCell).join(','))
     for (const r of (exps ?? []) as any[]) {
       const amount = Number(r.amount ?? 0)
