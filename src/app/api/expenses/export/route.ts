@@ -6,8 +6,8 @@ export const revalidate = 0
 import { NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { createSupabaseServerActionClient } from '@/lib/supabaseServer'
+import { canAccessExpenses, normalizeRole, type Role } from '@/lib/rbac'
 
-type Role = 'member' | 'assistant_coach' | 'coach' | 'reception' | 'admin' | 'super_admin'
 
 function json(status: number, body: any) {
   const res = NextResponse.json(body, { status })
@@ -59,7 +59,7 @@ export async function GET(req: Request) {
       .maybeSingle<{ role: Role | null }>()
 
     if (meErr) return json(500, { ok: false, error: 'PROFILE_LOOKUP_FAILED', details: meErr.message })
-    if (!['admin', 'super_admin'].includes((me?.role as Role) ?? 'member')) return json(403, { ok: false, error: 'FORBIDDEN' })
+    if (!canAccessExpenses(normalizeRole(me?.role))) return json(403, { ok: false, error: 'FORBIDDEN' })
 
     const admin = makeAdminClient()
     if (!admin) return json(500, { ok: false, error: 'SERVICE_ROLE_MISSING' })

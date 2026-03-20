@@ -6,6 +6,7 @@ import { redirect } from 'next/navigation'
 import AccessDeniedCard from '@/components/AccessDeniedCard'
 import { getSessionUserCached, getSupabaseAdminClientCached } from '@/lib/requestCache'
 import { formatScanAuditMember, formatScanAuditScanner, getScanAuditData } from '@/lib/scanAudit'
+import { canAccessScanAudit } from '@/lib/rbac'
 
 type SearchParams = Record<string, string | string[] | undefined>
 
@@ -45,7 +46,7 @@ const PER_PAGE = 50
 export default async function ScanAuditPage({ searchParams }: { searchParams: SearchParams }) {
   const me = await getSessionUserCached()
   if (!me) redirect('/login')
-  if (me.role !== 'admin' && me.role !== 'super_admin') return <AccessDeniedCard />
+  if (!canAccessScanAudit(me.role)) return <AccessDeniedCard />
 
   const q = spGet(searchParams, 'q').trim()
   const status = spGet(searchParams, 'status').trim()

@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
-import { getSessionUser, type Role, type SessionUser } from '@/lib/session'
+import { getSessionUser, type SessionUser } from '@/lib/session'
+import { type Role, hasAnyRole, STAFF_ROLES, ADMIN_ROLES, SUPER_ADMIN_ROLES } from '@/lib/rbac'
 
 type GateOk = { ok: true; user: SessionUser }
 type GateKo = { ok: false; res: NextResponse }
@@ -18,20 +19,21 @@ export async function requireUser(): Promise<Gate> {
   return { ok: true, user }
 }
 
-const STAFF: Role[] = ['reception', 'assistant_coach', 'coach', 'admin', 'super_admin']
-
-export async function requireStaff(): Promise<Gate> {
+export async function requireRoles(allowed: readonly Role[]): Promise<Gate> {
   const gate = await requireUser()
   if (!gate.ok) return gate
-  if (!STAFF.includes(gate.user.role)) return deny(403, 'FORBIDDEN')
+  if (!hasAnyRole(gate.user.role, allowed)) return deny(403, 'FORBIDDEN')
   return gate
 }
 
-const ADMINS: Role[] = ['admin', 'super_admin']
+export async function requireStaff(): Promise<Gate> {
+  return requireRoles(STAFF_ROLES)
+}
 
 export async function requireAdmin(): Promise<Gate> {
-  const gate = await requireUser()
-  if (!gate.ok) return gate
-  if (!ADMINS.includes(gate.user.role)) return deny(403, 'FORBIDDEN')
-  return gate
+  return requireRoles(ADMIN_ROLES)
+}
+
+export async function requireSuperAdmin(): Promise<Gate> {
+  return requireRoles(SUPER_ADMIN_ROLES)
 }

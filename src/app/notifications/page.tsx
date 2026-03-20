@@ -4,6 +4,7 @@ export const revalidate = 0
 
 import { redirect } from 'next/navigation'
 import { getSessionUser } from '@/lib/session'
+import { canAccessNotifications, canManageNotifications } from '@/lib/rbac'
 import PageHeader from '@/components/layout/PageHeader'
 import Section from '@/components/layout/Section'
 import NotificationsSender from '@/components/NotificationsSender'
@@ -29,14 +30,13 @@ export default async function NotificationsPage() {
     )
   }
 
-  // 🚫 Reception is not allowed to access notifications at all
-  if (me.role === 'reception') {
+  if (!canAccessNotifications(me.role)) {
     redirect('/')
   }
 
   const role = me.role
-  const isAdmin = role === 'admin'
-  const isSuper = role === 'super_admin'
+  const isAdmin = canManageNotifications(role) && role === 'admin'
+  const isSuper = canManageNotifications(role) && role === 'super_admin'
   const isMember = role === 'member'
   const isCoach = role === 'coach'
   const isAssistantCoach = role === 'assistant_coach'

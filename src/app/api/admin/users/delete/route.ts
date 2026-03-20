@@ -3,9 +3,9 @@ export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
 import { NextResponse } from 'next/server'
-import type { Role } from '@/lib/session'
 import { createSupabaseServerActionClient } from '@/lib/supabaseServer'
 import { createSupabaseAdminClient } from '@/lib/supabaseAdmin'
+import { canDeleteUser, canManageRoles, normalizeRole, type Role } from '@/lib/rbac'
 
 type DeleteOutcome =
   | 'deleted'
@@ -140,8 +140,8 @@ export async function POST(req: Request) {
       )
     }
 
-    const actorRole = (actorProfile?.role ?? 'member') as Role
-    if (actorRole !== 'super_admin') {
+    const actorRole = normalizeRole(actorProfile?.role)
+    if (!canManageRoles(actorRole)) {
       return noStore(
         NextResponse.json(
           {
@@ -155,7 +155,7 @@ export async function POST(req: Request) {
       )
     }
 
-    if (userId === actor.id) {
+    if (!canDeleteUser(actorRole, { isSelf: userId === actor.id })) {
       return noStore(
         NextResponse.json(
           {

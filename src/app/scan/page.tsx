@@ -6,16 +6,12 @@ import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { ClipboardList, ScanLine, UserPlus, Users } from 'lucide-react'
 import { getSessionUser } from '@/lib/session'
+import { canAccessScan } from '@/lib/rbac'
 import KioskScanner from '@/components/KioskScanner'
-import type { Role } from '@/lib/session'
 import PageHeader from '@/components/layout/PageHeader'
 import Section from '@/components/layout/Section'
 import AccessDeniedPage from '@/components/AccessDeniedPage'
 import KioskHealthBadge from '@/components/KioskHealthBadge'
-
-function canAccess(role: Role) {
-  return role === 'reception' || role === 'admin' || role === 'super_admin'
-}
 
 function QuickLink({
   href,
@@ -51,7 +47,7 @@ export default async function ScanPage() {
 
   if (!user) redirect('/login?next=/scan')
 
-  if (!canAccess(user.role)) {
+  if (!canAccessScan(user.role)) {
     return (
       <AccessDeniedPage
         title="Scan — Check-in & Validity"
@@ -66,7 +62,7 @@ export default async function ScanPage() {
     )
   }
 
-  const showAudit = user.role === 'admin' || user.role === 'super_admin'
+  const showAudit = canAccessScan(user.role) && user.role !== 'reception'
 
   return (
     <main>

@@ -10,6 +10,7 @@ import PageHeader from '@/components/layout/PageHeader'
 import Section from '@/components/layout/Section'
 import { Card, CardContent } from '@/components/ui/Card'
 import { formatCurrency } from '@/lib/money'
+import { canAccessStore, canAccessStoreAdmin } from '@/lib/rbac'
 
 type Category = 'kimono' | 'rashguard' | 'short' | 'belt'
 const CATEGORIES: Array<{ v: 'all' | Category; label: string }> = [
@@ -19,8 +20,6 @@ const CATEGORIES: Array<{ v: 'all' | Category; label: string }> = [
   { v: 'short', label: 'Short' },
   { v: 'belt', label: 'Belt' },
 ]
-
-const HIDDEN_STORE_ROLES = new Set(['member', 'assistant_coach', 'coach'])
 
 type ProductRow = {
   id: string
@@ -114,9 +113,9 @@ export default async function StorePage({
   if (!me) redirect('/login?next=/store')
 
   const role = me.role
-  const isSuperAdmin = role === 'super_admin'
+  const isSuperAdmin = canAccessStoreAdmin(role)
 
-  if (HIDDEN_STORE_ROLES.has(role)) redirect('/')
+  if (!canAccessStore(role)) redirect('/')
 
   const page = clampInt(searchParams?.page, 1, 1, 9999)
   const pageSize = clampInt(searchParams?.page_size, 12, 6, 48)

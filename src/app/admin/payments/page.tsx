@@ -10,10 +10,9 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card'
 import { Table } from '@/components/ui/Table'
 import EditPaymentDateButton from '@/components/EditPaymentDateButton'
 import { addDaysDateOnly, cairoDayBoundsUTC, cairoTodayDateOnly, isISODateOnly } from '@/lib/cairoTime'
-import type { Role } from '@/lib/session'
+import { canAccessPayments } from '@/lib/rbac'
 import { getSessionUserCached, getSupabaseAdminClientCached } from '@/lib/requestCache'
 
-const ALLOWED: Role[] = ['admin', 'super_admin']
 const PAGE_SIZE = 50
 const IMPOSSIBLE_MEMBER_ID = '00000000-0000-0000-0000-000000000000'
 
@@ -140,7 +139,7 @@ export default async function AdminPaymentsPage({
   const me = await getSessionUserCached()
   if (!me) redirect('/login?next=/admin/payments')
 
-  if (!ALLOWED.includes(me.role)) {
+  if (!canAccessPayments(me.role)) {
     return (
       <main className="p-6">
         <h1 className="text-2xl font-bold">Admin · Payments</h1>

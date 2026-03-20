@@ -14,6 +14,7 @@ import Select from '@/components/ui/Select'
 import InlineAlert from '@/components/ui/InlineAlert'
 import { Table } from '@/components/ui/Table'
 import { getSessionUserCached, getSupabaseAdminClientCached } from '@/lib/requestCache'
+import { canAccessPersonalFunds } from '@/lib/rbac'
 
 type EntryKind = 'advance_to_gym' | 'expense_paid_personally' | 'reimbursement_from_gym'
 type RangePreset = '30d' | '90d' | 'year' | 'all' | 'custom'
@@ -42,10 +43,6 @@ type EntryRow = {
 
 const PER_PAGE = 25
 const RECEIPT_MAX_BYTES = 8 * 1024 * 1024
-
-function isAdmin(role?: string | null) {
-  return role === 'admin' || role === 'super_admin'
-}
 
 function safeStr(v: unknown) {
   return typeof v === 'string' ? v : ''
@@ -262,7 +259,7 @@ async function addPersonAction(formData: FormData) {
 
   const me = await getSessionUserCached()
   if (!me) redirect('/login?next=/admin/personal-funds')
-  if (!isAdmin(me.role)) redirect('/admin/personal-funds?error=Access%20denied')
+  if (!canAccessPersonalFunds(me.role)) redirect('/admin/personal-funds?error=Access%20denied')
 
   const returnQS = safeStr(formData.get('return_qs'))
   const label = safeStr(formData.get('label')).trim()
@@ -292,7 +289,7 @@ async function deletePersonAction(formData: FormData) {
 
   const me = await getSessionUserCached()
   if (!me) redirect('/login?next=/admin/personal-funds')
-  if (!isAdmin(me.role)) redirect('/admin/personal-funds?error=Access%20denied')
+  if (!canAccessPersonalFunds(me.role)) redirect('/admin/personal-funds?error=Access%20denied')
 
   const returnQS = safeStr(formData.get('return_qs'))
   const personId = safeStr(formData.get('person_id')).trim()
@@ -324,7 +321,7 @@ async function addEntryAction(formData: FormData) {
 
   const me = await getSessionUserCached()
   if (!me) redirect('/login?next=/admin/personal-funds')
-  if (!isAdmin(me.role)) redirect('/admin/personal-funds?error=Access%20denied')
+  if (!canAccessPersonalFunds(me.role)) redirect('/admin/personal-funds?error=Access%20denied')
 
   const returnQS = safeStr(formData.get('return_qs'))
   const entry_date = safeStr(formData.get('entry_date')).trim() || toISODate(new Date())
@@ -401,7 +398,7 @@ async function updateEntryAction(formData: FormData) {
 
   const me = await getSessionUserCached()
   if (!me) redirect('/login?next=/admin/personal-funds')
-  if (!isAdmin(me.role)) redirect('/admin/personal-funds?error=Access%20denied')
+  if (!canAccessPersonalFunds(me.role)) redirect('/admin/personal-funds?error=Access%20denied')
 
   const returnQS = safeStr(formData.get('return_qs'))
   const id = safeStr(formData.get('id')).trim()
@@ -506,7 +503,7 @@ async function deleteEntryAction(formData: FormData) {
 
   const me = await getSessionUserCached()
   if (!me) redirect('/login?next=/admin/personal-funds')
-  if (!isAdmin(me.role)) redirect('/admin/personal-funds?error=Access%20denied')
+  if (!canAccessPersonalFunds(me.role)) redirect('/admin/personal-funds?error=Access%20denied')
 
   const returnQS = safeStr(formData.get('return_qs'))
   const id = safeStr(formData.get('id')).trim()
@@ -541,7 +538,7 @@ export default async function PersonalFundsPage({
   const me = await getSessionUserCached()
   if (!me) redirect('/login?next=/admin/personal-funds')
 
-  if (!isAdmin(me.role)) {
+  if (!canAccessPersonalFunds(me.role)) {
     return (
       <AccessDeniedPage
         title="Personal Funds"
@@ -1023,7 +1020,7 @@ export default async function PersonalFundsPage({
               <form action={addPersonAction} className="flex flex-col gap-3 sm:flex-row sm:items-end">
                 <input type="hidden" name="return_qs" value={returnQS} />
                 <div className="min-w-0 flex-1">
-                  <Input label="Add person" name="label" />
+                  <Input label="Add person" name="label" placeholder="e.g. Charaf, Ahmed, Partner 2" />
                 </div>
                 <Button type="submit">Add person</Button>
               </form>
