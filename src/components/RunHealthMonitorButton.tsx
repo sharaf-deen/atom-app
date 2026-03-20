@@ -1,6 +1,7 @@
 'use client'
 
 import { useMemo, useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import Button from '@/components/ui/Button'
 
@@ -8,20 +9,9 @@ type Props = {
   sendEmail?: boolean
 }
 
-function statusLabel(status: string) {
-  if (status === 'critical') return 'Critical'
-  if (status === 'warning') return 'Warning'
-  return 'Healthy'
-}
-
-function statusHint(status: string) {
-  if (status === 'critical') return 'Serious issue detected. Review the page as soon as possible.'
-  if (status === 'warning') return 'Attention needed. Review the active warnings on the page.'
-  return 'Everything looks normal.'
-}
-
 export default function RunHealthMonitorButton({ sendEmail = false }: Props) {
   const [loading, setLoading] = useState(false)
+  const router = useRouter()
 
   const label = useMemo(() => {
     if (loading) return sendEmail ? 'Running + emailing…' : 'Running…'
@@ -41,37 +31,44 @@ export default function RunHealthMonitorButton({ sendEmail = false }: Props) {
 
       if (!res.ok) {
         const msg = json?.details || json?.error || 'Failed'
-        toast.error('Health monitor failed', { description: String(msg) })
+        toast.error(`Health monitor: ${msg}`)
         return
       }
 
       const status = String(json?.summary?.overall_status ?? 'healthy')
       const scans = Number(json?.summary?.counts?.scans_today ?? 0)
       const orphan = Number(json?.summary?.counts?.orphan_profiles ?? 0)
-      const warningsCount = Array.isArray(json?.summary?.warnings) ? json.summary.warnings.length : 0
+      const warnings = Array.isArray(json?.summary?.warnings) ? json.summary.warnings.length : 0
       const emailSent = !!json?.email_sent
       const persistError = json?.persist_error
+      const reportId = String(json?.report_id ?? '').trim()
 
-      const description = [
-        `${warningsCount} active warning(s).`,
-        `Scans today: ${scans}.`,
-        `Orphan profiles: ${orphan}.`,
-        statusHint(status),
-        sendEmail ? (emailSent ? 'Email sent.' : 'Email not sent.') : null,
-        persistError ? `Saved with warning: ${persistError}` : 'Report saved.',
-      ]
-        .filter(Boolean)
-        .join(' ')
+      const suffix = sendEmail
+        ? emailSent
+          ? ' Email sent.'
+          : ' Email not sent.'
+        : ''
 
-      if (status === 'critical') {
-        toast.error(`Health monitor: ${statusLabel(status)}`, { description })
+      const base = `Status ${status}. Warnings ${warnings}. Scans today ${scans}. Orphans ${orphan}.${suffix}`
+
+      if (persistError) {
+        toast.warning(base, { description: `Report save warning: ${persistError}` })
+      } else if (status === 'critical') {
+        toast.error(base)
       } else if (status === 'warning') {
-        toast.warning(`Health monitor: ${statusLabel(status)}`, { description })
+        toast.warning(base)
       } else {
-        toast.success(`Health monitor: ${statusLabel(status)}`, { description })
+        toast.success(base)
+      }
+
+      if (reportId) {
+        router.push(`/admin/health-monitor?report=${reportId}`)
+        router.refresh()
+      } else {
+        router.refresh()
       }
     } catch (e: any) {
-      toast.error('Health monitor failed', { description: e?.message ?? 'Unknown error' })
+      toast.error(e?.message ?? 'Health monitor failed')
     } finally {
       setLoading(false)
     }
