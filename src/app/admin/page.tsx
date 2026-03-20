@@ -7,6 +7,7 @@ import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { createSupabaseRSC } from '@/lib/supabaseServer'
 import { getSessionUser } from '@/lib/session'
+import { canAccessAdminDashboard } from '@/lib/rbac'
 import PageHeader from '@/components/layout/PageHeader'
 import Section from '@/components/layout/Section'
 import Forbidden from '@/components/Forbidden'
@@ -62,7 +63,7 @@ export default async function AdminPage() {
   const me = await getSessionUser()
   if (!me) redirect('/login?next=/admin')
 
-  const allowed = me.role === 'admin' || me.role === 'super_admin'
+  const allowed = canAccessAdminDashboard(me.role)
   if (!allowed) {
     return (
       <Forbidden

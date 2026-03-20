@@ -187,104 +187,6 @@ export type Database = {
           },
         ]
       }
-      personal_fund_entries: {
-        Row: {
-          amount: number
-          created_at: string
-          created_by: string | null
-          entry_date: string
-          id: string
-          kind: string
-          note: string | null
-          payment_method: string | null
-          person_id: string
-          receipt_filename: string | null
-          receipt_mime: string | null
-          receipt_path: string | null
-          receipt_size_bytes: number | null
-        }
-        Insert: {
-          amount: number
-          created_at?: string
-          created_by?: string | null
-          entry_date?: string
-          id?: string
-          kind: string
-          note?: string | null
-          payment_method?: string | null
-          person_id: string
-          receipt_filename?: string | null
-          receipt_mime?: string | null
-          receipt_path?: string | null
-          receipt_size_bytes?: number | null
-        }
-        Update: {
-          amount?: number
-          created_at?: string
-          created_by?: string | null
-          entry_date?: string
-          id?: string
-          kind?: string
-          note?: string | null
-          payment_method?: string | null
-          person_id?: string
-          receipt_filename?: string | null
-          receipt_mime?: string | null
-          receipt_path?: string | null
-          receipt_size_bytes?: number | null
-        }
-        Relationships: [
-          {
-            foreignKeyName: "personal_fund_entries_created_by_fkey"
-            columns: ["created_by"]
-            isOneToOne: false
-            referencedRelation: "profiles"
-            referencedColumns: ["user_id"]
-          },
-          {
-            foreignKeyName: "personal_fund_entries_person_id_fkey"
-            columns: ["person_id"]
-            isOneToOne: false
-            referencedRelation: "personal_fund_people"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      personal_fund_people: {
-        Row: {
-          created_at: string
-          created_by: string | null
-          id: string
-          is_active: boolean
-          label: string
-          sort_order: number
-        }
-        Insert: {
-          created_at?: string
-          created_by?: string | null
-          id?: string
-          is_active?: boolean
-          label: string
-          sort_order?: number
-        }
-        Update: {
-          created_at?: string
-          created_by?: string | null
-          id?: string
-          is_active?: boolean
-          label?: string
-          sort_order?: number
-        }
-        Relationships: [
-          {
-            foreignKeyName: "personal_fund_people_created_by_fkey"
-            columns: ["created_by"]
-            isOneToOne: false
-            referencedRelation: "profiles"
-            referencedColumns: ["user_id"]
-          },
-        ]
-      }
       freeze_requests: {
         Row: {
           admin_note: string | null
@@ -1004,7 +906,7 @@ export type Database = {
       freeze_request_status: "pending" | "approved" | "denied" | "canceled"
       payment_method: "cash" | "card" | "transfer" | "online"
       promo_discount_type: "percent" | "amount"
-      user_role: "admin" | "coach" | "assistant_coach" | "member"
+      user_role: "admin" | "coach" | "assistant_coach" | "member" | "reception" | "super_admin"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -1135,7 +1037,7 @@ export const Constants = {
       freeze_request_status: ["pending", "approved", "denied", "canceled"],
       payment_method: ["cash", "card", "transfer", "online"],
       promo_discount_type: ["percent", "amount"],
-      user_role: ["admin", "coach", "assistant_coach", "member"],
+      user_role: ["admin", "coach", "assistant_coach", "member", "reception", "super_admin"],
     },
   },
 } as const

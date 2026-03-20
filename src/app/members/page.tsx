@@ -8,12 +8,10 @@ import PageHeader from '@/components/layout/PageHeader'
 import Section from '@/components/layout/Section'
 import AccessDeniedPage from '@/components/AccessDeniedPage'
 import { getSessionUserCached } from '@/lib/requestCache'
-import { type Role } from '@/lib/session'
+import { canAccessMembersList } from '@/lib/rbac'
 import MembersFilters from './_components/MembersFilters'
 import MembersStatsCards from './_components/MembersStatsCards'
 import MembersResults from './_components/MembersResults'
-
-const STAFF: Role[] = ['reception', 'admin', 'super_admin']
 
 type Status = 'all' | 'active' | 'inactive'
 
@@ -96,7 +94,7 @@ export default async function MembersPage({
 
   if (!me) redirect(`/login?next=${encodeURIComponent(currentPath)}`)
 
-  const allowed = STAFF.includes(me.role)
+  const allowed = canAccessMembersList(me.role)
 
   if (!allowed) {
     return (

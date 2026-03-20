@@ -8,6 +8,7 @@ import AccessDeniedPage from '@/components/AccessDeniedPage'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card'
 import InlineAlert from '@/components/ui/InlineAlert'
 import ExpensesTableClient, { type ExpenseRow } from '@/components/ExpensesTableClient'
+import { canAccessExpenses } from '@/lib/rbac'
 import ExpenseSubmitButton from '@/components/ExpenseSubmitButton'
 
 type RangePreset = 'today' | '7d' | 'month' | 'custom'
@@ -17,10 +18,6 @@ const PER_PAGE = 50
 function parsePositiveInt(v: unknown, fallback: number) {
   const n = typeof v === 'string' ? Number.parseInt(v, 10) : NaN
   return Number.isFinite(n) && n > 0 ? n : fallback
-}
-
-function isAdmin(role?: string | null) {
-  return role === 'admin' || role === 'super_admin'
 }
 
 function toISODate(d: Date) {
@@ -92,7 +89,7 @@ async function addExpenseAction(formData: FormData) {
 
   const me = await getSessionUserCached()
   if (!me) redirect('/login?next=/expenses')
-  if (!isAdmin(me.role)) redirect('/expenses?error=Access%20denied')
+  if (!canAccessExpenses(me.role)) redirect('/expenses?error=Access%20denied')
 
   const return_qs = safeStr(formData.get('return_qs'))
 
@@ -189,7 +186,7 @@ export default async function ExpensesPage({
   const user = await getSessionUserCached()
   if (!user) redirect('/login?next=/expenses')
 
-  if (!isAdmin(user.role)) {
+  if (!canAccessExpenses(user.role)) {
     return (
       <AccessDeniedPage
         title="Expenses"

@@ -11,6 +11,7 @@ import Button from '@/components/ui/Button'
 import RunHealthMonitorButton from '@/components/RunHealthMonitorButton'
 import { getSessionUserCached, getSupabaseAdminClientCached } from '@/lib/requestCache'
 import { collectHealthMonitorSummary, getHealthMonitorRecipients, type HealthMonitorStoredReport } from '@/lib/healthMonitor'
+import { canAccessHealthMonitor } from '@/lib/rbac'
 
 type SearchParams = {
   report?: string | string[]
@@ -376,7 +377,7 @@ export default async function HealthMonitorPage({ searchParams }: { searchParams
   const me = await getSessionUserCached()
   if (!me) redirect('/login?next=/admin/health-monitor')
 
-  const allowed = me.role === 'admin' || me.role === 'super_admin'
+  const allowed = canAccessHealthMonitor(me.role)
   if (!allowed) {
     return (
       <Forbidden

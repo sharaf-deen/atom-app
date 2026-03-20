@@ -4,7 +4,8 @@ export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
 import { NextResponse } from 'next/server'
-import { getSessionUser, type Role } from '@/lib/session'
+import { getSessionUser } from '@/lib/session'
+import { canOpenOtherMemberProfile, normalizeRole, type Role } from '@/lib/rbac'
 import { createSupabaseAdminClient } from '@/lib/supabaseAdmin'
 
 type MemberRow = {
@@ -19,8 +20,6 @@ type MemberRow = {
   date_of_birth: string | null
   is_active?: boolean | null
 }
-
-const ALLOWED: Role[] = ['coach', 'reception', 'admin', 'super_admin']
 
 function isISODateOnly(s?: string | null) {
   return !!s && /^\d{4}-\d{2}-\d{2}$/.test(s)
@@ -60,7 +59,7 @@ export async function GET(req: Request) {
     )
   }
 
-  if (!ALLOWED.includes(me.role)) {
+  if (!canOpenOtherMemberProfile(me.role)) {
     return NextResponse.json(
       { ok: false, error: 'FORBIDDEN' },
       { status: 403, headers: { 'Cache-Control': 'no-store' } },

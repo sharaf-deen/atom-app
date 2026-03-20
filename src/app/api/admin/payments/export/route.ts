@@ -6,6 +6,7 @@ export const revalidate = 0
 import { NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { createSupabaseServerActionClient } from '@/lib/supabaseServer'
+import { canAccessPayments, normalizeRole } from '@/lib/rbac'
 import { addDaysDateOnly, cairoDayBoundsUTC, isISODateOnly } from '@/lib/cairoTime'
 
 type Role = 'member' | 'assistant_coach' | 'coach' | 'reception' | 'admin' | 'super_admin'

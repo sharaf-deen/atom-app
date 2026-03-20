@@ -3,12 +3,9 @@ export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
 import { NextResponse } from 'next/server'
-import type { Role } from '@/lib/session'
+import { canAccessKiosk, normalizeRole, type Role } from '@/lib/rbac'
 import { createSupabaseServerActionClient } from '@/lib/supabaseServer'
 import { createClient } from '@supabase/supabase-js'
-
-const STAFF: Role[] = ['reception', 'admin', 'super_admin']
-const can = (r: Role) => STAFF.includes(r)
 
 const ACTION_RESET = 'member_reset_password_send'
 
@@ -144,8 +141,8 @@ export async function POST(req: Request, ctx: { params: { id: string } }) {
       )
     }
 
-    const role = (me?.role ?? 'member') as Role
-    if (!can(role)) {
+    const role = normalizeRole(me?.role)
+    if (!canAccessKiosk(role)) {
       return noStore(NextResponse.json({ ok: false, error: 'FORBIDDEN' }, { status: 403 }))
     }
 

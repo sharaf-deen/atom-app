@@ -6,6 +6,7 @@ export const revalidate = 0
 import { NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { createSupabaseServerActionClient } from '@/lib/supabaseServer'
+import { canAccessCashReport, normalizeRole } from '@/lib/rbac'
 import {
   cairoMonthBoundsDateOnly,
   cairoRangeBoundsUTC,
@@ -146,8 +147,8 @@ export async function GET(req: Request) {
       .maybeSingle()
 
     if (meErr) return json(500, { ok: false, error: 'PROFILE_LOOKUP_FAILED', details: meErr.message })
-    const role: Role = (me?.role as Role) ?? 'member'
-    if (!['admin', 'super_admin'].includes(role)) return json(403, { ok: false, error: 'FORBIDDEN' })
+    const role = normalizeRole(me?.role)
+    if (!canAccessCashReport(role)) return json(403, { ok: false, error: 'FORBIDDEN' })
 
     const admin = makeAdminClient()
     if (!admin) return json(500, { ok: false, error: 'SERVICE_ROLE_MISSING' })

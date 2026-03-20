@@ -4,6 +4,7 @@ export const revalidate = 0
 
 import { redirect } from 'next/navigation'
 import { getSessionUser } from '@/lib/session'
+import { canAccessKiosk } from '@/lib/rbac'
 import PageHeader from '@/components/layout/PageHeader'
 import Section from '@/components/layout/Section'
 import CreateMemberForm from '@/components/CreateMemberForm'
@@ -14,7 +15,7 @@ export default async function KioskPage() {
 
   if (!me) redirect('/login?next=/kiosk')
 
-  const isStaff = ['reception', 'admin', 'super_admin'].includes(me.role)
+  const isStaff = canAccessKiosk(me.role)
 
   if (!isStaff) {
     return (

@@ -4,115 +4,20 @@ export const revalidate = 0
 
 import Link from 'next/link'
 import Image from 'next/image'
-import { getSessionUser, type Role } from '@/lib/session'
+import { getSessionUser } from '@/lib/session'
+import { getAppNavForRole, type NavIconKey as IconKey, type NavMenuItem as MenuItem } from '@/lib/rbac'
 import SignOutButton from '@/components/SignOutButton'
 import NavLoginLink from '@/components/NavLoginLink'
 import RoleMenu from '@/components/RoleMenu'
 import NotificationsBell from '@/components/NotificationsBell'
 import HideMenuOnRoutes from '@/components/HideMenuOnRoutes'
 
-type IconKey =
-  | 'home'
-  | 'dashboard'
-  | 'bell'
-  | 'gift'
-  | 'id'
-  | 'scan'
-  | 'users'
-  | 'user-cog'
-  | 'bag'
-  | 'wallet'
-  | 'calendar'
-  | 'file-text'
-
-type MenuItem = { label: string; href: string; icon: IconKey }
-type MenuByRole = Record<Role, MenuItem[]>
-
-const MENU_BY_ROLE: MenuByRole = {
-  member: [
-    { label: 'Store', href: '/store', icon: 'bag' },
-    { label: 'Notifications', href: '/notifications', icon: 'bell' },
-    { label: 'Schedule', href: '/schedule', icon: 'calendar' },
-    { label: 'My Profile', href: '/profile', icon: 'id' },
-    { label: 'Packages & Promos', href: '/packages-and-promos', icon: 'gift' },
-    { label: 'Contact Admin', href: '/contact', icon: 'user-cog' },
-  ],
-  assistant_coach: [
-    { label: 'Store', href: '/store', icon: 'bag' },
-    { label: 'Notifications', href: '/notifications', icon: 'bell' },
-    { label: 'Schedule', href: '/schedule', icon: 'calendar' },
-    { label: 'My Profile', href: '/profile', icon: 'id' },
-    { label: 'Packages & Promos', href: '/packages-and-promos', icon: 'gift' },
-  ],
-  coach: [
-    { label: 'Store', href: '/store', icon: 'bag' },
-    { label: 'Notifications', href: '/notifications', icon: 'bell' },
-    { label: 'Schedule', href: '/schedule', icon: 'calendar' },
-    { label: 'My Profile', href: '/profile', icon: 'id' },
-    { label: 'Packages & Promos', href: '/packages-and-promos', icon: 'gift' },
-  ],
-  reception: [
-    { label: 'Schedule', href: '/schedule', icon: 'calendar' },
-    { label: 'Membership', href: '/kiosk', icon: 'id' },
-    { label: 'My Profile', href: '/profile', icon: 'id' },
-    { label: 'Scan', href: '/scan', icon: 'scan' },
-    { label: 'Members', href: '/members', icon: 'users' },
-    { label: 'Packages & Promos', href: '/packages-and-promos', icon: 'gift' },
-  ],
-  admin: [
-    { label: 'Dashboard', href: '/admin', icon: 'dashboard' },
-    { label: 'Notifications', href: '/notifications', icon: 'bell' },
-    { label: 'My Profile', href: '/profile', icon: 'id' },
-    { label: 'Schedule', href: '/schedule', icon: 'calendar' },
-    { label: 'Attendance', href: '/admin/attendance', icon: 'calendar' },
-    { label: 'Scan Audit', href: '/admin/scan-audit', icon: 'file-text' },
-    { label: 'Health Monitor', href: '/admin/health-monitor', icon: 'file-text' },
-    { label: 'Packages & Promos', href: '/packages-and-promos', icon: 'gift' },
-    { label: 'Membership', href: '/kiosk', icon: 'id' },
-    { label: 'Scan', href: '/scan', icon: 'scan' },
-    { label: 'Members', href: '/members', icon: 'users' },
-    { label: 'Coaches', href: '/coaches', icon: 'user-cog' },
-    { label: 'Store', href: '/store', icon: 'bag' },
-    { label: 'Invoices', href: '/invoices', icon: 'file-text' },
-    { label: 'Payments', href: '/admin/payments', icon: 'file-text' },
-    { label: 'Cash Report', href: '/admin/cash-report', icon: 'wallet' },
-    { label: 'Outstanding Dues', href: '/admin/outstanding-dues', icon: 'wallet' },
-    { label: 'Membership Activity', href: '/admin/membership-activity', icon: 'file-text' },
-    { label: 'Expiring Soon', href: '/admin/expiring-soon', icon: 'bell' },
-    { label: 'Expenses', href: '/expenses', icon: 'wallet' },
-  ],
-  super_admin: [
-    { label: 'Home', href: '/', icon: 'home' },
-    { label: 'Dashboard', href: '/admin', icon: 'dashboard' },
-    { label: 'Notifications', href: '/notifications', icon: 'bell' },
-    { label: 'My Profile', href: '/profile', icon: 'id' },
-    { label: 'Schedule', href: '/schedule', icon: 'calendar' },
-    { label: 'Attendance', href: '/admin/attendance', icon: 'calendar' },
-    { label: 'Scan Audit', href: '/admin/scan-audit', icon: 'file-text' },
-    { label: 'Health Monitor', href: '/admin/health-monitor', icon: 'file-text' },
-    { label: 'Packages & Promos', href: '/packages-and-promos', icon: 'gift' },
-    { label: 'Membership', href: '/kiosk', icon: 'id' },
-    { label: 'Scan', href: '/scan', icon: 'scan' },
-    { label: 'Members', href: '/members', icon: 'users' },
-    { label: 'Coaches', href: '/coaches', icon: 'user-cog' },
-    { label: 'Store', href: '/store', icon: 'bag' },
-    { label: 'Store Admin', href: '/admin/store', icon: 'bag' },
-    { label: 'Invoices', href: '/invoices', icon: 'file-text' },
-    { label: 'Payments', href: '/admin/payments', icon: 'file-text' },
-    { label: 'Cash Report', href: '/admin/cash-report', icon: 'wallet' },
-    { label: 'Outstanding Dues', href: '/admin/outstanding-dues', icon: 'wallet' },
-    { label: 'Membership Activity', href: '/admin/membership-activity', icon: 'file-text' },
-    { label: 'Expiring Soon', href: '/admin/expiring-soon', icon: 'bell' },
-    { label: 'Expenses', href: '/expenses', icon: 'wallet' },
-  ],
-}
-
 // ✅ Pages d’auth sur lesquelles on ne veut afficher ni Menu, ni Logout, ni lien Login
 const AUTH_ROUTES = ['/login', '/signup', '/reset-password']
 
 export default async function AppNav() {
   const user = await getSessionUser()
-  const items = user ? (MENU_BY_ROLE[user.role] ?? []) : []
+  const items = user ? getAppNavForRole(user.role) : []
   const hasNotifications = items.some((it) => it.href === '/notifications')
 
   return (

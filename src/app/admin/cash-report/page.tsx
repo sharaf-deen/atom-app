@@ -6,6 +6,7 @@ import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { createSupabaseAdminClient } from '@/lib/supabaseAdmin'
 import { getSessionUser } from '@/lib/session'
+import { canAccessCashReport } from '@/lib/rbac'
 import AccessDeniedCard from '@/components/AccessDeniedCard'
 import Badge from '@/components/ui/Badge'
 import { Card } from '@/components/ui/Card'
@@ -18,9 +19,6 @@ import {
   cairoWeekBoundsDateOnly,
   isISODateOnly,
 } from '@/lib/cairoTime'
-
-type Role = 'member' | 'assistant_coach' | 'coach' | 'reception' | 'admin' | 'super_admin'
-const ALLOWED: Role[] = ['admin', 'super_admin']
 
 type Method = 'cash' | 'instapay' | 'card' | 'bank_transfer'
 const METHODS: Method[] = ['cash', 'instapay', 'card', 'bank_transfer']
@@ -123,7 +121,7 @@ export default async function AdminCashReportPage({
   const me = await getSessionUser()
   if (!me) redirect('/login?next=/admin/cash-report')
 
-  if (!ALLOWED.includes(me.role as Role)) {
+  if (!canAccessCashReport(me.role)) {
     return (
       <main className="p-6">
         <h1 className="text-2xl font-bold">Admin · Cash Report</h1>

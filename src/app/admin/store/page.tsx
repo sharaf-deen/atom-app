@@ -14,6 +14,7 @@ import { Card, CardContent } from '@/components/ui/Card'
 import { formatCurrency } from '@/lib/money'
 import type { OrderStatus } from '@/lib/order'
 import { humanStatus } from '@/lib/order'
+import { canAccessStoreAdmin } from '@/lib/rbac'
 import AdminProductQuickEdit from '@/components/store/AdminProductQuickEdit'
 
 const StoreProductForm = dynamicImport(() => import('@/components/StoreProductForm'), {
@@ -148,7 +149,7 @@ export default async function AdminStorePage({
   const me = await getSessionUserCached()
   if (!me) redirect('/login?next=/admin/store')
 
-  if (me.role !== 'super_admin') {
+  if (!canAccessStoreAdmin(me.role)) {
     return (
       <AccessDeniedPage
         title="Store Admin"

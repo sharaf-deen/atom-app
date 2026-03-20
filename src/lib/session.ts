@@ -1,14 +1,9 @@
 // src/lib/session.ts
 import { headers } from 'next/headers'            // ✅ marche sur Next 13/14/15
 import { createSupabaseRSC } from '@/lib/supabaseServer'
+import { normalizeRole, type Role } from '@/lib/rbac'
 
-export type Role =
-  | 'member'
-  | 'assistant_coach'
-  | 'coach'
-  | 'reception'
-  | 'admin'
-  | 'super_admin'
+export type { Role } from '@/lib/rbac'
 
 export type SessionUser = {
   id: string
@@ -83,7 +78,7 @@ export async function getSessionUser(): Promise<SessionUser | null> {
   const email     = (u.email ?? p?.email ?? null) as string | null
   const phone     = (p?.phone ?? null) as string | null
   const member_id = (p?.member_id ?? null) as string | null
-  const role      = (p?.role ?? 'member') as Role
+  const role      = normalizeRole(p?.role)
   const qr_code   = (p?.qr_code ?? null) as string | null
   const id_photo_path = (p?.id_photo_path ?? null) as string | null
 

@@ -4,25 +4,14 @@ export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
 import { NextResponse } from 'next/server'
-import type { Role } from '@/lib/session'
 import { createSupabaseServerActionClient } from '@/lib/supabaseServer'
+import { canManageRoles, isRole, normalizeRole, type Role } from '@/lib/rbac'
 
 type Body = { user_id?: string; role?: Role } | Record<string, any>
 
 function noStore(res: NextResponse) {
   res.headers.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate')
   return res
-}
-
-function isRole(v: unknown): v is Role {
-  return (
-    v === 'member' ||
-    v === 'assistant_coach' ||
-    v === 'coach' ||
-    v === 'reception' ||
-    v === 'admin' ||
-    v === 'super_admin'
-  )
 }
 
 export async function POST(req: Request) {
@@ -50,8 +39,8 @@ export async function POST(req: Request) {
       return noStore(NextResponse.json({ ok: false, error: `ACTOR_PROFILE_ERROR: ${meErr.message}` }, { status: 500 }))
     }
 
-    const actorRole = (me?.role ?? 'member') as Role
-    if (actorRole !== 'super_admin') {
+    const actorRole = normalizeRole(me?.role)
+    if (!canManageRoles(actorRole)) {
       return noStore(NextResponse.json({ ok: false, error: 'FORBIDDEN' }, { status: 403 }))
     }
 

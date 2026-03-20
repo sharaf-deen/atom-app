@@ -4,12 +4,9 @@ export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
 import { NextResponse } from 'next/server'
-import type { Role } from '@/lib/session'
+import { canAccessKiosk, normalizeRole, type Role } from '@/lib/rbac'
 import { createSupabaseServerActionClient } from '@/lib/supabaseServer'
 import { createClient } from '@supabase/supabase-js'
-
-const STAFF: Role[] = ['reception', 'admin', 'super_admin']
-const can = (r: Role) => STAFF.includes(r)
 
 function noStore(res: NextResponse) {
   res.headers.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate')
@@ -52,8 +49,8 @@ export async function GET(req: Request, ctx: { params: { id: string } }) {
       return noStore(NextResponse.json({ ok: false, error: `ACTOR_PROFILE_ERROR: ${meErr.message}` }, { status: 500 }))
     }
 
-    const role = (me?.role ?? 'member') as Role
-    if (!can(role)) {
+    const role = normalizeRole(me?.role)
+    if (!canAccessKiosk(role)) {
       return noStore(NextResponse.json({ ok: false, status: 'forbidden' as InviteStatus }, { status: 403 }))
     }
 

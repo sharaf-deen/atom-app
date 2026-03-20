@@ -5,7 +5,7 @@ export const revalidate = 0
 
 import { NextResponse } from 'next/server'
 import { revalidateTag, revalidatePath } from 'next/cache'
-import type { Role } from '@/lib/session'
+import { canAccessKiosk, normalizeRole, type Role } from '@/lib/rbac'
 import { createSupabaseServerActionClient } from '@/lib/supabaseServer'
 import { createClient } from '@supabase/supabase-js'
 import { extractActionLink, sendMemberInviteEmailWithQr } from '@/lib/memberInviteEmail'
@@ -30,9 +30,6 @@ type CreateOutcome =
   | 'existing_auth_user'
 
 type InviteMode = 'custom_qr' | 'custom_qr_failed' | 'supabase_default' | 'none'
-
-const STAFF: Role[] = ['reception', 'admin', 'super_admin']
-const can = (r: Role) => STAFF.includes(r)
 
 function isValidDateOnly(dateOnly: string) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(dateOnly)) return false
@@ -93,8 +90,8 @@ export async function POST(req: Request) {
       )
     }
 
-    const role = (me?.role ?? 'member') as Role
-    if (!can(role)) {
+    const role = normalizeRole(me?.role)
+    if (!canAccessKiosk(role)) {
       return noStore(
         NextResponse.json({ ok: false, error: 'FORBIDDEN' }, { status: 403 }),
       )
