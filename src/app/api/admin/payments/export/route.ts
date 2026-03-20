@@ -151,15 +151,15 @@ export async function GET(req: Request) {
       'member_phone',
       'amount',
       'payment_method',
-      'payment_label',
+      'payment_method_label',
       'note',
       'recorded_by',
     ]
 
     const lines: string[] = []
-    lines.push(['Report from', from, 'to', to].map(csvCell).join(','))
-    lines.push(['Payment filter', payment_method].map(csvCell).join(','))
-    lines.push(['Search', qRaw].map(csvCell).join(','))
+    lines.push(['Filtered payments export', `Range: ${from} → ${to}`].map(csvCell).join(','))
+    lines.push(['Method filter', payment_method].map(csvCell).join(','))
+    lines.push(['Search filter', qRaw].map(csvCell).join(','))
     lines.push('')
     lines.push(header.map(csvCell).join(','))
 
@@ -197,7 +197,7 @@ export async function GET(req: Request) {
     }
 
     lines.push('')
-    lines.push(['Summary', 'Amount'].map(csvCell).join(','))
+    lines.push(['Filtered summary', 'Amount'].map(csvCell).join(','))
     lines.push(['Total', totals.all.toFixed(2)].map(csvCell).join(','))
     lines.push(['Cash', totals.cash.toFixed(2)].map(csvCell).join(','))
     lines.push(['Instapay', totals.instapay.toFixed(2)].map(csvCell).join(','))

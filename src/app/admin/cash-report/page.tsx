@@ -253,6 +253,8 @@ export default async function AdminCashReportPage({
     }
   })
 
+  const paymentsHref = `/admin/payments?${new URLSearchParams({ preset: 'custom', from: safeFrom, to: safeTo }).toString()}`
+
   const activeChips = [
     rangeLabel,
     'Timezone: Africa/Cairo',
@@ -282,8 +284,8 @@ export default async function AdminCashReportPage({
           <Link prefetch={false} href="/admin" className="border px-4 py-2 rounded-lg hover:bg-gray-50">
             ← Admin
           </Link>
-          <Link prefetch={false} href="/admin/payments" className="border px-4 py-2 rounded-lg hover:bg-gray-50">
-            Payments
+          <Link prefetch={false} href={paymentsHref} className="border px-4 py-2 rounded-lg hover:bg-gray-50">
+            Filtered Payments
           </Link>
         </div>
       </div>
@@ -404,17 +406,17 @@ export default async function AdminCashReportPage({
             href={`/api/admin/cash-report/export?${exportQuery.toString()}`}
             className="rounded-xl border px-4 py-2 text-sm font-medium hover:bg-gray-50"
           >
-            Export CSV
+            Export filtered CSV
           </Link>
           <Link
             prefetch={false}
             href={`/api/admin/cash-report/export-pdf?${exportQuery.toString()}`}
             className="rounded-xl border px-4 py-2 text-sm font-medium hover:bg-gray-50"
           >
-            Export PDF
+            Export filtered PDF
           </Link>
           <div className="self-center text-xs text-[hsl(var(--muted))]">
-            CSV exports all filtered payments and expenses. PDF exports the summary and top lists for the same period.
+            Filtered CSV/PDF exports and the Payments shortcut always follow the same selected period.
           </div>
         </div>
       </Card>
@@ -443,7 +445,12 @@ export default async function AdminCashReportPage({
         <div className="space-y-3">
           <div className="flex items-center justify-between gap-3 flex-wrap">
             <h2 className="text-lg font-semibold">Recent income (latest 10)</h2>
-            <p className="text-xs text-[hsl(var(--muted))]">Sorted by latest payment time in Cairo range.</p>
+            <div className="flex items-center gap-3 flex-wrap">
+              <p className="text-xs text-[hsl(var(--muted))]">Sorted by latest payment time in Cairo range.</p>
+              <Link prefetch={false} href={paymentsHref} className="text-xs font-medium underline underline-offset-4">
+                Open full filtered payments
+              </Link>
+            </div>
           </div>
           <Table columns={payColumns} rows={payRows as any} keyField="id" stickyTopClassName="top-0" />
         </div>

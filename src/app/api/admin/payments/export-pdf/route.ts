@@ -221,8 +221,8 @@ export async function GET(req: Request) {
       const { width, height } = page.getSize()
       const topY = height - marginTop
 
-      page.drawText('Payments Report', { x: marginX, y: topY, size: 18, font: fontBold })
-      page.drawText(`From: ${fmtDateOnly(from)}   To: ${fmtDateOnly(to)}`, { x: marginX, y: topY - 18, size: 10, font })
+      page.drawText('Filtered Payments Export', { x: marginX, y: topY, size: 18, font: fontBold })
+      page.drawText(`Range: ${fmtDateOnly(from)} → ${fmtDateOnly(to)}`, { x: marginX, y: topY - 18, size: 10, font })
 
       const filters: string[] = []
       if (payment_method !== 'all') filters.push(`Method: ${paymentLabel(payment_method)}`)

@@ -293,6 +293,7 @@ export default async function AdminPaymentsPage({
   }
 
   const exportQS = buildQS({ from, to, payment_method, q })
+  const cashReportHref = `/admin/cash-report?${buildQS({ mode: from === to ? 'day' : 'range', date: from, from, to })}`
 
   const activeFilters = [
     `Range: ${from} → ${to}`,
@@ -371,8 +372,8 @@ export default async function AdminPaymentsPage({
           <Link prefetch={false} href="/admin" className="border px-4 py-2 rounded-lg hover:bg-gray-50">
             ← Admin
           </Link>
-          <Link prefetch={false} href="/admin/cash-report" className="border px-4 py-2 rounded-lg hover:bg-gray-50">
-            Cash Report
+          <Link prefetch={false} href={cashReportHref} className="border px-4 py-2 rounded-lg hover:bg-gray-50">
+            Filtered Cash Report
           </Link>
         </div>
       </div>
@@ -466,10 +467,10 @@ export default async function AdminPaymentsPage({
                 Apply filters
               </button>
               <a href={`/api/admin/payments/export?${exportQS}`} className="inline-flex items-center justify-center rounded-2xl shadow-soft border border-[hsl(var(--border))] bg-white px-4 py-2 text-sm font-medium hover:bg-[hsl(var(--bg))]/80">
-                Export current CSV
+                Export filtered CSV
               </a>
               <a href={`/api/admin/payments/export-pdf?${exportQS}`} className="inline-flex items-center justify-center rounded-2xl shadow-soft border border-[hsl(var(--border))] bg-white px-4 py-2 text-sm font-medium hover:bg-[hsl(var(--bg))]/80">
-                Export current PDF
+                Export filtered PDF
               </a>
               <Link
                 prefetch={false}
@@ -503,7 +504,7 @@ export default async function AdminPaymentsPage({
             Use <strong>Edit date</strong> for historical imports already entered with today&apos;s date.
           </div>
           <div className="text-xs text-[hsl(var(--muted))]">
-            CSV/PDF exports always follow the current filtered result, not only the visible page.
+            Filtered CSV/PDF exports and the Cash Report shortcut always follow the current filtered result, not only the visible page.
           </div>
         </CardContent>
       </Card>
