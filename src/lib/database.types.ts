@@ -198,6 +198,10 @@ export type Database = {
           note: string | null
           payment_method: string | null
           person_id: string
+          receipt_filename: string | null
+          receipt_mime: string | null
+          receipt_path: string | null
+          receipt_size_bytes: number | null
         }
         Insert: {
           amount: number
@@ -209,6 +213,10 @@ export type Database = {
           note?: string | null
           payment_method?: string | null
           person_id: string
+          receipt_filename?: string | null
+          receipt_mime?: string | null
+          receipt_path?: string | null
+          receipt_size_bytes?: number | null
         }
         Update: {
           amount?: number
@@ -220,6 +228,10 @@ export type Database = {
           note?: string | null
           payment_method?: string | null
           person_id?: string
+          receipt_filename?: string | null
+          receipt_mime?: string | null
+          receipt_path?: string | null
+          receipt_size_bytes?: number | null
         }
         Relationships: [
           {

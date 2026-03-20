@@ -3,6 +3,7 @@ export const revalidate = 0
 
 import { redirect } from 'next/navigation'
 import Link from 'next/link'
+import { randomUUID } from 'crypto'
 import AccessDeniedPage from '@/components/AccessDeniedPage'
 import PageHeader from '@/components/layout/PageHeader'
 import Section from '@/components/layout/Section'
@@ -33,9 +34,14 @@ type EntryRow = {
   payment_method: string | null
   note: string | null
   created_at: string
+  receipt_path: string | null
+  receipt_mime: string | null
+  receipt_filename: string | null
+  receipt_size_bytes: number | null
 }
 
 const PER_PAGE = 25
+const RECEIPT_MAX_BYTES = 8 * 1024 * 1024
 
 function isAdmin(role?: string | null) {
   return role === 'admin' || role === 'super_admin'
@@ -105,6 +111,14 @@ function formatEGP(n: number) {
   }).format(safe)
 }
 
+function formatBytes(n?: number | null) {
+  const size = Number(n ?? 0)
+  if (!Number.isFinite(size) || size <= 0) return '—'
+  if (size < 1024) return `${size} B`
+  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`
+  return `${(size / (1024 * 1024)).toFixed(1)} MB`
+}
+
 function paymentLabel(v?: string | null) {
   const s = (v || '').trim()
   if (!s) return '—'
@@ -136,6 +150,41 @@ function balanceImpact(kind: EntryKind, amount: number) {
     return <span className="inline-flex rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-800">Gym repaid {formatEGP(amount)}</span>
   }
   return <span className="inline-flex rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-900">Gym owes {formatEGP(amount)}</span>
+}
+
+function actionLinkClass() {
+  return 'inline-flex items-center justify-center rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-1.5 text-sm shadow-soft transition hover:bg-[hsl(var(--bg))]/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-[hsl(var(--bg))]'
+}
+
+function normalizeFileName(name: string) {
+  return (name || 'receipt').replace(/[^a-zA-Z0-9._-]+/g, '_')
+}
+
+function inferReceiptMime(file: File) {
+  const typed = (file.type || '').toLowerCase()
+  if (typed === 'application/pdf' || typed === 'image/jpeg' || typed === 'image/png' || typed === 'image/webp') return typed
+
+  const lower = (file.name || '').toLowerCase()
+  if (lower.endsWith('.pdf')) return 'application/pdf'
+  if (lower.endsWith('.jpg') || lower.endsWith('.jpeg')) return 'image/jpeg'
+  if (lower.endsWith('.png')) return 'image/png'
+  if (lower.endsWith('.webp')) return 'image/webp'
+  return ''
+}
+
+function proofBadge(entry: Pick<EntryRow, 'receipt_path' | 'receipt_filename' | 'receipt_size_bytes'>) {
+  if (!entry.receipt_path) {
+    return <span className="inline-flex rounded-full border border-[hsl(var(--border))] bg-[hsl(var(--bg))] px-2 py-0.5 text-xs font-medium text-[hsl(var(--muted))]">No receipt</span>
+  }
+
+  return (
+    <div className="space-y-1">
+      <span className="inline-flex rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-800">Receipt attached</span>
+      <div className="text-xs text-[hsl(var(--muted))] break-all">
+        {entry.receipt_filename || 'receipt'}{entry.receipt_size_bytes ? ` · ${formatBytes(entry.receipt_size_bytes)}` : ''}
+      </div>
+    </div>
+  )
 }
 
 async function addPersonAction(formData: FormData) {
@@ -214,6 +263,7 @@ async function addEntryAction(formData: FormData) {
   const amountRaw = safeStr(formData.get('amount')).trim()
   const payment_method = safeStr(formData.get('payment_method')).trim()
   const note = safeStr(formData.get('note')).trim()
+  const receipt = formData.get('receipt')
 
   if (!person_id) {
     redirect(withFlash(returnQS, { error: 'Please choose a person.' }))
@@ -234,19 +284,69 @@ async function addEntryAction(formData: FormData) {
   }
 
   const admin = getSupabaseAdminClientCached()
+  const entryId = randomUUID()
+
+  let receipt_path: string | null = null
+  let receipt_mime: string | null = null
+  let receipt_filename: string | null = null
+  let receipt_size_bytes: number | null = null
+
+  if (receipt && typeof (receipt as any)?.arrayBuffer === 'function') {
+    const file = receipt as File
+    if (file.size > 0) {
+      if (file.size > RECEIPT_MAX_BYTES) {
+        redirect(withFlash(returnQS, { error: 'Receipt file is too large (max 8MB).' }))
+      }
+
+      const mime = inferReceiptMime(file)
+      if (!mime) {
+        redirect(withFlash(returnQS, { error: 'Receipt must be a PDF, JPG, PNG, or WEBP file.' }))
+      }
+
+      const safeName = normalizeFileName(file.name || 'receipt')
+      const path = `personal-funds/${entryId}/${safeName}`
+      const ab = await file.arrayBuffer()
+      const up = await admin.storage.from('personal-fund-receipts').upload(path, ab, {
+        contentType: mime,
+        upsert: false,
+      })
+
+      if (up.error) {
+        redirect(withFlash(returnQS, { error: up.error.message || 'Receipt upload failed.' }))
+      }
+
+      receipt_path = path
+      receipt_mime = mime
+      receipt_filename = file.name || safeName
+      receipt_size_bytes = file.size
+    }
+  }
+
   const { error } = await admin.from('personal_fund_entries').insert([
     {
+      id: entryId,
       entry_date,
       person_id,
       kind,
       amount,
       payment_method,
       note: note || null,
+      receipt_path,
+      receipt_mime,
+      receipt_filename,
+      receipt_size_bytes,
       created_by: me.id,
     },
   ])
 
   if (error) {
+    if (receipt_path) {
+      try {
+        await admin.storage.from('personal-fund-receipts').remove([receipt_path])
+      } catch {
+        // best effort only
+      }
+    }
     redirect(withFlash(returnQS, { error: error.message || 'Could not save entry.' }))
   }
 
@@ -268,10 +368,25 @@ async function deleteEntryAction(formData: FormData) {
   }
 
   const admin = getSupabaseAdminClientCached()
+  const { data: beforeDelete } = await admin
+    .from('personal_fund_entries')
+    .select('receipt_path')
+    .eq('id', id)
+    .maybeSingle<{ receipt_path: string | null }>()
+
   const { error } = await admin.from('personal_fund_entries').delete().eq('id', id)
 
   if (error) {
     redirect(withFlash(returnQS, { error: error.message || 'Could not delete entry.' }))
+  }
+
+  const receiptPath = String(beforeDelete?.receipt_path ?? '').trim()
+  if (receiptPath) {
+    try {
+      await admin.storage.from('personal-fund-receipts').remove([receiptPath])
+    } catch {
+      // best effort only
+    }
   }
 
   redirect(withFlash(returnQS, { deleted: '1' }))
@@ -390,7 +505,10 @@ export default async function PersonalFundsPage({
 
   let entriesQuery = admin
     .from('personal_fund_entries')
-    .select('id,entry_date,person_id,kind,amount,payment_method,note,created_at', { count: 'exact' })
+    .select(
+      'id,entry_date,person_id,kind,amount,payment_method,note,created_at,receipt_path,receipt_mime,receipt_filename,receipt_size_bytes',
+      { count: 'exact' }
+    )
     .order('entry_date', { ascending: false })
     .order('created_at', { ascending: false })
 
@@ -400,7 +518,7 @@ export default async function PersonalFundsPage({
   if (kindFilter !== 'all') entriesQuery = entriesQuery.eq('kind', kindFilter)
   if (qText) {
     const matchingPeople = people.filter((p) => p.label.toLowerCase().includes(qText.toLowerCase())).map((p) => p.id)
-    const ors = [`note.ilike.%${qText}%`]
+    const ors = [`note.ilike.%${qText}%`, `receipt_filename.ilike.%${qText}%`]
     if (matchingPeople.length > 0) ors.push(`person_id.in.(${matchingPeople.join(',')})`)
     entriesQuery = entriesQuery.or(ors.join(','))
   }
@@ -441,6 +559,7 @@ export default async function PersonalFundsPage({
     { key: 'impact', header: 'Balance impact' },
     { key: 'amount', header: 'Amount' },
     { key: 'method', header: 'Method', hideOnMobile: true },
+    { key: 'proof', header: 'Proof' },
     { key: 'note', header: 'Note' },
     { key: 'created', header: 'Recorded', hideOnMobile: true },
     { key: 'actions', header: '' },
@@ -454,16 +573,37 @@ export default async function PersonalFundsPage({
     impact: balanceImpact(entry.kind, Number(entry.amount ?? 0)),
     amount: formatEGP(Number(entry.amount ?? 0)),
     method: paymentLabel(entry.payment_method),
+    proof: proofBadge(entry),
     note: entry.note || '—',
     created: new Date(entry.created_at).toLocaleString('en-GB', { timeZone: 'Africa/Cairo' }),
     actions: (
-      <form action={deleteEntryAction}>
-        <input type="hidden" name="id" value={entry.id} />
-        <input type="hidden" name="return_qs" value={returnQS} />
-        <Button variant="outline" size="sm" type="submit">
-          Delete
-        </Button>
-      </form>
+      <div className="flex flex-wrap items-center justify-end gap-2">
+        {entry.receipt_path ? (
+          <>
+            <a
+              href={`/api/admin/personal-funds/${entry.id}/receipt`}
+              target="_blank"
+              rel="noreferrer"
+              className={actionLinkClass()}
+            >
+              View
+            </a>
+            <a
+              href={`/api/admin/personal-funds/${entry.id}/receipt?download=1`}
+              className={actionLinkClass()}
+            >
+              Download
+            </a>
+          </>
+        ) : null}
+        <form action={deleteEntryAction}>
+          <input type="hidden" name="id" value={entry.id} />
+          <input type="hidden" name="return_qs" value={returnQS} />
+          <Button variant="outline" size="sm" type="submit">
+            Delete
+          </Button>
+        </form>
+      </div>
     ),
   }))
 
@@ -471,7 +611,7 @@ export default async function PersonalFundsPage({
     <main>
       <PageHeader
         title="Personal Funds"
-        subtitle="Track partner advances, gym expenses paid personally, and reimbursements. This V1 stays separate from Cash Report for stability."
+        subtitle="Track partner advances, gym expenses paid personally, reimbursements, and attached proof. This V1.1 still stays separate from Cash Report for stability."
         right={
           <div className="flex flex-wrap items-center gap-2">
             <Button asChild variant="outline" href="/admin">
@@ -533,6 +673,7 @@ export default async function PersonalFundsPage({
           <div className="space-y-1">
             <div><strong>Advance to gym</strong> and <strong>Expense paid personally</strong> increase what the gym owes to that person.</div>
             <div><strong>Reimbursement from gym</strong> decreases what the gym still owes.</div>
+            <div><strong>Receipt / invoice</strong> is optional proof and stays private in storage.</div>
           </div>
         </InlineAlert>
 
@@ -609,6 +750,15 @@ export default async function PersonalFundsPage({
                     <option value="instapay">Instapay</option>
                     <option value="bank_transfer">Bank transfer</option>
                   </Select>
+                  <Input
+                    label="Receipt / invoice"
+                    name="receipt"
+                    type="file"
+                    accept=".pdf,image/jpeg,image/png,image/webp"
+                    hint="Optional proof. Accepted: PDF, JPG, PNG, WEBP. Max 8MB."
+                    disabled={people.length === 0}
+                    className="file:mr-3 file:rounded-xl file:border-0 file:bg-black file:px-3 file:py-2 file:text-sm file:font-medium file:text-white"
+                  />
                 </div>
 
                 <label className="block">
@@ -624,7 +774,7 @@ export default async function PersonalFundsPage({
 
                 <div className="flex flex-wrap items-center gap-2">
                   <Button type="submit" disabled={people.length === 0}>Add entry</Button>
-                  <div className="text-xs text-[hsl(var(--muted))]">This V1 only records personal-funds movements. It does not change Cash Report yet.</div>
+                  <div className="text-xs text-[hsl(var(--muted))]">This V1.1 records personal-funds movements and optional proof only. It does not change Cash Report yet.</div>
                 </div>
               </form>
             </CardContent>
@@ -721,7 +871,7 @@ export default async function PersonalFundsPage({
                   <option value="expense_paid_personally">Expense paid personally</option>
                   <option value="reimbursement_from_gym">Reimbursement from gym</option>
                 </Select>
-                <Input label="Search" name="q" defaultValue={qText} placeholder="Note or person" />
+                <Input label="Search" name="q" defaultValue={qText} placeholder="Note, file name, or person" />
               </div>
 
               <div className="flex flex-wrap items-center gap-2">
