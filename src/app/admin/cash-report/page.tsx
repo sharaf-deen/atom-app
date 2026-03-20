@@ -11,6 +11,7 @@ import Badge from '@/components/ui/Badge'
 import { Card } from '@/components/ui/Card'
 import { Table } from '@/components/ui/Table'
 import {
+  addDaysDateOnly,
   cairoMonthBoundsDateOnly,
   cairoRangeBoundsUTC,
   cairoTodayDateOnly,
@@ -31,6 +32,13 @@ function formatEGP(n: number) {
   } catch {
     return `${v.toFixed(2)} EGP`
   }
+}
+
+function formatShortDate(isoDateOnly: string) {
+  const [y, m, d] = String(isoDateOnly ?? '').split('-').map((x) => Number(x))
+  const dt = new Date(Date.UTC(y, (m || 1) - 1, d || 1))
+  if (Number.isNaN(dt.getTime())) return isoDateOnly
+  return dt.toLocaleDateString('en-GB', { year: 'numeric', month: 'short', day: '2-digit' })
 }
 
 function normMethod(m: any): Method {
@@ -83,6 +91,8 @@ export default async function AdminCashReportPage({
   }
 
   const today = cairoTodayDateOnly()
+  const last7From = addDaysDateOnly(today, -6)
+  const yesterday = addDaysDateOnly(today, -1)
 
   const modeRaw = typeof searchParams.mode === 'string' ? searchParams.mode : 'day'
   const mode: 'day' | 'week' | 'month' | 'range' =
@@ -102,7 +112,8 @@ export default async function AdminCashReportPage({
   const { from: weekFrom, to: weekTo } = cairoWeekBoundsDateOnly(anchorDate)
   const { from: monthFrom, to: monthTo } = cairoMonthBoundsDateOnly(anchorDate)
 
-  const rangeFrom = mode === 'week' ? weekFrom : mode === 'month' ? monthFrom : mode === 'range' ? rangeFromParam : anchorDate
+  const rangeFrom =
+    mode === 'week' ? weekFrom : mode === 'month' ? monthFrom : mode === 'range' ? rangeFromParam : anchorDate
   const rangeTo = mode === 'week' ? weekTo : mode === 'month' ? monthTo : mode === 'range' ? rangeToParam : anchorDate
 
   const safeFrom = rangeFrom <= rangeTo ? rangeFrom : rangeTo
@@ -110,18 +121,16 @@ export default async function AdminCashReportPage({
 
   const rangeLabel =
     mode === 'day'
-      ? `Day: ${safeFrom}`
+      ? `Day: ${formatShortDate(safeFrom)}`
       : mode === 'week'
-      ? `Week (Mon–Sun): ${safeFrom} → ${safeTo}`
+      ? `Week (Mon–Sun): ${formatShortDate(safeFrom)} → ${formatShortDate(safeTo)}`
       : mode === 'month'
       ? `Month: ${safeFrom.slice(0, 7)}`
-      : `Range: ${safeFrom} → ${safeTo}`
+      : `Range: ${formatShortDate(safeFrom)} → ${formatShortDate(safeTo)}`
 
   const admin = createSupabaseAdminClient()
-
   const { startISO, endISO } = cairoRangeBoundsUTC(safeFrom, safeTo)
 
-  // Income from subscription_payments (paid_at in UTC bounds for Cairo day)
   const { data: pays, error: payErr } = await admin
     .from('subscription_payments')
     .select('amount, payment_method')
@@ -136,7 +145,6 @@ export default async function AdminCashReportPage({
     incomeBy[normMethod(r.payment_method)] += amt
   }
 
-  // Expenses for the same Cairo date range (expenses.date is YYYY-MM-DD)
   const { data: exps, error: expErr } = await admin
     .from('expenses')
     .select('id, date, category_key, description, amount, payment_method')
@@ -154,8 +162,9 @@ export default async function AdminCashReportPage({
   const totalIncome = METHODS.reduce((s, m) => s + incomeBy[m], 0)
   const totalExpenses = METHODS.reduce((s, m) => s + expenseBy[m], 0)
   const net = totalIncome - totalExpenses
+  const paymentsCount = (pays ?? []).length
+  const expensesCount = (exps ?? []).length
 
-  // Recent payments (top 10 by time)
   const { data: recentPays } = await admin
     .from('subscription_payments')
     .select(
@@ -166,7 +175,6 @@ export default async function AdminCashReportPage({
     .order('paid_at', { ascending: false })
     .limit(10)
 
-  // "Recent" expenses for the range: highest 10 amounts
   const topExpenses = (exps ?? [])
     .slice()
     .sort((a: any, b: any) => Number(b.amount ?? 0) - Number(a.amount ?? 0))
@@ -190,7 +198,11 @@ export default async function AdminCashReportPage({
     method: <Badge className={badgeClassForMethod(m)}>{labelMethod(m)}</Badge>,
     income: <span className="font-semibold">{formatEGP(incomeBy[m])}</span>,
     expenses: <span className="font-semibold">{formatEGP(expenseBy[m])}</span>,
-    net: <span className={`font-semibold ${incomeBy[m] - expenseBy[m] < 0 ? 'text-rose-700' : 'text-emerald-700'}`}>{formatEGP(incomeBy[m] - expenseBy[m])}</span>,
+    net: (
+      <span className={`font-semibold ${incomeBy[m] - expenseBy[m] < 0 ? 'text-rose-700' : 'text-emerald-700'}`}>
+        {formatEGP(incomeBy[m] - expenseBy[m])}
+      </span>
+    ),
   }))
 
   const payColumns = [
@@ -205,7 +217,11 @@ export default async function AdminCashReportPage({
     const name = `${r.member?.first_name ?? ''} ${r.member?.last_name ?? ''}`.trim() || r.member?.email || '—'
     return {
       id: String(r.id),
-      when: new Date(r.paid_at || r.created_at).toLocaleTimeString('en-GB', { timeZone: 'Africa/Cairo' }),
+      when: new Date(r.paid_at || r.created_at).toLocaleTimeString('en-GB', {
+        timeZone: 'Africa/Cairo',
+        hour: '2-digit',
+        minute: '2-digit',
+      }),
       member: (
         <div className="space-y-0.5">
           <div className="font-medium">{name}</div>
@@ -218,6 +234,7 @@ export default async function AdminCashReportPage({
   })
 
   const expColumns = [
+    { key: 'date', header: 'Date' },
     { key: 'category', header: 'Category' },
     { key: 'desc', header: 'Description' },
     { key: 'amount', header: 'Amount' },
@@ -228,6 +245,7 @@ export default async function AdminCashReportPage({
     const m = normMethod(r.payment_method)
     return {
       id: String(r.id),
+      date: <span className="text-sm text-[hsl(var(--muted))]">{formatShortDate(String(r.date ?? '—'))}</span>,
       category: <span className="font-medium">{String(r.category_key ?? '—')}</span>,
       desc: <span className="text-sm text-[hsl(var(--muted))]">{String(r.description ?? '—')}</span>,
       amount: <span className="font-semibold">{formatEGP(Number(r.amount ?? 0))}</span>,
@@ -235,9 +253,24 @@ export default async function AdminCashReportPage({
     }
   })
 
+  const activeChips = [
+    rangeLabel,
+    'Timezone: Africa/Cairo',
+    `Payments: ${paymentsCount}`,
+    `Expenses: ${expensesCount}`,
+  ]
+
+  const statCards = [
+    { label: 'Income', value: formatEGP(totalIncome), tone: 'text-[hsl(var(--fg))]' },
+    { label: 'Expenses', value: formatEGP(totalExpenses), tone: 'text-[hsl(var(--fg))]' },
+    { label: 'Net', value: formatEGP(net), tone: net < 0 ? 'text-rose-700' : 'text-emerald-700' },
+    { label: 'Payments', value: String(paymentsCount), tone: 'text-[hsl(var(--fg))]' },
+    { label: 'Expense lines', value: String(expensesCount), tone: 'text-[hsl(var(--fg))]' },
+  ]
+
   return (
-    <main className="p-6 space-y-6">
-      <div className="flex items-center justify-between gap-3 flex-wrap">
+    <main className="p-4 sm:p-6 space-y-6">
+      <div className="flex items-start justify-between gap-3 flex-wrap">
         <div>
           <h1 className="text-2xl font-bold">Admin · Cash Report</h1>
           <p className="text-sm text-[hsl(var(--muted))]">
@@ -245,31 +278,24 @@ export default async function AdminCashReportPage({
           </p>
         </div>
 
-        <div className="flex gap-2">
+        <div className="flex gap-2 flex-wrap">
           <Link prefetch={false} href="/admin" className="border px-4 py-2 rounded-lg hover:bg-gray-50">
             ← Admin
           </Link>
           <Link prefetch={false} href="/admin/payments" className="border px-4 py-2 rounded-lg hover:bg-gray-50">
             Payments
           </Link>
-          <Link
-            prefetch={false}
-            href={`/api/admin/cash-report/export-pdf?${exportQuery.toString()}`}
-            className="border px-4 py-2 rounded-lg hover:bg-gray-50"
-          >
-            Export PDF
-          </Link>
         </div>
       </div>
 
-      <Card className="p-5">
-        <form method="get" className="flex flex-wrap items-end gap-3">
+      <Card className="p-4 sm:p-5 space-y-4">
+        <form method="get" className="grid gap-3 md:grid-cols-[minmax(0,180px)_minmax(0,180px)_minmax(0,180px)_auto] xl:grid-cols-[minmax(0,180px)_minmax(0,180px)_minmax(0,180px)_auto_auto] xl:items-end">
           <label className="block">
             <span className="mb-1 block text-sm font-medium">Period</span>
             <select
               name="mode"
               defaultValue={mode}
-              className="w-56 rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              className="w-full rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
             >
               <option value="day">Day</option>
               <option value="week">Week (Mon–Sun)</option>
@@ -286,7 +312,7 @@ export default async function AdminCashReportPage({
                   type="date"
                   name="from"
                   defaultValue={safeFrom}
-                  className="w-44 rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  className="w-full rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 />
               </label>
               <label className="block">
@@ -295,85 +321,138 @@ export default async function AdminCashReportPage({
                   type="date"
                   name="to"
                   defaultValue={safeTo}
-                  className="w-44 rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  className="w-full rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 />
               </label>
             </>
           ) : (
-            <label className="block">
+            <label className="block md:col-span-2">
               <span className="mb-1 block text-sm font-medium">Anchor date (Egypt)</span>
               <input
                 type="date"
                 name="date"
                 defaultValue={anchorDate}
-                className="w-56 rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                className="w-full rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
               />
             </label>
           )}
 
-          <button className="rounded-xl bg-black text-white px-4 py-2 text-sm font-medium">Load</button>
-
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2 xl:justify-end">
+            <button className="rounded-xl bg-black text-white px-4 py-2 text-sm font-medium">Load report</button>
             <Link
               prefetch={false}
-              href={`/admin/cash-report?mode=day&date=${today}`}
-              className="border px-3 py-2 rounded-lg text-sm hover:bg-gray-50"
+              href="/admin/cash-report"
+              className="rounded-xl border px-4 py-2 text-sm font-medium hover:bg-gray-50"
             >
-              Today
+              Reset
             </Link>
-            <Link
-              prefetch={false}
-              href={`/admin/cash-report?mode=week&date=${today}`}
-              className="border px-3 py-2 rounded-lg text-sm hover:bg-gray-50"
-            >
-              This week
-            </Link>
-            <Link
-              prefetch={false}
-              href={`/admin/cash-report?mode=month&date=${today}`}
-              className="border px-3 py-2 rounded-lg text-sm hover:bg-gray-50"
-            >
-              This month
-            </Link>
-          </div>
-
-          <div className="text-xs text-[hsl(var(--muted))]">
-            Tip: use Week/Month for quick reporting, or Custom range for accounting.
           </div>
         </form>
+
+        <div className="flex flex-wrap gap-2">
+          <Link
+            prefetch={false}
+            href={`/admin/cash-report?mode=day&date=${today}`}
+            className="border px-3 py-2 rounded-lg text-sm hover:bg-gray-50"
+          >
+            Today
+          </Link>
+          <Link
+            prefetch={false}
+            href={`/admin/cash-report?mode=day&date=${yesterday}`}
+            className="border px-3 py-2 rounded-lg text-sm hover:bg-gray-50"
+          >
+            Yesterday
+          </Link>
+          <Link
+            prefetch={false}
+            href={`/admin/cash-report?mode=week&date=${today}`}
+            className="border px-3 py-2 rounded-lg text-sm hover:bg-gray-50"
+          >
+            This week
+          </Link>
+          <Link
+            prefetch={false}
+            href={`/admin/cash-report?mode=month&date=${today}`}
+            className="border px-3 py-2 rounded-lg text-sm hover:bg-gray-50"
+          >
+            This month
+          </Link>
+          <Link
+            prefetch={false}
+            href={`/admin/cash-report?mode=range&from=${last7From}&to=${today}`}
+            className="border px-3 py-2 rounded-lg text-sm hover:bg-gray-50"
+          >
+            Last 7 days
+          </Link>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          {activeChips.map((chip) => (
+            <span
+              key={chip}
+              className="inline-flex items-center rounded-full border border-[hsl(var(--border))] bg-[hsl(var(--bg))] px-3 py-1 text-xs font-medium text-[hsl(var(--muted))]"
+            >
+              {chip}
+            </span>
+          ))}
+        </div>
+
+        <div className="flex flex-wrap gap-2">
+          <Link
+            prefetch={false}
+            href={`/api/admin/cash-report/export?${exportQuery.toString()}`}
+            className="rounded-xl border px-4 py-2 text-sm font-medium hover:bg-gray-50"
+          >
+            Export CSV
+          </Link>
+          <Link
+            prefetch={false}
+            href={`/api/admin/cash-report/export-pdf?${exportQuery.toString()}`}
+            className="rounded-xl border px-4 py-2 text-sm font-medium hover:bg-gray-50"
+          >
+            Export PDF
+          </Link>
+          <div className="self-center text-xs text-[hsl(var(--muted))]">
+            CSV exports all filtered payments and expenses. PDF exports the summary and top lists for the same period.
+          </div>
+        </div>
       </Card>
 
-      <div className="grid gap-4 sm:grid-cols-3">
-        <Card>
-          <div className="text-sm text-[hsl(var(--muted))]">Income</div>
-          <div className="mt-1 text-2xl font-semibold">{formatEGP(totalIncome)}</div>
-        </Card>
-        <Card>
-          <div className="text-sm text-[hsl(var(--muted))]">Expenses</div>
-          <div className="mt-1 text-2xl font-semibold">{formatEGP(totalExpenses)}</div>
-        </Card>
-        <Card>
-          <div className="text-sm text-[hsl(var(--muted))]">Net</div>
-          <div className={`mt-1 text-2xl font-semibold ${net < 0 ? 'text-rose-700' : 'text-emerald-700'}`}>{formatEGP(net)}</div>
-        </Card>
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
+        {statCards.map((card) => (
+          <Card key={card.label} className="p-4">
+            <div className="text-sm text-[hsl(var(--muted))]">{card.label}</div>
+            <div className={`mt-1 text-2xl font-semibold ${card.tone}`}>{card.value}</div>
+          </Card>
+        ))}
       </div>
 
       {payErr ? <p className="text-sm text-rose-700">❌ Income error: {payErr.message}</p> : null}
       {expErr ? <p className="text-sm text-rose-700">❌ Expenses error: {expErr.message}</p> : null}
 
       <div className="space-y-3">
-        <h2 className="text-lg font-semibold">Breakdown</h2>
-        <Table columns={breakdownColumns} rows={breakdownRows as any} keyField="id" stickyTopClassName="top-0"/>
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          <h2 className="text-lg font-semibold">Breakdown</h2>
+          <p className="text-xs text-[hsl(var(--muted))]">Net = income − expenses by payment method.</p>
+        </div>
+        <Table columns={breakdownColumns} rows={breakdownRows as any} keyField="id" stickyTopClassName="top-0" />
       </div>
 
       <div className="grid gap-6 lg:grid-cols-2">
         <div className="space-y-3">
-          <h2 className="text-lg font-semibold">Recent income</h2>
-          <Table columns={payColumns} rows={payRows as any} keyField="id" />
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <h2 className="text-lg font-semibold">Recent income (latest 10)</h2>
+            <p className="text-xs text-[hsl(var(--muted))]">Sorted by latest payment time in Cairo range.</p>
+          </div>
+          <Table columns={payColumns} rows={payRows as any} keyField="id" stickyTopClassName="top-0" />
         </div>
         <div className="space-y-3">
-          <h2 className="text-lg font-semibold">Top expenses (by amount)</h2>
-          <Table columns={expColumns} rows={expRows as any} keyField="id" />
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <h2 className="text-lg font-semibold">Top expenses (highest 10)</h2>
+            <p className="text-xs text-[hsl(var(--muted))]">Sorted by amount for the selected period.</p>
+          </div>
+          <Table columns={expColumns} rows={expRows as any} keyField="id" stickyTopClassName="top-0" />
         </div>
       </div>
     </main>
