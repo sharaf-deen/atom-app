@@ -172,6 +172,66 @@ function inferReceiptMime(file: File) {
   return ''
 }
 
+
+async function uploadReceiptFile(admin: any, entryId: string, receipt: FormDataEntryValue | null) {
+  if (!(receipt && typeof (receipt as any)?.arrayBuffer === 'function')) {
+    return {
+      receipt_path: null as string | null,
+      receipt_mime: null as string | null,
+      receipt_filename: null as string | null,
+      receipt_size_bytes: null as number | null,
+    }
+  }
+
+  const file = receipt as File
+  if (file.size <= 0) {
+    return {
+      receipt_path: null as string | null,
+      receipt_mime: null as string | null,
+      receipt_filename: null as string | null,
+      receipt_size_bytes: null as number | null,
+    }
+  }
+
+  if (file.size > RECEIPT_MAX_BYTES) {
+    throw new Error('Receipt file is too large (max 8MB).')
+  }
+
+  const mime = inferReceiptMime(file)
+  if (!mime) {
+    throw new Error('Receipt must be a PDF, JPG, PNG, or WEBP file.')
+  }
+
+  const safeName = normalizeFileName(file.name || 'receipt')
+  const path = `personal-funds/${entryId}/${Date.now()}-${safeName}`
+  const ab = await file.arrayBuffer()
+  const up = await admin.storage.from('personal-fund-receipts').upload(path, ab, {
+    contentType: mime,
+    upsert: false,
+  })
+
+  if (up.error) {
+    throw new Error(up.error.message || 'Receipt upload failed.')
+  }
+
+  return {
+    receipt_path: path,
+    receipt_mime: mime,
+    receipt_filename: file.name || safeName,
+    receipt_size_bytes: file.size,
+  }
+}
+
+async function removeReceiptPath(admin: any, path: string | null | undefined) {
+  const safe = String(path ?? '').trim()
+  if (!safe) return
+  try {
+    await admin.storage.from('personal-fund-receipts').remove([safe])
+  } catch {
+    // best effort only
+  }
+}
+
 function proofBadge(entry: Pick<EntryRow, 'receipt_path' | 'receipt_filename' | 'receipt_size_bytes'>) {
   if (!entry.receipt_path) {
     return <span className="inline-flex rounded-full border border-[hsl(var(--border))] bg-[hsl(var(--bg))] px-2 py-0.5 text-xs font-medium text-[hsl(var(--muted))]">No receipt</span>
@@ -291,35 +351,14 @@ async function addEntryAction(formData: FormData) {
   let receipt_filename: string | null = null
   let receipt_size_bytes: number | null = null
 
-  if (receipt && typeof (receipt as any)?.arrayBuffer === 'function') {
-    const file = receipt as File
-    if (file.size > 0) {
-      if (file.size > RECEIPT_MAX_BYTES) {
-        redirect(withFlash(returnQS, { error: 'Receipt file is too large (max 8MB).' }))
-      }
-
-      const mime = inferReceiptMime(file)
-      if (!mime) {
-        redirect(withFlash(returnQS, { error: 'Receipt must be a PDF, JPG, PNG, or WEBP file.' }))
-      }
-
-      const safeName = normalizeFileName(file.name || 'receipt')
-      const path = `personal-funds/${entryId}/${safeName}`
-      const ab = await file.arrayBuffer()
-      const up = await admin.storage.from('personal-fund-receipts').upload(path, ab, {
-        contentType: mime,
-        upsert: false,
-      })
-
-      if (up.error) {
-        redirect(withFlash(returnQS, { error: up.error.message || 'Receipt upload failed.' }))
-      }
-
-      receipt_path = path
-      receipt_mime = mime
-      receipt_filename = file.name || safeName
-      receipt_size_bytes = file.size
-    }
+  try {
+    const uploaded = await uploadReceiptFile(admin, entryId, receipt)
+    receipt_path = uploaded.receipt_path
+    receipt_mime = uploaded.receipt_mime
+    receipt_filename = uploaded.receipt_filename
+    receipt_size_bytes = uploaded.receipt_size_bytes
+  } catch (e: any) {
+    redirect(withFlash(returnQS, { error: e?.message || 'Receipt upload failed.' }))
   }
 
   const { error } = await admin.from('personal_fund_entries').insert([
@@ -340,17 +379,116 @@ async function addEntryAction(formData: FormData) {
   ])
 
   if (error) {
-    if (receipt_path) {
-      try {
-        await admin.storage.from('personal-fund-receipts').remove([receipt_path])
-      } catch {
-        // best effort only
-      }
-    }
+    await removeReceiptPath(admin, receipt_path)
     redirect(withFlash(returnQS, { error: error.message || 'Could not save entry.' }))
   }
 
   redirect(withFlash(returnQS, { saved: '1' }))
+}
+
+async function updateEntryAction(formData: FormData) {
+  'use server'
+
+  const me = await getSessionUserCached()
+  if (!me) redirect('/login?next=/admin/personal-funds')
+  if (!isAdmin(me.role)) redirect('/admin/personal-funds?error=Access%20denied')
+
+  const returnQS = safeStr(formData.get('return_qs'))
+  const id = safeStr(formData.get('id')).trim()
+  const entry_date = safeStr(formData.get('entry_date')).trim() || toISODate(new Date())
+  const person_id = safeStr(formData.get('person_id')).trim()
+  const kind = safeStr(formData.get('kind')).trim() as EntryKind
+  const amountRaw = safeStr(formData.get('amount')).trim()
+  const payment_method = safeStr(formData.get('payment_method')).trim()
+  const note = safeStr(formData.get('note')).trim()
+  const removeReceipt = safeStr(formData.get('remove_receipt')) === '1'
+  const receipt = formData.get('receipt')
+
+  if (!id) {
+    redirect(withFlash(returnQS, { error: 'Missing entry id.' }))
+  }
+
+  if (!person_id) {
+    redirect(withFlash(returnQS, { error: 'Please choose a person.' }))
+  }
+
+  if (!['advance_to_gym', 'expense_paid_personally', 'reimbursement_from_gym'].includes(kind)) {
+    redirect(withFlash(returnQS, { error: 'Please choose a valid entry type.' }))
+  }
+
+  const amount = Number(amountRaw)
+  if (!Number.isFinite(amount) || amount <= 0) {
+    redirect(withFlash(returnQS, { error: 'Amount must be greater than 0.' }))
+  }
+
+  const allowedMethods = new Set(['cash', 'visa', 'instapay', 'bank_transfer'])
+  if (!allowedMethods.has(payment_method)) {
+    redirect(withFlash(returnQS, { error: 'Please choose a payment method.' }))
+  }
+
+  const admin = getSupabaseAdminClientCached()
+  const { data: existing, error: existingError } = await admin
+    .from('personal_fund_entries')
+    .select('id,receipt_path,receipt_mime,receipt_filename,receipt_size_bytes')
+    .eq('id', id)
+    .maybeSingle<Pick<EntryRow, 'id' | 'receipt_path' | 'receipt_mime' | 'receipt_filename' | 'receipt_size_bytes'>>()
+
+  if (existingError || !existing) {
+    redirect(withFlash(returnQS, { error: existingError?.message || 'Entry not found.' }))
+  }
+
+  let receipt_path: string | null = existing.receipt_path
+  let receipt_mime: string | null = existing.receipt_mime
+  let receipt_filename: string | null = existing.receipt_filename
+  let receipt_size_bytes: number | null = existing.receipt_size_bytes
+  let uploadedNewPath: string | null = null
+
+  try {
+    const uploaded = await uploadReceiptFile(admin, id, receipt)
+    if (uploaded.receipt_path) {
+      uploadedNewPath = uploaded.receipt_path
+      receipt_path = uploaded.receipt_path
+      receipt_mime = uploaded.receipt_mime
+      receipt_filename = uploaded.receipt_filename
+      receipt_size_bytes = uploaded.receipt_size_bytes
+    } else if (removeReceipt) {
+      receipt_path = null
+      receipt_mime = null
+      receipt_filename = null
+      receipt_size_bytes = null
+    }
+  } catch (e: any) {
+    redirect(withFlash(returnQS, { error: e?.message || 'Receipt upload failed.' }))
+  }
+
+  const { error } = await admin
+    .from('personal_fund_entries')
+    .update({
+      entry_date,
+      person_id,
+      kind,
+      amount,
+      payment_method,
+      note: note || null,
+      receipt_path,
+      receipt_mime,
+      receipt_filename,
+      receipt_size_bytes,
+    })
+    .eq('id', id)
+
+  if (error) {
+    await removeReceiptPath(admin, uploadedNewPath)
+    redirect(withFlash(returnQS, { error: error.message || 'Could not update entry.' }))
+  }
+
+  if (uploadedNewPath && existing.receipt_path && existing.receipt_path !== uploadedNewPath) {
+    await removeReceiptPath(admin, existing.receipt_path)
+  } else if (!uploadedNewPath && removeReceipt && existing.receipt_path) {
+    await removeReceiptPath(admin, existing.receipt_path)
+  }
+
+  redirect(withFlash(returnQS, { updated: '1' }))
 }
 
 async function deleteEntryAction(formData: FormData) {
@@ -380,14 +518,7 @@ async function deleteEntryAction(formData: FormData) {
     redirect(withFlash(returnQS, { error: error.message || 'Could not delete entry.' }))
   }
 
-  const receiptPath = String(beforeDelete?.receipt_path ?? '').trim()
-  if (receiptPath) {
-    try {
-      await admin.storage.from('personal-fund-receipts').remove([receiptPath])
-    } catch {
-      // best effort only
-    }
-  }
+  await removeReceiptPath(admin, beforeDelete?.receipt_path)
 
   redirect(withFlash(returnQS, { deleted: '1' }))
 }
@@ -450,8 +581,10 @@ export default async function PersonalFundsPage({
   const personAdded = safeStr(searchParams.person_added)
   const personDeleted = safeStr(searchParams.person_deleted)
   const saved = safeStr(searchParams.saved)
+  const updated = safeStr(searchParams.updated)
   const deleted = safeStr(searchParams.deleted)
   const errorMsg = safeStr(searchParams.error)
+  const editId = safeStr(searchParams.edit).trim()
 
   const returnQS = buildQS({
     preset,
@@ -527,6 +660,22 @@ export default async function PersonalFundsPage({
   const entries = (rawEntries ?? []) as EntryRow[]
   const totalPages = Math.max(1, Math.ceil((count ?? 0) / PER_PAGE))
 
+  let editEntry: EntryRow | null = null
+  let editLoadError = ''
+  if (editId) {
+    const { data, error } = await admin
+      .from('personal_fund_entries')
+      .select('id,entry_date,person_id,kind,amount,payment_method,note,created_at,receipt_path,receipt_mime,receipt_filename,receipt_size_bytes')
+      .eq('id', editId)
+      .maybeSingle<EntryRow>()
+
+    if (error || !data) {
+      editLoadError = error?.message || 'Could not load the selected entry for editing.'
+    } else {
+      editEntry = data
+    }
+  }
+
   const personCards = people
     .map((person) => {
       const bucket = perPerson.get(person.id) ?? { advanced: 0, paidPersonally: 0, reimbursed: 0, entries: 0 }
@@ -551,6 +700,10 @@ export default async function PersonalFundsPage({
     kindFilter !== 'all' ? kindLabel(kindFilter) : '',
     qText ? `Search: ${qText}` : '',
   ].filter(Boolean)
+
+  const returnParams = Object.fromEntries(new URLSearchParams(returnQS).entries())
+  const editPersonLabel = editEntry ? personById.get(editEntry.person_id)?.label ?? 'Unknown person' : ''
+  const editingInCurrentPage = editEntry ? entries.some((entry) => entry.id === editEntry?.id) : false
 
   const tableColumns = [
     { key: 'date', header: 'Date' },
@@ -578,6 +731,13 @@ export default async function PersonalFundsPage({
     created: new Date(entry.created_at).toLocaleString('en-GB', { timeZone: 'Africa/Cairo' }),
     actions: (
       <div className="flex flex-wrap items-center justify-end gap-2">
+        <Link
+          prefetch={false}
+          href={`/admin/personal-funds?${buildQS({ ...returnParams, edit: entry.id })}`}
+          className={actionLinkClass()}
+        >
+          {editEntry?.id === entry.id ? 'Editing' : 'Edit'}
+        </Link>
         {entry.receipt_path ? (
           <>
             <a
@@ -611,7 +771,7 @@ export default async function PersonalFundsPage({
     <main>
       <PageHeader
         title="Personal Funds"
-        subtitle="Track partner advances, gym expenses paid personally, reimbursements, and attached proof. This V1.1 still stays separate from Cash Report for stability."
+        subtitle="Track partner advances, gym expenses paid personally, reimbursements, and attached proof. V1.2 adds edit entry + replace receipt while still staying separate from Cash Report for stability."
         right={
           <div className="flex flex-wrap items-center gap-2">
             <Button asChild variant="outline" href="/admin">
@@ -658,6 +818,11 @@ export default async function PersonalFundsPage({
             Entry saved.
           </InlineAlert>
         ) : null}
+        {updated === '1' ? (
+          <InlineAlert variant="success" title="Personal Funds">
+            Entry updated.
+          </InlineAlert>
+        ) : null}
         {deleted === '1' ? (
           <InlineAlert variant="success" title="Personal Funds">
             Entry deleted.
@@ -668,12 +833,17 @@ export default async function PersonalFundsPage({
             {errorMsg}
           </InlineAlert>
         ) : null}
+        {editId && editLoadError ? (
+          <InlineAlert variant="warning" title="Edit entry">
+            {editLoadError}
+          </InlineAlert>
+        ) : null}
 
         <InlineAlert variant="info" title="How balances work">
           <div className="space-y-1">
             <div><strong>Advance to gym</strong> and <strong>Expense paid personally</strong> increase what the gym owes to that person.</div>
             <div><strong>Reimbursement from gym</strong> decreases what the gym still owes.</div>
-            <div><strong>Receipt / invoice</strong> is optional proof and stays private in storage.</div>
+            <div><strong>Receipt / invoice</strong> is optional proof, stays private in storage, and can be replaced later.</div>
           </div>
         </InlineAlert>
 
@@ -713,7 +883,7 @@ export default async function PersonalFundsPage({
         <div className="grid gap-4 xl:grid-cols-[1.1fr_0.9fr]">
           <Card>
             <CardHeader>
-              <CardTitle>Add entry</CardTitle>
+              <CardTitle>{editEntry ? 'Edit entry' : 'Add entry'}</CardTitle>
             </CardHeader>
             <CardContent>
               {people.length === 0 ? (
@@ -722,50 +892,93 @@ export default async function PersonalFundsPage({
                 </InlineAlert>
               ) : null}
 
-              <form action={addEntryAction} className="space-y-4">
-                <input type="hidden" name="return_qs" value={returnQS} />
-                <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-                  <Input label="Date" name="entry_date" type="date" defaultValue={today} />
+              {editEntry ? (
+                <div className="mb-4 space-y-3">
+                  <InlineAlert variant="info" title="Editing stored entry">
+                    <div className="space-y-1">
+                      <div><strong>{editPersonLabel}</strong> · {kindLabel(editEntry.kind)} · {formatEGP(Number(editEntry.amount ?? 0))}</div>
+                      <div>Recorded on {new Date(editEntry.created_at).toLocaleString('en-GB', { timeZone: 'Africa/Cairo' })}.</div>
+                      {!editingInCurrentPage ? <div>This entry is loaded from storage and may be outside the current filtered page.</div> : null}
+                    </div>
+                  </InlineAlert>
 
-                  <Select label="Person" name="person_id" defaultValue="" disabled={people.length === 0}>
+                  {editEntry.receipt_path ? (
+                    <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] px-4 py-3 text-sm">
+                      <div className="font-medium">Current receipt</div>
+                      <div className="mt-1 text-[hsl(var(--muted))] break-all">
+                        {editEntry.receipt_filename || 'receipt'}{editEntry.receipt_size_bytes ? ` · ${formatBytes(editEntry.receipt_size_bytes)}` : ''}
+                      </div>
+                      <div className="mt-3 flex flex-wrap items-center gap-2">
+                        <a href={`/api/admin/personal-funds/${editEntry.id}/receipt`} target="_blank" rel="noreferrer" className={actionLinkClass()}>
+                          View current receipt
+                        </a>
+                        <a href={`/api/admin/personal-funds/${editEntry.id}/receipt?download=1`} className={actionLinkClass()}>
+                          Download
+                        </a>
+                      </div>
+                    </div>
+                  ) : (
+                    <InlineAlert variant="info" title="Current receipt">
+                      No receipt attached yet.
+                    </InlineAlert>
+                  )}
+                </div>
+              ) : null}
+
+              <form action={editEntry ? updateEntryAction : addEntryAction} className="space-y-4">
+                <input type="hidden" name="return_qs" value={returnQS} />
+                {editEntry ? <input type="hidden" name="id" value={editEntry.id} /> : null}
+
+                <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+                  <Input label="Date" name="entry_date" type="date" defaultValue={editEntry?.entry_date ?? today} />
+
+                  <Select label="Person" name="person_id" defaultValue={editEntry?.person_id ?? ''} disabled={people.length === 0}>
                     <option value="">Choose person</option>
                     {people.map((person) => (
                       <option key={person.id} value={person.id}>{person.label}</option>
                     ))}
                   </Select>
 
-                  <Select label="Type" name="kind" defaultValue="advance_to_gym" disabled={people.length === 0}>
+                  <Select label="Type" name="kind" defaultValue={editEntry?.kind ?? 'advance_to_gym'} disabled={people.length === 0}>
                     <option value="advance_to_gym">Advance to gym</option>
                     <option value="expense_paid_personally">Expense paid personally</option>
                     <option value="reimbursement_from_gym">Reimbursement from gym</option>
                   </Select>
 
-                  <Input label="Amount (EGP)" name="amount" type="number" min="0.01" step="0.01" placeholder="0.00" disabled={people.length === 0} />
+                  <Input label="Amount (EGP)" name="amount" type="number" min="0.01" step="0.01" placeholder="0.00" defaultValue={editEntry ? String(editEntry.amount) : ''} disabled={people.length === 0} />
                 </div>
 
                 <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-                  <Select label="Payment method" name="payment_method" defaultValue="cash" disabled={people.length === 0}>
+                  <Select label="Payment method" name="payment_method" defaultValue={editEntry?.payment_method ?? 'cash'} disabled={people.length === 0}>
                     <option value="cash">Cash</option>
                     <option value="visa">Visa card</option>
                     <option value="instapay">Instapay</option>
                     <option value="bank_transfer">Bank transfer</option>
                   </Select>
                   <Input
-                    label="Receipt / invoice"
+                    label={editEntry?.receipt_path ? 'Replace receipt / invoice' : 'Receipt / invoice'}
                     name="receipt"
                     type="file"
                     accept=".pdf,image/jpeg,image/png,image/webp"
-                    hint="Optional proof. Accepted: PDF, JPG, PNG, WEBP. Max 8MB."
+                    hint={editEntry?.receipt_path ? 'Optional. Upload a new file to replace the current private receipt. Max 8MB.' : 'Optional proof. Accepted: PDF, JPG, PNG, WEBP. Max 8MB.'}
                     disabled={people.length === 0}
                     className="file:mr-3 file:rounded-xl file:border-0 file:bg-black file:px-3 file:py-2 file:text-sm file:font-medium file:text-white"
                   />
                 </div>
+
+                {editEntry?.receipt_path ? (
+                  <label className="flex items-start gap-2 rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] px-3 py-2 text-sm">
+                    <input type="checkbox" name="remove_receipt" value="1" className="mt-0.5" />
+                    <span>Remove current receipt if you do not upload a replacement.</span>
+                  </label>
+                ) : null}
 
                 <label className="block">
                   <span className="mb-1 block text-sm font-medium">Note</span>
                   <textarea
                     name="note"
                     rows={3}
+                    defaultValue={editEntry?.note ?? ''}
                     placeholder="Optional details: what was paid, partial reimbursement, reference..."
                     className="w-full rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm placeholder:text-[hsl(var(--muted))] outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-[hsl(var(--bg))]"
                     disabled={people.length === 0}
@@ -773,8 +986,13 @@ export default async function PersonalFundsPage({
                 </label>
 
                 <div className="flex flex-wrap items-center gap-2">
-                  <Button type="submit" disabled={people.length === 0}>Add entry</Button>
-                  <div className="text-xs text-[hsl(var(--muted))]">This V1.1 records personal-funds movements and optional proof only. It does not change Cash Report yet.</div>
+                  <Button type="submit" disabled={people.length === 0}>{editEntry ? 'Save changes' : 'Add entry'}</Button>
+                  {editEntry ? (
+                    <Button asChild variant="outline" href={`/admin/personal-funds?${returnQS}`}>
+                      Cancel edit
+                    </Button>
+                  ) : null}
+                  <div className="text-xs text-[hsl(var(--muted))]">This V1.2 keeps Personal Funds isolated. Editing and receipt replacement do not change Cash Report yet.</div>
                 </div>
               </form>
             </CardContent>
