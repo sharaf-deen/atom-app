@@ -187,6 +187,92 @@ export type Database = {
           },
         ]
       }
+      personal_fund_entries: {
+        Row: {
+          amount: number
+          created_at: string
+          created_by: string | null
+          entry_date: string
+          id: string
+          kind: string
+          note: string | null
+          payment_method: string | null
+          person_id: string
+        }
+        Insert: {
+          amount: number
+          created_at?: string
+          created_by?: string | null
+          entry_date?: string
+          id?: string
+          kind: string
+          note?: string | null
+          payment_method?: string | null
+          person_id: string
+        }
+        Update: {
+          amount?: number
+          created_at?: string
+          created_by?: string | null
+          entry_date?: string
+          id?: string
+          kind?: string
+          note?: string | null
+          payment_method?: string | null
+          person_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "personal_fund_entries_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["user_id"]
+          },
+          {
+            foreignKeyName: "personal_fund_entries_person_id_fkey"
+            columns: ["person_id"]
+            isOneToOne: false
+            referencedRelation: "personal_fund_people"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      personal_fund_people: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          id: string
+          is_active: boolean
+          label: string
+          sort_order: number
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          is_active?: boolean
+          label: string
+          sort_order?: number
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          is_active?: boolean
+          label?: string
+          sort_order?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "personal_fund_people_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["user_id"]
+          },
+        ]
+      }
       freeze_requests: {
         Row: {
           admin_note: string | null
