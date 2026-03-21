@@ -137,6 +137,9 @@ export default async function AdminPage() {
             <Button asChild variant="outline" href="/members">
               Members
             </Button>
+            <Button asChild variant="outline" href="/admin/crm">
+              CRM
+            </Button>
           </div>
         }
       />
@@ -178,6 +181,9 @@ export default async function AdminPage() {
           </Button>
           <Button asChild variant="outline" href="/admin/outstanding-dues">
             Outstanding
+          </Button>
+          <Button asChild variant="outline" href="/admin/crm">
+            CRM
           </Button>
           <Button asChild variant="outline" href="/admin/payments">
             Payments
