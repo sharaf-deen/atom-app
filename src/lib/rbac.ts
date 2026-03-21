@@ -64,6 +64,7 @@ const APP_NAV_BY_ROLE: MenuByRole = {
     { label: 'My Profile', href: '/profile', icon: 'id' },
     { label: 'Scan', href: '/scan', icon: 'scan' },
     { label: 'Members', href: '/members', icon: 'users' },
+    { label: 'CRM', href: '/admin/crm', icon: 'users' },
     { label: 'Packages & Promos', href: '/packages-and-promos', icon: 'gift' },
     { label: 'Store', href: '/store', icon: 'bag' },
   ],
@@ -80,6 +81,7 @@ const APP_NAV_BY_ROLE: MenuByRole = {
     { label: 'Membership', href: '/kiosk', icon: 'id' },
     { label: 'Scan', href: '/scan', icon: 'scan' },
     { label: 'Members', href: '/members', icon: 'users' },
+    { label: 'CRM', href: '/admin/crm', icon: 'users' },
     { label: 'Coaches', href: '/coaches', icon: 'user-cog' },
     { label: 'Store', href: '/store', icon: 'bag' },
     { label: 'Invoices', href: '/invoices', icon: 'file-text' },
@@ -104,6 +106,7 @@ const APP_NAV_BY_ROLE: MenuByRole = {
     { label: 'Membership', href: '/kiosk', icon: 'id' },
     { label: 'Scan', href: '/scan', icon: 'scan' },
     { label: 'Members', href: '/members', icon: 'users' },
+    { label: 'CRM', href: '/admin/crm', icon: 'users' },
     { label: 'Coaches', href: '/coaches', icon: 'user-cog' },
     { label: 'Store', href: '/store', icon: 'bag' },
     { label: 'Store Admin', href: '/admin/store', icon: 'bag' },
@@ -139,6 +142,10 @@ export function canAccessMembersList(role: Role | null | undefined) {
 
 export function canOpenOtherMemberProfile(role: Role | null | undefined) {
   return canAccessMembersList(role) || role === 'coach'
+}
+
+export function canAccessCrm(role: Role | null | undefined) {
+  return hasAnyRole(role, FRONT_DESK_ROLES)
 }
 
 export function canAccessMemberProfile(
@@ -261,6 +268,14 @@ const CAPABILITY_BLUEPRINTS: CapabilityBlueprint[] = [
     description: 'Open members search and desk operations list.',
     href: '/members',
     check: (role) => canAccessMembersList(role),
+  },
+  {
+    key: 'crm_queue',
+    category: 'Front desk',
+    label: 'CRM follow-up queue',
+    description: 'Review who should be contacted today and open desk follow-up actions.',
+    href: '/admin/crm',
+    check: (role) => canAccessCrm(role),
   },
   {
     key: 'other_member_profile',
