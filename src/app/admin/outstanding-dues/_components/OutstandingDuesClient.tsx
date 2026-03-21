@@ -1,11 +1,15 @@
 'use client'
 
 import Link from 'next/link'
+import type { ReactNode } from 'react'
 import { useMemo, useState } from 'react'
-import type { OutstandingDueRow } from '../types'
+import SettleDueDialog from '@/components/SettleDueDialog'
 import { Table } from '@/components/ui/Table'
+import type { OutstandingDueRow } from '../types'
 
 type PaymentMethod = 'cash' | 'instapay' | 'card' | 'bank_transfer' | 'other'
+
+type SortKey = 'due_desc' | 'due_asc' | 'paid_at_desc' | 'paid_at_asc' | 'name_asc'
 
 function fmtMoney(v: number) {
   const n = Number(v ?? 0)
@@ -19,7 +23,7 @@ function fmtMoney(v: number) {
 function fmtDate(v?: string | null) {
   if (!v) return '—'
   const dt = new Date(v)
-  if (isNaN(dt.getTime())) return v
+  if (Number.isNaN(dt.getTime())) return v
   return dt.toLocaleDateString('en-GB', { year: 'numeric', month: 'short', day: '2-digit' })
 }
 
@@ -45,17 +49,59 @@ function humanMethod(v?: string | null) {
   }
 }
 
+function humanPlan(v?: string | null) {
+  switch (v) {
+    case '1m':
+      return '1 month'
+    case '3m':
+      return '3 months'
+    case '6m':
+      return '6 months'
+    case '12m':
+      return '12 months'
+    case 'sessions':
+      return 'Sessions'
+    default:
+      return v ? String(v) : 'Membership'
+  }
+}
+
+function toneClasses(kind: 'neutral' | 'warning' | 'danger' | 'success') {
+  if (kind === 'success') return 'border-emerald-200 bg-emerald-50 text-emerald-700'
+  if (kind === 'warning') return 'border-amber-200 bg-amber-50 text-amber-800'
+  if (kind === 'danger') return 'border-rose-200 bg-rose-50 text-rose-700'
+  return 'border-[hsl(var(--border))] bg-[hsl(var(--bg))] text-[hsl(var(--muted))]'
+}
+
+function TinyBadge({ children, tone = 'neutral' }: { children: ReactNode; tone?: 'neutral' | 'warning' | 'danger' | 'success' }) {
+  return (
+    <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold ${toneClasses(tone)}`}>
+      {children}
+    </span>
+  )
+}
+
+function SummaryCard({ label, value, hint }: { label: string; value: string; hint: string }) {
+  return (
+    <div className="rounded-2xl border border-[hsl(var(--border))] bg-white p-4 shadow-soft">
+      <div className="text-sm text-[hsl(var(--muted))]">{label}</div>
+      <div className="mt-1 text-2xl font-semibold tracking-tight">{value}</div>
+      <div className="mt-2 text-xs text-[hsl(var(--muted))]">{hint}</div>
+    </div>
+  )
+}
+
 export default function OutstandingDuesClient({ initialRows }: { initialRows: OutstandingDueRow[] }) {
   const [q, setQ] = useState('')
   const [method, setMethod] = useState<'all' | PaymentMethod>('all')
   const [minDue, setMinDue] = useState<string>('')
-  const [sort, setSort] = useState<'due_desc' | 'due_asc' | 'paid_at_desc' | 'paid_at_asc' | 'name_asc'>('due_desc')
+  const [sort, setSort] = useState<SortKey>('due_desc')
 
   const filtered = useMemo(() => {
     const query = q.trim().toLowerCase()
     const min = Number(minDue || 0)
 
-    let out = (initialRows ?? []).filter((r) => {
+    const out = (initialRows ?? []).filter((r) => {
       if (method !== 'all' && normMethod(r.payment_method) !== method) return false
       if (Number.isFinite(min) && min > 0 && r.due < min) return false
 
@@ -91,43 +137,73 @@ export default function OutstandingDuesClient({ initialRows }: { initialRows: Ou
   const totals = useMemo(() => {
     const due = filtered.reduce((acc, r) => acc + Number(r.due || 0), 0)
     const members = new Set(filtered.map((r) => r.user_id)).size
-    return { due, members }
+    const urgent = filtered.filter((r) => Number(r.due || 0) >= 1000).length
+    const recentlyPaid = filtered.filter((r) => !!r.paid_at).length
+    return { due, members, urgent, recentlyPaid }
   }, [filtered])
+
+  const hasFilters = q.trim() !== '' || method !== 'all' || minDue.trim() !== '' || sort !== 'due_desc'
 
   const columns = useMemo(
     () => [
       { key: 'member', header: 'Member' },
-      { key: 'contact', header: 'Contact' },
-      { key: 'plan', header: 'Plan' },
-      { key: 'paid', header: 'Paid' },
-      { key: 'due', header: 'Due' },
-      { key: 'total', header: 'Total' },
-      { key: 'payment', header: 'Payment' },
-      { key: 'paid_at', header: 'Paid at' },
-      { key: 'open', header: 'Profile' },
+      { key: 'membership', header: 'Membership' },
+      { key: 'billing', header: 'Billing' },
+      { key: 'paid_at', header: 'Last paid' },
+      { key: 'actions', header: 'Actions' },
     ],
-    []
+    [],
   )
 
   const rows = useMemo(() => {
     return filtered.map((r) => {
-      const memberLabel = `${r.name}${r.member_code ? ` · ${r.member_code}` : ''}`
-      const contact = [r.email ?? '', r.phone ?? ''].filter(Boolean).join(' · ') || '—'
+      const planTone = Number(r.due || 0) >= 1000 ? 'danger' : Number(r.due || 0) >= 500 ? 'warning' : 'neutral'
+      const contact = [r.email ?? '', r.phone ?? ''].filter(Boolean)
 
       return {
         key: r.subscription_id,
-        member: memberLabel,
-        contact,
-        plan: `${r.plan ?? '—'}${r.status ? ` · ${r.status}` : ''}`,
-        paid: fmtMoney(r.paid),
-        due: fmtMoney(r.due),
-        total: fmtMoney(r.total),
-        payment: humanMethod(r.payment_method),
-        paid_at: fmtDate(r.paid_at),
-        open: (
-          <Link prefetch={false} className="underline" href={`/members/${r.user_id}`}>
-            Open
-          </Link>
+        member: (
+          <div className="space-y-1">
+            <div className="font-medium">{r.name}</div>
+            <div className="flex flex-wrap gap-1">
+              {r.member_code ? <TinyBadge>{r.member_code}</TinyBadge> : null}
+              {r.status ? <TinyBadge tone={planTone}>{String(r.status).replace(/_/g, ' ')}</TinyBadge> : null}
+            </div>
+            {contact.length ? <div className="text-xs text-[hsl(var(--muted))]">{contact.join(' · ')}</div> : null}
+          </div>
+        ),
+        membership: (
+          <div className="space-y-1">
+            <div className="font-medium">{humanPlan(r.plan)}</div>
+            <div className="text-xs text-[hsl(var(--muted))]">Payment method: {humanMethod(r.payment_method)}</div>
+          </div>
+        ),
+        billing: (
+          <div className="space-y-1">
+            <div className="font-medium">Due {fmtMoney(r.due)}</div>
+            <div className="text-xs text-[hsl(var(--muted))]">Paid {fmtMoney(r.paid)} · Total {fmtMoney(r.total)}</div>
+          </div>
+        ),
+        paid_at: (
+          <div className="space-y-1">
+            <div className="font-medium">{fmtDate(r.paid_at)}</div>
+            <div className="text-xs text-[hsl(var(--muted))]">Latest real payment date</div>
+          </div>
+        ),
+        actions: (
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            <SettleDueDialog
+              sub={{ id: r.subscription_id, amount: r.paid, amount_due: r.due, payment_method: r.payment_method }}
+              buttonLabel="Settle due"
+            />
+            <Link
+              prefetch={false}
+              className="inline-flex items-center justify-center rounded-xl border px-3 py-2 text-sm font-medium hover:bg-gray-50"
+              href={`/members/${r.user_id}`}
+            >
+              Open profile
+            </Link>
+          </div>
         ),
       }
     })
@@ -135,27 +211,19 @@ export default function OutstandingDuesClient({ initialRows }: { initialRows: Ou
 
   return (
     <section className="space-y-4">
-      <div className="grid gap-3 sm:grid-cols-3">
-        <div className="rounded-2xl border border-[hsl(var(--border))] bg-white p-4 shadow-soft">
-          <div className="text-sm text-[hsl(var(--muted))]">Members with due</div>
-          <div className="mt-1 text-2xl font-semibold">{totals.members}</div>
-        </div>
-        <div className="rounded-2xl border border-[hsl(var(--border))] bg-white p-4 shadow-soft">
-          <div className="text-sm text-[hsl(var(--muted))]">Total due</div>
-          <div className="mt-1 text-2xl font-semibold">{fmtMoney(totals.due)}</div>
-        </div>
-        <div className="rounded-2xl border border-[hsl(var(--border))] bg-white p-4 shadow-soft">
-          <div className="text-sm text-[hsl(var(--muted))]">Rows</div>
-          <div className="mt-1 text-2xl font-semibold">{filtered.length}</div>
-        </div>
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <SummaryCard label="Members with due" value={String(totals.members)} hint="Unique members in the current filtered view." />
+        <SummaryCard label="Total due" value={fmtMoney(totals.due)} hint="Current outstanding balance in the filtered view." />
+        <SummaryCard label="Urgent rows" value={String(totals.urgent)} hint="Subscriptions with due of 1,000 EGP or more." />
+        <SummaryCard label="Rows" value={String(filtered.length)} hint={totals.recentlyPaid > 0 ? `${totals.recentlyPaid} row(s) have a paid date.` : 'No paid date recorded in this view.'} />
       </div>
 
-      <div className="rounded-2xl border border-[hsl(var(--border))] bg-white p-4 shadow-soft">
+      <div className="rounded-2xl border border-[hsl(var(--border))] bg-white p-4 shadow-soft space-y-4">
         <div className="flex flex-wrap gap-2 items-end">
-          <label className="block">
+          <label className="block min-w-[220px] flex-1">
             <span className="mb-1 block text-sm font-medium">Search</span>
             <input
-              className="border px-3 py-2 rounded-lg"
+              className="w-full rounded-lg border px-3 py-2"
               placeholder="Name / email / phone / member id"
               value={q}
               onChange={(e) => setQ(e.target.value)}
@@ -164,7 +232,7 @@ export default function OutstandingDuesClient({ initialRows }: { initialRows: Ou
 
           <label className="block">
             <span className="mb-1 block text-sm font-medium">Payment</span>
-            <select className="border px-3 py-2 rounded-lg" value={method} onChange={(e) => setMethod(e.target.value as any)}>
+            <select className="rounded-lg border px-3 py-2" value={method} onChange={(e) => setMethod(e.target.value as 'all' | PaymentMethod)}>
               <option value="all">All</option>
               <option value="cash">Cash</option>
               <option value="instapay">InstaPay</option>
@@ -177,7 +245,7 @@ export default function OutstandingDuesClient({ initialRows }: { initialRows: Ou
           <label className="block">
             <span className="mb-1 block text-sm font-medium">Min due (EGP)</span>
             <input
-              className="border px-3 py-2 rounded-lg w-[160px]"
+              className="w-[160px] rounded-lg border px-3 py-2"
               inputMode="decimal"
               placeholder="0"
               value={minDue}
@@ -187,7 +255,7 @@ export default function OutstandingDuesClient({ initialRows }: { initialRows: Ou
 
           <label className="block">
             <span className="mb-1 block text-sm font-medium">Sort</span>
-            <select className="border px-3 py-2 rounded-lg" value={sort} onChange={(e) => setSort(e.target.value as any)}>
+            <select className="rounded-lg border px-3 py-2" value={sort} onChange={(e) => setSort(e.target.value as SortKey)}>
               <option value="due_desc">Due (high → low)</option>
               <option value="due_asc">Due (low → high)</option>
               <option value="paid_at_desc">Paid at (newest)</option>
@@ -198,7 +266,7 @@ export default function OutstandingDuesClient({ initialRows }: { initialRows: Ou
 
           <button
             type="button"
-            className="ml-auto border px-4 py-2 rounded-lg hover:bg-gray-50"
+            className="ml-auto rounded-lg border px-4 py-2 hover:bg-gray-50"
             onClick={() => {
               setQ('')
               setMethod('all')
@@ -209,9 +277,17 @@ export default function OutstandingDuesClient({ initialRows }: { initialRows: Ou
             Reset
           </button>
         </div>
+
+        <div className="flex flex-wrap items-center gap-2 text-xs text-[hsl(var(--muted))]">
+          <TinyBadge>{filtered.length} visible row(s)</TinyBadge>
+          {method !== 'all' ? <TinyBadge>Payment: {humanMethod(method)}</TinyBadge> : null}
+          {minDue.trim() ? <TinyBadge tone="warning">Min due {minDue} EGP</TinyBadge> : null}
+          {q.trim() ? <TinyBadge>Search: {q.trim()}</TinyBadge> : null}
+          {hasFilters ? <span>Filters are applied to both the cards and the list below.</span> : <span>Use this page to settle dues fast before opening the full member profile.</span>}
+        </div>
       </div>
 
-      <Table columns={columns} rows={rows as any} keyField="key" stickyTopClassName="top-0" />
+      <Table columns={columns} rows={rows as any[]} keyField="key" stickyTopClassName="top-0" />
     </section>
   )
 }
