@@ -626,6 +626,34 @@ function buildDeskWorkflow(subs: SubscriptionRow[], today: string, outstandingTo
   }
 }
 
+function buildDeskTriageSignals(subs: SubscriptionRow[], today: string, outstandingTotal: number) {
+  const items: { label: string; tone: SummaryTone }[] = []
+
+  const activeTime = subs.find((s) => {
+    const status = String(s.status ?? '').toLowerCase()
+    if (status !== 'active') return false
+    if ((s.subscription_type ?? (s.plan === 'sessions' ? 'sessions' : 'time')) !== 'time') return false
+    if (!s.end_date || s.end_date < today) return false
+    return true
+  })
+
+  const firstExpired = subs.find((s) => !!s.end_date && String(s.status ?? '').toLowerCase() === 'active' && diffDays(today, s.end_date) < 0)
+  const firstToday = subs.find((s) => !!s.end_date && String(s.status ?? '').toLowerCase() === 'active' && diffDays(today, s.end_date) === 0)
+  const missingPaidDate = subs.some((s) => Math.max(Number(s.amount_due ?? 0), 0) > 0 && !s.paid_at)
+
+  if (firstExpired) items.push({ label: 'Overdue', tone: 'danger' })
+  else if (firstToday) items.push({ label: 'Today', tone: 'danger' })
+  else if (activeTime?.end_date) {
+    const left = daysUntil(activeTime.end_date, today)
+    if (left !== null && left > 0 && left <= 3) items.push({ label: 'Urgent', tone: 'warning' })
+  }
+
+  if (outstandingTotal > 0) items.push({ label: `Due ${fmtMoneyEGP(outstandingTotal)}`, tone: 'warning' })
+  if (missingPaidDate) items.push({ label: 'Missing paid date', tone: 'warning' })
+
+  return items
+}
+
 function Surface({ children, className = '' }: { children: ReactNode; className?: string }) {
   return <section className={`rounded-3xl border border-[hsl(var(--border))] bg-white shadow-soft ${className}`}>{children}</section>
 }
@@ -889,6 +917,7 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
   const coachTrainingUseful = coachSafeView ? buildCoachTrainingUseful(subs, attendance, today) : null
   const receptionDeskUseful = receptionDeskView ? buildReceptionDeskUseful(subs, attendance, today, outstandingTotal) : null
   const deskWorkflow = !coachSafeView && viewedRole === 'member' ? buildDeskWorkflow(subs, today, outstandingTotal) : null
+  const deskTriageSignals = !coachSafeView && viewedRole === 'member' ? buildDeskTriageSignals(subs, today, outstandingTotal) : []
   const settleQuickActionSub = !coachSafeView && viewedRole === 'member'
     ? [...subs]
         .filter((s) => Math.max(Number(s.amount_due ?? 0), 0) > 0)
@@ -1206,6 +1235,19 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
             <p className="mt-1 text-sm text-[hsl(var(--muted))]">
               Recommended order for the current member before moving to the next desk action.
             </p>
+
+            {deskTriageSignals.length ? (
+              <div className="mt-3 space-y-2">
+                <div className="flex flex-wrap gap-2">
+                  {deskTriageSignals.map((item, idx) => (
+                    <TinyBadge key={`${item.label}-${idx}`} tone={item.tone}>{item.label}</TinyBadge>
+                  ))}
+                </div>
+                <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] px-3 py-2 text-xs text-[hsl(var(--muted))]">
+                  Handle the member in this order: overdue / today, then any due amount, then missing paid date review.
+                </div>
+              </div>
+            ) : null}
 
             <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
               <SummaryCard

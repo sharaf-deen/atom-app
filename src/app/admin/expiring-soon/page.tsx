@@ -45,7 +45,7 @@ type SubRow = {
 }
 
 type View = 'today' | 'next7' | 'overdue' | 'range'
-type Focus = 'all' | 'action'
+type Focus = 'all' | 'action' | 'missing_paid'
 
 const PER_PAGE = 50
 
@@ -54,7 +54,7 @@ function isView(v: any): v is View {
 }
 
 function isFocus(v: any): v is Focus {
-  return v === 'all' || v === 'action'
+  return v === 'all' || v === 'action' || v === 'missing_paid'
 }
 
 function buildQS(params: Record<string, string | undefined>) {
@@ -108,6 +108,18 @@ function needsDeskAction(s: Pick<SubRow, 'end_date' | 'amount_due' | 'frozen_unt
   return dueAmount > 0 || (!frozen && leftNum !== null && leftNum <= 3)
 }
 
+function triageScore(s: Pick<SubRow, 'end_date' | 'amount_due' | 'paid_at' | 'frozen_until'>, today: string) {
+  const leftNum = s.end_date ? diffDays(today, s.end_date) : null
+  const dueAmount = Math.max(Number(s.amount_due ?? 0), 0)
+  let score = 0
+  if (leftNum !== null && leftNum < 0) score += 6
+  else if (leftNum === 0) score += 5
+  else if (leftNum !== null && leftNum > 0 && leftNum <= 3) score += 3
+  if (dueAmount > 0) score += dueAmount >= 1000 ? 4 : 2
+  if (!s.paid_at) score += 2
+  return score
+}
+
 function toneClasses(kind: 'neutral' | 'warning' | 'danger' | 'success') {
   if (kind === 'success') return 'border-emerald-200 bg-emerald-50 text-emerald-700'
   if (kind === 'warning') return 'border-amber-200 bg-amber-50 text-amber-800'
@@ -159,7 +171,7 @@ export default async function ExpiringSoonPage({
   const daysWindow = clampInt(Number(searchParams?.days ?? 7), 1, 60)
   const q = (searchParams?.q ?? '').trim()
   const includeFrozen = (searchParams?.includeFrozen ?? '').trim() === '1'
-  const focus: Focus = isFocus(searchParams?.focus) ? (searchParams!.focus as Focus) : 'all'
+  const focus: Focus = isFocus(searchParams?.focus) ? (searchParams!.focus as Focus) : 'action'
   const page = clampInt(Number(searchParams?.page ?? 1), 1, 9999)
 
   const rangeStart = today
@@ -357,7 +369,16 @@ export default async function ExpiringSoonPage({
       >
         Action needed first
       </Link>
-      <span>{focus === 'action' ? 'Only rows that need desk follow-up now are shown.' : 'Show everything in the current date view.'}</span>
+      <Link
+        href={nextPath + buildQS({ ...baseQS, focus: 'missing_paid', page: undefined })}
+        className={
+          'inline-flex items-center rounded-full border px-3 py-1 font-medium transition ' +
+          (focus === 'missing_paid' ? 'bg-black text-white border-black' : 'bg-white hover:bg-gray-50')
+        }
+      >
+        Missing paid date
+      </Link>
+      <span>{focus === 'action' ? 'Only rows that need desk follow-up now are shown.' : focus === 'missing_paid' ? 'Only rows missing a paid date are shown.' : 'Show everything in the current date view.'}</span>
     </div>
   )
 
@@ -368,7 +389,19 @@ export default async function ExpiringSoonPage({
     { key: 'actions', header: 'Actions' },
   ]
 
-  const visibleRows = focus === 'action' ? rows.filter((s) => needsDeskAction(s, today)) : rows
+  const triagedRows = [...rows].sort((a, b) => {
+    const triageDiff = triageScore(b, today) - triageScore(a, today)
+    if (triageDiff !== 0) return triageDiff
+    const aEnd = a.end_date ? new Date(a.end_date).getTime() : Number.MAX_SAFE_INTEGER
+    const bEnd = b.end_date ? new Date(b.end_date).getTime() : Number.MAX_SAFE_INTEGER
+    return aEnd - bEnd
+  })
+
+  const visibleRows = triagedRows.filter((s) => {
+    if (focus === 'action') return needsDeskAction(s, today) || !s.paid_at
+    if (focus === 'missing_paid') return !s.paid_at
+    return true
+  })
 
   const tableRows = visibleRows.map((s) => {
     const p = s.profiles
@@ -404,6 +437,7 @@ export default async function ExpiringSoonPage({
             {leftNum !== null && leftNum < 0 ? <TinyBadge tone="danger">Overdue</TinyBadge> : null}
             {leftNum !== null && leftNum > 0 && leftNum <= 3 ? <TinyBadge tone="warning">Urgent</TinyBadge> : null}
             {dueAmount > 0 ? <TinyBadge tone="warning">Due</TinyBadge> : null}
+            {!s.paid_at ? <TinyBadge tone="warning">No paid date</TinyBadge> : null}
             {frozen ? <TinyBadge tone="warning">Frozen until {s.frozen_until}</TinyBadge> : null}
           </div>
         </div>
@@ -442,9 +476,11 @@ export default async function ExpiringSoonPage({
 
   const totalVisibleDue = visibleRows.reduce((sum, s) => sum + Math.max(Number(s.amount_due ?? 0), 0), 0)
   const overdueVisible = visibleRows.filter((s) => !!s.end_date && diffDays(today, s.end_date) < 0).length
+  const todayVisible = visibleRows.filter((s) => !!s.end_date && diffDays(today, s.end_date) === 0).length
   const dueVisible = visibleRows.filter((s) => Math.max(Number(s.amount_due ?? 0), 0) > 0).length
   const frozenVisible = visibleRows.filter((s) => !!s.frozen_until && s.frozen_until >= today).length
-  const actionNeededVisible = visibleRows.filter((s) => needsDeskAction(s, today)).length
+  const missingPaidVisible = visibleRows.filter((s) => !s.paid_at).length
+  const actionNeededVisible = visibleRows.filter((s) => needsDeskAction(s, today) || !s.paid_at).length
 
   const rangeTextBase =
     view === 'overdue'
@@ -507,16 +543,28 @@ export default async function ExpiringSoonPage({
 
         {focusToggle}
 
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
           <SummaryCard label="Visible memberships" value={String(visibleRows.length)} hint={view === 'overdue' ? 'Rows currently overdue in this page view.' : 'Rows in the current filtered page view.'} />
           <SummaryCard label="Action needed" value={String(actionNeededVisible)} hint={actionNeededVisible > 0 ? 'Rows that should usually be handled first at the desk.' : 'No urgent desk follow-up in the visible rows.'} />
           <SummaryCard label="Visible due" value={fmtMoneyEGP(totalVisibleDue)} hint={dueVisible > 0 ? `${dueVisible} row(s) still have money due.` : 'No due in the current view.'} />
           <SummaryCard label="Overdue now" value={String(overdueVisible)} hint={overdueVisible > 0 ? 'Needs fast renewal action.' : frozenVisible > 0 ? 'Nothing overdue. Frozen rows are still visible.' : 'Nothing overdue in the visible rows.'} />
+          <SummaryCard label="Missing paid date" value={String(missingPaidVisible)} hint={missingPaidVisible > 0 ? 'Review before closing the desk action.' : 'Every visible row already has a paid date.'} />
+        </div>
+
+        <div className="rounded-2xl border border-[hsl(var(--border))] bg-white p-4 shadow-soft">
+          <div className="text-sm font-semibold">Action-needed triage</div>
+          <div className="mt-1 text-sm text-[hsl(var(--muted))]">Handle the most time-sensitive memberships first: overdue or ending today, then rows with money due, then rows missing a paid date.</div>
+          <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-[hsl(var(--muted))]">
+            <TinyBadge tone="danger">{overdueVisible} overdue</TinyBadge>
+            <TinyBadge tone="danger">{todayVisible} today</TinyBadge>
+            <TinyBadge tone="warning">{dueVisible} with due amount</TinyBadge>
+            <TinyBadge tone="warning">{missingPaidVisible} missing paid date</TinyBadge>
+          </div>
         </div>
 
         <div className="flex flex-wrap items-center gap-2 text-xs text-[hsl(var(--muted))]">
           <TinyBadge>{view === 'overdue' ? 'Overdue mode' : view === 'today' ? 'Today' : view === 'next7' ? 'Next 7 days' : `Custom ${daysWindow} days`}</TinyBadge>
-          <TinyBadge tone={focus === 'action' ? 'warning' : 'neutral'}>{focus === 'action' ? 'Action needed only' : 'All visible rows'}</TinyBadge>
+          <TinyBadge tone={focus === 'action' || focus === 'missing_paid' ? 'warning' : 'neutral'}>{focus === 'action' ? 'Action needed only' : focus === 'missing_paid' ? 'Missing paid date only' : 'All visible rows'}</TinyBadge>
           {includeFrozen ? <TinyBadge tone="warning">Frozen included</TinyBadge> : <TinyBadge>Frozen hidden</TinyBadge>}
           {q ? <TinyBadge>Search: {q}</TinyBadge> : null}
           <span>{rangeText}</span>
@@ -529,7 +577,7 @@ export default async function ExpiringSoonPage({
         {pager}
 
         <div className="max-w-3xl text-xs text-[hsl(var(--muted))]">
-          Tips: <b>Action needed first</b> keeps the desk focused on rows that are due or very close to expiry. When both renewal and money due exist, use <b>Settle due</b> first, then <b>Renew</b>. <b>Notify</b> sends an in-app reminder now and logs it in Membership Activity.
+          Tips: <b>Action needed first</b> keeps the desk focused on rows that are due, overdue or very close to expiry. <b>Missing paid date</b> highlights rows that still need payment-history review. When both renewal and money due exist, use <b>Settle due</b> first, then <b>Renew</b>. <b>Notify</b> sends an in-app reminder now and logs it in Membership Activity.
         </div>
       </Section>
     </main>
