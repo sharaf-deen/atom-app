@@ -96,7 +96,7 @@ export default async function ScanPage() {
     <main>
       <PageHeader
         title="Scan — Check-in & Validity"
-        subtitle="Fast front-desk scanning with clearer results, next actions and kiosk-ready flow."
+        subtitle="Fast front-desk scanning with clearer results, presence context and kiosk-ready flow."
       />
 
       <Section className="max-w-5xl space-y-5">
@@ -145,8 +145,8 @@ export default async function ScanPage() {
             icon={<ScanLine size={18} strokeWidth={2.1} />}
           />
           <FlowCard
-            title="3. Keep the line moving"
-            body="Repeat-scan protection avoids immediate double check-ins, while the result page makes the next action obvious for the desk."
+            title="3. Use presence context fast"
+            body="Repeat-scan protection avoids immediate double check-ins, while the result page shows whether the member is already here today, recently active or needs follow-up."
             icon={<Users size={18} strokeWidth={2.1} />}
           />
         </div>
@@ -160,7 +160,7 @@ export default async function ScanPage() {
               Use the back camera when possible and keep only one QR in the frame.
             </div>
             <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-3 text-sm text-[hsl(var(--muted))]">
-              In kiosk mode, the result page auto-returns to the scanner and immediate repeat scans of the same QR are ignored for a few seconds.
+              In kiosk mode, the result page auto-returns to the scanner and shows useful presence context like already here today, recent activity and last valid attendance.
             </div>
           </div>
         </div>

@@ -413,7 +413,7 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className }: 
           sp.set('repeatSeconds', String(Math.max(1, Math.round(repeatAgeMs / 1000))))
           if (kioskMode) sp.set('kiosk', '1')
           setStatus('ok')
-          setMsg('Same member scanned again — showing the latest result.')
+          setMsg('Same member scanned again — showing the latest result and presence context.')
           router.push(`/scan/result?${sp.toString()}`)
           didNavigate = true
           return
@@ -656,7 +656,7 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className }: 
                 {kioskMode ? <Badge>Kiosk</Badge> : null}
               </div>
               <p className="mt-1 text-sm text-[hsl(var(--muted))]">
-                Fast front-desk scanning with full-screen mode, kiosk mode, repeat-scan guardrails and automatic result pages.
+                Fast front-desk scanning with full-screen mode, kiosk mode, repeat-scan guardrails, presence context and automatic result pages.
               </p>
             </div>
 
