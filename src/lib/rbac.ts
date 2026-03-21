@@ -25,6 +25,19 @@ export type NavMenuItem = { label: string; href: string; icon: NavIconKey }
 
 type MenuByRole = Record<Role, NavMenuItem[]>
 
+type CapabilityBlueprint = {
+  key: string
+  category: 'Core' | 'Front desk' | 'Finance' | 'Admin ops' | 'Store' | 'Comms'
+  label: string
+  description: string
+  href?: string
+  check: (role: Role) => boolean
+}
+
+export type PermissionAuditCapability = Omit<CapabilityBlueprint, 'check'> & {
+  allowedRoles: Role[]
+}
+
 const APP_NAV_BY_ROLE: MenuByRole = {
   member: [
     { label: 'Notifications', href: '/notifications', icon: 'bell' },
@@ -62,6 +75,7 @@ const APP_NAV_BY_ROLE: MenuByRole = {
     { label: 'Attendance', href: '/admin/attendance', icon: 'calendar' },
     { label: 'Scan Audit', href: '/admin/scan-audit', icon: 'file-text' },
     { label: 'Health Monitor', href: '/admin/health-monitor', icon: 'file-text' },
+    { label: 'Permissions Audit', href: '/admin/permissions-audit', icon: 'file-text' },
     { label: 'Packages & Promos', href: '/packages-and-promos', icon: 'gift' },
     { label: 'Membership', href: '/kiosk', icon: 'id' },
     { label: 'Scan', href: '/scan', icon: 'scan' },
@@ -85,6 +99,7 @@ const APP_NAV_BY_ROLE: MenuByRole = {
     { label: 'Attendance', href: '/admin/attendance', icon: 'calendar' },
     { label: 'Scan Audit', href: '/admin/scan-audit', icon: 'file-text' },
     { label: 'Health Monitor', href: '/admin/health-monitor', icon: 'file-text' },
+    { label: 'Permissions Audit', href: '/admin/permissions-audit', icon: 'file-text' },
     { label: 'Packages & Promos', href: '/packages-and-promos', icon: 'gift' },
     { label: 'Membership', href: '/kiosk', icon: 'id' },
     { label: 'Scan', href: '/scan', icon: 'scan' },
@@ -174,6 +189,10 @@ export function canAccessHealthMonitor(role: Role | null | undefined) {
   return hasAnyRole(role, ADMIN_ROLES)
 }
 
+export function canAccessPermissionsAudit(role: Role | null | undefined) {
+  return hasAnyRole(role, ADMIN_ROLES)
+}
+
 export function canAccessPayments(role: Role | null | undefined) {
   return hasAnyRole(role, ADMIN_ROLES)
 }
@@ -216,6 +235,212 @@ export function canManageNotifications(role: Role | null | undefined) {
 
 export function canAccessInvoices(role: Role | null | undefined) {
   return hasAnyRole(role, FRONT_DESK_ROLES)
+}
+
+const CAPABILITY_BLUEPRINTS: CapabilityBlueprint[] = [
+  {
+    key: 'admin_dashboard',
+    category: 'Admin ops',
+    label: 'Admin dashboard',
+    description: 'Open the main admin dashboard and quick actions.',
+    href: '/admin',
+    check: (role) => canAccessAdminDashboard(role),
+  },
+  {
+    key: 'permissions_audit',
+    category: 'Admin ops',
+    label: 'Permissions audit',
+    description: 'Review the internal role matrix and capability audit page.',
+    href: '/admin/permissions-audit',
+    check: (role) => canAccessPermissionsAudit(role),
+  },
+  {
+    key: 'members_list',
+    category: 'Front desk',
+    label: 'Members list',
+    description: 'Open members search and desk operations list.',
+    href: '/members',
+    check: (role) => canAccessMembersList(role),
+  },
+  {
+    key: 'other_member_profile',
+    category: 'Front desk',
+    label: 'Other member profile',
+    description: 'Open someone else’s member detail page.',
+    href: '/members/[id]',
+    check: (role) => canOpenOtherMemberProfile(role),
+  },
+  {
+    key: 'scan',
+    category: 'Front desk',
+    label: 'Scan',
+    description: 'Run front-desk scan flow.',
+    href: '/scan',
+    check: (role) => canAccessScan(role),
+  },
+  {
+    key: 'kiosk',
+    category: 'Front desk',
+    label: 'Membership kiosk',
+    description: 'Access kiosk / membership desk tools.',
+    href: '/kiosk',
+    check: (role) => canAccessKiosk(role),
+  },
+  {
+    key: 'subscriptions_manage',
+    category: 'Front desk',
+    label: 'Manage subscriptions',
+    description: 'Create or update subscription records in admin flows.',
+    href: '/members/[id]',
+    check: (role) => canManageSubscriptions(role),
+  },
+  {
+    key: 'subscriptions_create',
+    category: 'Front desk',
+    label: 'Create subscriptions',
+    description: 'Create subscription entries from front desk flows.',
+    href: '/kiosk',
+    check: (role) => canCreateSubscription(role),
+  },
+  {
+    key: 'resend_invite',
+    category: 'Front desk',
+    label: 'Resend invite',
+    description: 'Resend onboarding / invite email to a member.',
+    href: '/members/[id]',
+    check: (role) => canResendInvite(role),
+  },
+  {
+    key: 'payments',
+    category: 'Finance',
+    label: 'Payments',
+    description: 'Open admin payments list and exports.',
+    href: '/admin/payments',
+    check: (role) => canAccessPayments(role),
+  },
+  {
+    key: 'cash_report',
+    category: 'Finance',
+    label: 'Cash report',
+    description: 'Open cash report totals, filters, and exports.',
+    href: '/admin/cash-report',
+    check: (role) => canAccessCashReport(role),
+  },
+  {
+    key: 'expenses',
+    category: 'Finance',
+    label: 'Expenses',
+    description: 'Open expense list, receipts, and exports.',
+    href: '/expenses',
+    check: (role) => canAccessExpenses(role),
+  },
+  {
+    key: 'personal_funds',
+    category: 'Finance',
+    label: 'Personal Funds',
+    description: 'Track advances, reimbursements, and personal-fund proofs.',
+    href: '/admin/personal-funds',
+    check: (role) => canAccessPersonalFunds(role),
+  },
+  {
+    key: 'scan_audit',
+    category: 'Admin ops',
+    label: 'Scan Audit',
+    description: 'Review scan logs and attendance scan diagnostics.',
+    href: '/admin/scan-audit',
+    check: (role) => canAccessScanAudit(role),
+  },
+  {
+    key: 'health_monitor',
+    category: 'Admin ops',
+    label: 'Health Monitor',
+    description: 'Run and review daily health checks and report history.',
+    href: '/admin/health-monitor',
+    check: (role) => canAccessHealthMonitor(role),
+  },
+  {
+    key: 'coaches',
+    category: 'Admin ops',
+    label: 'Coaches',
+    description: 'Open coaches admin area and listing.',
+    href: '/coaches',
+    check: (role) => canAccessCoaches(role),
+  },
+  {
+    key: 'coaches_manage',
+    category: 'Admin ops',
+    label: 'Manage coaches',
+    description: 'Perform coach management actions reserved for super admins.',
+    href: '/coaches',
+    check: (role) => canManageCoaches(role),
+  },
+  {
+    key: 'roles_manage',
+    category: 'Admin ops',
+    label: 'Manage roles',
+    description: 'Change user roles through protected admin APIs.',
+    href: '/members/[id]',
+    check: (role) => canManageRoles(role),
+  },
+  {
+    key: 'users_delete',
+    category: 'Admin ops',
+    label: 'Delete users',
+    description: 'Delete users and orphan profiles through protected admin APIs.',
+    href: '/members/[id]',
+    check: (role) => canDeleteUser(role),
+  },
+  {
+    key: 'notifications_read',
+    category: 'Comms',
+    label: 'Notifications',
+    description: 'Open notifications center.',
+    href: '/notifications',
+    check: (role) => canAccessNotifications(role),
+  },
+  {
+    key: 'notifications_manage',
+    category: 'Comms',
+    label: 'Manage notifications',
+    description: 'Run admin notification actions and protected notification APIs.',
+    href: '/notifications',
+    check: (role) => canManageNotifications(role),
+  },
+  {
+    key: 'invoices',
+    category: 'Finance',
+    label: 'Invoices',
+    description: 'Open invoice-related pages and desk invoice flows.',
+    href: '/invoices',
+    check: (role) => canAccessInvoices(role),
+  },
+  {
+    key: 'store',
+    category: 'Store',
+    label: 'Store',
+    description: 'Open the store page for reception/admin roles only.',
+    href: '/store',
+    check: (role) => canAccessStore(role),
+  },
+  {
+    key: 'store_admin',
+    category: 'Store',
+    label: 'Store admin',
+    description: 'Open store admin controls reserved for super admin.',
+    href: '/admin/store',
+    check: (role) => canAccessStoreAdmin(role),
+  },
+]
+
+export function getPermissionAuditCapabilities(): PermissionAuditCapability[] {
+  return CAPABILITY_BLUEPRINTS.map(({ check, ...rest }) => ({
+    ...rest,
+    allowedRoles: APP_ROLES.filter((role) => check(role)),
+  }))
+}
+
+export function getCapabilityCountForRole(role: Role) {
+  return getPermissionAuditCapabilities().filter((cap) => cap.allowedRoles.includes(role)).length
 }
 
 export function allowedRolesLabel(roles: readonly Role[]) {
