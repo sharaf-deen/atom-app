@@ -1020,7 +1020,7 @@ export default async function PersonalFundsPage({
               <form action={addPersonAction} className="flex flex-col gap-3 sm:flex-row sm:items-end">
                 <input type="hidden" name="return_qs" value={returnQS} />
                 <div className="min-w-0 flex-1">
-                  <Input label="Add person" name="label" placeholder="e.g. Charaf, Ahmed, Partner 2" />
+                  <Input name="label" placeholder="e.g. Sharaf Deen" />
                 </div>
                 <Button type="submit">Add person</Button>
               </form>
