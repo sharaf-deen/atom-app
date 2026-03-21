@@ -7,22 +7,29 @@ import Link from 'next/link'
 import Image from 'next/image'
 import { createSupabaseRSC } from '@/lib/supabaseServer'
 import { getSessionUser, type Role } from '@/lib/session'
+import { getSupabaseAdminClientCached } from '@/lib/requestCache'
 import { addDays, cairoToday, diffDays } from '@/lib/cairoDate'
 import HomeNotificationsTile from '@/components/HomeNotificationsTile'
 import QrImage from '@/components/QrImage'
 import HomeMemberLookup from '@/components/home/HomeMemberLookup'
 import {
+  AlertTriangle,
   ArrowRight,
   Bell,
   CalendarDays,
+  CheckCircle2,
+  Clock3,
   CreditCard,
   Gift,
   IdCard,
   LayoutDashboard,
+  MessageSquare,
   Receipt,
   ScanLine,
-  ShoppingBag,
+  ShieldAlert,
+  ShieldCheck,
   UserCog,
+  UserRoundSearch,
   Users,
   Wallet,
 } from 'lucide-react'
@@ -74,6 +81,22 @@ type OpsKpis = {
   scansToday: number
   outstandingCount: number
   outstandingTotal: number
+}
+
+type HealthLite = {
+  status: string | null
+  createdAt: string | null
+}
+
+type PriorityTone = 'success' | 'warning' | 'danger' | 'neutral'
+
+type PriorityItem = {
+  href: string
+  eyebrow: string
+  title: string
+  desc: string
+  icon: IconType
+  tone: PriorityTone
 }
 
 type IconType = React.ComponentType<{ size?: number | string; strokeWidth?: number | string; className?: string }>
@@ -314,6 +337,250 @@ async function getOpsKpis(): Promise<OpsKpis> {
   }
 }
 
+
+async function getLatestHealthSnapshot(): Promise<HealthLite | null> {
+  try {
+    const admin = getSupabaseAdminClientCached()
+    const { data } = await admin
+      .from('system_health_reports')
+      .select('overall_status, created_at')
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle<{ overall_status: string | null; created_at: string | null }>()
+
+    if (!data) return null
+    return {
+      status: data.overall_status ?? null,
+      createdAt: data.created_at ?? null,
+    }
+  } catch {
+    return null
+  }
+}
+
+function priorityToneClasses(tone: PriorityTone) {
+  if (tone === 'success') {
+    return {
+      badge: 'border-emerald-200 bg-emerald-50 text-emerald-700',
+      iconWrap: 'border-emerald-200 bg-emerald-50 text-emerald-700',
+    }
+  }
+  if (tone === 'warning') {
+    return {
+      badge: 'border-amber-200 bg-amber-50 text-amber-800',
+      iconWrap: 'border-amber-200 bg-amber-50 text-amber-800',
+    }
+  }
+  if (tone === 'danger') {
+    return {
+      badge: 'border-rose-200 bg-rose-50 text-rose-700',
+      iconWrap: 'border-rose-200 bg-rose-50 text-rose-700',
+    }
+  }
+  return {
+    badge: 'border-[hsl(var(--border))] bg-[hsl(var(--bg))] text-[hsl(var(--muted))]',
+    iconWrap: 'border-[hsl(var(--border))] bg-[hsl(var(--bg))] text-black',
+  }
+}
+
+function PriorityCard({ href, eyebrow, title, desc, icon: Icon, tone }: PriorityItem) {
+  const styles = priorityToneClasses(tone)
+
+  return (
+    <Link
+      href={href}
+      className="group block rounded-3xl border border-[hsl(var(--border))] bg-white p-4 shadow-soft transition hover:-translate-y-0.5 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className={`inline-flex rounded-full border px-2.5 py-1 text-[11px] font-semibold ${styles.badge}`}>{eyebrow}</div>
+          <div className="mt-3 text-sm font-semibold tracking-tight sm:text-base">{title}</div>
+          <p className="mt-1 text-sm text-[hsl(var(--muted))]">{desc}</p>
+        </div>
+        <span className={`inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border ${styles.iconWrap}`}>
+          <Icon size={18} strokeWidth={2.1} />
+        </span>
+      </div>
+    </Link>
+  )
+}
+
+function PriorityGrid({ title, subtitle, items }: { title: string; subtitle?: string; items: PriorityItem[] }) {
+  return (
+    <Surface className="p-4 sm:p-5">
+      <SectionTitle title={title} subtitle={subtitle} />
+      <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        {items.map((item) => (
+          <PriorityCard key={`${item.href}-${item.title}`} {...item} />
+        ))}
+      </div>
+    </Surface>
+  )
+}
+
+function buildMemberPriorities(snapshot: MembershipSnapshot, unreadCount: number, hasQr: boolean): PriorityItem[] {
+  const accessReady = snapshot.tone === 'success'
+  const accessTone: PriorityTone = accessReady ? 'success' : snapshot.tone === 'warning' ? 'warning' : 'danger'
+
+  return [
+    {
+      href: '/profile',
+      eyebrow: 'Your access today',
+      title: accessReady ? 'Membership ready' : 'Check your membership',
+      desc: snapshot.meta,
+      icon: accessReady ? ShieldCheck : AlertTriangle,
+      tone: accessTone,
+    },
+    {
+      href: '/profile',
+      eyebrow: 'QR readiness',
+      title: hasQr ? 'QR code ready' : 'QR missing',
+      desc: hasQr ? 'Show your QR code at reception for fast entry.' : 'Open your profile to confirm your QR code is available.',
+      icon: IdCard,
+      tone: hasQr ? 'success' : 'warning',
+    },
+    {
+      href: '/notifications',
+      eyebrow: 'Inbox today',
+      title: unreadCount > 0 ? `${unreadCount} unread update(s)` : 'Inbox up to date',
+      desc: unreadCount > 0 ? 'Open your notifications before your next visit.' : 'No unread updates right now.',
+      icon: Bell,
+      tone: unreadCount > 0 ? 'warning' : 'neutral',
+    },
+    {
+      href: '/schedule',
+      eyebrow: 'Useful next step',
+      title: 'Check today’s schedule',
+      desc: 'Open the latest class times before you head to the gym.',
+      icon: CalendarDays,
+      tone: 'neutral',
+    },
+  ]
+}
+
+function buildStaffPriorities(role: 'coach' | 'assistant_coach', unreadCount: number, hasQr: boolean): PriorityItem[] {
+  return [
+    {
+      href: '/profile',
+      eyebrow: 'Your access today',
+      title: hasQr ? 'QR ready for entry' : 'Open profile first',
+      desc: hasQr ? 'Your staff QR code is ready for daily access.' : 'Open your profile and confirm your QR code before heading to class.',
+      icon: hasQr ? ShieldCheck : IdCard,
+      tone: hasQr ? 'success' : 'warning',
+    },
+    {
+      href: '/notifications',
+      eyebrow: 'Staff updates',
+      title: unreadCount > 0 ? `${unreadCount} unread update(s)` : 'Inbox up to date',
+      desc: unreadCount > 0 ? 'Check your latest staff instructions and notices.' : 'No unread staff update right now.',
+      icon: Bell,
+      tone: unreadCount > 0 ? 'warning' : 'neutral',
+    },
+    {
+      href: role === 'coach' ? '/members' : '/schedule',
+      eyebrow: role === 'coach' ? 'Lookup today' : 'Training useful',
+      title: role === 'coach' ? 'Open member lookup' : 'Open the schedule',
+      desc:
+        role === 'coach'
+          ? 'Search a member quickly with read-only access when you need to help on the mat.'
+          : 'Keep the day moving with fast access to your schedule and staff shortcuts.',
+      icon: role === 'coach' ? UserRoundSearch : CalendarDays,
+      tone: 'neutral',
+    },
+    {
+      href: '/packages-and-promos',
+      eyebrow: 'Useful shortcut',
+      title: 'Open current offers',
+      desc: 'Keep the current promos close when members ask for quick information.',
+      icon: Gift,
+      tone: 'neutral',
+    },
+  ]
+}
+
+function buildReceptionPriorities(ops: OpsKpis): PriorityItem[] {
+  return [
+    {
+      href: '/scan',
+      eyebrow: 'Entrance flow',
+      title: ops.scansToday > 0 ? `${ops.scansToday} scan(s) today` : 'Open scan now',
+      desc: ops.scansToday > 0 ? 'Keep the entrance moving with the scan and kiosk flow.' : 'No scan recorded yet today. Start with the scanner.',
+      icon: ScanLine,
+      tone: ops.scansToday > 0 ? 'success' : 'warning',
+    },
+    {
+      href: '/admin/expiring-soon',
+      eyebrow: 'Renewals',
+      title: ops.expiring7Count > 0 ? `${ops.expiring7Count} member(s) expiring soon` : 'No urgent renewal queue',
+      desc: ops.expiring7Count > 0 ? 'Review renewals first before the queue grows.' : 'The current renewal queue looks calm.',
+      icon: Clock3,
+      tone: ops.expiring7Count > 0 ? 'warning' : 'neutral',
+    },
+    {
+      href: '/admin/outstanding-dues',
+      eyebrow: 'Money to collect',
+      title: ops.outstandingCount > 0 ? `${ops.outstandingCount} member(s) with dues` : 'No outstanding due right now',
+      desc: ops.outstandingCount > 0 ? `${fmtMoneyEGP(ops.outstandingTotal)} still open across member balances.` : 'Outstanding balances are currently clear.',
+      icon: Wallet,
+      tone: ops.outstandingCount > 0 ? 'danger' : 'neutral',
+    },
+    {
+      href: '/admin/crm',
+      eyebrow: 'Follow-up queue',
+      title: 'Open today’s CRM queue',
+      desc: 'Use the live queue for WhatsApp, calls, email and member follow-up.',
+      icon: MessageSquare,
+      tone: 'neutral',
+    },
+  ]
+}
+
+function buildAdminPriorities(ops: OpsKpis, health: HealthLite | null, role: 'admin' | 'super_admin'): PriorityItem[] {
+  const healthStatus = (health?.status ?? '').toLowerCase()
+  const healthTone: PriorityTone = healthStatus === 'critical' ? 'danger' : healthStatus === 'warning' ? 'warning' : healthStatus === 'healthy' ? 'success' : 'neutral'
+  const healthTitle = healthStatus ? `${healthStatus.charAt(0).toUpperCase()}${healthStatus.slice(1)} health status` : 'Health monitor not run yet'
+  const healthDesc = health?.createdAt
+    ? `Latest stored report: ${fmtDate(health.createdAt)}. Open Health Monitor for details.`
+    : 'Run Health Monitor or open the latest report details.'
+
+  const items: PriorityItem[] = [
+    {
+      href: '/admin/crm',
+      eyebrow: 'Operations today',
+      title: 'Open the follow-up queue',
+      desc: 'Review expiring members, dues and no-attendance cases in one live queue.',
+      icon: MessageSquare,
+      tone: ops.expiring7Count > 0 || ops.outstandingCount > 0 ? 'warning' : 'neutral',
+    },
+    {
+      href: '/admin/health-monitor',
+      eyebrow: 'System health',
+      title: healthTitle,
+      desc: healthDesc,
+      icon: healthTone === 'success' ? ShieldCheck : ShieldAlert,
+      tone: healthTone,
+    },
+    {
+      href: '/admin/payments',
+      eyebrow: 'Finance today',
+      title: ops.outstandingCount > 0 ? `${fmtMoneyEGP(ops.outstandingTotal)} outstanding` : 'Finance looks clear',
+      desc: ops.outstandingCount > 0 ? 'Move quickly into payments, dues and cash review.' : 'Open payments and cash report when you need the detailed view.',
+      icon: CreditCard,
+      tone: ops.outstandingCount > 0 ? 'warning' : 'neutral',
+    },
+    {
+      href: '/admin/personal-funds',
+      eyebrow: role === 'super_admin' ? 'Control' : 'Review',
+      title: 'Open personal funds',
+      desc: 'Review partner advances, reimbursements and related proof quickly.',
+      icon: Wallet,
+      tone: 'neutral',
+    },
+  ]
+
+  return items
+}
+
 function toneClasses(tone: 'success' | 'warning' | 'neutral') {
   if (tone === 'success') {
     return {
@@ -538,7 +805,6 @@ function memberActions(): QuickAction[] {
     { href: '/profile', label: 'My profile', desc: 'Identity, subscription details and QR code.', icon: IdCard },
     { href: '/schedule', label: 'Schedule', desc: 'See the current class schedule.', icon: CalendarDays },
     { href: '/notifications', label: 'Notifications', desc: 'Read your latest updates.', icon: Bell },
-    { href: '/store', label: 'Store', desc: 'Shop gear and see your orders.', icon: ShoppingBag },
     { href: '/packages-and-promos', label: 'Packages & promos', desc: 'See current offers and packages.', icon: Gift },
     { href: '/contact', label: 'Contact admin', desc: 'Send a message when you need help.', icon: UserCog },
   ]
@@ -550,7 +816,6 @@ function coachActions(): QuickAction[] {
     { href: '/schedule', label: 'Schedule', desc: 'Open the latest class schedule.', icon: CalendarDays },
     { href: '/notifications', label: 'Notifications', desc: 'Read the latest staff updates.', icon: Bell },
     { href: '/packages-and-promos', label: 'Packages & promos', desc: 'Quick access to current offers.', icon: Gift },
-    { href: '/store', label: 'Store', desc: 'View products and orders.', icon: ShoppingBag },
   ]
 }
 
@@ -559,6 +824,7 @@ function receptionActions(): QuickAction[] {
     { href: '/scan', label: 'Scan', desc: 'Fast attendance and QR validation.', icon: ScanLine },
     { href: '/kiosk', label: 'Create member', desc: 'Open the front-desk member creation flow.', icon: IdCard },
     { href: '/members', label: 'Members', desc: 'Search and manage members quickly.', icon: Users },
+    { href: '/admin/crm', label: 'CRM queue', desc: 'Work through follow-ups and contact priorities.', icon: MessageSquare },
     { href: '/schedule', label: 'Schedule', desc: 'Check class times on the desk.', icon: CalendarDays },
     { href: '/notifications', label: 'Notifications', desc: 'Read operational updates.', icon: Bell },
     { href: '/packages-and-promos', label: 'Packages & promos', desc: 'Use offers at the desk when needed.', icon: Gift },
@@ -568,17 +834,21 @@ function receptionActions(): QuickAction[] {
 function adminActions(role: 'admin' | 'super_admin'): QuickAction[] {
   const base: QuickAction[] = [
     { href: '/admin', label: 'Dashboard', desc: 'Operational KPIs and admin overview.', icon: LayoutDashboard },
+    { href: '/admin/crm', label: 'CRM queue', desc: 'Review follow-ups and daily contact priorities.', icon: MessageSquare },
     { href: '/scan', label: 'Scan', desc: 'QR check-in and validation flow.', icon: ScanLine },
     { href: '/members', label: 'Members', desc: 'Open the members workspace.', icon: Users },
     { href: '/admin/payments', label: 'Payments', desc: 'Track subscription payments.', icon: CreditCard },
     { href: '/admin/cash-report', label: 'Cash report', desc: 'Review daily payment summaries.', icon: Wallet },
     { href: '/expenses', label: 'Expenses', desc: 'Open expenses and categories.', icon: Receipt },
+    { href: '/admin/personal-funds', label: 'Personal funds', desc: 'Review advances, reimbursements and proof.', icon: Wallet },
+    { href: '/admin/health-monitor', label: 'Health Monitor', desc: 'Open the latest health status and reports.', icon: ShieldCheck },
     { href: '/admin/outstanding-dues', label: 'Outstanding dues', desc: 'Focus on unpaid balances.', icon: Wallet },
     { href: '/admin/expiring-soon', label: 'Expiring soon', desc: 'Review urgent renewals.', icon: Bell },
   ]
 
   if (role === 'super_admin') {
-    base.splice(6, 0, { href: '/store/admin', label: 'Store admin', desc: 'Manage products and store ops.', icon: ShoppingBag })
+    base.splice(8, 0, { href: '/store/admin', label: 'Store admin', desc: 'Manage products and store ops.', icon: LayoutDashboard })
+    base.push({ href: '/admin/permissions-audit', label: 'Permissions audit', desc: 'Review who can access what.', icon: UserCog })
   }
 
   return base
@@ -623,6 +893,7 @@ export default async function HomePage() {
 
   let memberSnapshot: MembershipSnapshot | null = null
   let opsKpis: OpsKpis | null = null
+  let healthSnapshot: HealthLite | null = null
 
   if (user.role === 'member') {
     const subs = await getSubscriptionsLite(user.id)
@@ -631,6 +902,10 @@ export default async function HomePage() {
 
   if (['reception', 'admin', 'super_admin'].includes(user.role)) {
     opsKpis = await getOpsKpis()
+  }
+
+  if (user.role === 'admin' || user.role === 'super_admin') {
+    healthSnapshot = await getLatestHealthSnapshot()
   }
 
   return (
@@ -646,6 +921,12 @@ export default async function HomePage() {
 
         {user.role === 'member' ? (
           <>
+            <PriorityGrid
+              title="Your access today"
+              subtitle="The essentials only, so you know what matters right now."
+              items={buildMemberPriorities(memberSnapshot!, unreadNotificationsCount, Boolean(qrCode))}
+            />
+
             <div className="grid gap-4 lg:grid-cols-[1.2fr_0.8fr]">
               <MembershipCard snapshot={memberSnapshot!} />
               <QrCard qrCode={qrCode} />
@@ -676,6 +957,12 @@ export default async function HomePage() {
 
         {(user.role === 'coach' || user.role === 'assistant_coach') ? (
           <>
+            <PriorityGrid
+              title="Training useful today"
+              subtitle="Fast access cues built for the training floor."
+              items={buildStaffPriorities(user.role, unreadNotificationsCount, Boolean(qrCode))}
+            />
+
             <div className="grid gap-4 lg:grid-cols-[1.05fr_0.95fr]">
               <StaffAccessCard role={user.role} />
               <QrCard qrCode={qrCode} />
@@ -718,10 +1005,16 @@ export default async function HomePage() {
 
         {user.role === 'reception' ? (
           <>
+            <PriorityGrid
+              title="Today’s priorities"
+              subtitle="The front-desk queue in the order you are most likely to need it."
+              items={buildReceptionPriorities(opsKpis!)}
+            />
+
             <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
               <SummaryCard label="Scans today" value={opsKpis?.scansToday ?? 0} hint={`Attendance today · ${cairoToday()}`} href="/scan" />
-              <SummaryCard label="Expiring in 7 days" value={opsKpis?.expiring7Count ?? 0} hint="Members to contact soon." />
-              <SummaryCard label="Outstanding dues" value={opsKpis?.outstandingCount ?? 0} hint={fmtMoneyEGP(opsKpis?.outstandingTotal ?? 0)} />
+              <SummaryCard label="Expiring in 7 days" value={opsKpis?.expiring7Count ?? 0} hint="Members to contact soon." href="/admin/expiring-soon" />
+              <SummaryCard label="Outstanding dues" value={opsKpis?.outstandingCount ?? 0} hint={fmtMoneyEGP(opsKpis?.outstandingTotal ?? 0)} href="/admin/outstanding-dues" />
               <SummaryCard label="Active members" value={opsKpis?.activeCount ?? 0} hint="Current active subscriptions." href="/members" />
             </div>
 
@@ -757,6 +1050,12 @@ export default async function HomePage() {
 
         {(user.role === 'admin' || user.role === 'super_admin') ? (
           <>
+            <PriorityGrid
+              title="Operations today"
+              subtitle="Your highest-value admin shortcuts, with cues that match today’s situation."
+              items={buildAdminPriorities(opsKpis!, healthSnapshot, user.role)}
+            />
+
             <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
               <SummaryCard label="Active members" value={opsKpis?.activeCount ?? 0} hint="Subscriptions currently active." href="/members" />
               <SummaryCard label="Expiring in 7 days" value={opsKpis?.expiring7Count ?? 0} hint="Renewals needing attention." href="/admin/expiring-soon" />
