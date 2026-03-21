@@ -176,6 +176,30 @@ function InfoStrip({
   )
 }
 
+function DecisionCard({
+  label,
+  value,
+  tone,
+}: {
+  label: string
+  value: React.ReactNode
+  tone: 'success' | 'warning' | 'danger'
+}) {
+  const cls =
+    tone === 'success'
+      ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
+      : tone === 'warning'
+        ? 'border-sky-200 bg-sky-50 text-sky-800'
+        : 'border-rose-200 bg-rose-50 text-rose-800'
+
+  return (
+    <div className={`rounded-2xl border px-4 py-3 ${cls}`}>
+      <div className="text-[11px] font-semibold uppercase tracking-wide opacity-75">{label}</div>
+      <div className="mt-2 text-sm font-semibold tracking-tight">{value}</div>
+    </div>
+  )
+}
+
 export default async function ScanResultPage({ searchParams }: { searchParams: SearchParams }) {
   const me = await getSessionUserCached()
   if (!me) redirect('/login?next=/scan')
@@ -296,7 +320,7 @@ export default async function ScanResultPage({ searchParams }: { searchParams: S
   const presenceBody = alreadyHereToday
     ? "Attendance is already in today's log. Let the member continue unless the desk needs to open the profile."
     : attendanceTodayScannedAt && valid
-      ? "Attendance is already in today's log. Let the member continue unless the desk needs to open the profile."
+      ? "This scan was recorded today. The result page also shows the member's recent attendance context for faster desk decisions."
       : recentActive
         ? `Last valid attendance: ${lastValidAttendanceAt ? fmtDateTimeNice(lastValidAttendanceAt) : lastValidAttendanceDate ? fmtDateNice(lastValidAttendanceDate) : 'recently active'}.`
         : 'No valid attendance was found in the recent period. Use the member profile if the desk needs more history.'
@@ -349,11 +373,43 @@ export default async function ScanResultPage({ searchParams }: { searchParams: S
       ? alreadyCheckedToday
         ? 'Attendance is already recorded for today. You can continue scanning unless the desk needs the member profile.'
         : 'This result was recorded. You can continue scanning immediately.'
-      : 'Use the member profile to renew, settle dues or explain why check-in is blocked.'
+      : memberId
+        ? 'Use the member profile to renew, settle dues or explain why check-in is blocked.'
+        : 'Re-scan the QR or open Members if the desk needs to search the person manually.'
 
-  const primaryHref = !valid && memberId ? `/members/${memberId}` : returnHref
-  const primaryLabel = !valid && memberId ? 'Open member' : 'Scan next'
-  const primaryIcon = !valid && memberId ? <QrCode size={16} className="mr-2" /> : <ScanLine size={16} className="mr-2" />
+  const entranceDecision = frozen
+    ? 'Check desk'
+    : valid
+      ? alreadyCheckedToday
+        ? 'Let in'
+        : 'Let in'
+      : memberId
+        ? 'Open profile'
+        : 'Check QR'
+
+  const decisionReason = frozen
+    ? 'Subscription frozen'
+    : valid
+      ? alreadyCheckedToday
+        ? 'Attendance already recorded today'
+        : 'Membership valid for entry'
+      : memberId
+        ? 'Membership not valid right now'
+        : 'QR or member could not be validated'
+
+  const deskDecisionCue = frozen
+    ? 'Pause entry and review the freeze dates.'
+    : valid
+      ? alreadyCheckedToday
+        ? 'Let the member continue. No extra attendance action is needed.'
+        : 'Allow entry and move to the next scan.'
+      : memberId
+        ? 'Open the member profile to renew, settle or explain the block.'
+        : 'Check the QR and re-scan, or search the member manually.'
+
+  const primaryHref = !valid ? (memberId ? `/members/${memberId}` : '/members') : returnHref
+  const primaryLabel = !valid ? (memberId ? 'Open profile' : 'Check members') : 'Scan next'
+  const primaryIcon = !valid ? <QrCode size={16} className="mr-2" /> : <ScanLine size={16} className="mr-2" />
 
   const infoTitle = repeatScan
     ? 'Repeated scan detected'
@@ -366,7 +422,7 @@ export default async function ScanResultPage({ searchParams }: { searchParams: S
         : 'Check-in blocked by membership status'
 
   const infoBody = repeatScan
-    ? `Same QR scanned again${typeof repeatSeconds === 'number' ? ` after ${repeatSeconds}s` : ''}. Showing the latest known result for this member.`
+    ? `Same QR scanned again${typeof repeatSeconds === 'number' ? ` after ${repeatSeconds}s` : ''}. Reusing the latest entrance decision and presence context for this member.`
     : apiMessage || subtitle
 
   return (
@@ -386,6 +442,7 @@ export default async function ScanResultPage({ searchParams }: { searchParams: S
                     <StatusBadge tone={presenceTone}>{presenceBadgeLabel}</StatusBadge>
                     {repeatScan ? <StatusBadge tone={valid ? 'success' : 'warning'}>Repeat scan</StatusBadge> : null}
                     {attendanceTodayScannedAt ? <StatusBadge tone={valid ? 'success' : 'warning'}>Attendance today</StatusBadge> : null}
+                    <StatusBadge tone={tone}>{entranceDecision}</StatusBadge>
                   </div>
                   <h1 className="mt-3 text-2xl font-semibold tracking-tight sm:text-3xl">{title}</h1>
                   <p className="mt-2 max-w-2xl text-sm text-[hsl(var(--muted))] sm:text-base">{subtitle}</p>
@@ -444,6 +501,12 @@ export default async function ScanResultPage({ searchParams }: { searchParams: S
                     </div>
                   </div>
                 </div>
+              </div>
+
+              <div className="grid gap-3 lg:grid-cols-3">
+                <DecisionCard label="Entrance decision" value={entranceDecision} tone={tone} />
+                <DecisionCard label="Reason" value={decisionReason} tone={tone} />
+                <DecisionCard label="Desk cue" value={deskDecisionCue} tone={tone} />
               </div>
 
               <InfoStrip title={infoTitle} body={infoBody} tone={tone} />

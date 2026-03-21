@@ -96,7 +96,7 @@ export default async function ScanPage() {
     <main>
       <PageHeader
         title="Scan — Check-in & Validity"
-        subtitle="Fast front-desk scanning with clearer results, presence context and kiosk-ready flow."
+        subtitle="Fast front-desk scanning with clearer entrance decision cues, presence context and kiosk-ready flow."
       />
 
       <Section className="max-w-5xl space-y-5">
@@ -135,8 +135,8 @@ export default async function ScanPage() {
 
         <div className="grid gap-3 lg:grid-cols-3">
           <FlowCard
-            title="1. Scan and decide fast"
-            body="Result pages now make the decision obvious in one second: valid, frozen, expired or no active membership."
+            title="1. Read the entrance cue fast"
+            body="Result pages now make the next decision obvious in one second: let in, check desk or open profile."
             icon={<ShieldCheck size={18} strokeWidth={2.1} />}
           />
           <FlowCard
@@ -145,8 +145,8 @@ export default async function ScanPage() {
             icon={<ScanLine size={18} strokeWidth={2.1} />}
           />
           <FlowCard
-            title="3. Use presence context fast"
-            body="Repeat-scan protection avoids immediate double check-ins, while the result page shows whether the member is already here today, recently active or needs follow-up."
+            title="3. Separate QR, subscription and repeat cases"
+            body="Repeat-scan protection avoids immediate double check-ins, while the result page separates allowed entry, blocked membership, frozen membership and QR/member issues."
             icon={<Users size={18} strokeWidth={2.1} />}
           />
         </div>
@@ -160,7 +160,7 @@ export default async function ScanPage() {
               Use the back camera when possible and keep only one QR in the frame.
             </div>
             <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-3 text-sm text-[hsl(var(--muted))]">
-              In kiosk mode, the result page auto-returns to the scanner and shows useful presence context like already here today, recent activity and last valid attendance.
+              In kiosk mode, the result page auto-returns to the scanner and highlights the fastest decision cue: let in, check desk or open profile.
             </div>
           </div>
         </div>
