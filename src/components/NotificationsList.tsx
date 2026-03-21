@@ -230,6 +230,7 @@ export default function NotificationsList({ isAdmin = false, sentOnly = false }:
         if (counts.members > 0 && n === counts.members) item.recipient_name = 'All members'
         else if (counts.coaches > 0 && n === counts.coaches) item.recipient_name = 'All coaches'
         else if (counts.assistant_coaches > 0 && n === counts.assistant_coaches) item.recipient_name = 'All assistant coaches'
+        else if (counts.coaches + counts.assistant_coaches > 0 && n === counts.coaches + counts.assistant_coaches) item.recipient_name = 'All coaches + assistants'
         else item.recipient_name = `Custom (${n})`
         item.recipient_email = null
       } else {
