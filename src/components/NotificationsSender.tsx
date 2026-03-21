@@ -27,6 +27,11 @@ export default function NotificationsSender() {
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState<string>('')
 
+  const recipientGuardrail =
+    audience === 'custom'
+      ? 'Custom notifications from this screen are limited to members, coaches, and assistant coaches. Admin, super admin, and reception are excluded.'
+      : 'This screen sends notifications only to roles that have a visible notifications inbox.'
+
   async function onSend(e: React.FormEvent) {
     e.preventDefault()
     setBusy(true)
@@ -71,7 +76,7 @@ export default function NotificationsSender() {
         setMsg(j?.details || j?.error || 'Failed to send')
         return
       }
-      setMsg(`Sent to ${j.count} recipient(s).`)
+      setMsg(`Sent to ${j.count} eligible recipient(s).`)
       setBody('')
       setSelectedIds([])
       setEmails('')
@@ -121,6 +126,10 @@ export default function NotificationsSender() {
             </Select>
           </div>
 
+          <div className="rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+            {recipientGuardrail}
+          </div>
+
           {/* Bloc custom audience */}
           {audience === 'custom' && (
             <div className="grid gap-3">
@@ -145,7 +154,7 @@ export default function NotificationsSender() {
                     onChange={() => setCustomMode('emails')}
                     disabled={busy}
                   />
-                  <span>Emails</span>
+                  <span>Member/staff emails</span>
                 </label>
               </div>
 
@@ -156,7 +165,7 @@ export default function NotificationsSender() {
                   label="Recipient emails (comma-separated)"
                   value={emails}
                   onChange={(e) => setEmails(e.target.value)}
-                  placeholder="member1@ex.com, member2@ex.com"
+                  placeholder="member1@ex.com, coach1@ex.com"
                   disabled={busy}
                 />
               )}
