@@ -4,14 +4,18 @@ export const revalidate = 0
 
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
-import { ClipboardList, ScanLine, UserPlus, Users } from 'lucide-react'
+import { ClipboardList, ScanLine, ShieldCheck, UserPlus, Users } from 'lucide-react'
 import { getSessionUser } from '@/lib/session'
-import { canAccessScan } from '@/lib/rbac'
 import KioskScanner from '@/components/KioskScanner'
+import type { Role } from '@/lib/session'
 import PageHeader from '@/components/layout/PageHeader'
 import Section from '@/components/layout/Section'
 import AccessDeniedPage from '@/components/AccessDeniedPage'
 import KioskHealthBadge from '@/components/KioskHealthBadge'
+
+function canAccess(role: Role) {
+  return role === 'reception' || role === 'admin' || role === 'super_admin'
+}
 
 function QuickLink({
   href,
@@ -42,12 +46,36 @@ function QuickLink({
   )
 }
 
+function FlowCard({
+  title,
+  body,
+  icon,
+}: {
+  title: string
+  body: string
+  icon: React.ReactNode
+}) {
+  return (
+    <div className="rounded-3xl border border-[hsl(var(--border))] bg-white p-4 shadow-soft">
+      <div className="flex items-start gap-3">
+        <span className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-black">
+          {icon}
+        </span>
+        <div>
+          <div className="text-sm font-semibold tracking-tight">{title}</div>
+          <p className="mt-1 text-sm text-[hsl(var(--muted))]">{body}</p>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export default async function ScanPage() {
   const user = await getSessionUser()
 
   if (!user) redirect('/login?next=/scan')
 
-  if (!canAccessScan(user.role)) {
+  if (!canAccess(user.role)) {
     return (
       <AccessDeniedPage
         title="Scan — Check-in & Validity"
@@ -62,13 +90,13 @@ export default async function ScanPage() {
     )
   }
 
-  const showAudit = canAccessScan(user.role) && user.role !== 'reception'
+  const showAudit = user.role === 'admin' || user.role === 'super_admin'
 
   return (
     <main>
       <PageHeader
         title="Scan — Check-in & Validity"
-        subtitle="Fast front-desk scanning for attendance, subscription validation and kiosk mode."
+        subtitle="Fast front-desk scanning with clearer results, next actions and kiosk-ready flow."
       />
 
       <Section className="max-w-5xl space-y-5">
@@ -90,7 +118,7 @@ export default async function ScanPage() {
           <QuickLink
             href="/scan?kiosk=1"
             label="Open kiosk mode"
-            desc="Sticky full-screen scanner for the entrance."
+            desc="Launch the full-screen entrance scanner with auto-return flow."
             icon={<ScanLine size={18} strokeWidth={2.1} />}
           />
           {showAudit ? (
@@ -105,6 +133,24 @@ export default async function ScanPage() {
           )}
         </div>
 
+        <div className="grid gap-3 lg:grid-cols-3">
+          <FlowCard
+            title="1. Scan and decide fast"
+            body="Result pages now make the decision obvious in one second: valid, frozen, expired or no active membership."
+            icon={<ShieldCheck size={18} strokeWidth={2.1} />}
+          />
+          <FlowCard
+            title="2. Use kiosk for the entrance"
+            body="Kiosk mode opens directly in full screen, keeps the device awake and returns automatically to the next scan after each result."
+            icon={<ScanLine size={18} strokeWidth={2.1} />}
+          />
+          <FlowCard
+            title="3. Take the next action"
+            body="Open the member profile, settle a due or continue scanning immediately depending on the result shown."
+            icon={<Users size={18} strokeWidth={2.1} />}
+          />
+        </div>
+
         <KioskScanner size="md" ratio="1:1" />
 
         <div className="rounded-3xl border border-[hsl(var(--border))] bg-white p-4 shadow-soft">
@@ -114,7 +160,7 @@ export default async function ScanPage() {
               Use the back camera when possible and keep only one QR in the frame.
             </div>
             <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-3 text-sm text-[hsl(var(--muted))]">
-              Kiosk mode is better for the entrance because it hides navigation and keeps the screen awake.
+              In kiosk mode, the result page auto-returns to the scanner so the entrance can keep moving without extra taps.
             </div>
           </div>
         </div>
