@@ -145,8 +145,8 @@ export default async function ScanPage() {
             icon={<ScanLine size={18} strokeWidth={2.1} />}
           />
           <FlowCard
-            title="3. Take the next action"
-            body="Open the member profile, settle a due or continue scanning immediately depending on the result shown."
+            title="3. Keep the line moving"
+            body="Repeat-scan protection avoids immediate double check-ins, while the result page makes the next action obvious for the desk."
             icon={<Users size={18} strokeWidth={2.1} />}
           />
         </div>
@@ -160,7 +160,7 @@ export default async function ScanPage() {
               Use the back camera when possible and keep only one QR in the frame.
             </div>
             <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-3 text-sm text-[hsl(var(--muted))]">
-              In kiosk mode, the result page auto-returns to the scanner so the entrance can keep moving without extra taps.
+              In kiosk mode, the result page auto-returns to the scanner and immediate repeat scans of the same QR are ignored for a few seconds.
             </div>
           </div>
         </div>
