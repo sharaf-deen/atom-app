@@ -211,7 +211,7 @@ export default function OutstandingDuesClient({ initialRows }: { initialRows: Ou
         </div>
       </div>
 
-      <Table columns={columns} rows={rows as any} keyField="key" />
+      <Table columns={columns} rows={rows as any} keyField="key" stickyTopClassName="top-0" />
     </section>
   )
 }

@@ -403,7 +403,7 @@ export default async function ExpiringSoonPage({
 
         {pager}
 
-        <Table columns={columns} rows={tableRows as any[]} keyField="id" />
+        <Table columns={columns} rows={tableRows as any[]} keyField="id" stickyTopClassName="top-0" />
 
         {pager}
 
