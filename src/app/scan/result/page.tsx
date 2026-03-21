@@ -38,6 +38,8 @@ type SearchParams = {
   freezeDaysRemaining?: string
   kiosk?: string
   message?: string
+  repeat?: string
+  repeatSeconds?: string
 }
 
 function canAccess(role: Role) {
@@ -64,6 +66,49 @@ function fmtDateNice(dateOnly?: string | null) {
 
 function safeMessage(v?: string) {
   return (v || '').trim().slice(0, 180)
+}
+
+
+const CAIRO_TZ = 'Africa/Cairo'
+
+function todayDateOnlyCairo() {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: CAIRO_TZ,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(new Date())
+  const y = parts.find((p) => p.type === 'year')?.value ?? '1970'
+  const m = parts.find((p) => p.type === 'month')?.value ?? '01'
+  const d = parts.find((p) => p.type === 'day')?.value ?? '01'
+  return `${y}-${m}-${d}`
+}
+
+function dateDaysAgoCairo(days: number) {
+  const now = new Date()
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: CAIRO_TZ,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(new Date(now.getTime() - days * 86400000))
+  const y = parts.find((p) => p.type === 'year')?.value ?? '1970'
+  const m = parts.find((p) => p.type === 'month')?.value ?? '01'
+  const d = parts.find((p) => p.type === 'day')?.value ?? '01'
+  return `${y}-${m}-${d}`
+}
+
+function fmtDateTimeNice(v?: string | null) {
+  if (!v) return '—'
+  const dt = new Date(v)
+  if (Number.isNaN(dt.getTime())) return v
+  return new Intl.DateTimeFormat(undefined, {
+    year: 'numeric',
+    month: 'short',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(dt)
 }
 
 function StatusBadge({
@@ -182,6 +227,45 @@ export default async function ScanResultPage({ searchParams }: { searchParams: S
     }
   }
 
+  const repeatScan = searchParams.repeat === '1'
+  const repeatSeconds = parseIntSafe(searchParams.repeatSeconds)
+
+  let attendanceTodayScannedAt: string | null = null
+  let attendanceTodayStatus: string | null = null
+  let recentValidAttendanceCount = 0
+  let lastAttendanceDate: string | null = null
+
+  if (memberId) {
+    try {
+      const admin = getSupabaseAdminClientCached()
+      const today = todayDateOnlyCairo()
+      const since = dateDaysAgoCairo(30)
+      const { data: attendanceRows } = await admin
+        .from('attendance')
+        .select('date, valid, status, scanned_at')
+        .eq('member_id', memberId)
+        .gte('date', since)
+        .order('date', { ascending: false })
+        .order('scanned_at', { ascending: false })
+        .limit(40)
+
+      const rows = (attendanceRows ?? []) as Array<{
+        date: string
+        valid: boolean | null
+        status: string | null
+        scanned_at: string | null
+      }>
+
+      const todayRow = rows.find((row) => row.date === today) ?? null
+      attendanceTodayScannedAt = todayRow?.scanned_at ?? null
+      attendanceTodayStatus = todayRow?.status ?? null
+      recentValidAttendanceCount = rows.filter((row) => !!row.valid).length
+      lastAttendanceDate = rows[0]?.date ?? null
+    } catch {
+      // ignore
+    }
+  }
+
   const daysRemaining = parseIntSafe(searchParams.daysRemaining)
   const expiresOn = searchParams.expiresOn || null
   const expiredDays = parseIntSafe(searchParams.expiredDays)
@@ -206,33 +290,41 @@ export default async function ScanResultPage({ searchParams }: { searchParams: S
     : valid
       ? 'Membership is valid for check-in.'
       : 'Membership is not currently valid for check-in.'
-  const statusLabel = frozen ? 'Frozen' : valid ? 'Valid' : 'Expired'
+  const statusLabel = repeatScan ? (valid ? 'Already today' : 'Repeat scan') : frozen ? 'Frozen' : valid ? 'Valid' : 'Expired'
 
   const nextStepTitle = frozen
     ? 'Next step: open the member profile and review the freeze period.'
     : valid
-      ? 'Next step: let the member in and continue to the next scan.'
+      ? apiMessage.toLowerCase().includes('already checked') || repeatScan
+        ? 'Next step: no extra attendance action is needed.'
+        : 'Next step: let the member in and continue to the next scan.'
       : 'Next step: open the member profile and renew or settle the membership.'
 
   const nextStepBody = frozen
     ? 'Do not allow check-in until the freeze ends or the membership is updated.'
     : valid
-      ? 'This result was recorded. You can continue scanning immediately.'
+      ? apiMessage.toLowerCase().includes('already checked') || repeatScan
+        ? 'Attendance is already recorded for today. You can continue scanning unless the desk needs the member profile.'
+        : 'This result was recorded. You can continue scanning immediately.'
       : 'Use the member profile to renew, settle dues or explain why check-in is blocked.'
 
   const primaryHref = !valid && memberId ? `/members/${memberId}` : returnHref
   const primaryLabel = !valid && memberId ? 'Open member' : 'Scan next'
   const primaryIcon = !valid && memberId ? <QrCode size={16} className="mr-2" /> : <ScanLine size={16} className="mr-2" />
 
-  const infoTitle = valid
-    ? apiMessage.toLowerCase().includes('already checked')
-      ? 'Already recorded today'
-      : 'Check-in recorded'
-    : frozen
-      ? 'Check-in blocked by freeze'
-      : 'Check-in blocked by membership status'
+  const infoTitle = repeatScan
+    ? 'Repeated scan detected'
+    : valid
+      ? apiMessage.toLowerCase().includes('already checked')
+        ? 'Already recorded today'
+        : 'Check-in recorded'
+      : frozen
+        ? 'Check-in blocked by freeze'
+        : 'Check-in blocked by membership status'
 
-  const infoBody = apiMessage || subtitle
+  const infoBody = repeatScan
+    ? `Same QR scanned again${typeof repeatSeconds === 'number' ? ` after ${repeatSeconds}s` : ''}. Showing the latest known result for this member.`
+    : apiMessage || subtitle
 
   return (
     <main className="min-h-[calc(100vh-3rem)] bg-[hsl(var(--bg))] p-4 sm:p-6">
@@ -248,6 +340,8 @@ export default async function ScanResultPage({ searchParams }: { searchParams: S
                     <StatusBadge tone={tone}>{statusLabel}</StatusBadge>
                     {kioskMode ? <StatusBadge tone="warning">Auto-return enabled</StatusBadge> : null}
                     {apiMessage.toLowerCase().includes('already checked') ? <StatusBadge tone="success">Already today</StatusBadge> : null}
+                    {repeatScan ? <StatusBadge tone={valid ? 'success' : 'warning'}>Repeat scan</StatusBadge> : null}
+                    {attendanceTodayScannedAt ? <StatusBadge tone={valid ? 'success' : 'warning'}>Attendance today</StatusBadge> : null}
                   </div>
                   <h1 className="mt-3 text-2xl font-semibold tracking-tight sm:text-3xl">{title}</h1>
                   <p className="mt-2 max-w-2xl text-sm text-[hsl(var(--muted))] sm:text-base">{subtitle}</p>
@@ -309,6 +403,31 @@ export default async function ScanResultPage({ searchParams }: { searchParams: S
               </div>
 
               <InfoStrip title={infoTitle} body={infoBody} tone={tone} />
+
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                <FactCard
+                  label="Today attendance"
+                  value={attendanceTodayScannedAt ? 'Recorded' : 'Not recorded'}
+                  icon={<CircleCheckBig size={18} strokeWidth={2.1} />}
+                />
+                <FactCard
+                  label="Checked at"
+                  value={attendanceTodayScannedAt ? fmtDateTimeNice(attendanceTodayScannedAt) : '—'}
+                  icon={<Clock3 size={18} strokeWidth={2.1} />}
+                />
+                <FactCard
+                  label="Valid attendance · 30d"
+                  value={recentValidAttendanceCount > 0 ? recentValidAttendanceCount : '0'}
+                  icon={<CalendarDays size={18} strokeWidth={2.1} />}
+                />
+              </div>
+
+              {attendanceTodayStatus ? (
+                <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] px-4 py-3 text-sm text-[hsl(var(--muted))]">
+                  Today status: <span className="font-semibold text-black">{attendanceTodayStatus}</span>
+                  {lastAttendanceDate ? <span className="ml-2">• Last attendance date: {fmtDateNice(lastAttendanceDate)}</span> : null}
+                </div>
+              ) : null}
 
               <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                 {frozen ? (
