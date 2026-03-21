@@ -86,6 +86,25 @@ function errToString(err: unknown) {
   return 'Camera error'
 }
 
+
+function buildResultParams(j: ScanResponse, kioskMode: boolean) {
+  const sp = new URLSearchParams()
+  if (kioskMode) sp.set('kiosk', '1')
+  sp.set('valid', j.valid ? '1' : '0')
+  if (j.member_id) sp.set('memberId', j.member_id)
+  if (j.days_remaining !== undefined && j.days_remaining !== null) sp.set('daysRemaining', String(j.days_remaining))
+  if (j.expires_on) sp.set('expiresOn', String(j.expires_on))
+  if (j.expired_days !== undefined && j.expired_days !== null) sp.set('expiredDays', String(j.expired_days))
+  if (j.expired_on) sp.set('expiredOn', String(j.expired_on))
+  if (j.frozen) sp.set('frozen', '1')
+  if (j.frozen_until) sp.set('frozenUntil', String(j.frozen_until))
+  if (j.freeze_days_remaining !== undefined && j.freeze_days_remaining !== null) {
+    sp.set('freezeDaysRemaining', String(j.freeze_days_remaining))
+  }
+  if (j.message) sp.set('message', String(j.message).slice(0, 180))
+  return sp
+}
+
 type Status = 'idle' | 'checking' | 'ok' | 'invalid' | 'error'
 
 type KioskScannerProps = {
@@ -278,6 +297,8 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className }: 
   const [status, setStatus] = useState<Status>('idle')
   const [msg, setMsg] = useState<string>('Ready')
   const resumeTimerRef = useRef<number | null>(null)
+  const lastScanRef = useRef<{ scanKey: string; at: number; params: string } | null>(null)
+  const repeatCooldownMs = kioskMode ? 8000 : 5000
 
   const [online, setOnline] = useState(true)
   const wasOfflineRef = useRef(false)
@@ -375,11 +396,26 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className }: 
 
       try {
         const maybeId = parseMemberText(raw)
+        const scanKey = maybeId ? `atom:${maybeId}` : raw.trim()
         const payload = { code: maybeId ? `atom:${maybeId}` : raw }
 
         if (!online) {
           setStatus('error')
           setMsg('Offline — reconnect to the internet, then tap Retry.')
+          return
+        }
+
+        const last = lastScanRef.current
+        const repeatAgeMs = last && last.scanKey === scanKey ? Date.now() - last.at : null
+        if (last && repeatAgeMs !== null && repeatAgeMs < repeatCooldownMs) {
+          const sp = new URLSearchParams(last.params)
+          sp.set('repeat', '1')
+          sp.set('repeatSeconds', String(Math.max(1, Math.round(repeatAgeMs / 1000))))
+          if (kioskMode) sp.set('kiosk', '1')
+          setStatus('ok')
+          setMsg('Same member scanned again — showing the latest result.')
+          router.push(`/scan/result?${sp.toString()}`)
+          didNavigate = true
           return
         }
 
@@ -397,20 +433,12 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className }: 
           setStatus('error')
           setMsg(j?.message || 'Scan failed')
         } else {
-          const sp = new URLSearchParams()
-          if (kioskMode) sp.set('kiosk', '1')
-          sp.set('valid', j.valid ? '1' : '0')
-          if (j.member_id) sp.set('memberId', j.member_id)
-          if (j.days_remaining !== undefined && j.days_remaining !== null) sp.set('daysRemaining', String(j.days_remaining))
-          if (j.expires_on) sp.set('expiresOn', String(j.expires_on))
-          if (j.expired_days !== undefined && j.expired_days !== null) sp.set('expiredDays', String(j.expired_days))
-          if (j.expired_on) sp.set('expiredOn', String(j.expired_on))
-          if ((j as any).frozen) sp.set('frozen', '1')
-          if ((j as any).frozen_until) sp.set('frozenUntil', String((j as any).frozen_until))
-          if ((j as any).freeze_days_remaining !== undefined && (j as any).freeze_days_remaining !== null) {
-            sp.set('freezeDaysRemaining', String((j as any).freeze_days_remaining))
+          const sp = buildResultParams(j, kioskMode)
+          lastScanRef.current = {
+            scanKey,
+            at: Date.now(),
+            params: sp.toString(),
           }
-          if (j.message) sp.set('message', String(j.message).slice(0, 180))
 
           router.push(`/scan/result?${sp.toString()}`)
           didNavigate = true
@@ -429,11 +457,11 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className }: 
         resumeTimerRef.current = window.setTimeout(() => {
           setPaused(false)
           setStatus('idle')
-          setMsg('Ready')
+          setMsg(kioskMode ? 'Ready for next member' : 'Ready')
         }, 1500)
       }
     },
-    [paused, router, kioskMode, online]
+    [paused, router, kioskMode, online, repeatCooldownMs]
   )
 
   function manualRescan() {
@@ -628,7 +656,7 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className }: 
                 {kioskMode ? <Badge>Kiosk</Badge> : null}
               </div>
               <p className="mt-1 text-sm text-[hsl(var(--muted))]">
-                Fast front-desk scanning with full-screen mode, kiosk mode and automatic result pages.
+                Fast front-desk scanning with full-screen mode, kiosk mode, repeat-scan guardrails and automatic result pages.
               </p>
             </div>
 
