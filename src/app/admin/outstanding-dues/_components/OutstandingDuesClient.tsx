@@ -10,6 +10,7 @@ import type { OutstandingDueRow } from '../types'
 type PaymentMethod = 'cash' | 'instapay' | 'card' | 'bank_transfer' | 'other'
 
 type SortKey = 'due_desc' | 'due_asc' | 'paid_at_desc' | 'paid_at_asc' | 'name_asc'
+type FocusKey = 'all' | 'high_due' | 'missing_paid_at'
 
 function fmtMoney(v: number) {
   const n = Number(v ?? 0)
@@ -95,6 +96,7 @@ export default function OutstandingDuesClient({ initialRows }: { initialRows: Ou
   const [q, setQ] = useState('')
   const [method, setMethod] = useState<'all' | PaymentMethod>('all')
   const [minDue, setMinDue] = useState<string>('')
+  const [focus, setFocus] = useState<FocusKey>('all')
   const [sort, setSort] = useState<SortKey>('due_desc')
 
   const filtered = useMemo(() => {
@@ -104,6 +106,8 @@ export default function OutstandingDuesClient({ initialRows }: { initialRows: Ou
     const out = (initialRows ?? []).filter((r) => {
       if (method !== 'all' && normMethod(r.payment_method) !== method) return false
       if (Number.isFinite(min) && min > 0 && r.due < min) return false
+      if (focus === 'high_due' && Number(r.due || 0) < 1000) return false
+      if (focus === 'missing_paid_at' && !!r.paid_at) return false
 
       if (!query) return true
       const hay = [r.name, r.email ?? '', r.phone ?? '', r.member_code ?? ''].join(' ').toLowerCase()
@@ -132,17 +136,17 @@ export default function OutstandingDuesClient({ initialRows }: { initialRows: Ou
     })
 
     return out
-  }, [initialRows, method, minDue, q, sort])
+  }, [focus, initialRows, method, minDue, q, sort])
 
   const totals = useMemo(() => {
     const due = filtered.reduce((acc, r) => acc + Number(r.due || 0), 0)
     const members = new Set(filtered.map((r) => r.user_id)).size
-    const urgent = filtered.filter((r) => Number(r.due || 0) >= 1000).length
-    const recentlyPaid = filtered.filter((r) => !!r.paid_at).length
-    return { due, members, urgent, recentlyPaid }
+    const actionFirst = filtered.filter((r) => Number(r.due || 0) >= 1000).length
+    const missingPaidAt = filtered.filter((r) => !r.paid_at).length
+    return { due, members, actionFirst, missingPaidAt }
   }, [filtered])
 
-  const hasFilters = q.trim() !== '' || method !== 'all' || minDue.trim() !== '' || sort !== 'due_desc'
+  const hasFilters = q.trim() !== '' || method !== 'all' || minDue.trim() !== '' || focus !== 'all' || sort !== 'due_desc'
 
   const columns = useMemo(
     () => [
@@ -168,6 +172,8 @@ export default function OutstandingDuesClient({ initialRows }: { initialRows: Ou
             <div className="flex flex-wrap gap-1">
               {r.member_code ? <TinyBadge>{r.member_code}</TinyBadge> : null}
               {r.status ? <TinyBadge tone={planTone}>{String(r.status).replace(/_/g, ' ')}</TinyBadge> : null}
+              {Number(r.due || 0) >= 1000 ? <TinyBadge tone="danger">Action first</TinyBadge> : null}
+              {!r.paid_at ? <TinyBadge tone="warning">No paid date</TinyBadge> : null}
             </div>
             {contact.length ? <div className="text-xs text-[hsl(var(--muted))]">{contact.join(' · ')}</div> : null}
           </div>
@@ -214,8 +220,8 @@ export default function OutstandingDuesClient({ initialRows }: { initialRows: Ou
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <SummaryCard label="Members with due" value={String(totals.members)} hint="Unique members in the current filtered view." />
         <SummaryCard label="Total due" value={fmtMoney(totals.due)} hint="Current outstanding balance in the filtered view." />
-        <SummaryCard label="Urgent rows" value={String(totals.urgent)} hint="Subscriptions with due of 1,000 EGP or more." />
-        <SummaryCard label="Rows" value={String(filtered.length)} hint={totals.recentlyPaid > 0 ? `${totals.recentlyPaid} row(s) have a paid date.` : 'No paid date recorded in this view.'} />
+        <SummaryCard label="Action first" value={String(totals.actionFirst)} hint="Rows with due of 1,000 EGP or more." />
+        <SummaryCard label="Missing paid date" value={String(totals.missingPaidAt)} hint={totals.missingPaidAt > 0 ? 'Review payment history before closing the desk action.' : 'All visible rows already have a paid date.'} />
       </div>
 
       <div className="rounded-2xl border border-[hsl(var(--border))] bg-white p-4 shadow-soft space-y-4">
@@ -271,6 +277,7 @@ export default function OutstandingDuesClient({ initialRows }: { initialRows: Ou
               setQ('')
               setMethod('all')
               setMinDue('')
+              setFocus('all')
               setSort('due_desc')
             }}
           >
