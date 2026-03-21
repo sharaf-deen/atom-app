@@ -20,19 +20,15 @@ type Item = {
   recipient_name?: string
   recipient_email?: string | null
   recipient_count?: number
-  // For Sent view grouping: underlying notification row IDs
   source_ids?: string[]
 }
 
 const KINDS = ['all', 'info', 'order_update', 'billing', 'promo'] as const
 type KindFilter = (typeof KINDS)[number]
-
-// Always 5 per page
 const PER_PAGE = 5
 
 type Props = {
   isAdmin?: boolean
-  /** If true, force the tab to Sent and hide Inbox + actions */
   sentOnly?: boolean
 }
 
@@ -48,9 +44,30 @@ function isUuid(v: string) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(v)
 }
 
+function kindLabel(kind: string | null | undefined) {
+  switch (kind) {
+    case 'order_update':
+      return 'Order update'
+    case 'billing':
+      return 'Billing'
+    case 'promo':
+      return 'Promo'
+    case 'info':
+      return 'Info'
+    default:
+      return kind || '—'
+  }
+}
+
+function preview(text: string, max = 120) {
+  const s = String(text || '').replace(/\s+/g, ' ').trim()
+  if (!s) return '—'
+  return s.length > max ? `${s.slice(0, max - 1)}…` : s
+}
+
 export default function NotificationsList({ isAdmin = false, sentOnly = false }: Props) {
   const [box, setBox] = useState<Box>(sentOnly ? 'sent' : 'inbox')
-  const [tab, setTab] = useState<'all' | 'unread'>('all') // inbox only
+  const [tab, setTab] = useState<'all' | 'unread'>('all')
   const [kind, setKind] = useState<KindFilter>('all')
   const [q, setQ] = useState('')
   const [debQ, setDebQ] = useState('')
@@ -61,21 +78,39 @@ export default function NotificationsList({ isAdmin = false, sentOnly = false }:
   const [loading, setLoading] = useState(false)
   const [err, setErr] = useState<string>('')
   const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [openId, setOpenId] = useState<string | null>(null)
+  const [actionMsg, setActionMsg] = useState('')
   const [audCounts, setAudCounts] = useState<{ members: number; coaches: number; assistant_coaches: number } | null>(
-    null
+    null,
   )
 
-  // Align when prop changes
   useEffect(() => {
     if (sentOnly) setBox('sent')
   }, [sentOnly])
 
   const totalPages = useMemo(() => Math.max(1, Math.ceil(total / PER_PAGE)), [total])
+  const isSentView = sentOnly || box === 'sent'
+  const openItem = useMemo(() => items.find((item) => item.id === openId) ?? null, [items, openId])
+  const unreadOnPage = useMemo(() => items.filter((item) => !item.read_at).length, [items])
+  const selectedReadIds = useMemo(
+    () => items.filter((item) => selected.has(item.id) && !!item.read_at).map((item) => item.id),
+    [items, selected],
+  )
+  const selectedUnreadIds = useMemo(
+    () => items.filter((item) => selected.has(item.id) && !item.read_at).map((item) => item.id),
+    [items, selected],
+  )
 
   useEffect(() => {
     const t = setTimeout(() => setDebQ(q.trim()), 300)
     return () => clearTimeout(t)
   }, [q])
+
+  useEffect(() => {
+    if (openId && !items.some((item) => item.id === openId)) {
+      setOpenId(null)
+    }
+  }, [items, openId])
 
   async function ensureAudienceCounts() {
     if (audCounts) return audCounts
@@ -95,10 +130,7 @@ export default function NotificationsList({ isAdmin = false, sentOnly = false }:
     return { members: 0, coaches: 0, assistant_coaches: 0 }
   }
 
-  function groupSent(
-    rows: any[],
-    counts: { members: number; coaches: number; assistant_coaches: number }
-  ): Item[] {
+  function groupSent(rows: any[], counts: { members: number; coaches: number; assistant_coaches: number }): Item[] {
     const norm = (s: any) => String(s ?? '').trim().replace(/\s+/g, ' ')
     const timeKey = (iso: any) => {
       const s = String(iso ?? '')
@@ -106,13 +138,9 @@ export default function NotificationsList({ isAdmin = false, sentOnly = false }:
     }
 
     const out: Item[] = []
-    const map = new Map<
-      string,
-      { item: Item; recipients: { name?: string; email?: string | null }[] }
-    >()
+    const map = new Map<string, { item: Item; recipients: { name?: string; email?: string | null }[] }>()
 
     for (const r of rows) {
-      // Key based on second-level timestamp + content (good enough to represent one "send")
       const k = `${timeKey(r.created_at)}|${norm(r.kind)}|${norm(r.title)}|${norm(r.body)}`
       let g = map.get(k)
       if (!g) {
@@ -129,19 +157,16 @@ export default function NotificationsList({ isAdmin = false, sentOnly = false }:
         out.push(g.item)
       }
 
-      // Collect underlying IDs for delete in Sent view
       if (typeof r.id === 'string' && isUuid(r.id)) {
         g.item.source_ids = g.item.source_ids || []
         g.item.source_ids.push(r.id)
       }
 
-      // Collect recipients from non-grouped APIs
       g.recipients.push({
         name: (r.recipient_name ?? r.recipient ?? '') as any,
         email: (r.recipient_email ?? r.recipientEmail ?? null) as any,
       })
 
-      // If API already provides grouped fields, keep them
       if (typeof r.recipient_count === 'number' && r.recipient_count > 0) {
         g.item.recipient_count = r.recipient_count
         g.item.recipient_name = r.recipient_name
@@ -149,7 +174,6 @@ export default function NotificationsList({ isAdmin = false, sentOnly = false }:
       }
     }
 
-    // Finalize labels for groups that were not already labeled by API
     for (const item of out) {
       if (typeof item.recipient_count === 'number' && item.recipient_count > 0) continue
 
@@ -163,9 +187,9 @@ export default function NotificationsList({ isAdmin = false, sentOnly = false }:
       } else if (n > 1) {
         if (counts.members > 0 && n === counts.members) item.recipient_name = 'All members'
         else if (counts.coaches > 0 && n === counts.coaches) item.recipient_name = 'All coaches'
-        else if (counts.assistant_coaches > 0 && n === counts.assistant_coaches)
+        else if (counts.assistant_coaches > 0 && n === counts.assistant_coaches) {
           item.recipient_name = 'All assistant coaches'
-        else item.recipient_name = `Custom (${n})`
+        } else item.recipient_name = `Custom (${n})`
         item.recipient_email = null
       } else {
         item.recipient_name = '—'
@@ -180,10 +204,8 @@ export default function NotificationsList({ isAdmin = false, sentOnly = false }:
     setLoading(true)
     setErr('')
     try {
-      const isSentView = sentOnly || box === 'sent'
       const params = new URLSearchParams()
 
-      // Sent: fetch a larger window and group client-side so "All members/coaches/custom" becomes 1 line.
       if (isSentView) {
         params.set('page', '1')
         params.set('limit', '1000')
@@ -204,9 +226,7 @@ export default function NotificationsList({ isAdmin = false, sentOnly = false }:
         }
 
         const raw = Array.isArray(j.items) ? j.items : []
-        // If the API already returns grouped rows, keep them as-is.
         const alreadyGrouped = raw.length > 0 && typeof raw[0]?.recipient_count === 'number' && !raw[0]?.user_id
-
         const grouped: Item[] = alreadyGrouped ? (raw as Item[]) : groupSent(raw, counts)
 
         const totalGroups = grouped.length
@@ -215,17 +235,15 @@ export default function NotificationsList({ isAdmin = false, sentOnly = false }:
         setTotal(totalGroups)
         setPage(p)
         setSelected(new Set())
+        if (!openId && grouped.length > 0) setOpenId(grouped[offset]?.id ?? null)
         return
       }
 
-      // Inbox (server paginated)
       params.set('page', String(p))
       params.set('limit', String(PER_PAGE))
       if (kind !== 'all') params.set('kind', kind)
       if (debQ) params.set('q', debQ)
-      if (!sentOnly && box === 'inbox' && tab === 'unread') {
-        params.set('unread', '1')
-      }
+      if (tab === 'unread') params.set('unread', '1')
 
       const r = await fetch(`/api/notifications/list?${params.toString()}`, { cache: 'no-store' })
       const j: any = await safeJson(r)
@@ -237,10 +255,12 @@ export default function NotificationsList({ isAdmin = false, sentOnly = false }:
         return
       }
 
-      setItems(Array.isArray(j.items) ? j.items : [])
+      const nextItems = Array.isArray(j.items) ? j.items : []
+      setItems(nextItems)
       setTotal(Number(j.total || 0))
       setPage(Number(j.page || p))
       setSelected(new Set())
+      if (!openId && nextItems.length > 0) setOpenId(nextItems[0].id)
     } catch (e: any) {
       setErr(String(e?.message || e))
     } finally {
@@ -250,11 +270,11 @@ export default function NotificationsList({ isAdmin = false, sentOnly = false }:
 
   useEffect(() => {
     setPage(1)
+    setOpenId(null)
     load(1)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [box, tab, kind, debQ, sentOnly])
 
-  // Listen to top Reload button and global updates
   useEffect(() => {
     const handler = () => load(page)
     window.addEventListener('atom:reload', handler)
@@ -277,28 +297,49 @@ export default function NotificationsList({ isAdmin = false, sentOnly = false }:
 
   function toggleAll() {
     if (selected.size === items.length) setSelected(new Set())
-    else setSelected(new Set(items.map((i) => i.id)))
+    else setSelected(new Set(items.map((item) => item.id)))
   }
 
-  async function markSelectedRead() {
-    if (sentOnly || box !== 'inbox' || selected.size === 0) return
-    const ids = Array.from(selected)
-    const r = await fetch('/api/notifications/mark-read', {
+  async function markIds(ids: string[], mode: 'read' | 'unread') {
+    if (ids.length === 0) return true
+    const endpoint = mode === 'read' ? '/api/notifications/mark-read' : '/api/notifications/mark-unread'
+    const r = await fetch(endpoint, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ ids }),
     })
     const j: any = await safeJson(r)
     if (!r.ok || !j?.ok) {
-      alert(j?.details || j?.error || 'Failed to mark as read')
-      return
+      setActionMsg(j?.details || j?.error || `Failed to mark as ${mode}`)
+      return false
     }
+    setActionMsg(`Marked ${ids.length} notification${ids.length === 1 ? '' : 's'} as ${mode}.`)
     window.dispatchEvent(new Event('notifications:updated'))
-    await load(page)
+    return true
+  }
+
+  async function openItemAndRead(item: Item) {
+    setOpenId(item.id)
+    if (!isSentView && !item.read_at) {
+      const ok = await markIds([item.id], 'read')
+      if (ok) await load(page)
+    }
+  }
+
+  async function markSelectedRead() {
+    if (isSentView || selectedUnreadIds.length === 0) return
+    const ok = await markIds(selectedUnreadIds, 'read')
+    if (ok) await load(page)
+  }
+
+  async function markSelectedUnread() {
+    if (isSentView || selectedReadIds.length === 0) return
+    const ok = await markIds(selectedReadIds, 'unread')
+    if (ok) await load(page)
   }
 
   async function markAllUnreadInFilterRead() {
-    if (sentOnly || box !== 'inbox') return
+    if (isSentView) return
     const params = new URLSearchParams()
     params.set('page', '1')
     params.set('limit', '1000')
@@ -309,29 +350,18 @@ export default function NotificationsList({ isAdmin = false, sentOnly = false }:
     const r = await fetch(`/api/notifications/list?${params.toString()}`, { cache: 'no-store' })
     const j: any = await safeJson(r)
     if (!r.ok || !j?.ok) {
-      alert(j?.details || j?.error || 'Failed to load unread')
+      setActionMsg(j?.details || j?.error || 'Failed to load unread')
       return
     }
 
     const ids: string[] = (j.items || []).map((x: any) => x.id).filter(Boolean)
     if (ids.length === 0) {
-      alert('No unread notifications in current filter.')
+      setActionMsg('No unread notifications in the current filter.')
       return
     }
 
-    const r2 = await fetch('/api/notifications/mark-read', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ids }),
-    })
-    const j2: any = await safeJson(r2)
-    if (!r2.ok || !j2?.ok) {
-      alert(j2?.details || j2?.error || 'Failed to mark all as read')
-      return
-    }
-
-    window.dispatchEvent(new Event('notifications:updated'))
-    await load(page)
+    const ok = await markIds(ids, 'read')
+    if (ok) await load(page)
   }
 
   async function deleteIds(ids: string[], scope: 'inbox' | 'sent' = 'inbox') {
@@ -342,48 +372,45 @@ export default function NotificationsList({ isAdmin = false, sentOnly = false }:
     })
     const j: any = await safeJson(r)
     if (!r.ok || !j?.ok) {
-      alert(j?.details || j?.error || 'Failed to delete')
+      setActionMsg(j?.details || j?.error || 'Failed to delete')
       return false
     }
+    setActionMsg(`Deleted ${ids.length} notification${ids.length === 1 ? '' : 's'} from ${scope}.`)
     window.dispatchEvent(new Event('notifications:updated'))
     return true
   }
 
   async function deleteSelected() {
-    if (sentOnly || box !== 'inbox' || selected.size === 0) return
+    if (isSentView || selected.size === 0) return
     const ids = Array.from(selected)
-
     if (!confirm(`Delete ${ids.length} notification(s)? This cannot be undone.`)) return
-
     const ok = await deleteIds(ids, 'inbox')
     if (!ok) return
-
     const willEmpty = ids.length >= items.length && page > 1
     await load(willEmpty ? page - 1 : page)
   }
 
   async function deleteOne(id: string) {
-    if (sentOnly || box !== 'inbox') return
+    if (isSentView) return
     if (!confirm('Delete this notification? This cannot be undone.')) return
     const ok = await deleteIds([id], 'inbox')
     if (!ok) return
-
+    if (openId === id) setOpenId(null)
     const willEmpty = items.length === 1 && page > 1
     await load(willEmpty ? page - 1 : page)
   }
 
   async function deleteSentOne(item: Item) {
-    if (box !== 'sent') return
+    if (!isSentView) return
     const ids = Array.isArray(item.source_ids) && item.source_ids.length > 0 ? item.source_ids : isUuid(item.id) ? [item.id] : []
     if (ids.length === 0) {
-      alert('Cannot delete this row (missing source ids).')
+      setActionMsg('Cannot delete this sent row because its source ids are missing.')
       return
     }
     if (!confirm(`Delete this sent notification for you? (${ids.length} recipient${ids.length === 1 ? '' : 's'})`)) return
-
     const ok = await deleteIds(ids, 'sent')
     if (!ok) return
-
+    if (openId === item.id) setOpenId(null)
     const willEmpty = items.length === 1 && page > 1
     await load(willEmpty ? page - 1 : page)
   }
@@ -396,19 +423,14 @@ export default function NotificationsList({ isAdmin = false, sentOnly = false }:
     }
   }
 
-  const isSentView = sentOnly || box === 'sent'
-  const title = isSentView ? 'Notifications Sent' : 'Notifications'
-
   return (
     <Card hover>
       <CardHeader className="items-start">
-        <CardTitle>{title}</CardTitle>
+        <CardTitle>{isSentView ? 'Sent notifications' : 'My inbox'}</CardTitle>
       </CardHeader>
 
       <CardContent>
-        {/* Header & filters */}
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-          {/* Inbox/Sent tabs (hidden if sentOnly) */}
           {isAdmin && !sentOnly && (
             <div className="flex w-fit items-center gap-1 rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] p-1">
               <button
@@ -436,8 +458,7 @@ export default function NotificationsList({ isAdmin = false, sentOnly = false }:
             </div>
           )}
 
-          {/* All/Unread tabs (Inbox only) */}
-          {!sentOnly && box === 'inbox' && (
+          {!isSentView && (
             <div className="flex w-fit items-center gap-1 rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] p-1">
               <button
                 onClick={() => setTab('all')}
@@ -464,52 +485,61 @@ export default function NotificationsList({ isAdmin = false, sentOnly = false }:
             </div>
           )}
 
-          <Select value={kind} onChange={(e) => setKind(e.target.value as any)} className="sm:w-40">
+          <Select value={kind} onChange={(e) => setKind(e.target.value as KindFilter)} className="sm:w-44">
             {KINDS.map((k) => (
               <option key={k} value={k}>
-                {k === 'all' ? 'All kinds' : k}
+                {k === 'all' ? 'All kinds' : kindLabel(k)}
               </option>
             ))}
           </Select>
 
-          <div className="sm:max-w-xs w-full">
+          <div className="w-full sm:max-w-xs">
             <Input
               value={q}
               onChange={(e) => setQ(e.target.value)}
-              placeholder="Search title/body…"
+              placeholder={isSentView ? 'Search sent title/body…' : 'Search inbox title/body…'}
               aria-label="Search notifications"
             />
           </div>
 
-          <div className="sm:ml-auto flex items-center gap-2">
-            {/* Inbox actions */}
-            {!sentOnly && box === 'inbox' && (
-              <>
-                <Button onClick={markSelectedRead} disabled={selected.size === 0 || loading} className="px-3 py-2">
-                  Mark selected as read
-                </Button>
-                <Button
-                  onClick={markAllUnreadInFilterRead}
-                  variant="outline"
-                  disabled={loading}
-                  className="px-3 py-2"
-                  title="Mark all unread in current filter"
-                >
-                  Mark all unread (filter)
-                </Button>
-                <Button
-                  onClick={deleteSelected}
-                  variant="outline"
-                  disabled={selected.size === 0 || loading}
-                  className="px-3 py-2"
-                  title="Delete selected notifications"
-                >
-                  Delete selected
-                </Button>
-              </>
-            )}
+          {!isSentView && (
+            <div className="sm:ml-auto flex flex-wrap items-center gap-2">
+              <Button onClick={markSelectedRead} disabled={selectedUnreadIds.length === 0 || loading} variant="outline" size="sm">
+                Mark selected read
+              </Button>
+              <Button onClick={markSelectedUnread} disabled={selectedReadIds.length === 0 || loading} variant="outline" size="sm">
+                Mark selected unread
+              </Button>
+              <Button onClick={markAllUnreadInFilterRead} variant="outline" disabled={loading} size="sm">
+                Mark unread in filter
+              </Button>
+              <Button onClick={deleteSelected} variant="outline" disabled={selected.size === 0 || loading} size="sm">
+                Delete selected
+              </Button>
+            </div>
+          )}
+        </div>
+
+        <div className="mt-4 grid gap-3 sm:grid-cols-3">
+          <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] px-4 py-3">
+            <div className="text-xs uppercase tracking-wide text-[hsl(var(--muted))]">View</div>
+            <div className="mt-1 text-lg font-semibold">{isSentView ? 'Sent' : tab === 'unread' ? 'Unread inbox' : 'All inbox'}</div>
+          </div>
+          <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] px-4 py-3">
+            <div className="text-xs uppercase tracking-wide text-[hsl(var(--muted))]">Visible</div>
+            <div className="mt-1 text-lg font-semibold">{items.length}</div>
+          </div>
+          <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] px-4 py-3">
+            <div className="text-xs uppercase tracking-wide text-[hsl(var(--muted))]">Unread on page</div>
+            <div className="mt-1 text-lg font-semibold">{isSentView ? '—' : unreadOnPage}</div>
           </div>
         </div>
+
+        {actionMsg && (
+          <div className="mt-3 rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] px-3 py-2 text-sm text-[hsl(var(--muted))]">
+            {actionMsg}
+          </div>
+        )}
 
         {err && (
           <div className="mt-3 rounded-2xl border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-700">
@@ -517,15 +547,72 @@ export default function NotificationsList({ isAdmin = false, sentOnly = false }:
           </div>
         )}
 
-        {/* Table responsive */}
+        {openItem && (
+          <div className="mt-4 rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4 shadow-soft">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div className="space-y-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  <h4 className="text-base font-semibold">{openItem.title || 'Untitled notification'}</h4>
+                  <Badge>{kindLabel(openItem.kind)}</Badge>
+                  {!isSentView ? (
+                    openItem.read_at ? (
+                      <Badge className="bg-black text-white border-black">Read</Badge>
+                    ) : (
+                      <Badge>Unread</Badge>
+                    )
+                  ) : null}
+                </div>
+                <div className="text-xs text-[hsl(var(--muted))]">{fmtDate(openItem.created_at)}</div>
+                {isSentView ? (
+                  <div className="text-sm text-[hsl(var(--muted))]">
+                    Recipient: <span className="font-medium text-black">{openItem.recipient_name || '—'}</span>
+                    {openItem.recipient_email ? ` · ${openItem.recipient_email}` : ''}
+                    {typeof openItem.recipient_count === 'number'
+                      ? ` · ${openItem.recipient_count} recipient${openItem.recipient_count === 1 ? '' : 's'}`
+                      : ''}
+                  </div>
+                ) : null}
+              </div>
+
+              {!isSentView ? (
+                <div className="flex flex-wrap items-center gap-2">
+                  {openItem.read_at ? (
+                    <Button variant="outline" size="sm" onClick={async () => {
+                      const ok = await markIds([openItem.id], 'unread')
+                      if (ok) await load(page)
+                    }}>
+                      Mark unread
+                    </Button>
+                  ) : (
+                    <Button variant="outline" size="sm" onClick={async () => {
+                      const ok = await markIds([openItem.id], 'read')
+                      if (ok) await load(page)
+                    }}>
+                      Mark read
+                    </Button>
+                  )}
+                  <Button variant="outline" size="sm" onClick={() => deleteOne(openItem.id)}>
+                    Delete
+                  </Button>
+                </div>
+              ) : isAdmin ? (
+                <Button variant="outline" size="sm" onClick={() => deleteSentOne(openItem)}>
+                  Delete sent row
+                </Button>
+              ) : null}
+            </div>
+
+            <div className="mt-4 whitespace-pre-wrap text-sm leading-6">{openItem.body}</div>
+          </div>
+        )}
+
         <div className="mt-4">
-          {/* Desktop table */}
           <div className="hidden overflow-x-auto rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] shadow-soft md:block">
             <table className="min-w-full text-sm">
               <thead className="bg-[hsl(var(--bg))] text-left">
                 <tr>
                   <th className="border-b border-[hsl(var(--border))] p-3">
-                    {!sentOnly && box === 'inbox' && (
+                    {!isSentView && (
                       <input
                         type="checkbox"
                         checked={selected.size === items.length && items.length > 0}
@@ -535,12 +622,10 @@ export default function NotificationsList({ isAdmin = false, sentOnly = false }:
                     )}
                   </th>
                   <th className="border-b border-[hsl(var(--border))] p-3 font-medium">Title</th>
-                  <th className="border-b border-[hsl(var(--border))] p-3 font-medium">Message</th>
+                  <th className="border-b border-[hsl(var(--border))] p-3 font-medium">Preview</th>
                   <th className="border-b border-[hsl(var(--border))] p-3 font-medium">Kind</th>
                   <th className="border-b border-[hsl(var(--border))] p-3 font-medium">Created</th>
-                  <th className="border-b border-[hsl(var(--border))] p-3 font-medium">
-                    {isSentView ? 'Recipient' : 'Status'}
-                  </th>
+                  <th className="border-b border-[hsl(var(--border))] p-3 font-medium">{isSentView ? 'Recipient' : 'Status'}</th>
                   <th className="border-b border-[hsl(var(--border))] p-3" />
                 </tr>
               </thead>
@@ -548,14 +633,14 @@ export default function NotificationsList({ isAdmin = false, sentOnly = false }:
                 {items.length === 0 ? (
                   <tr>
                     <td colSpan={7} className="p-4 text-[hsl(var(--muted))]">
-                      No notifications.
+                      {isSentView ? 'No sent notifications.' : 'No inbox notifications.'}
                     </td>
                   </tr>
                 ) : (
                   items.map((n) => (
                     <tr key={n.id} className="odd:bg-[hsl(var(--card))] even:bg-[hsl(var(--bg))] align-top">
                       <td className="border-t border-[hsl(var(--border))] p-3">
-                        {!sentOnly && box === 'inbox' && (
+                        {!isSentView && (
                           <input
                             type="checkbox"
                             checked={selected.has(n.id)}
@@ -565,21 +650,17 @@ export default function NotificationsList({ isAdmin = false, sentOnly = false }:
                         )}
                       </td>
                       <td className="border-t border-[hsl(var(--border))] p-3 font-medium">{n.title || '—'}</td>
-                      <td className="border-t border-[hsl(var(--border))] p-3 whitespace-pre-wrap">{n.body}</td>
-                      <td className="border-t border-[hsl(var(--border))] p-3">
-                        <Badge>{n.kind || '—'}</Badge>
-                      </td>
+                      <td className="border-t border-[hsl(var(--border))] p-3 text-[hsl(var(--muted))]">{preview(n.body)}</td>
+                      <td className="border-t border-[hsl(var(--border))] p-3"><Badge>{kindLabel(n.kind)}</Badge></td>
                       <td className="border-t border-[hsl(var(--border))] p-3">{fmtDate(n.created_at)}</td>
                       <td className="border-t border-[hsl(var(--border))] p-3">
                         {isSentView ? (
                           <div className="text-xs">
                             <div className="font-medium">{n.recipient_name || '—'}</div>
-                            {n.recipient_email ? (
-                              <div className="text-[hsl(var(--muted))]">{n.recipient_email}</div>
-                            ) : null}
+                            {n.recipient_email ? <div className="text-[hsl(var(--muted))]">{n.recipient_email}</div> : null}
                             {typeof n.recipient_count === 'number' ? (
                               <div className="text-[hsl(var(--muted))]">
-                                {n.recipient_count} recipient{n.recipient_count == 1 ? '' : 's'}
+                                {n.recipient_count} recipient{n.recipient_count === 1 ? '' : 's'}
                               </div>
                             ) : null}
                           </div>
@@ -590,43 +671,37 @@ export default function NotificationsList({ isAdmin = false, sentOnly = false }:
                         )}
                       </td>
                       <td className="border-t border-[hsl(var(--border))] p-3">
-                        {!sentOnly && !isSentView && (
-                          <div className="flex flex-col gap-2">
-                            {!n.read_at && (
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={async () => {
-                                  const r = await fetch('/api/notifications/mark-read', {
-                                    method: 'POST',
-                                    headers: { 'Content-Type': 'application/json' },
-                                    body: JSON.stringify({ ids: [n.id] }),
-                                  })
-                                  const j: any = await safeJson(r)
-                                  if (!r.ok || !j?.ok) {
-                                    alert(j?.details || j?.error || 'Failed')
-                                    return
-                                  }
-                                  window.dispatchEvent(new Event('notifications:updated'))
-                                  await load(page)
-                                }}
-                              >
-                                Mark as read
+                        <div className="flex flex-wrap gap-2">
+                          <Button variant="outline" size="sm" onClick={() => openItemAndRead(n)}>
+                            Open
+                          </Button>
+                          {!isSentView ? (
+                            n.read_at ? (
+                              <Button variant="outline" size="sm" onClick={async () => {
+                                const ok = await markIds([n.id], 'unread')
+                                if (ok) await load(page)
+                              }}>
+                                Unread
                               </Button>
-                            )}
+                            ) : (
+                              <Button variant="outline" size="sm" onClick={async () => {
+                                const ok = await markIds([n.id], 'read')
+                                if (ok) await load(page)
+                              }}>
+                                Read
+                              </Button>
+                            )
+                          ) : null}
+                          {!isSentView ? (
                             <Button variant="outline" size="sm" onClick={() => deleteOne(n.id)}>
                               Delete
                             </Button>
-                          </div>
-                        )}
-
-                        {isSentView && isAdmin && (
-                          <div className="flex flex-col gap-2">
+                          ) : isAdmin ? (
                             <Button variant="outline" size="sm" onClick={() => deleteSentOne(n)}>
                               Delete
                             </Button>
-                          </div>
-                        )}
+                          ) : null}
+                        </div>
                       </td>
                     </tr>
                   ))
@@ -635,121 +710,90 @@ export default function NotificationsList({ isAdmin = false, sentOnly = false }:
             </table>
           </div>
 
-          {/* Mobile cards */}
-          <div className="md:hidden space-y-3">
+          <div className="space-y-3 md:hidden">
             {items.length === 0 ? (
               <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4 text-[hsl(var(--muted))]">
-                No notifications.
+                {isSentView ? 'No sent notifications.' : 'No inbox notifications.'}
               </div>
             ) : (
               items.map((n) => (
-                <div
-                  key={n.id}
-                  className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4 shadow-soft"
-                >
+                <div key={n.id} className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4 shadow-soft">
                   <div className="mb-2 flex items-start justify-between gap-2">
-                    <div className="font-semibold">{n.title || '—'}</div>
+                    <div>
+                      <div className="font-semibold">{n.title || '—'}</div>
+                      <div className="mt-1 text-xs text-[hsl(var(--muted))]">{fmtDate(n.created_at)}</div>
+                    </div>
                     {!isSentView && (
-                      <input
-                        type="checkbox"
-                        checked={selected.has(n.id)}
-                        onChange={() => toggle(n.id)}
-                        aria-label="Select"
-                      />
+                      <input type="checkbox" checked={selected.has(n.id)} onChange={() => toggle(n.id)} aria-label="Select" />
                     )}
                   </div>
 
-                  <div className="mb-2 whitespace-pre-wrap text-sm">{n.body}</div>
+                  <div className="mb-2 text-sm text-[hsl(var(--muted))]">{preview(n.body, 140)}</div>
 
-                  <div className="mb-1 text-sm">
-                    <span className="text-[hsl(var(--muted))]">Kind:</span> <Badge>{n.kind || '—'}</Badge>
+                  <div className="mb-3 flex flex-wrap items-center gap-2">
+                    <Badge>{kindLabel(n.kind)}</Badge>
+                    {!isSentView ? (
+                      n.read_at ? <Badge className="bg-black text-white border-black">Read</Badge> : <Badge>Unread</Badge>
+                    ) : null}
                   </div>
 
-                  <div className="mb-1 text-sm">
-                    <span className="text-[hsl(var(--muted))]">Created:</span> {fmtDate(n.created_at)}
-                  </div>
+                  {isSentView ? (
+                    <div className="mb-3 text-sm text-[hsl(var(--muted))]">
+                      Recipient: <span className="font-medium text-black">{n.recipient_name || '—'}</span>
+                      {n.recipient_email ? ` · ${n.recipient_email}` : ''}
+                    </div>
+                  ) : null}
 
-                  <div className="mb-3 text-sm">
-                    {isSentView ? (
-                      <>
-                        <span className="text-[hsl(var(--muted))]">Recipient:</span>{' '}
-                        <span className="font-medium">{n.recipient_name || '—'}</span>
-                        {n.recipient_email ? (
-                          <span className="text-[hsl(var(--muted))]"> · {n.recipient_email}</span>
-                        ) : null}
-                        {typeof n.recipient_count === 'number' ? (
-                          <span className="text-[hsl(var(--muted))]">
-                            {' '}
-                            · {n.recipient_count} recipient{n.recipient_count == 1 ? '' : 's'}
-                          </span>
-                        ) : null}
-                      </>
-                    ) : n.read_at ? (
-                      <Badge className="bg-black text-white border-black">Read</Badge>
-                    ) : (
-                      <Badge>Unread</Badge>
-                    )}
-                  </div>
-
-                  {!sentOnly && !isSentView && (
-                    <div className="flex flex-wrap gap-2">
-                      {!n.read_at && (
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={async () => {
-                            const r = await fetch('/api/notifications/mark-read', {
-                              method: 'POST',
-                              headers: { 'Content-Type': 'application/json' },
-                              body: JSON.stringify({ ids: [n.id] }),
-                            })
-                            const j: any = await safeJson(r)
-                            if (!r.ok || !j?.ok) {
-                              alert(j?.details || j?.error || 'Failed')
-                              return
-                            }
-                            window.dispatchEvent(new Event('notifications:updated'))
-                            await load(page)
-                          }}
-                        >
-                          Mark as read
+                  <div className="flex flex-wrap gap-2">
+                    <Button variant="outline" size="sm" onClick={() => openItemAndRead(n)}>
+                      Open
+                    </Button>
+                    {!isSentView ? (
+                      n.read_at ? (
+                        <Button variant="outline" size="sm" onClick={async () => {
+                          const ok = await markIds([n.id], 'unread')
+                          if (ok) await load(page)
+                        }}>
+                          Unread
                         </Button>
-                      )}
+                      ) : (
+                        <Button variant="outline" size="sm" onClick={async () => {
+                          const ok = await markIds([n.id], 'read')
+                          if (ok) await load(page)
+                        }}>
+                          Read
+                        </Button>
+                      )
+                    ) : null}
+                    {!isSentView ? (
                       <Button variant="outline" size="sm" onClick={() => deleteOne(n.id)}>
                         Delete
                       </Button>
-                    </div>
-                  )}
-
-                  {isSentView && isAdmin && (
-                    <div className="flex flex-wrap gap-2">
+                    ) : isAdmin ? (
                       <Button variant="outline" size="sm" onClick={() => deleteSentOne(n)}>
                         Delete
                       </Button>
-                    </div>
-                  )}
+                    ) : null}
+                  </div>
                 </div>
               ))
             )}
           </div>
         </div>
 
-        {/* Pagination */}
-        <div className="mt-4 flex flex-wrap items-center gap-2">
-          <Button variant="outline" onClick={() => load(Math.max(1, page - 1))} disabled={page <= 1 || loading}>
-            Prev
-          </Button>
-          <div className="text-xs text-[hsl(var(--muted))]">
-            Page <strong>{page}</strong> / {totalPages} · Total {total}
+        {totalPages > 1 && (
+          <div className="mt-4 flex flex-wrap items-center gap-2">
+            <Button variant="outline" onClick={() => load(Math.max(1, page - 1))} disabled={page <= 1 || loading}>
+              Prev
+            </Button>
+            <div className="text-xs text-[hsl(var(--muted))]">
+              Page <strong>{page}</strong> / {totalPages} · Total {total}
+            </div>
+            <Button variant="outline" onClick={() => load(Math.min(totalPages, page + 1))} disabled={page >= totalPages || loading}>
+              Next
+            </Button>
           </div>
-          <Button
-            variant="outline"
-            onClick={() => load(Math.min(totalPages, page + 1))}
-            disabled={page >= totalPages || loading}
-          >
-            Next
-          </Button>
-        </div>
+        )}
       </CardContent>
     </Card>
   )

@@ -11,66 +11,47 @@ function noStore(res: NextResponse) {
   return res
 }
 
-type Body = { ids?: string[] } | Record<string, any>
+type Body = { ids?: string[] }
 
 export async function POST(req: Request) {
   try {
     const supa = createSupabaseServerActionClient()
 
-    // Auth
-    const { data: authData, error: authErr } = await supa.auth.getUser()
+    const { data: auth, error: authErr } = await supa.auth.getUser()
     if (authErr) {
       return noStore(
-        NextResponse.json({ ok: false, error: `AUTH_ERROR: ${authErr.message}` }, { status: 401 }),
+        NextResponse.json({ ok: false, error: 'AUTH_ERROR', details: authErr.message }, { status: 401 }),
       )
     }
-    const actor = authData.user
-    if (!actor) {
+
+    const user = auth.user
+    if (!user) {
       return noStore(NextResponse.json({ ok: false, error: 'NOT_AUTHENTICATED' }, { status: 401 }))
     }
 
-    // Role check (super_admin only)
-    const { data: me, error: meErr } = await supa
-      .from('profiles')
-      .select('role')
-      .eq('user_id', actor.id)
-      .maybeSingle()
-
-    if (meErr) {
-      return noStore(
-        NextResponse.json({ ok: false, error: `PROFILE_ERROR: ${meErr.message}` }, { status: 500 }),
-      )
-    }
-
-    if ((me?.role ?? 'member') !== 'super_admin') {
-      return noStore(NextResponse.json({ ok: false, error: 'FORBIDDEN' }, { status: 403 }))
-    }
-
     const body = (await req.json()) as Body
-    const ids = Array.isArray((body as any).ids) ? ((body as any).ids as any[]).map(String) : []
-    const cleanIds = ids.map((s) => s.trim()).filter(Boolean)
-
-    if (cleanIds.length === 0) {
+    const ids = Array.isArray(body?.ids) ? body.ids.map((s) => String(s || '').trim()).filter(Boolean) : []
+    if (ids.length === 0) {
       return noStore(NextResponse.json({ ok: false, error: 'NO_IDS' }, { status: 400 }))
     }
 
-    // Only affect notifications owned by the actor
-    const { error: upErr } = await supa
+    const { error } = await supa
       .from('notifications')
       .update({ read_at: null })
-      .in('id', cleanIds)
-      .eq('user_id', actor.id)
+      .eq('user_id', user.id)
+      .in('id', ids)
 
-    if (upErr) {
-      return noStore(NextResponse.json({ ok: false, error: upErr.message }, { status: 400 }))
+    if (error) {
+      return noStore(
+        NextResponse.json({ ok: false, error: 'UPDATE_FAILED', details: error.message }, { status: 500 }),
+      )
     }
 
-    return noStore(NextResponse.json({ ok: true, count: cleanIds.length }))
+    return noStore(NextResponse.json({ ok: true, count: ids.length }))
   } catch (e: any) {
-    console.error('notifications/mark-unread error:', e)
     return noStore(
       NextResponse.json(
-        { ok: false, error: 'SERVER_ERROR', details: e?.message || String(e) },
+        { ok: false, error: 'SERVER_ERROR', details: e?.message ?? String(e) },
         { status: 500 },
       ),
     )
