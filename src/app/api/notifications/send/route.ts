@@ -15,6 +15,8 @@ type Audience =
   | 'all_staff' // coaches + assistants
   | 'custom'
 
+const ALLOWED_RECIPIENT_ROLES = ['member', 'coach', 'assistant_coach'] as const
+
 type Body = {
   title?: string
   body: string
@@ -101,8 +103,9 @@ export async function POST(req: Request) {
       if (mails.length > 0) {
         const { data, error } = await supa
           .from('profiles')
-          .select('user_id, email')
+          .select('user_id, email, role')
           .in('email', mails)
+          .in('role', [...ALLOWED_RECIPIENT_ROLES])
           .not('user_id', 'is', null)
           .limit(100000)
         if (error) throw new Error(error.message)
@@ -111,8 +114,27 @@ export async function POST(req: Request) {
         }
       }
 
+      // Guardrail: custom targeting must never send to roles that do not have a visible inbox
+      if (recipientIds.size > 0) {
+        const ids = Array.from(recipientIds)
+        const { data: allowedProfiles, error: allowedError } = await supa
+          .from('profiles')
+          .select('user_id')
+          .in('user_id', ids)
+          .in('role', [...ALLOWED_RECIPIENT_ROLES])
+          .not('user_id', 'is', null)
+          .limit(100000)
+
+        if (allowedError) throw new Error(allowedError.message)
+
+        const allowedIds = new Set((allowedProfiles ?? []).map((r: any) => r.user_id).filter(Boolean))
+        for (const id of ids) {
+          if (!allowedIds.has(id)) recipientIds.delete(id)
+        }
+      }
+
       if (recipientIds.size === 0) {
-        return noStore(NextResponse.json({ ok: false, error: 'NO_RECIPIENTS' }, { status: 400 }))
+        return noStore(NextResponse.json({ ok: false, error: 'NO_ELIGIBLE_RECIPIENTS', details: 'Only members, coaches, and assistant coaches can receive notifications from this screen.' }, { status: 400 }))
       }
     } else {
       return noStore(NextResponse.json({ ok: false, error: 'INVALID_AUDIENCE' }, { status: 400 }))
