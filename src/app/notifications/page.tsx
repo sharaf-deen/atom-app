@@ -46,17 +46,24 @@ export default async function NotificationsPage() {
         title="Notifications"
         subtitle={
           isAdmin || isSuper
-            ? 'Send announcements, review sent messages, and manage your admin inbox read flow.'
-            : 'Read updates, open message details, and manage your inbox read status.'
+            ? 'Send announcements, triage inbox items faster, and use bulk actions when there is admin cleanup to do.'
+            : 'Read updates, triage unread items first, and manage your inbox status faster.'
         }
       />
 
       <Section className="space-y-6">
-        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
           <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4 shadow-soft">
-            <div className="text-sm font-semibold">Inbox flow</div>
+            <div className="text-sm font-semibold">Inbox triage</div>
             <p className="mt-1 text-sm text-[hsl(var(--muted))]">
-              Open a message to read the full content, then mark it read or unread when needed.
+              Put unread or recent items first when you need to clear the inbox quickly.
+            </p>
+          </div>
+
+          <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4 shadow-soft">
+            <div className="text-sm font-semibold">Bulk actions</div>
+            <p className="mt-1 text-sm text-[hsl(var(--muted))]">
+              Select multiple rows to mark them read, unread, or delete them in one pass.
             </p>
           </div>
 
@@ -73,7 +80,7 @@ export default async function NotificationsPage() {
             <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4 shadow-soft">
               <div className="text-sm font-semibold">Admin inbox scope</div>
               <p className="mt-1 text-sm text-[hsl(var(--muted))]">
-                Admins manage sent announcements here and also read member messages sent directly to the admin inbox.
+                Admins manage sent announcements here and also triage member messages sent directly to the admin inbox.
               </p>
             </div>
           )}
