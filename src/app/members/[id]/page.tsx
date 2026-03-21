@@ -30,6 +30,7 @@ import SubscribeDialog, { type Plan } from '@/components/SubscribeDialog'
 import SubscriptionManageRowActions from '@/components/SubscriptionManageRowActions'
 import ResendInviteButton from '@/components/ResendInviteButton'
 import DeleteUserButton from '@/components/DeleteUserButton'
+import SettleDueDialog from '@/components/SettleDueDialog'
 
 type ProfileRow = {
   user_id: string
@@ -98,6 +99,15 @@ type ReceptionDeskUseful = {
   paymentHint: string
   lastSeen: string
   lastSeenHint: string
+}
+
+type DeskWorkflow = {
+  nextStep: string
+  nextHint: string
+  renewalAction: string
+  renewalHint: string
+  paymentAction: string
+  paymentHint: string
 }
 
 function fmtDate(dateStr?: string | null) {
@@ -509,6 +519,113 @@ function buildReceptionDeskUseful(
   }
 }
 
+function buildDeskWorkflow(subs: SubscriptionRow[], today: string, outstandingTotal: number): DeskWorkflow {
+  const activeTime = subs.find((s) => {
+    const status = String(s.status ?? '').toLowerCase()
+    if (status !== 'active') return false
+    if ((s.subscription_type ?? (s.plan === 'sessions' ? 'sessions' : 'time')) !== 'time') return false
+    if (!s.end_date || s.end_date < today) return false
+    return true
+  })
+
+  const activeSessions = subs.find((s) => {
+    const status = String(s.status ?? '').toLowerCase()
+    if (status !== 'active') return false
+    const type = (s.subscription_type ?? (s.plan === 'sessions' ? 'sessions' : 'time')) as 'time' | 'sessions'
+    if (type !== 'sessions') return false
+    const remaining = Math.max(Number(s.sessions_total ?? 0) - Number(s.sessions_used ?? 0), 0)
+    return remaining > 0
+  })
+
+  if (outstandingTotal > 0) {
+    return {
+      nextStep: 'Settle due first',
+      nextHint: `${fmtMoneyEGP(outstandingTotal)} is still outstanding. Close the due before finishing the desk workflow.`,
+      renewalAction: activeTime || activeSessions ? 'Renew right after' : 'Create after payment',
+      renewalHint: 'Use Renew / Extend once the payment step is done.',
+      paymentAction: 'Collect now',
+      paymentHint: 'The quick actions and subscription cards both keep Settle due visible.',
+    }
+  }
+
+  if (activeTime) {
+    if (isFrozenNow(activeTime, today)) {
+      return {
+        nextStep: 'Review freeze',
+        nextHint: `Membership is frozen until ${fmtDate(activeTime.frozen_until)}.`,
+        renewalAction: 'Wait / review',
+        renewalHint: 'Confirm the freeze period before changing anything.',
+        paymentAction: 'No payment action',
+        paymentHint: 'Nothing due right now.',
+      }
+    }
+
+    const left = daysUntil(activeTime.end_date, today)
+    if (left !== null && left < 0) {
+      return {
+        nextStep: 'Renew today',
+        nextHint: `${humanPlan(activeTime.plan)} is already expired.`,
+        renewalAction: 'Renew now',
+        renewalHint: 'Start the next period from today or from the correct follow-up date.',
+        paymentAction: 'No payment action',
+        paymentHint: 'Nothing due is blocking the renewal.',
+      }
+    }
+
+    if (left === 0) {
+      return {
+        nextStep: 'Renew today',
+        nextHint: `${humanPlan(activeTime.plan)} ends today.`,
+        renewalAction: 'Renew now',
+        renewalHint: 'Best moment to extend without losing continuity.',
+        paymentAction: 'No payment action',
+        paymentHint: 'Nothing due right now.',
+      }
+    }
+
+    if (left !== null && left <= 3) {
+      return {
+        nextStep: 'Renew soon',
+        nextHint: `${left} day(s) left on the active membership.`,
+        renewalAction: 'Prepare renewal',
+        renewalHint: 'Keep Renew / Extend ready during the desk conversation.',
+        paymentAction: 'No payment action',
+        paymentHint: 'Nothing due right now.',
+      }
+    }
+
+    return {
+      nextStep: 'No urgent action',
+      nextHint: `${humanPlan(activeTime.plan)} is active and not close to expiry.`,
+      renewalAction: 'No renewal pressure',
+      renewalHint: 'Renewal can wait for a later visit.',
+      paymentAction: 'No payment action',
+      paymentHint: 'Nothing due right now.',
+    }
+  }
+
+  if (activeSessions) {
+    const remaining = Math.max(Number(activeSessions.sessions_total ?? 0) - Number(activeSessions.sessions_used ?? 0), 0)
+    return {
+      nextStep: remaining <= 2 ? 'Top up sessions' : 'Monitor sessions',
+      nextHint: `${remaining} session(s) left on the active package.`,
+      renewalAction: remaining <= 2 ? 'Renew soon' : 'No urgent renewal',
+      renewalHint: remaining <= 2 ? 'Sessions are running low.' : 'The package still has room.',
+      paymentAction: 'No payment action',
+      paymentHint: 'Nothing due right now.',
+    }
+  }
+
+  return {
+    nextStep: 'Create subscription',
+    nextHint: 'No active subscription is covering the member right now.',
+    renewalAction: 'Start now',
+    renewalHint: 'Use New subscription from quick actions.',
+    paymentAction: 'Collect if needed',
+    paymentHint: 'There is no current due, but the new subscription payment can be recorded now.',
+  }
+}
+
 function Surface({ children, className = '' }: { children: ReactNode; className?: string }) {
   return <section className={`rounded-3xl border border-[hsl(var(--border))] bg-white shadow-soft ${className}`}>{children}</section>
 }
@@ -768,14 +885,20 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
 
   const summary = buildMembershipSummary(profile.role, isSelf, subs, today)
   const outstandingTotal = subs.reduce((sum, s) => sum + Math.max(Number(s.amount_due ?? 0), 0), 0)
+  const viewedRole = profile.role ?? 'member'
   const coachTrainingUseful = coachSafeView ? buildCoachTrainingUseful(subs, attendance, today) : null
   const receptionDeskUseful = receptionDeskView ? buildReceptionDeskUseful(subs, attendance, today, outstandingTotal) : null
+  const deskWorkflow = !coachSafeView && viewedRole === 'member' ? buildDeskWorkflow(subs, today, outstandingTotal) : null
+  const settleQuickActionSub = !coachSafeView && viewedRole === 'member'
+    ? [...subs]
+        .filter((s) => Math.max(Number(s.amount_due ?? 0), 0) > 0)
+        .sort((a, b) => Math.max(Number(b.amount_due ?? 0), 0) - Math.max(Number(a.amount_due ?? 0), 0))[0] ?? null
+    : null
   const latestPayment = subs.find((s) => !!s.paid_at)?.paid_at ?? null
   const recentAttendanceValid = attendance.filter((a) => a.valid).length
   const lastAttendance = attendance[0]?.date ?? null
   const fullName = `${profile.first_name ?? ''} ${profile.last_name ?? ''}`.trim() || '—'
   const age = ageYears(profile.date_of_birth)
-  const viewedRole = profile.role ?? 'member'
   const showSubscriptionActions = canCreateSubscription && viewedRole === 'member' && !coachSafeView
 
   const subtitle = coachSafeView
@@ -1002,8 +1125,8 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
                 </div>
                 <p className="mt-1 text-sm text-[hsl(var(--muted))]">
                   {receptionDeskView
-                    ? 'Keep the most common desk actions visible and fast on mobile.'
-                    : 'Keep high-frequency actions visible without opening extra screens.'}
+                    ? (deskWorkflow ? `${deskWorkflow.nextStep} — ${deskWorkflow.nextHint}` : 'Keep the most common desk actions visible and fast on mobile.')
+                    : (deskWorkflow ? `${deskWorkflow.nextStep} — ${deskWorkflow.nextHint}` : 'Keep high-frequency actions visible without opening extra screens.')}
                 </p>
               </div>
 
@@ -1016,6 +1139,18 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
                 ) : null}
                 {receptionDeskView ? (
                   <QuickLink href="/scan" label="Open scan" icon={<ScanLine size={16} />} />
+                ) : null}
+
+                {settleQuickActionSub ? (
+                  <SettleDueDialog
+                    sub={{
+                      id: settleQuickActionSub.id,
+                      amount: Math.max(Number(settleQuickActionSub.amount ?? 0), 0),
+                      amount_due: Math.max(Number(settleQuickActionSub.amount_due ?? 0), 0),
+                      payment_method: settleQuickActionSub.payment_method ?? null,
+                    }}
+                    buttonLabel="Settle due"
+                  />
                 ) : null}
 
                 {showSubscriptionActions ? (
@@ -1058,6 +1193,39 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
                   <DeleteUserButton userId={profile.user_id} email={profile.email} memberId={profile.member_id} />
                 ) : null}
               </div>
+            </div>
+          </Surface>
+        ) : null}
+
+        {deskWorkflow ? (
+          <Surface className="p-4 sm:p-5">
+            <div className="flex items-center gap-2">
+              <Wallet size={18} className="text-black" />
+              <h2 className="text-base font-semibold tracking-tight">Desk workflow</h2>
+            </div>
+            <p className="mt-1 text-sm text-[hsl(var(--muted))]">
+              Recommended order for the current member before moving to the next desk action.
+            </p>
+
+            <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+              <SummaryCard
+                label="Next step"
+                value={deskWorkflow.nextStep}
+                hint={deskWorkflow.nextHint}
+                icon={<AlertCircle size={18} strokeWidth={2.1} />}
+              />
+              <SummaryCard
+                label="Renewal action"
+                value={deskWorkflow.renewalAction}
+                hint={deskWorkflow.renewalHint}
+                icon={<CalendarDays size={18} strokeWidth={2.1} />}
+              />
+              <SummaryCard
+                label="Payment action"
+                value={deskWorkflow.paymentAction}
+                hint={deskWorkflow.paymentHint}
+                icon={<Wallet size={18} strokeWidth={2.1} />}
+              />
             </div>
           </Surface>
         ) : null}

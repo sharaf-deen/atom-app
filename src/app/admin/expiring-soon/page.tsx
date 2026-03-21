@@ -45,11 +45,16 @@ type SubRow = {
 }
 
 type View = 'today' | 'next7' | 'overdue' | 'range'
+type Focus = 'all' | 'action'
 
 const PER_PAGE = 50
 
 function isView(v: any): v is View {
   return v === 'today' || v === 'next7' || v === 'overdue' || v === 'range'
+}
+
+function isFocus(v: any): v is Focus {
+  return v === 'all' || v === 'action'
 }
 
 function buildQS(params: Record<string, string | undefined>) {
@@ -96,6 +101,13 @@ function humanPayment(v?: string | null) {
   }
 }
 
+function needsDeskAction(s: Pick<SubRow, 'end_date' | 'amount_due' | 'frozen_until'>, today: string) {
+  const leftNum = s.end_date ? diffDays(today, s.end_date) : null
+  const dueAmount = Math.max(Number(s.amount_due ?? 0), 0)
+  const frozen = !!s.frozen_until && s.frozen_until >= today
+  return dueAmount > 0 || (!frozen && leftNum !== null && leftNum <= 3)
+}
+
 function toneClasses(kind: 'neutral' | 'warning' | 'danger' | 'success') {
   if (kind === 'success') return 'border-emerald-200 bg-emerald-50 text-emerald-700'
   if (kind === 'warning') return 'border-amber-200 bg-amber-50 text-amber-800'
@@ -124,7 +136,7 @@ function SummaryCard({ label, value, hint }: { label: string; value: string; hin
 export default async function ExpiringSoonPage({
   searchParams,
 }: {
-  searchParams?: { view?: string; days?: string; q?: string; includeFrozen?: string; page?: string }
+  searchParams?: { view?: string; days?: string; q?: string; includeFrozen?: string; page?: string; focus?: string }
 }) {
   const user = await getSessionUserCached()
   const nextPath = '/admin/expiring-soon'
@@ -147,6 +159,7 @@ export default async function ExpiringSoonPage({
   const daysWindow = clampInt(Number(searchParams?.days ?? 7), 1, 60)
   const q = (searchParams?.q ?? '').trim()
   const includeFrozen = (searchParams?.includeFrozen ?? '').trim() === '1'
+  const focus: Focus = isFocus(searchParams?.focus) ? (searchParams!.focus as Focus) : 'all'
   const page = clampInt(Number(searchParams?.page ?? 1), 1, 9999)
 
   const rangeStart = today
@@ -243,6 +256,7 @@ export default async function ExpiringSoonPage({
     view,
     q: q || undefined,
     includeFrozen: includeFrozen ? '1' : '0',
+    focus: focus === 'action' ? 'action' : undefined,
     days: String(daysWindow),
   }
 
@@ -284,6 +298,7 @@ export default async function ExpiringSoonPage({
   const form = (
     <form className="flex flex-col gap-3 md:flex-row md:items-end" action={nextPath} method="get">
       <input type="hidden" name="view" value={view} />
+      <input type="hidden" name="focus" value={focus} />
 
       <div className="flex-1">
         <label className="mb-1 block text-xs font-medium text-[hsl(var(--muted))]">Search member</label>
@@ -321,6 +336,31 @@ export default async function ExpiringSoonPage({
     </form>
   )
 
+  const focusToggle = (
+    <div className="flex flex-wrap items-center gap-2 text-xs text-[hsl(var(--muted))]">
+      <span className="font-medium">Desk focus</span>
+      <Link
+        href={nextPath + buildQS({ ...baseQS, focus: undefined, page: undefined })}
+        className={
+          'inline-flex items-center rounded-full border px-3 py-1 font-medium transition ' +
+          (focus === 'all' ? 'bg-black text-white border-black' : 'bg-white hover:bg-gray-50')
+        }
+      >
+        All visible
+      </Link>
+      <Link
+        href={nextPath + buildQS({ ...baseQS, focus: 'action', page: undefined })}
+        className={
+          'inline-flex items-center rounded-full border px-3 py-1 font-medium transition ' +
+          (focus === 'action' ? 'bg-black text-white border-black' : 'bg-white hover:bg-gray-50')
+        }
+      >
+        Action needed first
+      </Link>
+      <span>{focus === 'action' ? 'Only rows that need desk follow-up now are shown.' : 'Show everything in the current date view.'}</span>
+    </div>
+  )
+
   const columns = [
     { key: 'member', header: 'Member' },
     { key: 'membership', header: 'Membership' },
@@ -328,7 +368,9 @@ export default async function ExpiringSoonPage({
     { key: 'actions', header: 'Actions' },
   ]
 
-  const tableRows = rows.map((s) => {
+  const visibleRows = focus === 'action' ? rows.filter((s) => needsDeskAction(s, today)) : rows
+
+  const tableRows = visibleRows.map((s) => {
     const p = s.profiles
     const name = [p?.first_name ?? '', p?.last_name ?? ''].join(' ').trim() || p?.email || 'Member'
     const memberCode = p?.member_id ? ` · ${p.member_id}` : ''
@@ -358,6 +400,10 @@ export default async function ExpiringSoonPage({
           {p?.email ? <div className="text-xs text-[hsl(var(--muted))]">{p.email}</div> : null}
           <div className="flex flex-wrap gap-1">
             <TinyBadge tone={leftTone}>{leftText}</TinyBadge>
+            {leftNum === 0 ? <TinyBadge tone="danger">Today</TinyBadge> : null}
+            {leftNum !== null && leftNum < 0 ? <TinyBadge tone="danger">Overdue</TinyBadge> : null}
+            {leftNum !== null && leftNum > 0 && leftNum <= 3 ? <TinyBadge tone="warning">Urgent</TinyBadge> : null}
+            {dueAmount > 0 ? <TinyBadge tone="warning">Due</TinyBadge> : null}
             {frozen ? <TinyBadge tone="warning">Frozen until {s.frozen_until}</TinyBadge> : null}
           </div>
         </div>
@@ -378,13 +424,13 @@ export default async function ExpiringSoonPage({
       ),
       actions: (
         <div className="flex flex-wrap items-center justify-end gap-2">
-          <SubscribeDialog member={memberObj} buttonLabel="Renew" mode="renew" lockStartDate defaultStartDate={renewStart} />
           {dueAmount > 0 ? (
             <SettleDueDialog
               sub={{ id: s.id, amount: paidAmount, amount_due: dueAmount, payment_method: s.payment_method ?? null }}
               buttonLabel="Settle due"
             />
           ) : null}
+          <SubscribeDialog member={memberObj} buttonLabel={leftNum !== null && leftNum < 0 ? 'Renew now' : 'Renew'} mode="renew" lockStartDate defaultStartDate={renewStart} />
           <NotifyExpiryButton subscriptionId={s.id} />
           <Link prefetch={false} className="inline-flex items-center justify-center rounded-xl border px-3 py-2 text-sm font-medium hover:bg-gray-50" href={`/members/${s.member_id}`}>
             Open profile
@@ -394,10 +440,11 @@ export default async function ExpiringSoonPage({
     }
   })
 
-  const totalVisibleDue = rows.reduce((sum, s) => sum + Math.max(Number(s.amount_due ?? 0), 0), 0)
-  const overdueVisible = rows.filter((s) => !!s.end_date && diffDays(today, s.end_date) < 0).length
-  const dueVisible = rows.filter((s) => Math.max(Number(s.amount_due ?? 0), 0) > 0).length
-  const frozenVisible = rows.filter((s) => !!s.frozen_until && s.frozen_until >= today).length
+  const totalVisibleDue = visibleRows.reduce((sum, s) => sum + Math.max(Number(s.amount_due ?? 0), 0), 0)
+  const overdueVisible = visibleRows.filter((s) => !!s.end_date && diffDays(today, s.end_date) < 0).length
+  const dueVisible = visibleRows.filter((s) => Math.max(Number(s.amount_due ?? 0), 0) > 0).length
+  const frozenVisible = visibleRows.filter((s) => !!s.frozen_until && s.frozen_until >= today).length
+  const actionNeededVisible = visibleRows.filter((s) => needsDeskAction(s, today)).length
 
   const rangeTextBase =
     view === 'overdue'
@@ -406,8 +453,8 @@ export default async function ExpiringSoonPage({
 
   const rangeText =
     totalKnown === null
-      ? `Showing ${rows.length} membership(s) · ${rangeTextBase}${page > 1 ? ` · Page ${page}` : ''}`
-      : `Showing ${rows.length} of ${totalKnown} membership(s) · ${rangeTextBase}${page > 1 ? ` · Page ${page}` : ''}`
+      ? `Showing ${visibleRows.length} membership(s) · ${rangeTextBase}${page > 1 ? ` · Page ${page}` : ''}`
+      : `Showing ${visibleRows.length} of ${totalKnown} membership(s) · ${rangeTextBase}${page > 1 ? ` · Page ${page}` : ''}`
 
   const pager = !loadError && (hasPrev || hasNext) ? (
     <div className="flex items-center justify-between gap-3">
@@ -458,15 +505,18 @@ export default async function ExpiringSoonPage({
 
         {form}
 
+        {focusToggle}
+
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-          <SummaryCard label="Visible memberships" value={String(rows.length)} hint={view === 'overdue' ? 'Rows currently overdue in this page view.' : 'Rows in the current filtered page view.'} />
+          <SummaryCard label="Visible memberships" value={String(visibleRows.length)} hint={view === 'overdue' ? 'Rows currently overdue in this page view.' : 'Rows in the current filtered page view.'} />
+          <SummaryCard label="Action needed" value={String(actionNeededVisible)} hint={actionNeededVisible > 0 ? 'Rows that should usually be handled first at the desk.' : 'No urgent desk follow-up in the visible rows.'} />
           <SummaryCard label="Visible due" value={fmtMoneyEGP(totalVisibleDue)} hint={dueVisible > 0 ? `${dueVisible} row(s) still have money due.` : 'No due in the current view.'} />
-          <SummaryCard label="Overdue now" value={String(overdueVisible)} hint={overdueVisible > 0 ? 'Needs fast renewal action.' : 'Nothing overdue in the visible rows.'} />
-          <SummaryCard label="Frozen visible" value={String(frozenVisible)} hint={frozenVisible > 0 ? 'Check pause dates before renewing.' : 'No frozen memberships visible.'} />
+          <SummaryCard label="Overdue now" value={String(overdueVisible)} hint={overdueVisible > 0 ? 'Needs fast renewal action.' : frozenVisible > 0 ? 'Nothing overdue. Frozen rows are still visible.' : 'Nothing overdue in the visible rows.'} />
         </div>
 
         <div className="flex flex-wrap items-center gap-2 text-xs text-[hsl(var(--muted))]">
           <TinyBadge>{view === 'overdue' ? 'Overdue mode' : view === 'today' ? 'Today' : view === 'next7' ? 'Next 7 days' : `Custom ${daysWindow} days`}</TinyBadge>
+          <TinyBadge tone={focus === 'action' ? 'warning' : 'neutral'}>{focus === 'action' ? 'Action needed only' : 'All visible rows'}</TinyBadge>
           {includeFrozen ? <TinyBadge tone="warning">Frozen included</TinyBadge> : <TinyBadge>Frozen hidden</TinyBadge>}
           {q ? <TinyBadge>Search: {q}</TinyBadge> : null}
           <span>{rangeText}</span>
@@ -479,7 +529,7 @@ export default async function ExpiringSoonPage({
         {pager}
 
         <div className="max-w-3xl text-xs text-[hsl(var(--muted))]">
-          Tips: <b>Renew</b> is ready directly from the list. Use <b>Settle due</b> before or after renewal when there is still money outstanding. <b>Notify</b> sends an in-app reminder now and logs it in Membership Activity.
+          Tips: <b>Action needed first</b> keeps the desk focused on rows that are due or very close to expiry. When both renewal and money due exist, use <b>Settle due</b> first, then <b>Renew</b>. <b>Notify</b> sends an in-app reminder now and logs it in Membership Activity.
         </div>
       </Section>
     </main>
