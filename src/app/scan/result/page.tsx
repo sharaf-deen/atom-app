@@ -233,18 +233,22 @@ export default async function ScanResultPage({ searchParams }: { searchParams: S
   let attendanceTodayScannedAt: string | null = null
   let attendanceTodayStatus: string | null = null
   let recentValidAttendanceCount = 0
+  let validAttendance7dCount = 0
   let lastAttendanceDate: string | null = null
+  let lastValidAttendanceAt: string | null = null
+  let lastValidAttendanceDate: string | null = null
 
   if (memberId) {
     try {
       const admin = getSupabaseAdminClientCached()
       const today = todayDateOnlyCairo()
-      const since = dateDaysAgoCairo(30)
+      const since30 = dateDaysAgoCairo(30)
+      const since7 = dateDaysAgoCairo(7)
       const { data: attendanceRows } = await admin
         .from('attendance')
         .select('date, valid, status, scanned_at')
         .eq('member_id', memberId)
-        .gte('date', since)
+.gte('date', since30)
         .order('date', { ascending: false })
         .order('scanned_at', { ascending: false })
         .limit(40)
@@ -259,8 +263,12 @@ export default async function ScanResultPage({ searchParams }: { searchParams: S
       const todayRow = rows.find((row) => row.date === today) ?? null
       attendanceTodayScannedAt = todayRow?.scanned_at ?? null
       attendanceTodayStatus = todayRow?.status ?? null
-      recentValidAttendanceCount = rows.filter((row) => !!row.valid).length
+      const validRows = rows.filter((row) => !!row.valid)
+      recentValidAttendanceCount = validRows.length
+      validAttendance7dCount = validRows.filter((row) => row.date >= since7).length
       lastAttendanceDate = rows[0]?.date ?? null
+      lastValidAttendanceAt = validRows[0]?.scanned_at ?? null
+      lastValidAttendanceDate = validRows[0]?.date ?? null
     } catch {
       // ignore
     }
@@ -274,6 +282,41 @@ export default async function ScanResultPage({ searchParams }: { searchParams: S
   const freezeDaysRemaining = parseIntSafe(searchParams.freezeDaysRemaining)
 
   const soundKind = frozen ? 'frozen' : valid ? 'ok' : 'invalid'
+  const alreadyCheckedToday = apiMessage.toLowerCase().includes('already checked') || repeatScan
+  const alreadyHereToday = !!attendanceTodayScannedAt && alreadyCheckedToday
+  const recentActive = recentValidAttendanceCount > 0
+  const presenceTitle = alreadyHereToday
+    ? 'Member already here today'
+    : attendanceTodayScannedAt && valid
+      ? 'First valid entry recorded today'
+      : recentActive
+        ? 'Recent member activity found'
+        : 'No recent valid attendance found'
+
+  const presenceBody = alreadyHereToday
+    ? "Attendance is already in today's log. Let the member continue unless the desk needs to open the profile."
+    : attendanceTodayScannedAt && valid
+      ? "Attendance is already in today's log. Let the member continue unless the desk needs to open the profile."
+      : recentActive
+        ? `Last valid attendance: ${lastValidAttendanceAt ? fmtDateTimeNice(lastValidAttendanceAt) : lastValidAttendanceDate ? fmtDateNice(lastValidAttendanceDate) : 'recently active'}.`
+        : 'No valid attendance was found in the recent period. Use the member profile if the desk needs more history.'
+
+  const presenceBadgeLabel = alreadyHereToday
+    ? 'Already here today'
+    : attendanceTodayScannedAt && valid
+      ? 'Recorded today'
+      : recentActive
+        ? 'Recent activity'
+        : 'No recent activity'
+
+  const presenceTone: 'success' | 'warning' | 'danger' = alreadyHereToday
+    ? 'warning'
+    : attendanceTodayScannedAt && valid
+      ? 'success'
+      : recentActive
+        ? 'success'
+        : 'danger'
+
 
   const tone: 'success' | 'warning' | 'danger' = frozen ? 'warning' : valid ? 'success' : 'danger'
   const heroIcon = frozen ? (
@@ -295,7 +338,7 @@ export default async function ScanResultPage({ searchParams }: { searchParams: S
   const nextStepTitle = frozen
     ? 'Next step: open the member profile and review the freeze period.'
     : valid
-      ? apiMessage.toLowerCase().includes('already checked') || repeatScan
+      ? alreadyCheckedToday
         ? 'Next step: no extra attendance action is needed.'
         : 'Next step: let the member in and continue to the next scan.'
       : 'Next step: open the member profile and renew or settle the membership.'
@@ -303,7 +346,7 @@ export default async function ScanResultPage({ searchParams }: { searchParams: S
   const nextStepBody = frozen
     ? 'Do not allow check-in until the freeze ends or the membership is updated.'
     : valid
-      ? apiMessage.toLowerCase().includes('already checked') || repeatScan
+      ? alreadyCheckedToday
         ? 'Attendance is already recorded for today. You can continue scanning unless the desk needs the member profile.'
         : 'This result was recorded. You can continue scanning immediately.'
       : 'Use the member profile to renew, settle dues or explain why check-in is blocked.'
@@ -315,7 +358,7 @@ export default async function ScanResultPage({ searchParams }: { searchParams: S
   const infoTitle = repeatScan
     ? 'Repeated scan detected'
     : valid
-      ? apiMessage.toLowerCase().includes('already checked')
+      ? alreadyCheckedToday
         ? 'Already recorded today'
         : 'Check-in recorded'
       : frozen
@@ -339,7 +382,8 @@ export default async function ScanResultPage({ searchParams }: { searchParams: S
                   <div className="flex flex-wrap items-center gap-2">
                     <StatusBadge tone={tone}>{statusLabel}</StatusBadge>
                     {kioskMode ? <StatusBadge tone="warning">Auto-return enabled</StatusBadge> : null}
-                    {apiMessage.toLowerCase().includes('already checked') ? <StatusBadge tone="success">Already today</StatusBadge> : null}
+                    {alreadyCheckedToday ? <StatusBadge tone="success">Already today</StatusBadge> : null}
+                    <StatusBadge tone={presenceTone}>{presenceBadgeLabel}</StatusBadge>
                     {repeatScan ? <StatusBadge tone={valid ? 'success' : 'warning'}>Repeat scan</StatusBadge> : null}
                     {attendanceTodayScannedAt ? <StatusBadge tone={valid ? 'success' : 'warning'}>Attendance today</StatusBadge> : null}
                   </div>
@@ -378,7 +422,7 @@ export default async function ScanResultPage({ searchParams }: { searchParams: S
                       <div className="min-w-0">
                         <div className="text-base font-semibold tracking-tight">{memberName || 'Member'}</div>
                         {memberCode ? <div className="mt-1 text-sm text-[hsl(var(--muted))]">ID: {memberCode}</div> : null}
-                        <div className="mt-2 text-sm text-[hsl(var(--muted))]">Use the quick action below if this result needs follow-up.</div>
+                        <div className="mt-2 text-sm text-[hsl(var(--muted))]">Presence context below helps the desk understand whether the member is already here today or recently active.</div>
                       </div>
                     </div>
                   </div>
@@ -404,6 +448,31 @@ export default async function ScanResultPage({ searchParams }: { searchParams: S
 
               <InfoStrip title={infoTitle} body={infoBody} tone={tone} />
 
+              <InfoStrip title={presenceTitle} body={presenceBody} tone={presenceTone} />
+
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                <FactCard
+                  label="Presence now"
+                  value={presenceBadgeLabel}
+                  icon={<UserRound size={18} strokeWidth={2.1} />}
+                />
+                <FactCard
+                  label="Last valid check-in"
+                  value={lastValidAttendanceAt ? fmtDateTimeNice(lastValidAttendanceAt) : lastValidAttendanceDate ? fmtDateNice(lastValidAttendanceDate) : '—'}
+                  icon={<Clock3 size={18} strokeWidth={2.1} />}
+                />
+                <FactCard
+                  label="Valid attendance · 7d"
+                  value={validAttendance7dCount > 0 ? validAttendance7dCount : '0'}
+                  icon={<CalendarDays size={18} strokeWidth={2.1} />}
+                />
+                <FactCard
+                  label="Valid attendance · 30d"
+                  value={recentValidAttendanceCount > 0 ? recentValidAttendanceCount : '0'}
+                  icon={<CircleCheckBig size={18} strokeWidth={2.1} />}
+                />
+              </div>
+
               <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                 <FactCard
                   label="Today attendance"
@@ -416,8 +485,8 @@ export default async function ScanResultPage({ searchParams }: { searchParams: S
                   icon={<Clock3 size={18} strokeWidth={2.1} />}
                 />
                 <FactCard
-                  label="Valid attendance · 30d"
-                  value={recentValidAttendanceCount > 0 ? recentValidAttendanceCount : '0'}
+                  label="Latest attendance date"
+                  value={lastAttendanceDate ? fmtDateNice(lastAttendanceDate) : '—'}
                   icon={<CalendarDays size={18} strokeWidth={2.1} />}
                 />
               </div>
@@ -425,7 +494,7 @@ export default async function ScanResultPage({ searchParams }: { searchParams: S
               {attendanceTodayStatus ? (
                 <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] px-4 py-3 text-sm text-[hsl(var(--muted))]">
                   Today status: <span className="font-semibold text-black">{attendanceTodayStatus}</span>
-                  {lastAttendanceDate ? <span className="ml-2">• Last attendance date: {fmtDateNice(lastAttendanceDate)}</span> : null}
+                  {lastAttendanceDate ? <span className="ml-2">• Latest attendance date: {fmtDateNice(lastAttendanceDate)}</span> : null}
                 </div>
               ) : null}
 
