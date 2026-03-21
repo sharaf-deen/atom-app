@@ -46,7 +46,7 @@ export default async function NotificationsPage() {
         title="Notifications"
         subtitle={
           isAdmin || isSuper
-            ? 'Send announcements, triage inbox items faster, and use bulk actions when there is admin cleanup to do.'
+            ? 'Send announcements with clearer role targeting, estimated recipient counts, and stronger delivery feedback.'
             : 'Read updates, triage unread items first, and manage your inbox status faster.'
         }
       />
@@ -67,20 +67,29 @@ export default async function NotificationsPage() {
             </p>
           </div>
 
-          {(isMember || isCoach || isAssistantCoach) && (
+          {(isAdmin || isSuper) && (
             <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4 shadow-soft">
-              <div className="text-sm font-semibold">Your role inbox</div>
+              <div className="text-sm font-semibold">Targeting clarity</div>
               <p className="mt-1 text-sm text-[hsl(var(--muted))]">
-                Members, coaches, and assistant coaches can read the notifications sent from the admin center here.
+                Before sending, the admin composer now shows who is eligible to receive the message and the estimated recipient count.
               </p>
             </div>
           )}
 
           {(isAdmin || isSuper) && (
             <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4 shadow-soft">
-              <div className="text-sm font-semibold">Admin inbox scope</div>
+              <div className="text-sm font-semibold">Delivery feedback</div>
               <p className="mt-1 text-sm text-[hsl(var(--muted))]">
-                Admins manage sent announcements here and also triage member messages sent directly to the admin inbox.
+                After sending, the admin sees how many eligible recipients were reached and what was filtered out or unmatched.
+              </p>
+            </div>
+          )}
+
+          {(isMember || isCoach || isAssistantCoach) && (
+            <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4 shadow-soft">
+              <div className="text-sm font-semibold">Your role inbox</div>
+              <p className="mt-1 text-sm text-[hsl(var(--muted))]">
+                Members, coaches, and assistant coaches can read the notifications sent from the admin center here.
               </p>
             </div>
           )}
