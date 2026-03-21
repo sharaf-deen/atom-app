@@ -10,7 +10,7 @@ import type { OutstandingDueRow } from '../types'
 type PaymentMethod = 'cash' | 'instapay' | 'card' | 'bank_transfer' | 'other'
 
 type SortKey = 'due_desc' | 'due_asc' | 'paid_at_desc' | 'paid_at_asc' | 'name_asc'
-type FocusKey = 'all' | 'high_due' | 'missing_paid_at'
+type FocusKey = 'all' | 'action_first' | 'high_due' | 'missing_paid_at'
 
 function fmtMoney(v: number) {
   const n = Number(v ?? 0)
@@ -74,7 +74,13 @@ function toneClasses(kind: 'neutral' | 'warning' | 'danger' | 'success') {
   return 'border-[hsl(var(--border))] bg-[hsl(var(--bg))] text-[hsl(var(--muted))]'
 }
 
-function TinyBadge({ children, tone = 'neutral' }: { children: ReactNode; tone?: 'neutral' | 'warning' | 'danger' | 'success' }) {
+function TinyBadge({
+  children,
+  tone = 'neutral',
+}: {
+  children: ReactNode
+  tone?: 'neutral' | 'warning' | 'danger' | 'success'
+}) {
   return (
     <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold ${toneClasses(tone)}`}>
       {children}
@@ -92,11 +98,20 @@ function SummaryCard({ label, value, hint }: { label: string; value: string; hin
   )
 }
 
+function triageScore(r: OutstandingDueRow) {
+  let score = 0
+  const due = Number(r.due || 0)
+  if (due >= 1000) score += 4
+  else if (due >= 500) score += 2
+  if (!r.paid_at) score += 3
+  return score
+}
+
 export default function OutstandingDuesClient({ initialRows }: { initialRows: OutstandingDueRow[] }) {
   const [q, setQ] = useState('')
   const [method, setMethod] = useState<'all' | PaymentMethod>('all')
   const [minDue, setMinDue] = useState<string>('')
-  const [focus, setFocus] = useState<FocusKey>('all')
+  const [focus, setFocus] = useState<FocusKey>('action_first')
   const [sort, setSort] = useState<SortKey>('due_desc')
 
   const filtered = useMemo(() => {
@@ -104,8 +119,10 @@ export default function OutstandingDuesClient({ initialRows }: { initialRows: Ou
     const min = Number(minDue || 0)
 
     const out = (initialRows ?? []).filter((r) => {
+      const score = triageScore(r)
       if (method !== 'all' && normMethod(r.payment_method) !== method) return false
       if (Number.isFinite(min) && min > 0 && r.due < min) return false
+      if (focus === 'action_first' && score <= 0) return false
       if (focus === 'high_due' && Number(r.due || 0) < 1000) return false
       if (focus === 'missing_paid_at' && !!r.paid_at) return false
 
@@ -120,6 +137,9 @@ export default function OutstandingDuesClient({ initialRows }: { initialRows: Ou
     }
 
     out.sort((a, b) => {
+      const triageDiff = triageScore(b) - triageScore(a)
+      if (triageDiff !== 0) return triageDiff
+
       switch (sort) {
         case 'due_asc':
           return a.due - b.due
@@ -141,12 +161,14 @@ export default function OutstandingDuesClient({ initialRows }: { initialRows: Ou
   const totals = useMemo(() => {
     const due = filtered.reduce((acc, r) => acc + Number(r.due || 0), 0)
     const members = new Set(filtered.map((r) => r.user_id)).size
-    const actionFirst = filtered.filter((r) => Number(r.due || 0) >= 1000).length
+    const actionFirst = filtered.filter((r) => triageScore(r) > 0).length
+    const highDue = filtered.filter((r) => Number(r.due || 0) >= 1000).length
     const missingPaidAt = filtered.filter((r) => !r.paid_at).length
-    return { due, members, actionFirst, missingPaidAt }
+    return { due, members, actionFirst, highDue, missingPaidAt }
   }, [filtered])
 
-  const hasFilters = q.trim() !== '' || method !== 'all' || minDue.trim() !== '' || focus !== 'all' || sort !== 'due_desc'
+  const hasFilters =
+    q.trim() !== '' || method !== 'all' || minDue.trim() !== '' || focus !== 'action_first' || sort !== 'due_desc'
 
   const columns = useMemo(
     () => [
@@ -161,7 +183,9 @@ export default function OutstandingDuesClient({ initialRows }: { initialRows: Ou
 
   const rows = useMemo(() => {
     return filtered.map((r) => {
-      const planTone = Number(r.due || 0) >= 1000 ? 'danger' : Number(r.due || 0) >= 500 ? 'warning' : 'neutral'
+      const due = Number(r.due || 0)
+      const score = triageScore(r)
+      const planTone = due >= 1000 ? 'danger' : due >= 500 ? 'warning' : 'neutral'
       const contact = [r.email ?? '', r.phone ?? ''].filter(Boolean)
 
       return {
@@ -172,7 +196,8 @@ export default function OutstandingDuesClient({ initialRows }: { initialRows: Ou
             <div className="flex flex-wrap gap-1">
               {r.member_code ? <TinyBadge>{r.member_code}</TinyBadge> : null}
               {r.status ? <TinyBadge tone={planTone}>{String(r.status).replace(/_/g, ' ')}</TinyBadge> : null}
-              {Number(r.due || 0) >= 1000 ? <TinyBadge tone="danger">Action first</TinyBadge> : null}
+              {score > 0 ? <TinyBadge tone="danger">Action needed</TinyBadge> : null}
+              {due >= 1000 ? <TinyBadge tone="danger">High due</TinyBadge> : null}
               {!r.paid_at ? <TinyBadge tone="warning">No paid date</TinyBadge> : null}
             </div>
             {contact.length ? <div className="text-xs text-[hsl(var(--muted))]">{contact.join(' · ')}</div> : null}
@@ -186,14 +211,16 @@ export default function OutstandingDuesClient({ initialRows }: { initialRows: Ou
         ),
         billing: (
           <div className="space-y-1">
-            <div className="font-medium">Due {fmtMoney(r.due)}</div>
+            <div className="font-medium">Due {fmtMoney(due)}</div>
             <div className="text-xs text-[hsl(var(--muted))]">Paid {fmtMoney(r.paid)} · Total {fmtMoney(r.total)}</div>
           </div>
         ),
         paid_at: (
           <div className="space-y-1">
             <div className="font-medium">{fmtDate(r.paid_at)}</div>
-            <div className="text-xs text-[hsl(var(--muted))]">Latest real payment date</div>
+            <div className="text-xs text-[hsl(var(--muted))]">
+              {!r.paid_at ? 'Review before closing the desk action.' : 'Latest real payment date'}
+            </div>
           </div>
         ),
         actions: (
@@ -218,10 +245,14 @@ export default function OutstandingDuesClient({ initialRows }: { initialRows: Ou
   return (
     <section className="space-y-4">
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        <SummaryCard label="Members with due" value={String(totals.members)} hint="Unique members in the current filtered view." />
+        <SummaryCard label="Visible members" value={String(totals.members)} hint="Unique members in the current filtered triage view." />
         <SummaryCard label="Total due" value={fmtMoney(totals.due)} hint="Current outstanding balance in the filtered view." />
-        <SummaryCard label="Action first" value={String(totals.actionFirst)} hint="Rows with due of 1,000 EGP or more." />
-        <SummaryCard label="Missing paid date" value={String(totals.missingPaidAt)} hint={totals.missingPaidAt > 0 ? 'Review payment history before closing the desk action.' : 'All visible rows already have a paid date.'} />
+        <SummaryCard label="Action needed" value={String(totals.actionFirst)} hint="Rows with high due or missing paid date." />
+        <SummaryCard
+          label="Missing paid date"
+          value={String(totals.missingPaidAt)}
+          hint={totals.missingPaidAt > 0 ? 'Check payment history before closing the desk action.' : 'All visible rows already have a paid date.'}
+        />
       </div>
 
       <div className="rounded-2xl border border-[hsl(var(--border))] bg-white p-4 shadow-soft space-y-4">
@@ -277,7 +308,7 @@ export default function OutstandingDuesClient({ initialRows }: { initialRows: Ou
               setQ('')
               setMethod('all')
               setMinDue('')
-              setFocus('all')
+              setFocus('action_first')
               setSort('due_desc')
             }}
           >
@@ -286,7 +317,50 @@ export default function OutstandingDuesClient({ initialRows }: { initialRows: Ou
         </div>
 
         <div className="flex flex-wrap items-center gap-2 text-xs text-[hsl(var(--muted))]">
-          <TinyBadge>{filtered.length} visible row(s)</TinyBadge>
+          <span className="font-medium">Desk focus</span>
+          <button
+            type="button"
+            className={'inline-flex items-center rounded-full border px-3 py-1 font-medium transition ' + (focus === 'action_first' ? 'bg-black text-white border-black' : 'bg-white hover:bg-gray-50')}
+            onClick={() => setFocus('action_first')}
+          >
+            Action needed first
+          </button>
+          <button
+            type="button"
+            className={'inline-flex items-center rounded-full border px-3 py-1 font-medium transition ' + (focus === 'high_due' ? 'bg-black text-white border-black' : 'bg-white hover:bg-gray-50')}
+            onClick={() => setFocus('high_due')}
+          >
+            High due
+          </button>
+          <button
+            type="button"
+            className={'inline-flex items-center rounded-full border px-3 py-1 font-medium transition ' + (focus === 'missing_paid_at' ? 'bg-black text-white border-black' : 'bg-white hover:bg-gray-50')}
+            onClick={() => setFocus('missing_paid_at')}
+          >
+            Missing paid date
+          </button>
+          <button
+            type="button"
+            className={'inline-flex items-center rounded-full border px-3 py-1 font-medium transition ' + (focus === 'all' ? 'bg-black text-white border-black' : 'bg-white hover:bg-gray-50')}
+            onClick={() => setFocus('all')}
+          >
+            All rows
+          </button>
+        </div>
+
+        <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] p-3 text-sm">
+          <div className="font-medium">Action-needed triage</div>
+          <div className="mt-1 text-[hsl(var(--muted))]">
+            Prioritize rows with a high due amount and rows missing a paid date. These are the cases most likely to block clean desk closure.
+          </div>
+          <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-[hsl(var(--muted))]">
+            <TinyBadge tone="danger">{totals.highDue} high-due row(s)</TinyBadge>
+            <TinyBadge tone="warning">{totals.missingPaidAt} missing paid date</TinyBadge>
+            <TinyBadge>{filtered.length} visible row(s)</TinyBadge>
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2 text-xs text-[hsl(var(--muted))]">
           {method !== 'all' ? <TinyBadge>Payment: {humanMethod(method)}</TinyBadge> : null}
           {minDue.trim() ? <TinyBadge tone="warning">Min due {minDue} EGP</TinyBadge> : null}
           {q.trim() ? <TinyBadge>Search: {q.trim()}</TinyBadge> : null}
