@@ -501,11 +501,14 @@ function buildStaffPriorities(role: 'coach' | 'assistant_coach', unreadCount: nu
 function buildReceptionPriorities(ops: OpsKpis): PriorityItem[] {
   return [
     {
-      href: '/scan',
-      eyebrow: 'Entrance flow',
-      title: ops.scansToday > 0 ? `${ops.scansToday} scan(s) today` : 'Open scan now',
-      desc: ops.scansToday > 0 ? 'Keep the entrance moving with the scan and kiosk flow.' : 'No scan recorded yet today. Start with the scanner.',
-      icon: ScanLine,
+      href: '/reception',
+      eyebrow: 'Front desk now',
+      title: 'Open the front desk center',
+      desc:
+        ops.scansToday > 0
+          ? `${ops.scansToday} scan(s) recorded today. Use the command center for the next actions.`
+          : 'No scan recorded yet today. Start from the front desk center and keep the queue moving.',
+      icon: LayoutDashboard,
       tone: ops.scansToday > 0 ? 'success' : 'warning',
     },
     {
@@ -686,7 +689,7 @@ function HeroCard({
     member: 'Everything important at a glance: membership, QR code and useful updates.',
     coach: 'Fast access to your staff tools, QR code and a read-only member lookup.',
     assistant_coach: 'Fast access to your staff tools, QR code and useful updates.',
-    reception: 'Built for quick actions at the front desk: scan, member creation and daily queues.',
+    reception: 'Built for quick actions at the front desk: scan, member creation, follow-up queues and a live command center.',
     admin: 'Daily operations first: members, finance, reporting and control.',
     super_admin: 'Full operational overview with direct access to all critical areas.',
   }
@@ -821,6 +824,7 @@ function coachActions(): QuickAction[] {
 
 function receptionActions(): QuickAction[] {
   return [
+    { href: '/reception', label: 'Front desk center', desc: "Open today's command center for scan, renewals and follow-up.", icon: LayoutDashboard },
     { href: '/scan', label: 'Scan', desc: 'Fast attendance and QR validation.', icon: ScanLine },
     { href: '/kiosk', label: 'Create member', desc: 'Open the front-desk member creation flow.', icon: IdCard },
     { href: '/members', label: 'Members', desc: 'Search and manage members quickly.', icon: Users },
@@ -834,6 +838,7 @@ function receptionActions(): QuickAction[] {
 function adminActions(role: 'admin' | 'super_admin'): QuickAction[] {
   const base: QuickAction[] = [
     { href: '/admin', label: 'Dashboard', desc: 'Operational KPIs and admin overview.', icon: LayoutDashboard },
+    { href: '/reception', label: 'Front desk center', desc: 'Open the live desk command center used at reception.', icon: LayoutDashboard },
     { href: '/admin/crm', label: 'CRM queue', desc: 'Review follow-ups and daily contact priorities.', icon: MessageSquare },
     { href: '/scan', label: 'Scan', desc: 'QR check-in and validation flow.', icon: ScanLine },
     { href: '/members', label: 'Members', desc: 'Open the members workspace.', icon: Users },
