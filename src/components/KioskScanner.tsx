@@ -164,12 +164,16 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className }: 
       const stored = window.localStorage.getItem('atom:kiosk') === '1'
       if (kioskRequested || stored) {
         setKioskMode(true)
+        setFullScreen(true)
       }
       if (kioskRequested) {
         window.localStorage.setItem('atom:kiosk', '1')
       }
     } catch {
-      if (kioskRequested) setKioskMode(true)
+      if (kioskRequested) {
+        setKioskMode(true)
+        setFullScreen(true)
+      }
     }
   }, [kioskRequested])
 
@@ -406,6 +410,7 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className }: 
           if ((j as any).freeze_days_remaining !== undefined && (j as any).freeze_days_remaining !== null) {
             sp.set('freezeDaysRemaining', String((j as any).freeze_days_remaining))
           }
+          if (j.message) sp.set('message', String(j.message).slice(0, 180))
 
           router.push(`/scan/result?${sp.toString()}`)
           didNavigate = true
@@ -435,7 +440,7 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className }: 
     if (resumeTimerRef.current) window.clearTimeout(resumeTimerRef.current)
     setPaused(false)
     setStatus('idle')
-    setMsg('Ready')
+    setMsg(kioskMode ? 'Ready for next member' : 'Ready')
   }
 
   function retryNow() {
@@ -635,7 +640,7 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className }: 
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
             <ActionChip
               icon={<ScanLine size={16} strokeWidth={2.1} />}
-              label={paused ? 'Paused until rescan' : 'Ready for next QR'}
+              label={paused ? 'Paused until rescan' : kioskMode ? 'Ready for next member' : 'Ready for next QR'}
             />
             <ActionChip
               icon={<Camera size={16} strokeWidth={2.1} />}
@@ -643,11 +648,11 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className }: 
             />
             <ActionChip
               icon={<Smartphone size={16} strokeWidth={2.1} />}
-              label={kioskMode ? 'Kiosk mode enabled' : 'Standard scanner view'}
+              label={kioskMode ? 'Kiosk mode + full screen' : 'Standard scanner view'}
             />
             <ActionChip
               icon={online ? <ShieldCheck size={16} strokeWidth={2.1} /> : <WifiOff size={16} strokeWidth={2.1} />}
-              label={online ? 'Internet connected' : 'Internet required'}
+              label={online ? (kioskMode ? 'Auto-return after each result' : 'Internet connected') : 'Internet required'}
             />
           </div>
 
@@ -727,6 +732,7 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className }: 
                   <li>Use the back camera for faster detection.</li>
                   <li>Tap Rescan after any blocked or invalid attempt.</li>
                   <li>Use kiosk mode for the academy entrance.</li>
+                  <li>Kiosk mode returns automatically to the next scan after the result page.</li>
                 </ul>
               </div>
             </div>

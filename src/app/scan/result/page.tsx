@@ -8,6 +8,9 @@ import { redirect } from 'next/navigation'
 import {
   ArrowLeft,
   CalendarDays,
+  CircleAlert,
+  CircleCheckBig,
+  Clock3,
   QrCode,
   ScanLine,
   ShieldAlert,
@@ -19,7 +22,7 @@ import { Card, CardContent } from '@/components/ui/Card'
 import Button from '@/components/ui/Button'
 import AccessDeniedPage from '@/components/AccessDeniedPage'
 import { getSessionUserCached, getSupabaseAdminClientCached } from '@/lib/requestCache'
-import { canAccessScan } from '@/lib/rbac'
+import type { Role } from '@/lib/session'
 import AutoReturn from './AutoReturn'
 import ResultSound from './ResultSound'
 
@@ -34,6 +37,11 @@ type SearchParams = {
   frozenUntil?: string
   freezeDaysRemaining?: string
   kiosk?: string
+  message?: string
+}
+
+function canAccess(role: Role) {
+  return role === 'reception' || role === 'admin' || role === 'super_admin'
 }
 
 function isUuid(v?: string | null) {
@@ -52,6 +60,10 @@ function fmtDateNice(dateOnly?: string | null) {
   if (!y || !m || !d) return dateOnly
   const dt = new Date(Date.UTC(y, m - 1, d))
   return dt.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: '2-digit' })
+}
+
+function safeMessage(v?: string) {
+  return (v || '').trim().slice(0, 180)
 }
 
 function StatusBadge({
@@ -95,11 +107,35 @@ function FactCard({
   )
 }
 
+function InfoStrip({
+  title,
+  body,
+  tone,
+}: {
+  title: string
+  body: string
+  tone: 'success' | 'warning' | 'danger'
+}) {
+  const cls =
+    tone === 'success'
+      ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
+      : tone === 'warning'
+        ? 'border-sky-200 bg-sky-50 text-sky-800'
+        : 'border-rose-200 bg-rose-50 text-rose-800'
+
+  return (
+    <div className={`rounded-2xl border px-4 py-3 ${cls}`}>
+      <div className="text-sm font-semibold tracking-tight">{title}</div>
+      <p className="mt-1 text-sm">{body}</p>
+    </div>
+  )
+}
+
 export default async function ScanResultPage({ searchParams }: { searchParams: SearchParams }) {
   const me = await getSessionUserCached()
   if (!me) redirect('/login?next=/scan')
 
-  if (!canAccessScan(me.role)) {
+  if (!canAccess(me.role)) {
     return (
       <AccessDeniedPage
         title="Scan — Check-in & Validity"
@@ -118,6 +154,7 @@ export default async function ScanResultPage({ searchParams }: { searchParams: S
   const valid = searchParams.valid === '1'
   const kioskMode = searchParams.kiosk === '1'
   const returnHref = kioskMode ? '/scan?kiosk=1' : '/scan'
+  const apiMessage = safeMessage(searchParams.message)
 
   const memberId = isUuid(searchParams.memberId) ? (searchParams.memberId as string) : null
 
@@ -155,7 +192,7 @@ export default async function ScanResultPage({ searchParams }: { searchParams: S
   const soundKind = frozen ? 'frozen' : valid ? 'ok' : 'invalid'
 
   const tone: 'success' | 'warning' | 'danger' = frozen ? 'warning' : valid ? 'success' : 'danger'
-  const icon = frozen ? (
+  const heroIcon = frozen ? (
     <Snowflake size={30} strokeWidth={2.1} />
   ) : valid ? (
     <ShieldCheck size={30} strokeWidth={2.1} />
@@ -163,35 +200,62 @@ export default async function ScanResultPage({ searchParams }: { searchParams: S
     <ShieldAlert size={30} strokeWidth={2.1} />
   )
 
-  const title = frozen ? 'Subscription frozen' : valid ? 'Welcome back!' : 'Membership expired'
+  const title = frozen ? 'Subscription frozen' : valid ? 'Check-in allowed' : 'Check-in blocked'
   const subtitle = frozen
     ? 'This membership is temporarily frozen.'
     : valid
-      ? 'Membership is active.'
-      : 'Please renew the subscription before check-in.'
+      ? 'Membership is valid for check-in.'
+      : 'Membership is not currently valid for check-in.'
   const statusLabel = frozen ? 'Frozen' : valid ? 'Valid' : 'Expired'
+
+  const nextStepTitle = frozen
+    ? 'Next step: open the member profile and review the freeze period.'
+    : valid
+      ? 'Next step: let the member in and continue to the next scan.'
+      : 'Next step: open the member profile and renew or settle the membership.'
+
+  const nextStepBody = frozen
+    ? 'Do not allow check-in until the freeze ends or the membership is updated.'
+    : valid
+      ? 'This result was recorded. You can continue scanning immediately.'
+      : 'Use the member profile to renew, settle dues or explain why check-in is blocked.'
+
+  const primaryHref = !valid && memberId ? `/members/${memberId}` : returnHref
+  const primaryLabel = !valid && memberId ? 'Open member' : 'Scan next'
+  const primaryIcon = !valid && memberId ? <QrCode size={16} className="mr-2" /> : <ScanLine size={16} className="mr-2" />
+
+  const infoTitle = valid
+    ? apiMessage.toLowerCase().includes('already checked')
+      ? 'Already recorded today'
+      : 'Check-in recorded'
+    : frozen
+      ? 'Check-in blocked by freeze'
+      : 'Check-in blocked by membership status'
+
+  const infoBody = apiMessage || subtitle
 
   return (
     <main className="min-h-[calc(100vh-3rem)] bg-[hsl(var(--bg))] p-4 sm:p-6">
       <ResultSound kind={soundKind} />
 
-      <div className="mx-auto max-w-3xl space-y-4">
+      <div className="mx-auto max-w-4xl space-y-4">
         <Card className="rounded-3xl border border-[hsl(var(--border))]">
           <CardContent>
             <div className="flex flex-col gap-5">
-              <div className="flex items-start justify-between gap-3 flex-wrap">
-                <div>
+              <div className="flex flex-wrap items-start justify-between gap-4">
+                <div className="min-w-0">
                   <div className="flex flex-wrap items-center gap-2">
                     <StatusBadge tone={tone}>{statusLabel}</StatusBadge>
-                    {kioskMode ? <StatusBadge tone="warning">Kiosk return</StatusBadge> : null}
+                    {kioskMode ? <StatusBadge tone="warning">Auto-return enabled</StatusBadge> : null}
+                    {apiMessage.toLowerCase().includes('already checked') ? <StatusBadge tone="success">Already today</StatusBadge> : null}
                   </div>
                   <h1 className="mt-3 text-2xl font-semibold tracking-tight sm:text-3xl">{title}</h1>
-                  <p className="mt-2 text-sm text-[hsl(var(--muted))] sm:text-base">{subtitle}</p>
+                  <p className="mt-2 max-w-2xl text-sm text-[hsl(var(--muted))] sm:text-base">{subtitle}</p>
                 </div>
 
                 <div
                   className={
-                    'inline-flex h-16 w-16 items-center justify-center rounded-3xl border ' +
+                    'inline-flex h-16 w-16 shrink-0 items-center justify-center rounded-3xl border ' +
                     (tone === 'success'
                       ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
                       : tone === 'warning'
@@ -199,32 +263,54 @@ export default async function ScanResultPage({ searchParams }: { searchParams: S
                         : 'border-rose-200 bg-rose-50 text-rose-700')
                   }
                 >
-                  {icon}
+                  {heroIcon}
                 </div>
               </div>
 
-              {(memberName || memberCode || signedPhoto) ? (
-                <div className="rounded-3xl border border-[hsl(var(--border))] bg-white p-4 shadow-soft">
-                  <div className="flex items-center gap-3">
-                    {signedPhoto ? (
-                      <div className="relative h-16 w-16 overflow-hidden rounded-full border bg-white">
-                        <Image src={signedPhoto} alt="Member photo" fill className="object-cover" />
-                      </div>
-                    ) : (
-                      <div className="flex h-16 w-16 items-center justify-center rounded-full border bg-white text-[hsl(var(--muted))]">
-                        <UserRound size={22} />
-                      </div>
-                    )}
+              <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_320px]">
+                {(memberName || memberCode || signedPhoto) ? (
+                  <div className="rounded-3xl border border-[hsl(var(--border))] bg-white p-4 shadow-soft">
+                    <div className="flex items-center gap-3">
+                      {signedPhoto ? (
+                        <div className="relative h-16 w-16 overflow-hidden rounded-full border bg-white">
+                          <Image src={signedPhoto} alt="Member photo" fill className="object-cover" />
+                        </div>
+                      ) : (
+                        <div className="flex h-16 w-16 items-center justify-center rounded-full border bg-white text-[hsl(var(--muted))]">
+                          <UserRound size={22} />
+                        </div>
+                      )}
 
-                    <div className="min-w-0">
-                      <div className="text-base font-semibold tracking-tight">{memberName || 'Member'}</div>
-                      {memberCode ? <div className="mt-1 text-sm text-[hsl(var(--muted))]">ID: {memberCode}</div> : null}
+                      <div className="min-w-0">
+                        <div className="text-base font-semibold tracking-tight">{memberName || 'Member'}</div>
+                        {memberCode ? <div className="mt-1 text-sm text-[hsl(var(--muted))]">ID: {memberCode}</div> : null}
+                        <div className="mt-2 text-sm text-[hsl(var(--muted))]">Use the quick action below if this result needs follow-up.</div>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="rounded-3xl border border-[hsl(var(--border))] bg-white p-4 shadow-soft">
+                    <div className="text-base font-semibold tracking-tight">Member profile not loaded</div>
+                    <p className="mt-2 text-sm text-[hsl(var(--muted))]">The scan result is still valid, but no member details were loaded on this screen.</p>
+                  </div>
+                )}
+
+                <div className="rounded-3xl border border-[hsl(var(--border))] bg-white p-4 shadow-soft">
+                  <div className="flex items-start gap-3">
+                    <span className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-black">
+                      {valid ? <CircleCheckBig size={18} strokeWidth={2.1} /> : <CircleAlert size={18} strokeWidth={2.1} />}
+                    </span>
+                    <div>
+                      <div className="text-sm font-semibold tracking-tight">{nextStepTitle}</div>
+                      <p className="mt-1 text-sm text-[hsl(var(--muted))]">{nextStepBody}</p>
                     </div>
                   </div>
                 </div>
-              ) : null}
+              </div>
 
-              <div className="grid gap-3 sm:grid-cols-2">
+              <InfoStrip title={infoTitle} body={infoBody} tone={tone} />
+
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                 {frozen ? (
                   <>
                     <FactCard
@@ -237,41 +323,44 @@ export default async function ScanResultPage({ searchParams }: { searchParams: S
                       value={typeof freezeDaysRemaining === 'number' ? freezeDaysRemaining : '—'}
                       icon={<Snowflake size={18} strokeWidth={2.1} />}
                     />
+                    <FactCard label="Result" value="Check-in blocked" icon={<ShieldAlert size={18} strokeWidth={2.1} />} />
                   </>
                 ) : valid ? (
                   <>
                     <FactCard
                       label="Days remaining"
-                      value={typeof daysRemaining === 'number' ? daysRemaining : '—'}
+                      value={typeof daysRemaining === 'number' ? daysRemaining : apiMessage || '—'}
                       icon={<CalendarDays size={18} strokeWidth={2.1} />}
                     />
                     <FactCard
                       label="Expires on"
-                      value={expiresOn ? fmtDateNice(expiresOn) : '—'}
+                      value={expiresOn ? fmtDateNice(expiresOn) : 'Sessions membership'}
                       icon={<ShieldCheck size={18} strokeWidth={2.1} />}
                     />
+                    <FactCard label="Result" value="Check-in allowed" icon={<CircleCheckBig size={18} strokeWidth={2.1} />} />
                   </>
                 ) : (
                   <>
                     <FactCard
                       label="Expired since"
                       value={typeof expiredDays === 'number' ? `${expiredDays} day(s)` : '—'}
-                      icon={<CalendarDays size={18} strokeWidth={2.1} />}
+                      icon={<Clock3 size={18} strokeWidth={2.1} />}
                     />
                     <FactCard
                       label="Expired on"
                       value={expiredOn ? fmtDateNice(expiredOn) : '—'}
                       icon={<ShieldAlert size={18} strokeWidth={2.1} />}
                     />
+                    <FactCard label="Result" value="Check-in blocked" icon={<CircleAlert size={18} strokeWidth={2.1} />} />
                   </>
                 )}
               </div>
 
               <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                <Link href={returnHref}>
+                <Link href={primaryHref}>
                   <Button className="w-full">
-                    <ScanLine size={16} className="mr-2" />
-                    Scan again
+                    {primaryIcon}
+                    {primaryLabel}
                   </Button>
                 </Link>
 
