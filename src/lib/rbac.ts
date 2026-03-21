@@ -59,6 +59,7 @@ const APP_NAV_BY_ROLE: MenuByRole = {
     { label: 'Packages & Promos', href: '/packages-and-promos', icon: 'gift' },
   ],
   reception: [
+    { label: 'Front Desk', href: '/reception', icon: 'dashboard' },
     { label: 'Schedule', href: '/schedule', icon: 'calendar' },
     { label: 'Membership', href: '/kiosk', icon: 'id' },
     { label: 'My Profile', href: '/profile', icon: 'id' },
@@ -70,6 +71,7 @@ const APP_NAV_BY_ROLE: MenuByRole = {
   ],
   admin: [
     { label: 'Dashboard', href: '/admin', icon: 'dashboard' },
+    { label: 'Front Desk', href: '/reception', icon: 'dashboard' },
     { label: 'Notifications', href: '/notifications', icon: 'bell' },
     { label: 'My Profile', href: '/profile', icon: 'id' },
     { label: 'Schedule', href: '/schedule', icon: 'calendar' },
@@ -95,6 +97,7 @@ const APP_NAV_BY_ROLE: MenuByRole = {
   super_admin: [
     { label: 'Home', href: '/', icon: 'home' },
     { label: 'Dashboard', href: '/admin', icon: 'dashboard' },
+    { label: 'Front Desk', href: '/reception', icon: 'dashboard' },
     { label: 'Notifications', href: '/notifications', icon: 'bell' },
     { label: 'My Profile', href: '/profile', icon: 'id' },
     { label: 'Schedule', href: '/schedule', icon: 'calendar' },
@@ -145,6 +148,10 @@ export function canOpenOtherMemberProfile(role: Role | null | undefined) {
 }
 
 export function canAccessCrm(role: Role | null | undefined) {
+  return hasAnyRole(role, FRONT_DESK_ROLES)
+}
+
+export function canAccessReceptionDesk(role: Role | null | undefined) {
   return hasAnyRole(role, FRONT_DESK_ROLES)
 }
 
@@ -268,6 +275,14 @@ const CAPABILITY_BLUEPRINTS: CapabilityBlueprint[] = [
     description: 'Open members search and desk operations list.',
     href: '/members',
     check: (role) => canAccessMembersList(role),
+  },
+  {
+    key: 'front_desk_center',
+    category: 'Front desk',
+    label: 'Front desk center',
+    description: 'Open the reception command center with scan, renewals, dues and contact queue.',
+    href: '/reception',
+    check: (role) => canAccessReceptionDesk(role),
   },
   {
     key: 'crm_queue',
