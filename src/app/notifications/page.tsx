@@ -29,7 +29,6 @@ export default async function NotificationsPage() {
     )
   }
 
-  // 🚫 Reception is not allowed to access notifications at all
   if (me.role === 'reception') {
     redirect('/')
   }
@@ -47,22 +46,45 @@ export default async function NotificationsPage() {
         title="Notifications"
         subtitle={
           isAdmin || isSuper
-            ? 'Create announcements and review sent messages. Notifications are sent only to roles with a visible inbox.'
-            : 'Your announcements and updates'
+            ? 'Send announcements, review sent messages, and manage your admin inbox read flow.'
+            : 'Read updates, open message details, and manage your inbox read status.'
         }
       />
 
       <Section className="space-y-6">
-        {/* Create announcements (admin + super_admin) */}
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+          <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4 shadow-soft">
+            <div className="text-sm font-semibold">Inbox flow</div>
+            <p className="mt-1 text-sm text-[hsl(var(--muted))]">
+              Open a message to read the full content, then mark it read or unread when needed.
+            </p>
+          </div>
+
+          {(isMember || isCoach || isAssistantCoach) && (
+            <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4 shadow-soft">
+              <div className="text-sm font-semibold">Your role inbox</div>
+              <p className="mt-1 text-sm text-[hsl(var(--muted))]">
+                Members, coaches, and assistant coaches can read the notifications sent from the admin center here.
+              </p>
+            </div>
+          )}
+
+          {(isAdmin || isSuper) && (
+            <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4 shadow-soft">
+              <div className="text-sm font-semibold">Admin inbox scope</div>
+              <p className="mt-1 text-sm text-[hsl(var(--muted))]">
+                Admins manage sent announcements here and also read member messages sent directly to the admin inbox.
+              </p>
+            </div>
+          )}
+        </div>
+
         {(isAdmin || isSuper) && <NotificationsSender />}
 
-        {/* member / coach / assistant_coach : inbox */}
         {(isMember || isCoach || isAssistantCoach) && <NotificationsList />}
 
-        {/* admin / super_admin : sent only */}
         {(isAdmin || isSuper) && <NotificationsList isAdmin sentOnly />}
 
-        {/* Member messages inbox (admin + super_admin) */}
         {(isAdmin || isSuper) && <NotificationsMemberInbox canDelete />}
       </Section>
     </main>
