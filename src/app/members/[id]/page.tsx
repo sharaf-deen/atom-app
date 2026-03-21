@@ -24,7 +24,6 @@ import AccessDeniedPage from '@/components/AccessDeniedPage'
 import { createSupabaseRSC } from '@/lib/supabaseServer'
 import { createSupabaseAdminClient } from '@/lib/supabaseAdmin'
 import { getSessionUser, type Role } from '@/lib/session'
-import { canAccessMemberProfile, canAccessMembersList, canCreateSubscription, canDeleteUser, canManageSubscriptions, canOpenOtherMemberProfile, canResendInvite } from '@/lib/rbac'
 import { addDays, cairoToday, diffDays } from '@/lib/cairoDate'
 import QrImage from '@/components/QrImage'
 import SubscribeDialog, { type Plan } from '@/components/SubscribeDialog'
@@ -584,11 +583,12 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
     redirect(`/login?next=${encodeURIComponent(nextPath)}`)
   }
 
-  const canViewMembersList = canAccessMembersList(me.role)
-  const canOpenOtherProfiles = canOpenOtherMemberProfile(me.role)
-  const canManageSubs = canManageSubscriptions(me.role)
-  const canCreateSub = canCreateSubscription(me.role)
-  const canResendMemberInvite = canResendInvite(me.role)
+  const STAFF: Role[] = ['reception', 'admin', 'super_admin']
+  const canViewMembersList = STAFF.includes(me.role)
+  const canOpenOtherProfiles = canViewMembersList || me.role === 'coach'
+  const canManageSubscriptions = ['admin', 'super_admin'].includes(me.role)
+  const canCreateSubscription = STAFF.includes(me.role)
+  const canResendInvite = STAFF.includes(me.role)
 
   const sessionDb = createSupabaseRSC()
   const adminDb = createSupabaseAdminClient()
@@ -620,11 +620,11 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
   if (!profile) return notFound()
 
   const isSelf = me.id === profile.user_id
-  const canDeleteMemberUser = canDeleteUser(me.role, { isSelf })
+  const canDeleteUser = me.role === 'super_admin' && !isSelf
   const isCoachViewingOtherMember = me.role === 'coach' && !isSelf
   const receptionDeskView = me.role === 'reception' && !isSelf
 
-  if (!canAccessMemberProfile(me.role, { viewerUserId: me.id, targetUserId: profile.user_id, targetRole: profile.role })) {
+  if (!canOpenOtherProfiles && !isSelf) {
     return (
       <AccessDeniedPage
         title="Member"
@@ -776,7 +776,7 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
   const fullName = `${profile.first_name ?? ''} ${profile.last_name ?? ''}`.trim() || '—'
   const age = ageYears(profile.date_of_birth)
   const viewedRole = profile.role ?? 'member'
-  const showSubscriptionActions = canCreateSub && viewedRole === 'member' && !coachSafeView
+  const showSubscriptionActions = canCreateSubscription && viewedRole === 'member' && !coachSafeView
 
   const subtitle = coachSafeView
     ? 'Read-only coach view with only safe member information.'
@@ -993,7 +993,7 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
           </Surface>
         ) : null}
 
-        {(showSubscriptionActions || canResendMemberInvite || receptionDeskView) ? (
+        {(showSubscriptionActions || canResendInvite || receptionDeskView) ? (
           <Surface className="p-4 sm:p-5">
             <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
               <div className="min-w-0 flex-1">
@@ -1053,8 +1053,8 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
                   </>
                 ) : null}
 
-                {canResendMemberInvite ? <ResendInviteButton userId={profile.user_id} email={profile.email} /> : null}
-                {canDeleteMemberUser ? (
+                {canResendInvite ? <ResendInviteButton userId={profile.user_id} email={profile.email} /> : null}
+                {canDeleteUser ? (
                   <DeleteUserButton userId={profile.user_id} email={profile.email} memberId={profile.member_id} />
                 ) : null}
               </div>
@@ -1161,8 +1161,8 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
                 {coachSafeView
                   ? 'Only training-useful subscription status is visible here.'
                   : receptionDeskView
-                    ? 'Clean front-desk reading of plans, dues and payment details.'
-                    : 'A clean card view with no horizontal scrolling on mobile.'}
+                    ? 'Clean front-desk reading of status now, dues and payment details.'
+                    : 'Status now, billing and quick actions grouped in one clean card view.'}
               </p>
             </div>
             <TinyBadge>{subs.length} record(s)</TinyBadge>
@@ -1181,20 +1181,63 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
                 const left = state.left
                 const frozen = state.frozen
                 const due = Math.max(Number(s.amount_due ?? 0), 0)
+                const paid = Math.max(Number(s.amount ?? 0), 0)
+                const total = paid + due
+
+                const statusNow = isSessions
+                  ? remaining > 0
+                    ? `${remaining} session(s) left`
+                    : 'No sessions left'
+                  : frozen
+                    ? `Frozen until ${fmtDate(s.frozen_until)}`
+                    : left === null
+                      ? 'Time membership active'
+                      : left < 0
+                        ? `Expired ${Math.abs(left)} day(s) ago`
+                        : left === 0
+                          ? 'Ends today'
+                          : `${left} day(s) left`
+
+                const coverage = isSessions
+                  ? `${s.sessions_used ?? 0}/${s.sessions_total ?? 0} used`
+                  : `${fmtDate(s.start_date)} → ${fmtDate(s.end_date)}`
+
+                const billingNow = coachSafeView
+                  ? null
+                  : total > 0
+                    ? `Paid ${fmtMoneyEGP(paid)} of ${fmtMoneyEGP(total)}`
+                    : 'No billing recorded'
 
                 return (
                   <div key={s.id} className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4 shadow-soft">
                     <div className="flex flex-wrap items-center gap-2">
                       <TinyBadge>{humanPlan(s.plan)}</TinyBadge>
-                      <TinyBadge tone={state.statusTone}>
-                      {state.displayStatus}
-                    </TinyBadge>
+                      <TinyBadge tone={state.statusTone}>{state.displayStatus}</TinyBadge>
                       {left !== null && left >= 0 && !isSessions && !frozen ? (
                         <TinyBadge tone={left <= 7 ? 'warning' : 'success'}>{left} day(s) left</TinyBadge>
                       ) : null}
                       {frozen ? <TinyBadge tone="warning">Frozen until {fmtDate(s.frozen_until)}</TinyBadge> : null}
                       {isSessions ? <TinyBadge tone={remaining <= 2 ? 'warning' : 'success'}>{remaining} left</TinyBadge> : null}
                       {!coachSafeView && due > 0 ? <TinyBadge tone="warning">Due {fmtMoneyEGP(due)}</TinyBadge> : null}
+                    </div>
+
+                    <div className="mt-4 rounded-2xl border border-[hsl(var(--border))] bg-white/70 px-4 py-3">
+                      <div className={`grid gap-3 text-sm ${coachSafeView ? 'md:grid-cols-2' : 'md:grid-cols-3'}`}>
+                        <div>
+                          <div className="text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Status now</div>
+                          <div className="mt-1 font-medium">{statusNow}</div>
+                        </div>
+                        <div>
+                          <div className="text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Coverage</div>
+                          <div className="mt-1 font-medium">{coverage}</div>
+                        </div>
+                        {!coachSafeView ? (
+                          <div>
+                            <div className="text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Billing now</div>
+                            <div className="mt-1 font-medium">{billingNow}</div>
+                          </div>
+                        ) : null}
+                      </div>
                     </div>
 
                     <div className={`mt-4 grid gap-3 text-sm ${coachSafeView ? 'md:grid-cols-2 xl:grid-cols-3' : 'md:grid-cols-2 xl:grid-cols-4'}`}>
@@ -1215,10 +1258,10 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
                         <>
                           <div>
                             <div className="text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Paid</div>
-                            <div className="mt-1 font-medium">{fmtMoneyEGP(s.amount ?? 0)}</div>
+                            <div className="mt-1 font-medium">{fmtMoneyEGP(paid)}</div>
                           </div>
                           <div>
-                            <div className="text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Payment</div>
+                            <div className="text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Payment method</div>
                             <div className="mt-1 font-medium">{humanPayment(s.payment_method)}</div>
                           </div>
                           <div>
@@ -1233,7 +1276,7 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
                       ) : null}
                     </div>
 
-                    {!coachSafeView && canManageSubs && viewedRole === 'member' ? (
+                    {!coachSafeView && canManageSubscriptions && viewedRole === 'member' ? (
                       <div className="mt-4 border-t border-[hsl(var(--border))] pt-4">
                         <SubscriptionManageRowActions sub={s} />
                       </div>
