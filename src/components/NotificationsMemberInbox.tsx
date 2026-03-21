@@ -1,4 +1,4 @@
-'use client'
+"use client"
 
 import { useEffect, useMemo, useState } from 'react'
 import Button from '@/components/ui/Button'
@@ -6,6 +6,7 @@ import Input from '@/components/ui/Input'
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card'
 import Badge from '@/components/ui/Badge'
 
+type SortMode = 'recent' | 'unread_first' | 'important_first'
 type Item = {
   id: string
   title: string | null
@@ -38,10 +39,48 @@ function preview(text: string, max = 130) {
   return s.length > max ? `${s.slice(0, max - 1)}…` : s
 }
 
+function toMs(iso: string) {
+  const n = new Date(iso).getTime()
+  return Number.isFinite(n) ? n : 0
+}
+
+function isRecent(iso: string, hours = 72) {
+  const ms = toMs(iso)
+  return ms > 0 && Date.now() - ms <= hours * 60 * 60 * 1000
+}
+
+function isImportant(item: Item) {
+  return !item.read_at && isRecent(item.created_at, 48)
+}
+
+function sortItems(items: Item[], mode: SortMode) {
+  const copy = [...items]
+  copy.sort((a, b) => {
+    const aUnread = !a.read_at ? 1 : 0
+    const bUnread = !b.read_at ? 1 : 0
+    const aRecent = isRecent(a.created_at) ? 1 : 0
+    const bRecent = isRecent(b.created_at) ? 1 : 0
+    const aImportant = isImportant(a) ? 1 : 0
+    const bImportant = isImportant(b) ? 1 : 0
+
+    if (mode === 'unread_first' && aUnread !== bUnread) return bUnread - aUnread
+    if (mode === 'important_first' && aImportant !== bImportant) return bImportant - aImportant
+    if (mode === 'recent' && aRecent !== bRecent) return bRecent - aRecent
+
+    if (mode !== 'unread_first' && aUnread !== bUnread) return bUnread - aUnread
+    if (mode !== 'important_first' && aImportant !== bImportant) return bImportant - aImportant
+    if (mode !== 'recent' && aRecent !== bRecent) return bRecent - aRecent
+
+    return toMs(b.created_at) - toMs(a.created_at)
+  })
+  return copy
+}
+
 export default function NotificationsMemberInbox({ canDelete = false }: Props) {
   const [q, setQ] = useState('')
   const [debQ, setDebQ] = useState('')
   const [tab, setTab] = useState<'all' | 'unread'>('all')
+  const [sortMode, setSortMode] = useState<SortMode>('unread_first')
 
   const [page, setPage] = useState(1)
   const [total, setTotal] = useState(0)
@@ -49,11 +88,23 @@ export default function NotificationsMemberInbox({ canDelete = false }: Props) {
   const [loading, setLoading] = useState(false)
   const [err, setErr] = useState('')
   const [openId, setOpenId] = useState<string | null>(null)
+  const [selected, setSelected] = useState<Set<string>>(new Set())
   const [actionMsg, setActionMsg] = useState('')
 
   const totalPages = useMemo(() => Math.max(1, Math.ceil(total / PER_PAGE)), [total])
-  const openItem = useMemo(() => items.find((item) => item.id === openId) ?? null, [items, openId])
-  const unreadOnPage = useMemo(() => items.filter((item) => !item.read_at).length, [items])
+  const visibleItems = useMemo(() => sortItems(items, sortMode), [items, sortMode])
+  const openItem = useMemo(() => visibleItems.find((item) => item.id === openId) ?? null, [visibleItems, openId])
+  const unreadOnPage = useMemo(() => visibleItems.filter((item) => !item.read_at).length, [visibleItems])
+  const recentOnPage = useMemo(() => visibleItems.filter((item) => isRecent(item.created_at)).length, [visibleItems])
+  const importantOnPage = useMemo(() => visibleItems.filter((item) => isImportant(item)).length, [visibleItems])
+  const selectedReadIds = useMemo(
+    () => visibleItems.filter((item) => selected.has(item.id) && !!item.read_at).map((item) => item.id),
+    [visibleItems, selected],
+  )
+  const selectedUnreadIds = useMemo(
+    () => visibleItems.filter((item) => selected.has(item.id) && !item.read_at).map((item) => item.id),
+    [visibleItems, selected],
+  )
 
   useEffect(() => {
     const t = setTimeout(() => setDebQ(q.trim()), 300)
@@ -61,10 +112,10 @@ export default function NotificationsMemberInbox({ canDelete = false }: Props) {
   }, [q])
 
   useEffect(() => {
-    if (openId && !items.some((item) => item.id === openId)) {
+    if (openId && !visibleItems.some((item) => item.id === openId)) {
       setOpenId(null)
     }
-  }, [items, openId])
+  }, [visibleItems, openId])
 
   async function load(p = page) {
     setLoading(true)
@@ -90,6 +141,7 @@ export default function NotificationsMemberInbox({ canDelete = false }: Props) {
       setItems(nextItems)
       setTotal(Number(j.total || 0))
       setPage(Number(j.page || p))
+      setSelected(new Set())
       if (!openId && nextItems.length > 0) setOpenId(nextItems[0].id)
     } catch (e: any) {
       setErr(String(e?.message || e))
@@ -111,6 +163,24 @@ export default function NotificationsMemberInbox({ canDelete = false }: Props) {
     return () => window.removeEventListener('notifications:updated', handler)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [page])
+
+  function toggle(id: string) {
+    setSelected((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  function toggleAllVisible() {
+    if (selected.size === visibleItems.length && visibleItems.length > 0) setSelected(new Set())
+    else setSelected(new Set(visibleItems.map((item) => item.id)))
+  }
+
+  function selectUnreadVisible() {
+    setSelected(new Set(visibleItems.filter((item) => !item.read_at).map((item) => item.id)))
+  }
 
   async function markIds(ids: string[], mode: 'read' | 'unread') {
     if (ids.length === 0) return true
@@ -138,26 +208,54 @@ export default function NotificationsMemberInbox({ canDelete = false }: Props) {
     }
   }
 
-  async function deleteOne(id: string) {
-    if (!canDelete) return
-    if (!confirm('Delete this message for you? This will not delete it for the member.')) return
-
+  async function deleteIds(ids: string[]) {
+    if (!canDelete) return false
     const r = await fetch('/api/notifications/delete', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ids: [id], scope: 'inbox' }),
+      body: JSON.stringify({ ids, scope: 'inbox' }),
     })
 
     const j: any = await safeJson(r)
     if (!r.ok || !j?.ok) {
       setActionMsg(j?.details || j?.error || 'Failed to delete')
-      return
+      return false
     }
 
-    setActionMsg('Deleted message from your inbox.')
+    setActionMsg(`Deleted ${ids.length} message${ids.length === 1 ? '' : 's'} from your inbox.`)
     window.dispatchEvent(new Event('notifications:updated'))
+    return true
+  }
+
+  async function deleteOne(id: string) {
+    if (!canDelete) return
+    if (!confirm('Delete this message for you? This will not delete it for the member.')) return
+    const ok = await deleteIds([id])
+    if (!ok) return
     if (openId === id) setOpenId(null)
-    const willEmpty = items.length === 1 && page > 1
+    const willEmpty = visibleItems.length === 1 && page > 1
+    await load(willEmpty ? page - 1 : page)
+  }
+
+  async function markSelectedRead() {
+    if (selectedUnreadIds.length === 0) return
+    const ok = await markIds(selectedUnreadIds, 'read')
+    if (ok) await load(page)
+  }
+
+  async function markSelectedUnread() {
+    if (selectedReadIds.length === 0) return
+    const ok = await markIds(selectedReadIds, 'unread')
+    if (ok) await load(page)
+  }
+
+  async function deleteSelected() {
+    if (!canDelete || selected.size === 0) return
+    const ids = Array.from(selected)
+    if (!confirm(`Delete ${ids.length} member message(s) from your inbox?`)) return
+    const ok = await deleteIds(ids)
+    if (!ok) return
+    const willEmpty = ids.length >= visibleItems.length && page > 1
     await load(willEmpty ? page - 1 : page)
   }
 
@@ -202,23 +300,67 @@ export default function NotificationsMemberInbox({ canDelete = false }: Props) {
             </button>
           </div>
 
+          <select
+            value={sortMode}
+            onChange={(e) => setSortMode(e.target.value as SortMode)}
+            className="h-10 rounded-xl border border-[hsl(var(--border))] bg-white px-3 text-sm sm:w-44"
+          >
+            <option value="unread_first">Unread first</option>
+            <option value="recent">Recent first</option>
+            <option value="important_first">Important first</option>
+          </select>
+
           <div className="w-full sm:max-w-xs">
             <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search member messages…" aria-label="Search messages" />
           </div>
         </div>
 
-        <div className="mt-4 grid gap-3 sm:grid-cols-3">
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <Button onClick={markSelectedRead} disabled={selectedUnreadIds.length === 0 || loading} variant="outline" size="sm">
+            Mark selected read
+          </Button>
+          <Button onClick={markSelectedUnread} disabled={selectedReadIds.length === 0 || loading} variant="outline" size="sm">
+            Mark selected unread
+          </Button>
+          {canDelete ? (
+            <Button onClick={deleteSelected} disabled={selected.size === 0 || loading} variant="outline" size="sm">
+              Delete selected
+            </Button>
+          ) : null}
+          <Button onClick={selectUnreadVisible} disabled={unreadOnPage === 0 || loading} variant="outline" size="sm">
+            Select unread on page
+          </Button>
+          <Button onClick={toggleAllVisible} disabled={visibleItems.length === 0 || loading} variant="outline" size="sm">
+            {selected.size === visibleItems.length && visibleItems.length > 0 ? 'Clear page selection' : 'Select page'}
+          </Button>
+          {selected.size > 0 ? (
+            <Button onClick={() => setSelected(new Set())} variant="outline" size="sm">
+              Clear selection
+            </Button>
+          ) : null}
+        </div>
+
+        <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
           <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] px-4 py-3">
             <div className="text-xs uppercase tracking-wide text-[hsl(var(--muted))]">View</div>
             <div className="mt-1 text-lg font-semibold">{tab === 'unread' ? 'Unread' : 'All messages'}</div>
           </div>
           <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] px-4 py-3">
             <div className="text-xs uppercase tracking-wide text-[hsl(var(--muted))]">Visible</div>
-            <div className="mt-1 text-lg font-semibold">{items.length}</div>
+            <div className="mt-1 text-lg font-semibold">{visibleItems.length}</div>
           </div>
           <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] px-4 py-3">
             <div className="text-xs uppercase tracking-wide text-[hsl(var(--muted))]">Unread on page</div>
             <div className="mt-1 text-lg font-semibold">{unreadOnPage}</div>
+          </div>
+          <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] px-4 py-3">
+            <div className="text-xs uppercase tracking-wide text-[hsl(var(--muted))]">Recent on page</div>
+            <div className="mt-1 text-lg font-semibold">{recentOnPage}</div>
+          </div>
+          <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] px-4 py-3">
+            <div className="text-xs uppercase tracking-wide text-[hsl(var(--muted))]">Selected</div>
+            <div className="mt-1 text-lg font-semibold">{selected.size}</div>
+            <div className="mt-1 text-xs text-[hsl(var(--muted))]">Important on page: {importantOnPage}</div>
           </div>
         </div>
 
@@ -240,11 +382,9 @@ export default function NotificationsMemberInbox({ canDelete = false }: Props) {
               <div className="space-y-2">
                 <div className="flex flex-wrap items-center gap-2">
                   <h4 className="text-base font-semibold">{openItem.title || 'Untitled member message'}</h4>
-                  {openItem.read_at ? (
-                    <Badge className="bg-black text-white border-black">Read</Badge>
-                  ) : (
-                    <Badge>Unread</Badge>
-                  )}
+                  {isImportant(openItem) ? <Badge>Important</Badge> : null}
+                  {isRecent(openItem.created_at) ? <Badge>Recent</Badge> : null}
+                  {openItem.read_at ? <Badge className="bg-black text-white border-black">Read</Badge> : <Badge>Unread</Badge>}
                 </div>
                 <div className="text-xs text-[hsl(var(--muted))]">{fmtDate(openItem.created_at)}</div>
                 <div className="text-sm text-[hsl(var(--muted))]">
@@ -286,8 +426,17 @@ export default function NotificationsMemberInbox({ canDelete = false }: Props) {
             <table className="min-w-full text-sm">
               <thead className="bg-[hsl(var(--bg))] text-left">
                 <tr>
+                  <th className="border-b border-[hsl(var(--border))] p-3">
+                    <input
+                      type="checkbox"
+                      checked={selected.size === visibleItems.length && visibleItems.length > 0}
+                      onChange={toggleAllVisible}
+                      aria-label="Select all visible"
+                    />
+                  </th>
                   <th className="border-b border-[hsl(var(--border))] p-3 font-medium">From</th>
                   <th className="border-b border-[hsl(var(--border))] p-3 font-medium">Title</th>
+                  <th className="border-b border-[hsl(var(--border))] p-3 font-medium">Signals</th>
                   <th className="border-b border-[hsl(var(--border))] p-3 font-medium">Preview</th>
                   <th className="border-b border-[hsl(var(--border))] p-3 font-medium">Created</th>
                   <th className="border-b border-[hsl(var(--border))] p-3 font-medium">Status</th>
@@ -295,15 +444,23 @@ export default function NotificationsMemberInbox({ canDelete = false }: Props) {
                 </tr>
               </thead>
               <tbody>
-                {items.length === 0 ? (
+                {visibleItems.length === 0 ? (
                   <tr>
-                    <td colSpan={6} className="p-4 text-[hsl(var(--muted))]">
+                    <td colSpan={8} className="p-4 text-[hsl(var(--muted))]">
                       No member messages.
                     </td>
                   </tr>
                 ) : (
-                  items.map((m) => (
+                  visibleItems.map((m) => (
                     <tr key={m.id} className="odd:bg-[hsl(var(--card))] even:bg-[hsl(var(--bg))] align-top">
+                      <td className="border-t border-[hsl(var(--border))] p-3">
+                        <input
+                          type="checkbox"
+                          checked={selected.has(m.id)}
+                          onChange={() => toggle(m.id)}
+                          aria-label="Select row"
+                        />
+                      </td>
                       <td className="border-t border-[hsl(var(--border))] p-3">
                         <div className="text-xs">
                           <div className="font-medium">{m.sender_name || '—'}</div>
@@ -311,6 +468,13 @@ export default function NotificationsMemberInbox({ canDelete = false }: Props) {
                         </div>
                       </td>
                       <td className="border-t border-[hsl(var(--border))] p-3 font-medium">{m.title || '—'}</td>
+                      <td className="border-t border-[hsl(var(--border))] p-3">
+                        <div className="flex flex-wrap gap-2">
+                          {isImportant(m) ? <Badge>Important</Badge> : null}
+                          {isRecent(m.created_at) ? <Badge>Recent</Badge> : null}
+                          {!m.read_at ? <Badge>Unread</Badge> : null}
+                        </div>
+                      </td>
                       <td className="border-t border-[hsl(var(--border))] p-3 text-[hsl(var(--muted))]">{preview(m.body)}</td>
                       <td className="border-t border-[hsl(var(--border))] p-3">{fmtDate(m.created_at)}</td>
                       <td className="border-t border-[hsl(var(--border))] p-3">
@@ -351,23 +515,30 @@ export default function NotificationsMemberInbox({ canDelete = false }: Props) {
           </div>
 
           <div className="space-y-3 md:hidden">
-            {items.length === 0 ? (
+            {visibleItems.length === 0 ? (
               <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4 text-[hsl(var(--muted))]">
                 No member messages.
               </div>
             ) : (
-              items.map((m) => (
+              visibleItems.map((m) => (
                 <div key={m.id} className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4 shadow-soft">
                   <div className="mb-1 text-xs">
                     <span className="text-[hsl(var(--muted))]">From:</span>{' '}
                     <span className="font-medium">{m.sender_name || '—'}</span>
                     {m.sender_email ? <span className="text-[hsl(var(--muted))]"> · {m.sender_email}</span> : null}
                   </div>
-                  <div className="mb-2 font-semibold">{m.title || '—'}</div>
+                  <div className="mb-2 flex items-start justify-between gap-2">
+                    <div>
+                      <div className="font-semibold">{m.title || '—'}</div>
+                      <div className="mt-1 text-xs text-[hsl(var(--muted))]">{fmtDate(m.created_at)}</div>
+                    </div>
+                    <input type="checkbox" checked={selected.has(m.id)} onChange={() => toggle(m.id)} aria-label="Select" />
+                  </div>
                   <div className="mb-2 text-sm text-[hsl(var(--muted))]">{preview(m.body, 140)}</div>
                   <div className="mb-3 flex flex-wrap items-center gap-2">
+                    {isImportant(m) ? <Badge>Important</Badge> : null}
+                    {isRecent(m.created_at) ? <Badge>Recent</Badge> : null}
                     {m.read_at ? <Badge className="bg-black text-white border-black">Read</Badge> : <Badge>Unread</Badge>}
-                    <span className="text-xs text-[hsl(var(--muted))]">{fmtDate(m.created_at)}</span>
                   </div>
                   <div className="flex flex-wrap gap-2">
                     <Button variant="outline" size="sm" onClick={() => openItemAndRead(m)}>

@@ -1,4 +1,4 @@
-'use client'
+"use client"
 
 import { useEffect, useMemo, useState } from 'react'
 import Button from '@/components/ui/Button'
@@ -8,6 +8,7 @@ import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card'
 import Badge from '@/components/ui/Badge'
 
 type Box = 'inbox' | 'sent'
+type SortMode = 'recent' | 'unread_first' | 'important_first'
 type Item = {
   id: string
   title: string | null
@@ -65,10 +66,48 @@ function preview(text: string, max = 120) {
   return s.length > max ? `${s.slice(0, max - 1)}…` : s
 }
 
+function toMs(iso: string) {
+  const n = new Date(iso).getTime()
+  return Number.isFinite(n) ? n : 0
+}
+
+function isRecent(iso: string, hours = 72) {
+  const ms = toMs(iso)
+  return ms > 0 && Date.now() - ms <= hours * 60 * 60 * 1000
+}
+
+function isImportant(item: Item) {
+  return item.kind === 'billing' || item.kind === 'order_update'
+}
+
+function sortItems(items: Item[], mode: SortMode, isSentView: boolean) {
+  const copy = [...items]
+  copy.sort((a, b) => {
+    const aRecent = isRecent(a.created_at) ? 1 : 0
+    const bRecent = isRecent(b.created_at) ? 1 : 0
+    const aUnread = !isSentView && !a.read_at ? 1 : 0
+    const bUnread = !isSentView && !b.read_at ? 1 : 0
+    const aImportant = isImportant(a) ? 1 : 0
+    const bImportant = isImportant(b) ? 1 : 0
+
+    if (mode === 'unread_first' && aUnread !== bUnread) return bUnread - aUnread
+    if (mode === 'important_first' && aImportant !== bImportant) return bImportant - aImportant
+    if (mode === 'recent' && aRecent !== bRecent) return bRecent - aRecent
+
+    if (!isSentView && mode !== 'unread_first' && aUnread !== bUnread) return bUnread - aUnread
+    if (mode !== 'important_first' && aImportant !== bImportant) return bImportant - aImportant
+    if (mode !== 'recent' && aRecent !== bRecent) return bRecent - aRecent
+
+    return toMs(b.created_at) - toMs(a.created_at)
+  })
+  return copy
+}
+
 export default function NotificationsList({ isAdmin = false, sentOnly = false }: Props) {
   const [box, setBox] = useState<Box>(sentOnly ? 'sent' : 'inbox')
   const [tab, setTab] = useState<'all' | 'unread'>('all')
   const [kind, setKind] = useState<KindFilter>('all')
+  const [sortMode, setSortMode] = useState<SortMode>('unread_first')
   const [q, setQ] = useState('')
   const [debQ, setDebQ] = useState('')
 
@@ -90,15 +129,18 @@ export default function NotificationsList({ isAdmin = false, sentOnly = false }:
 
   const totalPages = useMemo(() => Math.max(1, Math.ceil(total / PER_PAGE)), [total])
   const isSentView = sentOnly || box === 'sent'
-  const openItem = useMemo(() => items.find((item) => item.id === openId) ?? null, [items, openId])
-  const unreadOnPage = useMemo(() => items.filter((item) => !item.read_at).length, [items])
+  const visibleItems = useMemo(() => sortItems(items, sortMode, isSentView), [items, sortMode, isSentView])
+  const openItem = useMemo(() => visibleItems.find((item) => item.id === openId) ?? null, [visibleItems, openId])
+  const unreadOnPage = useMemo(() => visibleItems.filter((item) => !item.read_at).length, [visibleItems])
+  const recentOnPage = useMemo(() => visibleItems.filter((item) => isRecent(item.created_at)).length, [visibleItems])
+  const importantOnPage = useMemo(() => visibleItems.filter((item) => isImportant(item)).length, [visibleItems])
   const selectedReadIds = useMemo(
-    () => items.filter((item) => selected.has(item.id) && !!item.read_at).map((item) => item.id),
-    [items, selected],
+    () => visibleItems.filter((item) => selected.has(item.id) && !!item.read_at).map((item) => item.id),
+    [visibleItems, selected],
   )
   const selectedUnreadIds = useMemo(
-    () => items.filter((item) => selected.has(item.id) && !item.read_at).map((item) => item.id),
-    [items, selected],
+    () => visibleItems.filter((item) => selected.has(item.id) && !item.read_at).map((item) => item.id),
+    [visibleItems, selected],
   )
 
   useEffect(() => {
@@ -107,10 +149,10 @@ export default function NotificationsList({ isAdmin = false, sentOnly = false }:
   }, [q])
 
   useEffect(() => {
-    if (openId && !items.some((item) => item.id === openId)) {
+    if (openId && !visibleItems.some((item) => item.id === openId)) {
       setOpenId(null)
     }
-  }, [items, openId])
+  }, [visibleItems, openId])
 
   async function ensureAudienceCounts() {
     if (audCounts) return audCounts
@@ -187,9 +229,8 @@ export default function NotificationsList({ isAdmin = false, sentOnly = false }:
       } else if (n > 1) {
         if (counts.members > 0 && n === counts.members) item.recipient_name = 'All members'
         else if (counts.coaches > 0 && n === counts.coaches) item.recipient_name = 'All coaches'
-        else if (counts.assistant_coaches > 0 && n === counts.assistant_coaches) {
-          item.recipient_name = 'All assistant coaches'
-        } else item.recipient_name = `Custom (${n})`
+        else if (counts.assistant_coaches > 0 && n === counts.assistant_coaches) item.recipient_name = 'All assistant coaches'
+        else item.recipient_name = `Custom (${n})`
         item.recipient_email = null
       } else {
         item.recipient_name = '—'
@@ -231,11 +272,12 @@ export default function NotificationsList({ isAdmin = false, sentOnly = false }:
 
         const totalGroups = grouped.length
         const offset = (p - 1) * PER_PAGE
-        setItems(grouped.slice(offset, offset + PER_PAGE))
+        const nextItems = grouped.slice(offset, offset + PER_PAGE)
+        setItems(nextItems)
         setTotal(totalGroups)
         setPage(p)
         setSelected(new Set())
-        if (!openId && grouped.length > 0) setOpenId(grouped[offset]?.id ?? null)
+        if (!openId && nextItems.length > 0) setOpenId(nextItems[0].id)
         return
       }
 
@@ -295,9 +337,13 @@ export default function NotificationsList({ isAdmin = false, sentOnly = false }:
     })
   }
 
-  function toggleAll() {
-    if (selected.size === items.length) setSelected(new Set())
-    else setSelected(new Set(items.map((item) => item.id)))
+  function toggleAllVisible() {
+    if (selected.size === visibleItems.length && visibleItems.length > 0) setSelected(new Set())
+    else setSelected(new Set(visibleItems.map((item) => item.id)))
+  }
+
+  function selectUnreadVisible() {
+    setSelected(new Set(visibleItems.filter((item) => !item.read_at).map((item) => item.id)))
   }
 
   async function markIds(ids: string[], mode: 'read' | 'unread') {
@@ -386,7 +432,7 @@ export default function NotificationsList({ isAdmin = false, sentOnly = false }:
     if (!confirm(`Delete ${ids.length} notification(s)? This cannot be undone.`)) return
     const ok = await deleteIds(ids, 'inbox')
     if (!ok) return
-    const willEmpty = ids.length >= items.length && page > 1
+    const willEmpty = ids.length >= visibleItems.length && page > 1
     await load(willEmpty ? page - 1 : page)
   }
 
@@ -396,7 +442,7 @@ export default function NotificationsList({ isAdmin = false, sentOnly = false }:
     const ok = await deleteIds([id], 'inbox')
     if (!ok) return
     if (openId === id) setOpenId(null)
-    const willEmpty = items.length === 1 && page > 1
+    const willEmpty = visibleItems.length === 1 && page > 1
     await load(willEmpty ? page - 1 : page)
   }
 
@@ -411,7 +457,7 @@ export default function NotificationsList({ isAdmin = false, sentOnly = false }:
     const ok = await deleteIds(ids, 'sent')
     if (!ok) return
     if (openId === item.id) setOpenId(null)
-    const willEmpty = items.length === 1 && page > 1
+    const willEmpty = visibleItems.length === 1 && page > 1
     await load(willEmpty ? page - 1 : page)
   }
 
@@ -420,6 +466,14 @@ export default function NotificationsList({ isAdmin = false, sentOnly = false }:
       return new Date(iso).toLocaleString()
     } catch {
       return iso
+    }
+  }
+
+  function rowSignals(item: Item) {
+    return {
+      recent: isRecent(item.created_at),
+      important: isImportant(item),
+      unread: !isSentView && !item.read_at,
     }
   }
 
@@ -493,6 +547,12 @@ export default function NotificationsList({ isAdmin = false, sentOnly = false }:
             ))}
           </Select>
 
+          <Select value={sortMode} onChange={(e) => setSortMode(e.target.value as SortMode)} className="sm:w-44">
+            <option value="unread_first">Unread first</option>
+            <option value="recent">Recent first</option>
+            <option value="important_first">Important first</option>
+          </Select>
+
           <div className="w-full sm:max-w-xs">
             <Input
               value={q}
@@ -501,37 +561,57 @@ export default function NotificationsList({ isAdmin = false, sentOnly = false }:
               aria-label="Search notifications"
             />
           </div>
-
-          {!isSentView && (
-            <div className="sm:ml-auto flex flex-wrap items-center gap-2">
-              <Button onClick={markSelectedRead} disabled={selectedUnreadIds.length === 0 || loading} variant="outline" size="sm">
-                Mark selected read
-              </Button>
-              <Button onClick={markSelectedUnread} disabled={selectedReadIds.length === 0 || loading} variant="outline" size="sm">
-                Mark selected unread
-              </Button>
-              <Button onClick={markAllUnreadInFilterRead} variant="outline" disabled={loading} size="sm">
-                Mark unread in filter
-              </Button>
-              <Button onClick={deleteSelected} variant="outline" disabled={selected.size === 0 || loading} size="sm">
-                Delete selected
-              </Button>
-            </div>
-          )}
         </div>
 
-        <div className="mt-4 grid gap-3 sm:grid-cols-3">
+        {!isSentView && (
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <Button onClick={markSelectedRead} disabled={selectedUnreadIds.length === 0 || loading} variant="outline" size="sm">
+              Mark selected read
+            </Button>
+            <Button onClick={markSelectedUnread} disabled={selectedReadIds.length === 0 || loading} variant="outline" size="sm">
+              Mark selected unread
+            </Button>
+            <Button onClick={deleteSelected} variant="outline" disabled={selected.size === 0 || loading} size="sm">
+              Delete selected
+            </Button>
+            <Button onClick={markAllUnreadInFilterRead} variant="outline" disabled={loading} size="sm">
+              Mark unread in filter
+            </Button>
+            <Button onClick={selectUnreadVisible} variant="outline" disabled={unreadOnPage === 0 || loading} size="sm">
+              Select unread on page
+            </Button>
+            <Button onClick={toggleAllVisible} variant="outline" disabled={visibleItems.length === 0 || loading} size="sm">
+              {selected.size === visibleItems.length && visibleItems.length > 0 ? 'Clear page selection' : 'Select page'}
+            </Button>
+            {selected.size > 0 ? (
+              <Button onClick={() => setSelected(new Set())} variant="outline" size="sm">
+                Clear selection
+              </Button>
+            ) : null}
+          </div>
+        )}
+
+        <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
           <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] px-4 py-3">
             <div className="text-xs uppercase tracking-wide text-[hsl(var(--muted))]">View</div>
             <div className="mt-1 text-lg font-semibold">{isSentView ? 'Sent' : tab === 'unread' ? 'Unread inbox' : 'All inbox'}</div>
           </div>
           <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] px-4 py-3">
             <div className="text-xs uppercase tracking-wide text-[hsl(var(--muted))]">Visible</div>
-            <div className="mt-1 text-lg font-semibold">{items.length}</div>
+            <div className="mt-1 text-lg font-semibold">{visibleItems.length}</div>
           </div>
           <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] px-4 py-3">
             <div className="text-xs uppercase tracking-wide text-[hsl(var(--muted))]">Unread on page</div>
             <div className="mt-1 text-lg font-semibold">{isSentView ? '—' : unreadOnPage}</div>
+          </div>
+          <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] px-4 py-3">
+            <div className="text-xs uppercase tracking-wide text-[hsl(var(--muted))]">Recent on page</div>
+            <div className="mt-1 text-lg font-semibold">{recentOnPage}</div>
+          </div>
+          <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] px-4 py-3">
+            <div className="text-xs uppercase tracking-wide text-[hsl(var(--muted))]">Selected</div>
+            <div className="mt-1 text-lg font-semibold">{selected.size}</div>
+            {!isSentView ? <div className="mt-1 text-xs text-[hsl(var(--muted))]">Important on page: {importantOnPage}</div> : null}
           </div>
         </div>
 
@@ -554,13 +634,9 @@ export default function NotificationsList({ isAdmin = false, sentOnly = false }:
                 <div className="flex flex-wrap items-center gap-2">
                   <h4 className="text-base font-semibold">{openItem.title || 'Untitled notification'}</h4>
                   <Badge>{kindLabel(openItem.kind)}</Badge>
-                  {!isSentView ? (
-                    openItem.read_at ? (
-                      <Badge className="bg-black text-white border-black">Read</Badge>
-                    ) : (
-                      <Badge>Unread</Badge>
-                    )
-                  ) : null}
+                  {rowSignals(openItem).important ? <Badge>Important</Badge> : null}
+                  {rowSignals(openItem).recent ? <Badge>Recent</Badge> : null}
+                  {!isSentView ? openItem.read_at ? <Badge className="bg-black text-white border-black">Read</Badge> : <Badge>Unread</Badge> : null}
                 </div>
                 <div className="text-xs text-[hsl(var(--muted))]">{fmtDate(openItem.created_at)}</div>
                 {isSentView ? (
@@ -571,7 +647,13 @@ export default function NotificationsList({ isAdmin = false, sentOnly = false }:
                       ? ` · ${openItem.recipient_count} recipient${openItem.recipient_count === 1 ? '' : 's'}`
                       : ''}
                   </div>
-                ) : null}
+                ) : (
+                  <div className="text-sm text-[hsl(var(--muted))]">
+                    Triage: {rowSignals(openItem).unread ? 'Unread first' : 'Already read'}
+                    {rowSignals(openItem).recent ? ' · Recent' : ''}
+                    {rowSignals(openItem).important ? ' · Important' : ''}
+                  </div>
+                )}
               </div>
 
               {!isSentView ? (
@@ -615,168 +697,182 @@ export default function NotificationsList({ isAdmin = false, sentOnly = false }:
                     {!isSentView && (
                       <input
                         type="checkbox"
-                        checked={selected.size === items.length && items.length > 0}
-                        onChange={toggleAll}
-                        aria-label="Select all"
+                        checked={selected.size === visibleItems.length && visibleItems.length > 0}
+                        onChange={toggleAllVisible}
+                        aria-label="Select all visible"
                       />
                     )}
                   </th>
                   <th className="border-b border-[hsl(var(--border))] p-3 font-medium">Title</th>
                   <th className="border-b border-[hsl(var(--border))] p-3 font-medium">Preview</th>
-                  <th className="border-b border-[hsl(var(--border))] p-3 font-medium">Kind</th>
+                  <th className="border-b border-[hsl(var(--border))] p-3 font-medium">Signals</th>
                   <th className="border-b border-[hsl(var(--border))] p-3 font-medium">Created</th>
                   <th className="border-b border-[hsl(var(--border))] p-3 font-medium">{isSentView ? 'Recipient' : 'Status'}</th>
                   <th className="border-b border-[hsl(var(--border))] p-3" />
                 </tr>
               </thead>
               <tbody>
-                {items.length === 0 ? (
+                {visibleItems.length === 0 ? (
                   <tr>
                     <td colSpan={7} className="p-4 text-[hsl(var(--muted))]">
                       {isSentView ? 'No sent notifications.' : 'No inbox notifications.'}
                     </td>
                   </tr>
                 ) : (
-                  items.map((n) => (
-                    <tr key={n.id} className="odd:bg-[hsl(var(--card))] even:bg-[hsl(var(--bg))] align-top">
-                      <td className="border-t border-[hsl(var(--border))] p-3">
-                        {!isSentView && (
-                          <input
-                            type="checkbox"
-                            checked={selected.has(n.id)}
-                            onChange={() => toggle(n.id)}
-                            aria-label="Select row"
-                          />
-                        )}
-                      </td>
-                      <td className="border-t border-[hsl(var(--border))] p-3 font-medium">{n.title || '—'}</td>
-                      <td className="border-t border-[hsl(var(--border))] p-3 text-[hsl(var(--muted))]">{preview(n.body)}</td>
-                      <td className="border-t border-[hsl(var(--border))] p-3"><Badge>{kindLabel(n.kind)}</Badge></td>
-                      <td className="border-t border-[hsl(var(--border))] p-3">{fmtDate(n.created_at)}</td>
-                      <td className="border-t border-[hsl(var(--border))] p-3">
-                        {isSentView ? (
-                          <div className="text-xs">
-                            <div className="font-medium">{n.recipient_name || '—'}</div>
-                            {n.recipient_email ? <div className="text-[hsl(var(--muted))]">{n.recipient_email}</div> : null}
-                            {typeof n.recipient_count === 'number' ? (
-                              <div className="text-[hsl(var(--muted))]">
-                                {n.recipient_count} recipient{n.recipient_count === 1 ? '' : 's'}
-                              </div>
+                  visibleItems.map((n) => {
+                    const signals = rowSignals(n)
+                    return (
+                      <tr key={n.id} className="odd:bg-[hsl(var(--card))] even:bg-[hsl(var(--bg))] align-top">
+                        <td className="border-t border-[hsl(var(--border))] p-3">
+                          {!isSentView && (
+                            <input
+                              type="checkbox"
+                              checked={selected.has(n.id)}
+                              onChange={() => toggle(n.id)}
+                              aria-label="Select row"
+                            />
+                          )}
+                        </td>
+                        <td className="border-t border-[hsl(var(--border))] p-3 font-medium">{n.title || '—'}</td>
+                        <td className="border-t border-[hsl(var(--border))] p-3 text-[hsl(var(--muted))]">{preview(n.body)}</td>
+                        <td className="border-t border-[hsl(var(--border))] p-3">
+                          <div className="flex flex-wrap gap-2">
+                            <Badge>{kindLabel(n.kind)}</Badge>
+                            {signals.important ? <Badge>Important</Badge> : null}
+                            {signals.recent ? <Badge>Recent</Badge> : null}
+                            {signals.unread ? <Badge>Unread</Badge> : null}
+                          </div>
+                        </td>
+                        <td className="border-t border-[hsl(var(--border))] p-3">{fmtDate(n.created_at)}</td>
+                        <td className="border-t border-[hsl(var(--border))] p-3">
+                          {isSentView ? (
+                            <div className="text-xs">
+                              <div className="font-medium">{n.recipient_name || '—'}</div>
+                              {n.recipient_email ? <div className="text-[hsl(var(--muted))]">{n.recipient_email}</div> : null}
+                              {typeof n.recipient_count === 'number' ? (
+                                <div className="text-[hsl(var(--muted))]">
+                                  {n.recipient_count} recipient{n.recipient_count === 1 ? '' : 's'}
+                                </div>
+                              ) : null}
+                            </div>
+                          ) : n.read_at ? (
+                            <Badge className="bg-black text-white border-black">Read</Badge>
+                          ) : (
+                            <Badge>Unread</Badge>
+                          )}
+                        </td>
+                        <td className="border-t border-[hsl(var(--border))] p-3">
+                          <div className="flex flex-wrap gap-2">
+                            <Button variant="outline" size="sm" onClick={() => openItemAndRead(n)}>
+                              Open
+                            </Button>
+                            {!isSentView ? (
+                              n.read_at ? (
+                                <Button variant="outline" size="sm" onClick={async () => {
+                                  const ok = await markIds([n.id], 'unread')
+                                  if (ok) await load(page)
+                                }}>
+                                  Unread
+                                </Button>
+                              ) : (
+                                <Button variant="outline" size="sm" onClick={async () => {
+                                  const ok = await markIds([n.id], 'read')
+                                  if (ok) await load(page)
+                                }}>
+                                  Read
+                                </Button>
+                              )
+                            ) : null}
+                            {!isSentView ? (
+                              <Button variant="outline" size="sm" onClick={() => deleteOne(n.id)}>
+                                Delete
+                              </Button>
+                            ) : isAdmin ? (
+                              <Button variant="outline" size="sm" onClick={() => deleteSentOne(n)}>
+                                Delete
+                              </Button>
                             ) : null}
                           </div>
-                        ) : n.read_at ? (
-                          <Badge className="bg-black text-white border-black">Read</Badge>
-                        ) : (
-                          <Badge>Unread</Badge>
-                        )}
-                      </td>
-                      <td className="border-t border-[hsl(var(--border))] p-3">
-                        <div className="flex flex-wrap gap-2">
-                          <Button variant="outline" size="sm" onClick={() => openItemAndRead(n)}>
-                            Open
-                          </Button>
-                          {!isSentView ? (
-                            n.read_at ? (
-                              <Button variant="outline" size="sm" onClick={async () => {
-                                const ok = await markIds([n.id], 'unread')
-                                if (ok) await load(page)
-                              }}>
-                                Unread
-                              </Button>
-                            ) : (
-                              <Button variant="outline" size="sm" onClick={async () => {
-                                const ok = await markIds([n.id], 'read')
-                                if (ok) await load(page)
-                              }}>
-                                Read
-                              </Button>
-                            )
-                          ) : null}
-                          {!isSentView ? (
-                            <Button variant="outline" size="sm" onClick={() => deleteOne(n.id)}>
-                              Delete
-                            </Button>
-                          ) : isAdmin ? (
-                            <Button variant="outline" size="sm" onClick={() => deleteSentOne(n)}>
-                              Delete
-                            </Button>
-                          ) : null}
-                        </div>
-                      </td>
-                    </tr>
-                  ))
+                        </td>
+                      </tr>
+                    )
+                  })
                 )}
               </tbody>
             </table>
           </div>
 
           <div className="space-y-3 md:hidden">
-            {items.length === 0 ? (
+            {visibleItems.length === 0 ? (
               <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4 text-[hsl(var(--muted))]">
                 {isSentView ? 'No sent notifications.' : 'No inbox notifications.'}
               </div>
             ) : (
-              items.map((n) => (
-                <div key={n.id} className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4 shadow-soft">
-                  <div className="mb-2 flex items-start justify-between gap-2">
-                    <div>
-                      <div className="font-semibold">{n.title || '—'}</div>
-                      <div className="mt-1 text-xs text-[hsl(var(--muted))]">{fmtDate(n.created_at)}</div>
+              visibleItems.map((n) => {
+                const signals = rowSignals(n)
+                return (
+                  <div key={n.id} className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4 shadow-soft">
+                    <div className="mb-2 flex items-start justify-between gap-2">
+                      <div>
+                        <div className="font-semibold">{n.title || '—'}</div>
+                        <div className="mt-1 text-xs text-[hsl(var(--muted))]">{fmtDate(n.created_at)}</div>
+                      </div>
+                      {!isSentView && (
+                        <input type="checkbox" checked={selected.has(n.id)} onChange={() => toggle(n.id)} aria-label="Select" />
+                      )}
                     </div>
-                    {!isSentView && (
-                      <input type="checkbox" checked={selected.has(n.id)} onChange={() => toggle(n.id)} aria-label="Select" />
-                    )}
-                  </div>
 
-                  <div className="mb-2 text-sm text-[hsl(var(--muted))]">{preview(n.body, 140)}</div>
+                    <div className="mb-2 text-sm text-[hsl(var(--muted))]">{preview(n.body, 140)}</div>
 
-                  <div className="mb-3 flex flex-wrap items-center gap-2">
-                    <Badge>{kindLabel(n.kind)}</Badge>
-                    {!isSentView ? (
-                      n.read_at ? <Badge className="bg-black text-white border-black">Read</Badge> : <Badge>Unread</Badge>
-                    ) : null}
-                  </div>
-
-                  {isSentView ? (
-                    <div className="mb-3 text-sm text-[hsl(var(--muted))]">
-                      Recipient: <span className="font-medium text-black">{n.recipient_name || '—'}</span>
-                      {n.recipient_email ? ` · ${n.recipient_email}` : ''}
+                    <div className="mb-3 flex flex-wrap items-center gap-2">
+                      <Badge>{kindLabel(n.kind)}</Badge>
+                      {signals.important ? <Badge>Important</Badge> : null}
+                      {signals.recent ? <Badge>Recent</Badge> : null}
+                      {signals.unread ? <Badge>Unread</Badge> : null}
+                      {!isSentView && !signals.unread ? <Badge className="bg-black text-white border-black">Read</Badge> : null}
                     </div>
-                  ) : null}
 
-                  <div className="flex flex-wrap gap-2">
-                    <Button variant="outline" size="sm" onClick={() => openItemAndRead(n)}>
-                      Open
-                    </Button>
-                    {!isSentView ? (
-                      n.read_at ? (
-                        <Button variant="outline" size="sm" onClick={async () => {
-                          const ok = await markIds([n.id], 'unread')
-                          if (ok) await load(page)
-                        }}>
-                          Unread
-                        </Button>
-                      ) : (
-                        <Button variant="outline" size="sm" onClick={async () => {
-                          const ok = await markIds([n.id], 'read')
-                          if (ok) await load(page)
-                        }}>
-                          Read
-                        </Button>
-                      )
+                    {isSentView ? (
+                      <div className="mb-3 text-sm text-[hsl(var(--muted))]">
+                        Recipient: <span className="font-medium text-black">{n.recipient_name || '—'}</span>
+                        {n.recipient_email ? ` · ${n.recipient_email}` : ''}
+                      </div>
                     ) : null}
-                    {!isSentView ? (
-                      <Button variant="outline" size="sm" onClick={() => deleteOne(n.id)}>
-                        Delete
+
+                    <div className="flex flex-wrap gap-2">
+                      <Button variant="outline" size="sm" onClick={() => openItemAndRead(n)}>
+                        Open
                       </Button>
-                    ) : isAdmin ? (
-                      <Button variant="outline" size="sm" onClick={() => deleteSentOne(n)}>
-                        Delete
-                      </Button>
-                    ) : null}
+                      {!isSentView ? (
+                        n.read_at ? (
+                          <Button variant="outline" size="sm" onClick={async () => {
+                            const ok = await markIds([n.id], 'unread')
+                            if (ok) await load(page)
+                          }}>
+                            Unread
+                          </Button>
+                        ) : (
+                          <Button variant="outline" size="sm" onClick={async () => {
+                            const ok = await markIds([n.id], 'read')
+                            if (ok) await load(page)
+                          }}>
+                            Read
+                          </Button>
+                        )
+                      ) : null}
+                      {!isSentView ? (
+                        <Button variant="outline" size="sm" onClick={() => deleteOne(n.id)}>
+                          Delete
+                        </Button>
+                      ) : isAdmin ? (
+                        <Button variant="outline" size="sm" onClick={() => deleteSentOne(n)}>
+                          Delete
+                        </Button>
+                      ) : null}
+                    </div>
                   </div>
-                </div>
-              ))
+                )
+              })
             )}
           </div>
         </div>
