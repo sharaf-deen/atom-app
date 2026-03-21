@@ -7,7 +7,7 @@ import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { createSupabaseRSC } from '@/lib/supabaseServer'
 import { getSessionUser } from '@/lib/session'
-import { canAccessAdminDashboard } from '@/lib/rbac'
+import { getSupabaseAdminClientCached } from '@/lib/requestCache'
 import PageHeader from '@/components/layout/PageHeader'
 import Section from '@/components/layout/Section'
 import Forbidden from '@/components/Forbidden'
@@ -16,6 +16,7 @@ import Button from '@/components/ui/Button'
 import AdminExports from '@/components/AdminExports'
 import AdminRevenue from '@/components/AdminRevenue'
 import { addDays, cairoToday, CAIRO_TZ } from '@/lib/cairoDate'
+import { MessageSquare, ShieldAlert, ShieldCheck, Wallet, UserCog } from 'lucide-react'
 
 function fmtMoneyEGP(v: any) {
   const n = Number(v ?? 0)
@@ -25,6 +26,14 @@ function fmtMoneyEGP(v: any) {
   } catch {
     return `${n.toFixed(0)} EGP`
   }
+}
+
+function healthBadgeClass(status?: string | null) {
+  const value = String(status ?? '').toLowerCase()
+  if (value === 'healthy') return 'border-emerald-200 bg-emerald-50 text-emerald-700'
+  if (value === 'warning') return 'border-amber-200 bg-amber-50 text-amber-800'
+  if (value === 'critical') return 'border-rose-200 bg-rose-50 text-rose-700'
+  return 'border-[hsl(var(--border))] bg-[hsl(var(--bg))] text-[hsl(var(--muted))]'
 }
 
 function StatCard({
@@ -59,11 +68,43 @@ function StatCard({
   )
 }
 
+function TodayCard({
+  href,
+  label,
+  title,
+  hint,
+  icon,
+}: {
+  href: string
+  label: string
+  title: string
+  hint: string
+  icon: React.ReactNode
+}) {
+  return (
+    <Link
+      href={href}
+      className="group block rounded-3xl border border-[hsl(var(--border))] bg-white p-4 shadow-soft transition hover:-translate-y-0.5 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <div className="text-[11px] font-semibold uppercase tracking-wide text-[hsl(var(--muted))]">{label}</div>
+          <div className="mt-2 text-base font-semibold tracking-tight">{title}</div>
+          <div className="mt-1 text-sm text-[hsl(var(--muted))]">{hint}</div>
+        </div>
+        <span className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] text-black">
+          {icon}
+        </span>
+      </div>
+    </Link>
+  )
+}
+
 export default async function AdminPage() {
   const me = await getSessionUser()
   if (!me) redirect('/login?next=/admin')
 
-  const allowed = canAccessAdminDashboard(me.role)
+  const allowed = me.role === 'admin' || me.role === 'super_admin'
   if (!allowed) {
     return (
       <Forbidden
@@ -122,7 +163,28 @@ export default async function AdminPage() {
     // ignore
   }
 
+  let latestHealthStatus: string | null = null
+  let latestHealthDate: string | null = null
+
+  try {
+    const admin = getSupabaseAdminClientCached()
+    const { data } = await admin
+      .from('system_health_reports')
+      .select('overall_status, created_at')
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle<{ overall_status: string | null; created_at: string | null }>()
+
+    latestHealthStatus = data?.overall_status ?? null
+    latestHealthDate = data?.created_at ?? null
+  } catch {
+    // ignore
+  }
+
   const scansToday = scansRes?.count ?? 0
+  const latestHealthLabel = latestHealthStatus
+    ? `${latestHealthStatus.charAt(0).toUpperCase()}${latestHealthStatus.slice(1)}`
+    : 'Not run yet'
 
   return (
     <main>
@@ -136,9 +198,6 @@ export default async function AdminPage() {
             </Button>
             <Button asChild variant="outline" href="/members">
               Members
-            </Button>
-            <Button asChild variant="outline" href="/admin/crm">
-              CRM
             </Button>
           </div>
         }
@@ -174,19 +233,62 @@ export default async function AdminPage() {
       </Section>
 
       <Section className="space-y-4">
+        <h2 className="text-lg font-semibold">Today priorities</h2>
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+          <TodayCard
+            href="/admin/crm"
+            label="Follow-up queue"
+            title="Open CRM"
+            hint="Work through renewals, dues and low-attendance cases."
+            icon={<MessageSquare size={18} strokeWidth={2.1} />}
+          />
+          <TodayCard
+            href="/admin/health-monitor"
+            label="System health"
+            title={latestHealthLabel}
+            hint={latestHealthDate ? `Latest report saved ${new Date(latestHealthDate).toLocaleDateString('en-GB')}.` : 'Open Health Monitor to run or review the latest status.'}
+            icon={
+              latestHealthStatus === 'healthy' ? (
+                <ShieldCheck size={18} strokeWidth={2.1} />
+              ) : (
+                <ShieldAlert size={18} strokeWidth={2.1} />
+              )
+            }
+          />
+          <TodayCard
+            href="/admin/payments"
+            label="Finance"
+            title={outstandingCount > 0 ? fmtMoneyEGP(outstandingTotal) : 'Payments look clear'}
+            hint={outstandingCount > 0 ? `${outstandingCount} member(s) still have dues to settle.` : 'Move into Payments and Cash Report when you need the detailed view.'}
+            icon={<Wallet size={18} strokeWidth={2.1} />}
+          />
+          <TodayCard
+            href={me.role === 'super_admin' ? '/admin/permissions-audit' : '/admin/personal-funds'}
+            label={me.role === 'super_admin' ? 'Control' : 'Review'}
+            title={me.role === 'super_admin' ? 'Permissions audit' : 'Personal funds'}
+            hint={me.role === 'super_admin' ? 'Review who can access what in one place.' : 'Review partner advances, reimbursements and attached proof.'}
+            icon={<UserCog size={18} strokeWidth={2.1} />}
+          />
+        </div>
+      </Section>
+
+      <Section className="space-y-4">
         <h2 className="text-lg font-semibold">Quick actions</h2>
         <div className="flex flex-wrap gap-2">
+          <Button asChild variant="outline" href="/admin/crm">
+            CRM
+          </Button>
           <Button asChild variant="outline" href="/admin/expiring-soon">
             Expiring
           </Button>
           <Button asChild variant="outline" href="/admin/outstanding-dues">
             Outstanding
           </Button>
-          <Button asChild variant="outline" href="/admin/crm">
-            CRM
-          </Button>
           <Button asChild variant="outline" href="/admin/payments">
             Payments
+          </Button>
+          <Button asChild variant="outline" href="/admin/cash-report">
+            Cash report
           </Button>
           <Button asChild variant="outline" href="/expenses">
             Expenses
@@ -200,9 +302,11 @@ export default async function AdminPage() {
           <Button asChild variant="outline" href="/admin/health-monitor">
             Health Monitor
           </Button>
-          <Button asChild variant="outline" href="/admin/permissions-audit">
-            Permissions Audit
-          </Button>
+          {me.role === 'super_admin' ? (
+            <Button asChild variant="outline" href="/admin/permissions-audit">
+              Permissions Audit
+            </Button>
+          ) : null}
         </div>
 
         <div className="grid gap-4 lg:grid-cols-2">
@@ -210,11 +314,17 @@ export default async function AdminPage() {
           <AdminExports />
         </div>
 
-        <div className="text-xs text-[hsl(var(--muted))]">
-          <Link href="/" className="underline">
-            Back to home
-          </Link>
-        </div>
+        <Card>
+          <CardContent className="flex flex-wrap items-center gap-3 text-sm text-[hsl(var(--muted))]">
+            <span className={`inline-flex rounded-full border px-3 py-1 text-xs font-semibold ${healthBadgeClass(latestHealthStatus)}`}>
+              Health: {latestHealthLabel}
+            </span>
+            <span>CRM and finance shortcuts are surfaced first to reduce clicks during daily ops.</span>
+            <Link href="/" className="ml-auto underline">
+              Back to home
+            </Link>
+          </CardContent>
+        </Card>
       </Section>
     </main>
   )
