@@ -132,8 +132,8 @@ function StatusPill({ status }: { status: Status }) {
 
 function statusTitle(status: Status, paused: boolean) {
   if (status === 'checking') return 'Checking member'
-  if (status === 'ok') return 'Scan complete'
-  if (status === 'invalid') return 'Membership not valid'
+  if (status === 'ok') return 'Decision ready'
+  if (status === 'invalid') return 'Check desk'
   if (status === 'error') return 'Scanner needs attention'
   if (paused) return 'Scanner paused'
   return 'Ready to scan'
@@ -413,7 +413,7 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className }: 
           sp.set('repeatSeconds', String(Math.max(1, Math.round(repeatAgeMs / 1000))))
           if (kioskMode) sp.set('kiosk', '1')
           setStatus('ok')
-          setMsg('Same member scanned again — showing the latest result.')
+          setMsg('Same member scanned again — reusing the latest entrance decision and presence context.')
           router.push(`/scan/result?${sp.toString()}`)
           didNavigate = true
           return
@@ -656,7 +656,7 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className }: 
                 {kioskMode ? <Badge>Kiosk</Badge> : null}
               </div>
               <p className="mt-1 text-sm text-[hsl(var(--muted))]">
-                Fast front-desk scanning with full-screen mode, kiosk mode, repeat-scan guardrails and automatic result pages.
+                Fast front-desk scanning with full-screen mode, kiosk mode, repeat-scan guardrails, presence context and clear entrance decision cues.
               </p>
             </div>
 
@@ -680,7 +680,7 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className }: 
             />
             <ActionChip
               icon={online ? <ShieldCheck size={16} strokeWidth={2.1} /> : <WifiOff size={16} strokeWidth={2.1} />}
-              label={online ? (kioskMode ? 'Auto-return after each result' : 'Internet connected') : 'Internet required'}
+              label={online ? (kioskMode ? 'Auto-return + decision cues' : 'Decision cues ready') : 'Internet required'}
             />
           </div>
 
@@ -754,10 +754,11 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className }: 
               </div>
 
               <div className="rounded-3xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] p-4">
-                <div className="text-sm font-semibold tracking-tight">Scan tips</div>
+                <div className="text-sm font-semibold tracking-tight">Desk decision tips</div>
                 <ul className="mt-2 space-y-2 text-sm text-[hsl(var(--muted))]">
                   <li>Keep only one QR code in the frame.</li>
                   <li>Use the back camera for faster detection.</li>
+                  <li>Use the result page cue first: Let in, Check desk or Open profile.</li>
                   <li>Tap Rescan after any blocked or invalid attempt.</li>
                   <li>Use kiosk mode for the academy entrance.</li>
                   <li>Kiosk mode returns automatically to the next scan after the result page.</li>
@@ -767,7 +768,7 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className }: 
           </div>
 
           <div className="text-sm text-[hsl(var(--muted))]">
-            The scanner will validate the member and redirect automatically to a result page with the next action.
+            The scanner validates the member and opens a result page with a stronger entrance decision cue for the desk.
           </div>
         </div>
       </CardContent>
