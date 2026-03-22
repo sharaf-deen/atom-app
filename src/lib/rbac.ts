@@ -47,12 +47,14 @@ const APP_NAV_BY_ROLE: MenuByRole = {
     { label: 'Contact Admin', href: '/contact', icon: 'user-cog' },
   ],
   assistant_coach: [
+    { label: 'Training Useful', href: '/training-useful', icon: 'dashboard' },
     { label: 'Notifications', href: '/notifications', icon: 'bell' },
     { label: 'Schedule', href: '/schedule', icon: 'calendar' },
     { label: 'My Profile', href: '/profile', icon: 'id' },
     { label: 'Packages & Promos', href: '/packages-and-promos', icon: 'gift' },
   ],
   coach: [
+    { label: 'Training Useful', href: '/training-useful', icon: 'dashboard' },
     { label: 'Notifications', href: '/notifications', icon: 'bell' },
     { label: 'Schedule', href: '/schedule', icon: 'calendar' },
     { label: 'My Profile', href: '/profile', icon: 'id' },
@@ -225,6 +227,10 @@ export function canAccessPersonalFunds(role: Role | null | undefined) {
 
 export function canAccessCoaches(role: Role | null | undefined) {
   return hasAnyRole(role, ADMIN_ROLES)
+}
+
+export function canAccessTrainingUseful(role: Role | null | undefined) {
+  return hasAnyRole(role, ['coach', 'assistant_coach', 'admin', 'super_admin'])
 }
 
 export function canManageCoaches(role: Role | null | undefined) {
@@ -403,6 +409,14 @@ const CAPABILITY_BLUEPRINTS: CapabilityBlueprint[] = [
     description: 'Perform coach management actions reserved for super admins.',
     href: '/coaches',
     check: (role) => canManageCoaches(role),
+  },
+  {
+    key: 'training_useful',
+    category: 'Core',
+    label: 'Training useful hub',
+    description: 'Open the coach-facing hub with QR, schedule, staff updates and member lookup shortcuts.',
+    href: '/training-useful',
+    check: (role) => canAccessTrainingUseful(role),
   },
   {
     key: 'roles_manage',
