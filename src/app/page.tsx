@@ -477,13 +477,13 @@ function buildStaffPriorities(role: 'coach' | 'assistant_coach', unreadCount: nu
       tone: unreadCount > 0 ? 'warning' : 'neutral',
     },
     {
-      href: role === 'coach' ? '/members' : '/schedule',
+      href: '/training-useful',
       eyebrow: role === 'coach' ? 'Lookup today' : 'Training useful',
-      title: role === 'coach' ? 'Open member lookup' : 'Open the schedule',
+      title: role === 'coach' ? 'Open training hub' : 'Open training hub',
       desc:
         role === 'coach'
-          ? 'Search a member quickly with read-only access when you need to help on the mat.'
-          : 'Keep the day moving with fast access to your schedule and staff shortcuts.',
+          ? 'Open your training hub for read-only member lookup, staff updates and quick schedule access.'
+          : 'Open your training hub for schedule, QR access and useful staff shortcuts.',
       icon: role === 'coach' ? UserRoundSearch : CalendarDays,
       tone: 'neutral',
     },
@@ -501,14 +501,11 @@ function buildStaffPriorities(role: 'coach' | 'assistant_coach', unreadCount: nu
 function buildReceptionPriorities(ops: OpsKpis): PriorityItem[] {
   return [
     {
-      href: '/reception',
-      eyebrow: 'Front desk now',
-      title: 'Open the front desk center',
-      desc:
-        ops.scansToday > 0
-          ? `${ops.scansToday} scan(s) recorded today. Use the command center for the next actions.`
-          : 'No scan recorded yet today. Start from the front desk center and keep the queue moving.',
-      icon: LayoutDashboard,
+      href: '/scan',
+      eyebrow: 'Entrance flow',
+      title: ops.scansToday > 0 ? `${ops.scansToday} scan(s) today` : 'Open scan now',
+      desc: ops.scansToday > 0 ? 'Keep the entrance moving with the scan and kiosk flow.' : 'No scan recorded yet today. Start with the scanner.',
+      icon: ScanLine,
       tone: ops.scansToday > 0 ? 'success' : 'warning',
     },
     {
@@ -689,7 +686,7 @@ function HeroCard({
     member: 'Everything important at a glance: membership, QR code and useful updates.',
     coach: 'Fast access to your staff tools, QR code and a read-only member lookup.',
     assistant_coach: 'Fast access to your staff tools, QR code and useful updates.',
-    reception: 'Built for quick actions at the front desk: scan, member creation, follow-up queues and a live command center.',
+    reception: 'Built for quick actions at the front desk: scan, member creation and daily queues.',
     admin: 'Daily operations first: members, finance, reporting and control.',
     super_admin: 'Full operational overview with direct access to all critical areas.',
   }
@@ -813,8 +810,9 @@ function memberActions(): QuickAction[] {
   ]
 }
 
-function coachActions(): QuickAction[] {
+function coachActions(role: 'coach' | 'assistant_coach'): QuickAction[] {
   return [
+    { href: '/training-useful', label: 'Training useful', desc: 'Open your coach hub for today\'s training-floor shortcuts.', icon: LayoutDashboard },
     { href: '/profile', label: 'My profile', desc: 'Identity, QR code and personal info.', icon: IdCard },
     { href: '/schedule', label: 'Schedule', desc: 'Open the latest class schedule.', icon: CalendarDays },
     { href: '/notifications', label: 'Notifications', desc: 'Read the latest staff updates.', icon: Bell },
@@ -824,7 +822,6 @@ function coachActions(): QuickAction[] {
 
 function receptionActions(): QuickAction[] {
   return [
-    { href: '/reception', label: 'Front desk center', desc: "Open today's command center for scan, renewals and follow-up.", icon: LayoutDashboard },
     { href: '/scan', label: 'Scan', desc: 'Fast attendance and QR validation.', icon: ScanLine },
     { href: '/kiosk', label: 'Create member', desc: 'Open the front-desk member creation flow.', icon: IdCard },
     { href: '/members', label: 'Members', desc: 'Search and manage members quickly.', icon: Users },
@@ -838,7 +835,6 @@ function receptionActions(): QuickAction[] {
 function adminActions(role: 'admin' | 'super_admin'): QuickAction[] {
   const base: QuickAction[] = [
     { href: '/admin', label: 'Dashboard', desc: 'Operational KPIs and admin overview.', icon: LayoutDashboard },
-    { href: '/reception', label: 'Front desk center', desc: 'Open the live desk command center used at reception.', icon: LayoutDashboard },
     { href: '/admin/crm', label: 'CRM queue', desc: 'Review follow-ups and daily contact priorities.', icon: MessageSquare },
     { href: '/scan', label: 'Scan', desc: 'QR check-in and validation flow.', icon: ScanLine },
     { href: '/members', label: 'Members', desc: 'Open the members workspace.', icon: Users },
@@ -982,19 +978,20 @@ export default async function HomePage() {
               />
               <SummaryCard
                 label="Role focus"
-                value={user.role === 'coach' ? 'Read-only member view' : 'Fast field access'}
+                value={user.role === 'coach' ? 'Open training hub' : 'Training useful hub'}
                 hint={
                   user.role === 'coach'
-                    ? 'Coach lookup opens a limited member profile with no financial or private contact data.'
-                    : 'Your home is optimized for QR, schedule, profile and useful staff shortcuts.'
+                    ? 'Your training hub keeps read-only member lookup, QR and staff shortcuts in one place.'
+                    : 'Your training hub keeps QR, schedule, notifications and useful field shortcuts together.'
                 }
+                href="/training-useful"
               />
             </div>
 
             <QuickActions
               title="Staff quick actions"
               subtitle="Shortcuts built for training-floor usage on phone or tablet."
-              items={coachActions()}
+              items={coachActions(user.role)}
             />
 
             {user.role === 'coach' ? (
