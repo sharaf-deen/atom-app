@@ -254,6 +254,32 @@ function proofBadge(entry: Pick<EntryRow, 'receipt_path' | 'receipt_filename' | 
   )
 }
 
+function proofCell(entry: Pick<EntryRow, 'id' | 'receipt_path' | 'receipt_filename' | 'receipt_size_bytes'>) {
+  if (!entry.receipt_path) return proofBadge(entry)
+
+  return (
+    <div className="space-y-2">
+      {proofBadge(entry)}
+      <div className="flex flex-wrap items-center gap-2">
+        <a
+          href={`/api/admin/personal-funds/${entry.id}/receipt`}
+          target="_blank"
+          rel="noreferrer"
+          className={actionLinkClass()}
+        >
+          View
+        </a>
+        <a
+          href={`/api/admin/personal-funds/${entry.id}/receipt?download=1`}
+          className={actionLinkClass()}
+        >
+          Download
+        </a>
+      </div>
+    </div>
+  )
+}
+
 async function addPersonAction(formData: FormData) {
   'use server'
 
@@ -715,13 +741,10 @@ export default async function PersonalFundsPage({
   const tableColumns = [
     { key: 'date', header: 'Date' },
     { key: 'person', header: 'Person' },
-    { key: 'type', header: 'Type' },
-    { key: 'cash', header: 'Cash effect' },
-    { key: 'impact', header: 'Balance impact' },
+    { key: 'details', header: 'Details' },
     { key: 'amount', header: 'Amount' },
-    { key: 'method', header: 'Method', hideOnMobile: true },
     { key: 'proof', header: 'Proof' },
-    { key: 'note', header: 'Note' },
+    { key: 'note', header: 'Note', hideOnMobile: true },
     { key: 'created', header: 'Recorded', hideOnMobile: true },
     { key: 'actions', header: '' },
   ]
@@ -730,16 +753,28 @@ export default async function PersonalFundsPage({
     id: entry.id,
     date: entry.entry_date,
     person: personById.get(entry.person_id)?.label ?? 'Unknown person',
-    type: kindBadge(entry.kind),
-    cash: cashEffectBadge(entry.kind),
-    impact: balanceImpact(entry.kind, Number(entry.amount ?? 0)),
-    amount: formatEGP(Number(entry.amount ?? 0)),
-    method: paymentLabel(entry.payment_method),
-    proof: proofBadge(entry),
+    details: (
+      <div className="space-y-2">
+        <div className="flex flex-wrap items-center gap-2">
+          {kindBadge(entry.kind)}
+          {cashEffectBadge(entry.kind)}
+        </div>
+        <div className="text-sm text-[hsl(var(--muted))]">
+          {paymentLabel(entry.payment_method)}
+        </div>
+      </div>
+    ),
+    amount: (
+      <div className="space-y-2">
+        <div className="font-medium">{formatEGP(Number(entry.amount ?? 0))}</div>
+        <div>{balanceImpact(entry.kind, Number(entry.amount ?? 0))}</div>
+      </div>
+    ),
+    proof: proofCell(entry),
     note: entry.note || '—',
     created: new Date(entry.created_at).toLocaleString('en-GB', { timeZone: 'Africa/Cairo' }),
     actions: (
-      <div className="flex flex-wrap items-center justify-end gap-2">
+      <div className="flex min-w-[9.5rem] flex-wrap items-center justify-end gap-2">
         <Link
           prefetch={false}
           href={`/admin/personal-funds?${buildQS({ ...returnParams, edit: entry.id })}`}
@@ -747,24 +782,6 @@ export default async function PersonalFundsPage({
         >
           {editEntry?.id === entry.id ? 'Editing' : 'Edit'}
         </Link>
-        {entry.receipt_path ? (
-          <>
-            <a
-              href={`/api/admin/personal-funds/${entry.id}/receipt`}
-              target="_blank"
-              rel="noreferrer"
-              className={actionLinkClass()}
-            >
-              View
-            </a>
-            <a
-              href={`/api/admin/personal-funds/${entry.id}/receipt?download=1`}
-              className={actionLinkClass()}
-            >
-              Download
-            </a>
-          </>
-        ) : null}
         <form action={deleteEntryAction}>
           <input type="hidden" name="id" value={entry.id} />
           <input type="hidden" name="return_qs" value={returnQS} />
@@ -1020,7 +1037,7 @@ export default async function PersonalFundsPage({
               <form action={addPersonAction} className="flex flex-col gap-3 sm:flex-row sm:items-end">
                 <input type="hidden" name="return_qs" value={returnQS} />
                 <div className="min-w-0 flex-1">
-                  <Input name="label" placeholder="e.g. Sharaf Deen" />
+                  <Input name="label" placeholder="e.g. Shawki" />
                 </div>
                 <Button type="submit">Add person</Button>
               </form>
