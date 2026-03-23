@@ -546,6 +546,19 @@ function TinyBadge({ children, tone = 'neutral' }: { children: ReactNode; tone?:
   return <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold ${badgeToneClass(tone)}`}>{children}</span>
 }
 
+function DetailsEditor({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <details className="group mt-3 rounded-2xl border border-[hsl(var(--border))] bg-white">
+      <summary className="flex cursor-pointer list-none items-center justify-between gap-3 rounded-2xl px-4 py-3 text-sm font-medium text-black marker:content-none">
+        <span>{label}</span>
+        <span className="text-xs text-[hsl(var(--muted))] group-open:hidden">Open</span>
+        <span className="hidden text-xs text-[hsl(var(--muted))] group-open:inline">Close</span>
+      </summary>
+      <div className="border-t border-[hsl(var(--border))] p-4">{children}</div>
+    </details>
+  )
+}
+
 export default async function AthleteProfileSection({ memberUserId, targetRole, viewerRole, isSelf, age, nextPath }: Props) {
   const adminDb = createSupabaseAdminClient()
   const sessionDb = createSupabaseRSC()
@@ -668,202 +681,214 @@ export default async function AthleteProfileSection({ memberUserId, targetRole, 
 
       {canEdit ? (
         <div className="mt-4 grid gap-4 xl:grid-cols-3">
-          <form action={saveTrainingProfileAction} className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4 shadow-soft">
+          <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4 shadow-soft">
             <div className="flex items-center justify-between gap-3">
               <div>
-                <h3 className="text-sm font-semibold tracking-tight">Update program</h3>
+                <h3 className="text-sm font-semibold tracking-tight">Program tools</h3>
                 <p className="mt-1 text-xs text-[hsl(var(--muted))]">Head coach and super admin only.</p>
               </div>
               <TinyBadge tone="warning">Editable</TinyBadge>
             </div>
-            <input type="hidden" name="memberUserId" value={memberUserId} />
-            <input type="hidden" name="targetRole" value={targetRole ?? 'member'} />
-            <input type="hidden" name="nextPath" value={nextPath} />
-            <label className="mt-4 block text-sm">
-              <span className="mb-2 block text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Program level</span>
-              <select
-                name="program_level"
-                defaultValue={training?.program_level ?? 'beginner'}
-                className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none transition focus:border-black"
-              >
-                {PROGRAM_OPTIONS.map((option) => (
-                  <option key={option} value={option}>{titleCase(option)}</option>
-                ))}
-              </select>
-            </label>
-            <div className="mt-4 flex flex-wrap gap-2">
-              <button
-                type="submit"
-                className="inline-flex items-center justify-center gap-2 rounded-2xl border border-black bg-black px-4 py-2 text-sm font-medium text-white transition hover:opacity-90"
-              >
-                <Save size={14} />
-                Save program
-              </button>
-              {training ? (
+            <DetailsEditor label={training ? 'Edit program' : 'Add program'}>
+              <form action={saveTrainingProfileAction} className="grid gap-3">
+                <input type="hidden" name="memberUserId" value={memberUserId} />
+                <input type="hidden" name="targetRole" value={targetRole ?? 'member'} />
+                <input type="hidden" name="nextPath" value={nextPath} />
+                <label className="block text-sm">
+                  <span className="mb-2 block text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Program level</span>
+                  <select
+                    name="program_level"
+                    defaultValue={training?.program_level ?? 'beginner'}
+                    className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none transition focus:border-black"
+                  >
+                    {PROGRAM_OPTIONS.map((option) => (
+                      <option key={option} value={option}>{titleCase(option)}</option>
+                    ))}
+                  </select>
+                </label>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="submit"
+                    className="inline-flex items-center justify-center gap-2 rounded-2xl border border-black bg-black px-4 py-2 text-sm font-medium text-white transition hover:opacity-90"
+                  >
+                    <Save size={14} />
+                    Save program
+                  </button>
+                  {training ? (
+                    <button
+                      type="submit"
+                      formAction={deleteTrainingProfileAction}
+                      className="inline-flex items-center justify-center gap-2 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-2 text-sm font-medium text-rose-700 transition hover:bg-rose-100"
+                    >
+                      <Trash2 size={14} />
+                      Remove program
+                    </button>
+                  ) : null}
+                </div>
+              </form>
+            </DetailsEditor>
+          </div>
+
+          <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4 shadow-soft">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <h3 className="text-sm font-semibold tracking-tight">Belt tools</h3>
+                <p className="mt-1 text-xs text-[hsl(var(--muted))]">New promotions stay collapsed until you choose to add one.</p>
+              </div>
+              <TinyBadge tone="warning">Editable</TinyBadge>
+            </div>
+            <DetailsEditor label="Add belt promotion">
+              <form action={addBeltPromotionAction} className="grid gap-3">
+                <input type="hidden" name="memberUserId" value={memberUserId} />
+                <input type="hidden" name="targetRole" value={targetRole ?? 'member'} />
+                <input type="hidden" name="nextPath" value={nextPath} />
+
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <label className="block text-sm">
+                    <span className="mb-2 block text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Belt</span>
+                    <select
+                      name="belt_code"
+                      defaultValue={beltChoices[0]}
+                      className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none transition focus:border-black"
+                    >
+                      {beltChoices.map((belt) => (
+                        <option key={belt} value={belt}>{beltLabel(belt)}</option>
+                      ))}
+                    </select>
+                  </label>
+
+                  <label className="block text-sm">
+                    <span className="mb-2 block text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Promotion date</span>
+                    <input
+                      type="date"
+                      name="promoted_at"
+                      defaultValue={new Date().toISOString().slice(0, 10)}
+                      className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none transition focus:border-black"
+                    />
+                  </label>
+                </div>
+
+                <label className="block text-sm">
+                  <span className="mb-2 block text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Attestation note</span>
+                  <textarea
+                    name="notes"
+                    rows={3}
+                    placeholder="Optional note"
+                    className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none transition focus:border-black"
+                  />
+                </label>
+
+                <label className="block text-sm">
+                  <span className="mb-2 block text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Certificate file</span>
+                  <input
+                    type="file"
+                    name="certificate"
+                    accept=".pdf,image/jpeg,image/png,image/webp"
+                    className="block w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm"
+                  />
+                  <span className="mt-2 block text-xs text-[hsl(var(--muted))]">PDF, JPG, PNG, or WEBP · max 8MB</span>
+                </label>
+
                 <button
                   type="submit"
-                  formAction={deleteTrainingProfileAction}
-                  className="inline-flex items-center justify-center gap-2 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-2 text-sm font-medium text-rose-700 transition hover:bg-rose-100"
+                  className="inline-flex items-center justify-center gap-2 rounded-2xl border border-black bg-black px-4 py-2 text-sm font-medium text-white transition hover:opacity-90"
                 >
-                  <Trash2 size={14} />
-                  Remove program
+                  <Upload size={14} />
+                  Save promotion
                 </button>
-              ) : null}
-            </div>
-          </form>
+              </form>
+            </DetailsEditor>
+          </div>
 
-          <form action={addBeltPromotionAction} className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4 shadow-soft">
+          <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4 shadow-soft">
             <div className="flex items-center justify-between gap-3">
               <div>
-                <h3 className="text-sm font-semibold tracking-tight">Add belt promotion</h3>
-                <p className="mt-1 text-xs text-[hsl(var(--muted))]">Creates a new promotion entry in the history.</p>
+                <h3 className="text-sm font-semibold tracking-tight">Competition tools</h3>
+                <p className="mt-1 text-xs text-[hsl(var(--muted))]">New results stay collapsed until you choose to add one.</p>
               </div>
               <TinyBadge tone="warning">Editable</TinyBadge>
             </div>
-            <input type="hidden" name="memberUserId" value={memberUserId} />
-            <input type="hidden" name="targetRole" value={targetRole ?? 'member'} />
-            <input type="hidden" name="nextPath" value={nextPath} />
+            <DetailsEditor label="Add competition result">
+              <form action={saveCompetitionResultAction} className="grid gap-3">
+                <input type="hidden" name="memberUserId" value={memberUserId} />
+                <input type="hidden" name="targetRole" value={targetRole ?? 'member'} />
+                <input type="hidden" name="nextPath" value={nextPath} />
 
-            <div className="mt-4 grid gap-3 sm:grid-cols-2">
-              <label className="block text-sm">
-                <span className="mb-2 block text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Belt</span>
-                <select
-                  name="belt_code"
-                  defaultValue={beltChoices[0]}
-                  className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none transition focus:border-black"
+                <label className="block text-sm">
+                  <span className="mb-2 block text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Competition name</span>
+                  <input
+                    type="text"
+                    name="competition_name"
+                    placeholder="AJP Cairo Open"
+                    className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none transition focus:border-black"
+                  />
+                </label>
+
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <label className="block text-sm">
+                    <span className="mb-2 block text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Competition date</span>
+                    <input
+                      type="date"
+                      name="competition_date"
+                      defaultValue={new Date().toISOString().slice(0, 10)}
+                      className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none transition focus:border-black"
+                    />
+                  </label>
+                  <label className="block text-sm">
+                    <span className="mb-2 block text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Result</span>
+                    <select
+                      name="result"
+                      defaultValue="gold"
+                      className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none transition focus:border-black"
+                    >
+                      {RESULT_OPTIONS.map((option) => (
+                        <option key={option} value={option}>{resultLabel(option)}</option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <label className="block text-sm">
+                    <span className="mb-2 block text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Division</span>
+                    <input
+                      type="text"
+                      name="division"
+                      placeholder="Gi / NoGi / Teens"
+                      className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none transition focus:border-black"
+                    />
+                  </label>
+                  <label className="block text-sm">
+                    <span className="mb-2 block text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Category</span>
+                    <input
+                      type="text"
+                      name="category"
+                      placeholder="-42kg / Kids 3"
+                      className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none transition focus:border-black"
+                    />
+                  </label>
+                </div>
+
+                <label className="block text-sm">
+                  <span className="mb-2 block text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Note</span>
+                  <textarea
+                    name="notes"
+                    rows={3}
+                    placeholder="Optional note"
+                    className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none transition focus:border-black"
+                  />
+                </label>
+
+                <button
+                  type="submit"
+                  className="inline-flex items-center justify-center gap-2 rounded-2xl border border-black bg-black px-4 py-2 text-sm font-medium text-white transition hover:opacity-90"
                 >
-                  {beltChoices.map((belt) => (
-                    <option key={belt} value={belt}>{beltLabel(belt)}</option>
-                  ))}
-                </select>
-              </label>
-
-              <label className="block text-sm">
-                <span className="mb-2 block text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Promotion date</span>
-                <input
-                  type="date"
-                  name="promoted_at"
-                  defaultValue={new Date().toISOString().slice(0, 10)}
-                  className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none transition focus:border-black"
-                />
-              </label>
-            </div>
-
-            <label className="mt-3 block text-sm">
-              <span className="mb-2 block text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Attestation note</span>
-              <textarea
-                name="notes"
-                rows={3}
-                placeholder="Optional note"
-                className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none transition focus:border-black"
-              />
-            </label>
-
-            <label className="mt-3 block text-sm">
-              <span className="mb-2 block text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Certificate file</span>
-              <input
-                type="file"
-                name="certificate"
-                accept=".pdf,image/jpeg,image/png,image/webp"
-                className="block w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm"
-              />
-              <span className="mt-2 block text-xs text-[hsl(var(--muted))]">PDF, JPG, PNG, or WEBP · max 8MB</span>
-            </label>
-
-            <button
-              type="submit"
-              className="mt-4 inline-flex items-center justify-center gap-2 rounded-2xl border border-black bg-black px-4 py-2 text-sm font-medium text-white transition hover:opacity-90"
-            >
-              <Upload size={14} />
-              Save promotion
-            </button>
-          </form>
-
-          <form action={saveCompetitionResultAction} className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4 shadow-soft">
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <h3 className="text-sm font-semibold tracking-tight">Add competition result</h3>
-                <p className="mt-1 text-xs text-[hsl(var(--muted))]">Add a new podium or competition result.</p>
-              </div>
-              <TinyBadge tone="warning">Editable</TinyBadge>
-            </div>
-            <input type="hidden" name="memberUserId" value={memberUserId} />
-            <input type="hidden" name="targetRole" value={targetRole ?? 'member'} />
-            <input type="hidden" name="nextPath" value={nextPath} />
-
-            <label className="mt-4 block text-sm">
-              <span className="mb-2 block text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Competition name</span>
-              <input
-                type="text"
-                name="competition_name"
-                placeholder="AJP Cairo Open"
-                className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none transition focus:border-black"
-              />
-            </label>
-
-            <div className="mt-3 grid gap-3 sm:grid-cols-2">
-              <label className="block text-sm">
-                <span className="mb-2 block text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Competition date</span>
-                <input
-                  type="date"
-                  name="competition_date"
-                  defaultValue={new Date().toISOString().slice(0, 10)}
-                  className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none transition focus:border-black"
-                />
-              </label>
-              <label className="block text-sm">
-                <span className="mb-2 block text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Result</span>
-                <select
-                  name="result"
-                  defaultValue="gold"
-                  className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none transition focus:border-black"
-                >
-                  {RESULT_OPTIONS.map((option) => (
-                    <option key={option} value={option}>{resultLabel(option)}</option>
-                  ))}
-                </select>
-              </label>
-            </div>
-
-            <div className="mt-3 grid gap-3 sm:grid-cols-2">
-              <label className="block text-sm">
-                <span className="mb-2 block text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Division</span>
-                <input
-                  type="text"
-                  name="division"
-                  placeholder="Gi / NoGi / Teens"
-                  className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none transition focus:border-black"
-                />
-              </label>
-              <label className="block text-sm">
-                <span className="mb-2 block text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Category</span>
-                <input
-                  type="text"
-                  name="category"
-                  placeholder="-42kg / Kids 3"
-                  className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none transition focus:border-black"
-                />
-              </label>
-            </div>
-
-            <label className="mt-3 block text-sm">
-              <span className="mb-2 block text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Note</span>
-              <textarea
-                name="notes"
-                rows={3}
-                placeholder="Optional note"
-                className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none transition focus:border-black"
-              />
-            </label>
-
-            <button
-              type="submit"
-              className="mt-4 inline-flex items-center justify-center gap-2 rounded-2xl border border-black bg-black px-4 py-2 text-sm font-medium text-white transition hover:opacity-90"
-            >
-              <Trophy size={14} />
-              Save result
-            </button>
-          </form>
+                  <Trophy size={14} />
+                  Save result
+                </button>
+              </form>
+            </DetailsEditor>
+          </div>
         </div>
       ) : null}
 
@@ -884,135 +909,111 @@ export default async function AthleteProfileSection({ memberUserId, targetRole, 
                 const certificateUrl = certificateUrlById.get(row.id) ?? null
                 return (
                   <div key={row.id} className="rounded-2xl border border-[hsl(var(--border))] bg-white/70 p-4">
-                    {canEdit ? (
-                      <form action={saveBeltPromotionAction} className="grid gap-3">
-                        <input type="hidden" name="memberUserId" value={memberUserId} />
-                        <input type="hidden" name="targetRole" value={targetRole ?? 'member'} />
-                        <input type="hidden" name="nextPath" value={nextPath} />
-                        <input type="hidden" name="beltPromotionId" value={row.id} />
-
-                        <div className="flex flex-wrap items-center gap-2">
-                          {index === 0 ? <TinyBadge tone="success">Current</TinyBadge> : null}
-                          <TinyBadge>{beltLabel(row.belt_code)}</TinyBadge>
-                          <TinyBadge>{fmtDate(row.promoted_at)}</TinyBadge>
-                          {row.updated_at ? <TinyBadge>Updated {fmtDate(row.updated_at)}</TinyBadge> : null}
-                          {row.certificate_path ? <TinyBadge tone="warning">Certificate attached</TinyBadge> : null}
-                        </div>
-
-                        <div className="grid gap-3 sm:grid-cols-2">
-                          <label className="block text-sm">
-                            <span className="mb-2 block text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Belt</span>
-                            <select
-                              name="belt_code"
-                              defaultValue={row.belt_code}
-                              className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none transition focus:border-black"
+                    <>
+                      <div className="flex flex-wrap items-center gap-2">
+                        {index === 0 ? <TinyBadge tone="success">Current</TinyBadge> : null}
+                        <TinyBadge>{beltLabel(row.belt_code)}</TinyBadge>
+                        <TinyBadge>{fmtDate(row.promoted_at)}</TinyBadge>
+                        {row.updated_at ? <TinyBadge>Updated {fmtDate(row.updated_at)}</TinyBadge> : null}
+                        {row.certificate_path ? <TinyBadge tone="warning">Certificate attached</TinyBadge> : null}
+                      </div>
+                      {row.notes ? <p className="mt-3 text-sm text-[hsl(var(--muted))]">{row.notes}</p> : null}
+                      {row.certificate_path ? (
+                        <div className="mt-3 flex flex-wrap items-center gap-3 text-sm">
+                          {certificateUrl ? (
+                            <a
+                              href={certificateUrl}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="inline-flex items-center justify-center rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-1.5 shadow-soft transition hover:bg-[hsl(var(--bg))]"
                             >
-                              {beltChoices.map((belt) => (
-                                <option key={belt} value={belt}>{beltLabel(belt)}</option>
-                              ))}
-                            </select>
-                          </label>
-                          <label className="block text-sm">
-                            <span className="mb-2 block text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Promotion date</span>
-                            <input
-                              type="date"
-                              name="promoted_at"
-                              defaultValue={row.promoted_at}
-                              className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none transition focus:border-black"
-                            />
-                          </label>
+                              View certificate
+                            </a>
+                          ) : null}
+                          <span className="break-all text-[hsl(var(--muted))]">
+                            {row.certificate_filename || 'certificate'}{row.certificate_size_bytes ? ` · ${formatBytes(row.certificate_size_bytes)}` : ''}
+                          </span>
                         </div>
+                      ) : null}
+                      {canEdit ? (
+                        <DetailsEditor label="Edit belt entry">
+                          <form action={saveBeltPromotionAction} className="grid gap-3">
+                            <input type="hidden" name="memberUserId" value={memberUserId} />
+                            <input type="hidden" name="targetRole" value={targetRole ?? 'member'} />
+                            <input type="hidden" name="nextPath" value={nextPath} />
+                            <input type="hidden" name="beltPromotionId" value={row.id} />
 
-                        <label className="block text-sm">
-                          <span className="mb-2 block text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Attestation note</span>
-                          <textarea
-                            name="notes"
-                            rows={2}
-                            defaultValue={row.notes ?? ''}
-                            className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none transition focus:border-black"
-                          />
-                        </label>
+                            <div className="grid gap-3 sm:grid-cols-2">
+                              <label className="block text-sm">
+                                <span className="mb-2 block text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Belt</span>
+                                <select
+                                  name="belt_code"
+                                  defaultValue={row.belt_code}
+                                  className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none transition focus:border-black"
+                                >
+                                  {beltChoices.map((belt) => (
+                                    <option key={belt} value={belt}>{beltLabel(belt)}</option>
+                                  ))}
+                                </select>
+                              </label>
+                              <label className="block text-sm">
+                                <span className="mb-2 block text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Promotion date</span>
+                                <input
+                                  type="date"
+                                  name="promoted_at"
+                                  defaultValue={row.promoted_at}
+                                  className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none transition focus:border-black"
+                                />
+                              </label>
+                            </div>
 
-                        <label className="block text-sm">
-                          <span className="mb-2 block text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Replace certificate</span>
-                          <input
-                            type="file"
-                            name="certificate"
-                            accept=".pdf,image/jpeg,image/png,image/webp"
-                            className="block w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm"
-                          />
-                          <span className="mt-2 block text-xs text-[hsl(var(--muted))]">Leave empty to keep the current file.</span>
-                        </label>
+                            <label className="block text-sm">
+                              <span className="mb-2 block text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Attestation note</span>
+                              <textarea
+                                name="notes"
+                                rows={2}
+                                defaultValue={row.notes ?? ''}
+                                className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none transition focus:border-black"
+                              />
+                            </label>
 
-                        {row.certificate_path ? (
-                          <div className="flex flex-wrap items-center gap-3 text-sm">
-                            {certificateUrl ? (
-                              <a
-                                href={certificateUrl}
-                                target="_blank"
-                                rel="noreferrer"
-                                className="inline-flex items-center justify-center rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-1.5 shadow-soft transition hover:bg-[hsl(var(--bg))]"
-                              >
-                                View certificate
-                              </a>
-                            ) : null}
-                            <span className="break-all text-[hsl(var(--muted))]">
-                              {row.certificate_filename || 'certificate'}{row.certificate_size_bytes ? ` · ${formatBytes(row.certificate_size_bytes)}` : ''}
-                            </span>
-                          </div>
-                        ) : null}
+                            <label className="block text-sm">
+                              <span className="mb-2 block text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Replace certificate</span>
+                              <input
+                                type="file"
+                                name="certificate"
+                                accept=".pdf,image/jpeg,image/png,image/webp"
+                                className="block w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm"
+                              />
+                              <span className="mt-2 block text-xs text-[hsl(var(--muted))]">Leave empty to keep the current file.</span>
+                            </label>
 
-                        <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
-                          <div className="flex flex-wrap gap-2 text-xs text-[hsl(var(--muted))]">
-                            {row.created_at ? <TinyBadge>Created {fmtDate(row.created_at)}</TinyBadge> : null}
-                          </div>
-                          <div className="flex flex-wrap gap-2">
-                            <button
-                              type="submit"
-                              className="inline-flex items-center justify-center gap-2 rounded-2xl border border-black bg-black px-4 py-2 text-sm font-medium text-white transition hover:opacity-90"
-                            >
-                              <Save size={14} />
-                              Save
-                            </button>
-                            <button
-                              type="submit"
-                              formAction={deleteBeltPromotionAction}
-                              className="inline-flex items-center justify-center gap-2 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-2 text-sm font-medium text-rose-700 transition hover:bg-rose-100"
-                            >
-                              <Trash2 size={14} />
-                              Remove
-                            </button>
-                          </div>
-                        </div>
-                      </form>
-                    ) : (
-                      <>
-                        <div className="flex flex-wrap items-center gap-2">
-                          {index === 0 ? <TinyBadge tone="success">Current</TinyBadge> : null}
-                          <TinyBadge>{beltLabel(row.belt_code)}</TinyBadge>
-                          <TinyBadge>{fmtDate(row.promoted_at)}</TinyBadge>
-                          {row.certificate_path ? <TinyBadge tone="warning">Certificate attached</TinyBadge> : null}
-                        </div>
-                        {row.notes ? <p className="mt-3 text-sm text-[hsl(var(--muted))]">{row.notes}</p> : null}
-                        {row.certificate_path ? (
-                          <div className="mt-3 flex flex-wrap items-center gap-3 text-sm">
-                            {certificateUrl ? (
-                              <a
-                                href={certificateUrl}
-                                target="_blank"
-                                rel="noreferrer"
-                                className="inline-flex items-center justify-center rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-1.5 shadow-soft transition hover:bg-[hsl(var(--bg))]"
-                              >
-                                View certificate
-                              </a>
-                            ) : null}
-                            <span className="break-all text-[hsl(var(--muted))]">
-                              {row.certificate_filename || 'certificate'}{row.certificate_size_bytes ? ` · ${formatBytes(row.certificate_size_bytes)}` : ''}
-                            </span>
-                          </div>
-                        ) : null}
-                      </>
-                    )}
+                            <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
+                              <div className="flex flex-wrap gap-2 text-xs text-[hsl(var(--muted))]">
+                                {row.created_at ? <TinyBadge>Created {fmtDate(row.created_at)}</TinyBadge> : null}
+                              </div>
+                              <div className="flex flex-wrap gap-2">
+                                <button
+                                  type="submit"
+                                  className="inline-flex items-center justify-center gap-2 rounded-2xl border border-black bg-black px-4 py-2 text-sm font-medium text-white transition hover:opacity-90"
+                                >
+                                  <Save size={14} />
+                                  Save
+                                </button>
+                                <button
+                                  type="submit"
+                                  formAction={deleteBeltPromotionAction}
+                                  className="inline-flex items-center justify-center gap-2 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-2 text-sm font-medium text-rose-700 transition hover:bg-rose-100"
+                                >
+                                  <Trash2 size={14} />
+                                  Remove
+                                </button>
+                              </div>
+                            </div>
+                          </form>
+                        </DetailsEditor>
+                      ) : null}
+                    </>
                   </div>
                 )
               })}
@@ -1034,114 +1035,109 @@ export default async function AthleteProfileSection({ memberUserId, targetRole, 
             <div className="mt-4 grid gap-3">
               {competitionRows.map((row) => (
                 <div key={row.id} className="rounded-2xl border border-[hsl(var(--border))] bg-white/70 p-4">
-                  {canEdit ? (
-                    <form action={saveCompetitionResultAction} className="grid gap-3">
-                      <input type="hidden" name="memberUserId" value={memberUserId} />
-                      <input type="hidden" name="targetRole" value={targetRole ?? 'member'} />
-                      <input type="hidden" name="nextPath" value={nextPath} />
-                      <input type="hidden" name="resultId" value={row.id} />
+                  <>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <TinyBadge>{resultLabel(row.result)}</TinyBadge>
+                      <TinyBadge>{fmtDate(row.competition_date)}</TinyBadge>
+                      {row.division ? <TinyBadge>{row.division}</TinyBadge> : null}
+                      {row.category ? <TinyBadge>{row.category}</TinyBadge> : null}
+                      {row.updated_at ? <TinyBadge>Updated {fmtDate(row.updated_at)}</TinyBadge> : null}
+                    </div>
+                    <div className="mt-3 text-sm font-medium">{row.competition_name}</div>
+                    {row.notes ? <p className="mt-2 text-sm text-[hsl(var(--muted))]">{row.notes}</p> : null}
+                    {canEdit ? (
+                      <DetailsEditor label="Edit result">
+                        <form action={saveCompetitionResultAction} className="grid gap-3">
+                          <input type="hidden" name="memberUserId" value={memberUserId} />
+                          <input type="hidden" name="targetRole" value={targetRole ?? 'member'} />
+                          <input type="hidden" name="nextPath" value={nextPath} />
+                          <input type="hidden" name="resultId" value={row.id} />
 
-                      <div className="grid gap-3 sm:grid-cols-2">
-                        <label className="block text-sm">
-                          <span className="mb-2 block text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Competition name</span>
-                          <input
-                            type="text"
-                            name="competition_name"
-                            defaultValue={row.competition_name}
-                            className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none transition focus:border-black"
-                          />
-                        </label>
-                        <label className="block text-sm">
-                          <span className="mb-2 block text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Competition date</span>
-                          <input
-                            type="date"
-                            name="competition_date"
-                            defaultValue={row.competition_date}
-                            className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none transition focus:border-black"
-                          />
-                        </label>
-                      </div>
+                          <div className="grid gap-3 sm:grid-cols-2">
+                            <label className="block text-sm">
+                              <span className="mb-2 block text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Competition name</span>
+                              <input
+                                type="text"
+                                name="competition_name"
+                                defaultValue={row.competition_name}
+                                className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none transition focus:border-black"
+                              />
+                            </label>
+                            <label className="block text-sm">
+                              <span className="mb-2 block text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Competition date</span>
+                              <input
+                                type="date"
+                                name="competition_date"
+                                defaultValue={row.competition_date}
+                                className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none transition focus:border-black"
+                              />
+                            </label>
+                          </div>
 
-                      <div className="grid gap-3 sm:grid-cols-3">
-                        <label className="block text-sm">
-                          <span className="mb-2 block text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Result</span>
-                          <select
-                            name="result"
-                            defaultValue={row.result}
-                            className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none transition focus:border-black"
-                          >
-                            {RESULT_OPTIONS.map((option) => (
-                              <option key={option} value={option}>{resultLabel(option)}</option>
-                            ))}
-                          </select>
-                        </label>
-                        <label className="block text-sm">
-                          <span className="mb-2 block text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Division</span>
-                          <input
-                            type="text"
-                            name="division"
-                            defaultValue={row.division ?? ''}
-                            className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none transition focus:border-black"
-                          />
-                        </label>
-                        <label className="block text-sm">
-                          <span className="mb-2 block text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Category</span>
-                          <input
-                            type="text"
-                            name="category"
-                            defaultValue={row.category ?? ''}
-                            className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none transition focus:border-black"
-                          />
-                        </label>
-                      </div>
+                          <div className="grid gap-3 sm:grid-cols-3">
+                            <label className="block text-sm">
+                              <span className="mb-2 block text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Result</span>
+                              <select
+                                name="result"
+                                defaultValue={row.result}
+                                className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none transition focus:border-black"
+                              >
+                                {RESULT_OPTIONS.map((option) => (
+                                  <option key={option} value={option}>{resultLabel(option)}</option>
+                                ))}
+                              </select>
+                            </label>
+                            <label className="block text-sm">
+                              <span className="mb-2 block text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Division</span>
+                              <input
+                                type="text"
+                                name="division"
+                                defaultValue={row.division ?? ''}
+                                className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none transition focus:border-black"
+                              />
+                            </label>
+                            <label className="block text-sm">
+                              <span className="mb-2 block text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Category</span>
+                              <input
+                                type="text"
+                                name="category"
+                                defaultValue={row.category ?? ''}
+                                className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none transition focus:border-black"
+                              />
+                            </label>
+                          </div>
 
-                      <label className="block text-sm">
-                        <span className="mb-2 block text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Note</span>
-                        <textarea
-                          name="notes"
-                          rows={2}
-                          defaultValue={row.notes ?? ''}
-                          className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none transition focus:border-black"
-                        />
-                      </label>
+                          <label className="block text-sm">
+                            <span className="mb-2 block text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Note</span>
+                            <textarea
+                              name="notes"
+                              rows={2}
+                              defaultValue={row.notes ?? ''}
+                              className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none transition focus:border-black"
+                            />
+                          </label>
 
-                      <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
-                        <div className="flex flex-wrap gap-2 text-xs text-[hsl(var(--muted))]">
-                          <TinyBadge>{resultLabel(row.result)}</TinyBadge>
-                          <TinyBadge>{fmtDate(row.competition_date)}</TinyBadge>
-                          {row.updated_at ? <TinyBadge>Updated {fmtDate(row.updated_at)}</TinyBadge> : null}
-                        </div>
-                        <div className="flex flex-wrap gap-2">
-                          <button
-                            type="submit"
-                            className="inline-flex items-center justify-center gap-2 rounded-2xl border border-black bg-black px-4 py-2 text-sm font-medium text-white transition hover:opacity-90"
-                          >
-                            <Save size={14} />
-                            Save
-                          </button>
-                          <button
-                            type="submit"
-                            formAction={deleteCompetitionResultAction}
-                            className="inline-flex items-center justify-center gap-2 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-2 text-sm font-medium text-rose-700 transition hover:bg-rose-100"
-                          >
-                            <Trash2 size={14} />
-                            Remove
-                          </button>
-                        </div>
-                      </div>
-                    </form>
-                  ) : (
-                    <>
-                      <div className="flex flex-wrap items-center gap-2">
-                        <TinyBadge>{resultLabel(row.result)}</TinyBadge>
-                        <TinyBadge>{fmtDate(row.competition_date)}</TinyBadge>
-                        {row.division ? <TinyBadge>{row.division}</TinyBadge> : null}
-                        {row.category ? <TinyBadge>{row.category}</TinyBadge> : null}
-                      </div>
-                      <div className="mt-3 text-sm font-medium">{row.competition_name}</div>
-                      {row.notes ? <p className="mt-2 text-sm text-[hsl(var(--muted))]">{row.notes}</p> : null}
-                    </>
-                  )}
+                          <div className="flex flex-wrap gap-2">
+                            <button
+                              type="submit"
+                              className="inline-flex items-center justify-center gap-2 rounded-2xl border border-black bg-black px-4 py-2 text-sm font-medium text-white transition hover:opacity-90"
+                            >
+                              <Save size={14} />
+                              Save
+                            </button>
+                            <button
+                              type="submit"
+                              formAction={deleteCompetitionResultAction}
+                              className="inline-flex items-center justify-center gap-2 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-2 text-sm font-medium text-rose-700 transition hover:bg-rose-100"
+                            >
+                              <Trash2 size={14} />
+                              Remove
+                            </button>
+                          </div>
+                        </form>
+                      </DetailsEditor>
+                    ) : null}
+                  </>
                 </div>
               ))}
             </div>
