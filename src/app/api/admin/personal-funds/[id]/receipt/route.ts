@@ -55,17 +55,6 @@ export async function GET(req: Request, ctx: { params: { id: string } }) {
     const filename = entry.receipt_filename || 'receipt'
     const wantDownload = new URL(req.url).searchParams.get('download') === '1'
 
-    if (!wantDownload) {
-      const signed = await admin.storage.from('personal-fund-receipts').createSignedUrl(entry.receipt_path, 60)
-      if (signed.error || !signed.data?.signedUrl) {
-        return json(404, { ok: false, error: 'RECEIPT_NOT_FOUND', details: signed.error?.message })
-      }
-
-      const res = NextResponse.redirect(signed.data.signedUrl, 302)
-      res.headers.set('Cache-Control', 'no-store')
-      return res
-    }
-
     const dl = await admin.storage.from('personal-fund-receipts').download(entry.receipt_path)
     if (dl.error || !dl.data) {
       return json(404, { ok: false, error: 'RECEIPT_NOT_FOUND', details: dl.error?.message })
@@ -73,12 +62,13 @@ export async function GET(req: Request, ctx: { params: { id: string } }) {
 
     const ab = await dl.data.arrayBuffer()
     const mime = entry.receipt_mime || (dl.data as any)?.type || 'application/octet-stream'
+    const disposition = wantDownload ? 'attachment' : 'inline'
 
     return new NextResponse(ab, {
       status: 200,
       headers: {
         'Content-Type': mime,
-        'Content-Disposition': `attachment; filename="${filename}"`,
+        'Content-Disposition': `${disposition}; filename="${filename}"`,
         'Cache-Control': 'no-store',
       },
     })

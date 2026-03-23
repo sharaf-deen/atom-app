@@ -12,7 +12,6 @@ import Button from '@/components/ui/Button'
 import Input from '@/components/ui/Input'
 import Select from '@/components/ui/Select'
 import InlineAlert from '@/components/ui/InlineAlert'
-import { Table } from '@/components/ui/Table'
 import { getSessionUserCached, getSupabaseAdminClientCached } from '@/lib/requestCache'
 import { canAccessPersonalFunds } from '@/lib/rbac'
 
@@ -738,60 +737,80 @@ export default async function PersonalFundsPage({
   const editPersonLabel = editEntry ? personById.get(editEntry.person_id)?.label ?? 'Unknown person' : ''
   const editingInCurrentPage = editEntry ? entries.some((entry) => entry.id === editEntry?.id) : false
 
-  const tableColumns = [
-    { key: 'date', header: 'Date' },
-    { key: 'person', header: 'Person' },
-    { key: 'details', header: 'Details' },
-    { key: 'amount', header: 'Amount' },
-    { key: 'proof', header: 'Proof' },
-    { key: 'note', header: 'Note', hideOnMobile: true },
-    { key: 'created', header: 'Recorded', hideOnMobile: true },
-    { key: 'actions', header: '' },
-  ]
+  const entryCards = entries.map((entry) => {
+    const personLabel = personById.get(entry.person_id)?.label ?? 'Unknown person'
+    const createdLabel = new Date(entry.created_at).toLocaleString('en-GB', { timeZone: 'Africa/Cairo' })
+    const isEditing = editEntry?.id === entry.id
 
-  const tableRows = entries.map((entry) => ({
-    id: entry.id,
-    date: entry.entry_date,
-    person: personById.get(entry.person_id)?.label ?? 'Unknown person',
-    details: (
-      <div className="space-y-2">
-        <div className="flex flex-wrap items-center gap-2">
-          {kindBadge(entry.kind)}
-          {cashEffectBadge(entry.kind)}
+    return {
+      id: entry.id,
+      personLabel,
+      createdLabel,
+      isEditing,
+      node: (
+        <div key={entry.id} className="rounded-2xl border border-[hsl(var(--border))] bg-white p-4 shadow-soft">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="space-y-1">
+              <div className="text-xs text-[hsl(var(--muted))]">{entry.entry_date}</div>
+              <div className="text-base font-semibold">{personLabel}</div>
+              <div className="flex flex-wrap items-center gap-2">
+                {kindBadge(entry.kind)}
+                {cashEffectBadge(entry.kind)}
+              </div>
+            </div>
+            <div className="text-right">
+              <div className="text-xs text-[hsl(var(--muted))]">Amount</div>
+              <div className="text-lg font-semibold">{formatEGP(Number(entry.amount ?? 0))}</div>
+              <div className="mt-2">{balanceImpact(entry.kind, Number(entry.amount ?? 0))}</div>
+            </div>
+          </div>
+
+          <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+            <div className="space-y-3">
+              <div>
+                <div className="text-[11px] uppercase tracking-wide text-[hsl(var(--muted))]">Payment</div>
+                <div className="mt-1 text-sm">{paymentLabel(entry.payment_method)}</div>
+              </div>
+              <div>
+                <div className="text-[11px] uppercase tracking-wide text-[hsl(var(--muted))]">Note</div>
+                <div className="mt-1 text-sm break-words">{entry.note || '—'}</div>
+              </div>
+              <div>
+                <div className="text-[11px] uppercase tracking-wide text-[hsl(var(--muted))]">Recorded</div>
+                <div className="mt-1 text-sm">{createdLabel}</div>
+              </div>
+            </div>
+
+            <div className="space-y-3">
+              <div>
+                <div className="text-[11px] uppercase tracking-wide text-[hsl(var(--muted))]">Proof</div>
+                <div className="mt-1">{proofCell(entry)}</div>
+              </div>
+              <div>
+                <div className="text-[11px] uppercase tracking-wide text-[hsl(var(--muted))]">Actions</div>
+                <div className="mt-1 flex flex-wrap items-center gap-2">
+                  <Link
+                    prefetch={false}
+                    href={`/admin/personal-funds?${buildQS({ ...returnParams, edit: entry.id })}`}
+                    className={actionLinkClass()}
+                  >
+                    {isEditing ? 'Editing' : 'Edit'}
+                  </Link>
+                  <form action={deleteEntryAction}>
+                    <input type="hidden" name="id" value={entry.id} />
+                    <input type="hidden" name="return_qs" value={returnQS} />
+                    <Button variant="outline" size="sm" type="submit">
+                      Delete
+                    </Button>
+                  </form>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
-        <div className="text-sm text-[hsl(var(--muted))]">
-          {paymentLabel(entry.payment_method)}
-        </div>
-      </div>
-    ),
-    amount: (
-      <div className="space-y-2">
-        <div className="font-medium">{formatEGP(Number(entry.amount ?? 0))}</div>
-        <div>{balanceImpact(entry.kind, Number(entry.amount ?? 0))}</div>
-      </div>
-    ),
-    proof: proofCell(entry),
-    note: entry.note || '—',
-    created: new Date(entry.created_at).toLocaleString('en-GB', { timeZone: 'Africa/Cairo' }),
-    actions: (
-      <div className="flex min-w-[9.5rem] flex-wrap items-center justify-end gap-2">
-        <Link
-          prefetch={false}
-          href={`/admin/personal-funds?${buildQS({ ...returnParams, edit: entry.id })}`}
-          className={actionLinkClass()}
-        >
-          {editEntry?.id === entry.id ? 'Editing' : 'Edit'}
-        </Link>
-        <form action={deleteEntryAction}>
-          <input type="hidden" name="id" value={entry.id} />
-          <input type="hidden" name="return_qs" value={returnQS} />
-          <Button variant="outline" size="sm" type="submit">
-            Delete
-          </Button>
-        </form>
-      </div>
-    ),
-  }))
+      ),
+    }
+  })
 
   return (
     <main>
@@ -1154,7 +1173,13 @@ export default async function PersonalFundsPage({
               <div className="text-[hsl(var(--muted))]">Page {Math.min(page, totalPages)} of {totalPages}</div>
             </div>
 
-            <Table columns={tableColumns} rows={tableRows as any[]} keyField="id" stickyTopClassName="top-0" />
+            {entryCards.length === 0 ? (
+              <div className="rounded-2xl border border-dashed border-[hsl(var(--border))] px-4 py-5 text-sm text-[hsl(var(--muted))]">
+                No entries for the current filters.
+              </div>
+            ) : (
+              <div className="space-y-3">{entryCards.map((entry) => entry.node)}</div>
+            )}
 
             {totalPages > 1 ? (
               <div className="flex items-center justify-between gap-3 pt-2">
