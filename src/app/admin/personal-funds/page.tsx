@@ -947,7 +947,7 @@ export default async function PersonalFundsPage({
         <div className="grid gap-4 xl:grid-cols-[1.1fr_0.9fr]">
           <Card>
             <CardHeader>
-              <CardTitle>{editEntry ? 'Edit entry' : 'Add entry'}</CardTitle>
+              <CardTitle>Add entry</CardTitle>
             </CardHeader>
             <CardContent>
               {people.length === 0 ? (
@@ -956,75 +956,41 @@ export default async function PersonalFundsPage({
                 </InlineAlert>
               ) : null}
 
-              {editEntry ? (
-                <div className="mb-4 space-y-3">
-                  <InlineAlert variant="info" title="Editing stored entry">
-                    <div className="space-y-1">
-                      <div><strong>{editPersonLabel}</strong> · {kindLabel(editEntry.kind)} · {formatEGP(Number(editEntry.amount ?? 0))}</div>
-                      <div>Recorded on {new Date(editEntry.created_at).toLocaleString('en-GB', { timeZone: 'Africa/Cairo' })}.</div>
-                      {!editingInCurrentPage ? <div>This entry is loaded from storage and may be outside the current filtered page.</div> : null}
-                    </div>
-                  </InlineAlert>
-
-                  {editEntry.receipt_path ? (
-                    <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] px-4 py-3 text-sm">
-                      <div className="font-medium">Current receipt</div>
-                      <div className="mt-1 text-[hsl(var(--muted))] break-all">
-                        {editEntry.receipt_filename || 'receipt'}{editEntry.receipt_size_bytes ? ` · ${formatBytes(editEntry.receipt_size_bytes)}` : ''}
-                      </div>
-                      <div className="mt-3 flex flex-wrap items-center gap-2">
-                        <Link href={`/admin/personal-funds?${buildQS({ ...returnParams, page: String(page), edit: editEntry.id, preview: editEntry.id })}`} prefetch={false} className={actionLinkClass()}>
-                          View current receipt
-                        </Link>
-                        <a href={`/api/admin/personal-funds/${editEntry.id}/receipt?download=1`} className={actionLinkClass()}>
-                          Download
-                        </a>
-                      </div>
-                    </div>
-                  ) : (
-                    <InlineAlert variant="info" title="Current receipt">
-                      No receipt attached yet.
-                    </InlineAlert>
-                  )}
-                </div>
-              ) : null}
-
-              <form action={editEntry ? updateEntryAction : addEntryAction} className="space-y-4">
+              <form action={addEntryAction} className="space-y-4">
                 <input type="hidden" name="return_qs" value={returnQS} />
-                {editEntry ? <input type="hidden" name="id" value={editEntry.id} /> : null}
-
+                
                 <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-                  <Input label="Date" name="entry_date" type="date" defaultValue={editEntry?.entry_date ?? today} />
+                  <Input label="Date" name="entry_date" type="date" defaultValue={today} />
 
-                  <Select label="Person" name="person_id" defaultValue={editEntry?.person_id ?? ''} disabled={people.length === 0}>
+                  <Select label="Person" name="person_id" defaultValue={''} disabled={people.length === 0}>
                     <option value="">Choose person</option>
                     {people.map((person) => (
                       <option key={person.id} value={person.id}>{person.label}</option>
                     ))}
                   </Select>
 
-                  <Select label="Type" name="kind" defaultValue={editEntry?.kind ?? 'advance_to_gym'} disabled={people.length === 0}>
+                  <Select label="Type" name="kind" defaultValue={'advance_to_gym'} disabled={people.length === 0}>
                     <option value="advance_to_gym">Advance to gym</option>
                     <option value="expense_paid_personally">Expense paid personally</option>
                     <option value="reimbursement_from_gym">Reimbursement from gym</option>
                   </Select>
 
-                  <Input label="Amount (EGP)" name="amount" type="number" min="0.01" step="0.01" placeholder="0.00" defaultValue={editEntry ? String(editEntry.amount) : ''} disabled={people.length === 0} />
+                  <Input label="Amount (EGP)" name="amount" type="number" min="0.01" step="0.01" placeholder="0.00" defaultValue={''} disabled={people.length === 0} />
                 </div>
 
                 <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-                  <Select label="Payment method" name="payment_method" defaultValue={editEntry?.payment_method ?? 'cash'} disabled={people.length === 0}>
+                  <Select label="Payment method" name="payment_method" defaultValue={'cash'} disabled={people.length === 0}>
                     <option value="cash">Cash</option>
                     <option value="visa">Visa card</option>
                     <option value="instapay">Instapay</option>
                     <option value="bank_transfer">Bank transfer</option>
                   </Select>
                   <Input
-                    label={editEntry?.receipt_path ? 'Replace receipt / invoice' : 'Receipt / invoice'}
+                    label={'Receipt / invoice'}
                     name="receipt"
                     type="file"
                     accept=".pdf,image/jpeg,image/png,image/webp"
-                    hint={editEntry?.receipt_path ? 'Optional. Upload a new file to replace the current private receipt. Max 8MB.' : 'Optional proof. Accepted: PDF, JPG, PNG, WEBP. Max 8MB.'}
+                    hint={'Optional proof. Accepted: PDF, JPG, PNG, WEBP. Max 8MB.'}
                     disabled={people.length === 0}
                     className="file:mr-3 file:rounded-xl file:border-0 file:bg-black file:px-3 file:py-2 file:text-sm file:font-medium file:text-white"
                   />
@@ -1034,19 +1000,12 @@ export default async function PersonalFundsPage({
                   <div><strong className="text-[hsl(var(--fg))]">Cash Report effect:</strong> Advance to gym = cash in, Reimbursement from gym = cash out, Expense paid personally = off-cash until reimbursed.</div>
                 </div>
 
-                {editEntry?.receipt_path ? (
-                  <label className="flex items-start gap-2 rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] px-3 py-2 text-sm">
-                    <input type="checkbox" name="remove_receipt" value="1" className="mt-0.5" />
-                    <span>Remove current receipt if you do not upload a replacement.</span>
-                  </label>
-                ) : null}
-
-                <label className="block">
+                                <label className="block">
                   <span className="mb-1 block text-sm font-medium">Note</span>
                   <textarea
                     name="note"
                     rows={3}
-                    defaultValue={editEntry?.note ?? ''}
+                    defaultValue={''}
                     placeholder="Optional details: what was paid, partial reimbursement, reference..."
                     className="w-full rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm placeholder:text-[hsl(var(--muted))] outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-[hsl(var(--bg))]"
                     disabled={people.length === 0}
@@ -1054,12 +1013,7 @@ export default async function PersonalFundsPage({
                 </label>
 
                 <div className="flex flex-wrap items-center gap-2">
-                  <Button type="submit" disabled={people.length === 0}>{editEntry ? 'Save changes' : 'Add entry'}</Button>
-                  {editEntry ? (
-                    <Button asChild variant="outline" href={`/admin/personal-funds?${returnQS}`}>
-                      Cancel edit
-                    </Button>
-                  ) : null}
+                  <Button type="submit" disabled={people.length === 0}>Add entry</Button>
                   <div className="text-xs text-[hsl(var(--muted))]">This V1.2 keeps Personal Funds isolated. Editing and receipt replacement do not change Cash Report yet.</div>
                 </div>
               </form>
@@ -1215,6 +1169,130 @@ export default async function PersonalFundsPage({
             ) : null}
           </CardContent>
         </Card>
+
+
+        {editEntry ? (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-3 sm:p-6">
+            <div className="max-h-[92vh] w-full max-w-3xl overflow-hidden rounded-3xl border border-[hsl(var(--border))] bg-white shadow-soft">
+              <div className="flex flex-wrap items-start justify-between gap-3 border-b border-[hsl(var(--border))] px-4 py-3 sm:px-6">
+                <div className="min-w-0">
+                  <div className="text-sm font-semibold">Edit entry</div>
+                  <div className="mt-1 text-sm text-[hsl(var(--muted))]">
+                    {editPersonLabel} · {kindLabel(editEntry.kind)} · {formatEGP(Number(editEntry.amount ?? 0))}
+                  </div>
+                  <div className="mt-1 text-xs text-[hsl(var(--muted))]">
+                    Recorded on {new Date(editEntry.created_at).toLocaleString('en-GB', { timeZone: 'Africa/Cairo' })}.
+                  </div>
+                  {!editingInCurrentPage ? (
+                    <div className="mt-1 text-xs text-[hsl(var(--muted))]">
+                      This entry is loaded from storage and may be outside the current filtered page.
+                    </div>
+                  ) : null}
+                </div>
+                <Link href={`/admin/personal-funds?${returnQS}`} prefetch={false} className={actionLinkClass()}>
+                  Close
+                </Link>
+              </div>
+
+              <div className="max-h-[calc(92vh-84px)] overflow-auto p-4 sm:p-6">
+                <form action={updateEntryAction} className="space-y-4">
+                  <input type="hidden" name="return_qs" value={returnQS} />
+                  <input type="hidden" name="id" value={editEntry.id} />
+
+                  {editEntry.receipt_path ? (
+                    <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] px-4 py-3 text-sm">
+                      <div className="font-medium">Current receipt</div>
+                      <div className="mt-1 text-[hsl(var(--muted))] break-all">
+                        {editEntry.receipt_filename || 'receipt'}{editEntry.receipt_size_bytes ? ` · ${formatBytes(editEntry.receipt_size_bytes)}` : ''}
+                      </div>
+                      <div className="mt-3 flex flex-wrap items-center gap-2">
+                        <Link href={`/admin/personal-funds?${buildQS({ ...returnParams, page: String(page), edit: editEntry.id, preview: editEntry.id })}`} prefetch={false} className={actionLinkClass()}>
+                          View current receipt
+                        </Link>
+                        <a href={`/api/admin/personal-funds/${editEntry.id}/receipt?download=1`} className={actionLinkClass()}>
+                          Download
+                        </a>
+                      </div>
+                    </div>
+                  ) : (
+                    <InlineAlert variant="info" title="Current receipt">
+                      No receipt attached yet.
+                    </InlineAlert>
+                  )}
+
+                  <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+                    <Input label="Date" name="entry_date" type="date" defaultValue={editEntry.entry_date} />
+
+                    <Select label="Person" name="person_id" defaultValue={editEntry.person_id} disabled={people.length === 0}>
+                      <option value="">Choose person</option>
+                      {people.map((person) => (
+                        <option key={person.id} value={person.id}>{person.label}</option>
+                      ))}
+                    </Select>
+
+                    <Select label="Type" name="kind" defaultValue={editEntry.kind} disabled={people.length === 0}>
+                      <option value="advance_to_gym">Advance to gym</option>
+                      <option value="expense_paid_personally">Expense paid personally</option>
+                      <option value="reimbursement_from_gym">Reimbursement from gym</option>
+                    </Select>
+
+                    <Input label="Amount (EGP)" name="amount" type="number" min="0.01" step="0.01" placeholder="0.00" defaultValue={String(editEntry.amount)} disabled={people.length === 0} />
+                  </div>
+
+                  <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+                    <Select label="Payment method" name="payment_method" defaultValue={editEntry.payment_method ?? 'cash'} disabled={people.length === 0}>
+                      <option value="cash">Cash</option>
+                      <option value="visa">Visa card</option>
+                      <option value="instapay">Instapay</option>
+                      <option value="bank_transfer">Bank transfer</option>
+                    </Select>
+                    <Input
+                      label={editEntry.receipt_path ? 'Replace receipt / invoice' : 'Receipt / invoice'}
+                      name="receipt"
+                      type="file"
+                      accept=".pdf,image/jpeg,image/png,image/webp"
+                      hint={editEntry.receipt_path ? 'Optional. Upload a new file to replace the current private receipt. Max 8MB.' : 'Optional proof. Accepted: PDF, JPG, PNG, WEBP. Max 8MB.'}
+                      disabled={people.length === 0}
+                      className="file:mr-3 file:rounded-xl file:border-0 file:bg-black file:px-3 file:py-2 file:text-sm file:font-medium file:text-white"
+                    />
+                  </div>
+
+                  <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] px-4 py-3 text-sm text-[hsl(var(--muted))]">
+                    <div><strong className="text-[hsl(var(--fg))]">Cash Report effect:</strong> Advance to gym = cash in, Reimbursement from gym = cash out, Expense paid personally = off-cash until reimbursed.</div>
+                  </div>
+
+                  {editEntry.receipt_path ? (
+                    <label className="flex items-start gap-2 rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] px-3 py-2 text-sm">
+                      <input type="checkbox" name="remove_receipt" value="1" className="mt-0.5" />
+                      <span>Remove current receipt if you do not upload a replacement.</span>
+                    </label>
+                  ) : null}
+
+                  <label className="block">
+                    <span className="mb-1 block text-sm font-medium">Note</span>
+                    <textarea
+                      name="note"
+                      rows={3}
+                      defaultValue={editEntry.note ?? ''}
+                      placeholder="Optional details: what was paid, partial reimbursement, reference..."
+                      className="w-full rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm placeholder:text-[hsl(var(--muted))] outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-[hsl(var(--bg))]"
+                      disabled={people.length === 0}
+                    />
+                  </label>
+
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Button type="submit" disabled={people.length === 0}>Save changes</Button>
+                    <Button asChild variant="outline" href={`/admin/personal-funds?${returnQS}`}>
+                      Cancel
+                    </Button>
+                    <div className="text-xs text-[hsl(var(--muted))]">Admins and super admins can edit any stored entry from this modal.</div>
+                  </div>
+                </form>
+              </div>
+            </div>
+          </div>
+        ) : null}
+
 
         {previewId ? (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-3 sm:p-6">
