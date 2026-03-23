@@ -10,7 +10,7 @@ const MAX_LIMIT = 200
 
 type Status = 'all' | 'active' | 'inactive'
 
-type Role = 'member' | 'assistant_coach' | 'coach' | 'reception' | 'admin' | 'super_admin'
+type Role = 'member' | 'champion' | 'vip' | 'assistant_coach' | 'coach' | 'head_coach' | 'reception' | 'admin' | 'super_admin'
 
 type MemberRow = {
   user_id: string
@@ -100,7 +100,8 @@ export async function GET(req: Request) {
         activeSet.add(mid)
       }
 
-      return items.map((i) => ({ ...i, is_active: activeSet.has(i.user_id) }))
+      const lifetimeRoles = new Set<Role>(['champion', 'vip'])
+      return items.map((i) => ({ ...i, is_active: lifetimeRoles.has((i.role ?? 'member') as Role) || activeSet.has(i.user_id) }))
     }
 
 
@@ -112,7 +113,7 @@ export async function GET(req: Request) {
           count: 'exact',
           head: false,
         })
-        .eq('role', 'member')
+        .in('role', ['member', 'champion', 'vip'])
         .order('created_at', { ascending: false })
         .range(from, to)
 
@@ -156,6 +157,15 @@ export async function GET(req: Request) {
       activeIds.add(mid)
     }
 
+    const { data: lifetimeProfiles } = await supabase
+      .from('profiles')
+      .select('user_id')
+      .in('role', ['champion', 'vip'])
+
+    for (const row of lifetimeProfiles ?? []) {
+      if ((row as any)?.user_id) activeIds.add((row as any).user_id as string)
+    }
+
     // ACTIVE list
     if (status === 'active') {
       const ids = Array.from(activeIds)
@@ -172,7 +182,7 @@ export async function GET(req: Request) {
           count: 'exact',
           head: false,
         })
-        .eq('role', 'member')
+        .in('role', ['member', 'champion', 'vip'])
         .in('user_id', ids)
         .order('created_at', { ascending: false })
         .range(from, to)
@@ -201,7 +211,7 @@ export async function GET(req: Request) {
     const { data: profiles, error: profilesError } = await supabase
       .from('profiles')
       .select('user_id, email, first_name, last_name, phone, role, created_at, member_id, date_of_birth')
-      .eq('role', 'member')
+      .in('role', ['member', 'champion', 'vip'])
       .order('created_at', { ascending: false })
 
     if (profilesError) {

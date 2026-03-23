@@ -5,6 +5,7 @@ export const revalidate = 0
 
 import { NextResponse } from 'next/server'
 import { createSupabaseServerActionClient } from '@/lib/supabaseServer'
+import { type Role, isRole, NOTIFICATION_MANAGER_ROLES, NOTIFICATION_RECIPIENT_ROLES } from '@/lib/rbac'
 import { createClient } from '@supabase/supabase-js'
 
 type Audience =
@@ -14,7 +15,14 @@ type Audience =
   | 'all_staff'
   | 'custom'
 
-const ALLOWED_RECIPIENT_ROLES = ['member', 'coach', 'assistant_coach'] as const
+const ALLOWED_RECIPIENT_ROLES = [...NOTIFICATION_RECIPIENT_ROLES] as const
+
+
+type SenderRole = (typeof NOTIFICATION_MANAGER_ROLES)[number]
+
+function isSenderRole(value: unknown): value is SenderRole {
+  return typeof value === 'string' && (NOTIFICATION_MANAGER_ROLES as readonly string[]).includes(value)
+}
 
 type Body = {
   title?: string
@@ -30,7 +38,6 @@ function noStore(res: NextResponse) {
   return res
 }
 
-const SENDER_ROLES = new Set(['admin', 'super_admin'])
 const ALLOWED_KINDS = new Set(['info', 'order_update', 'billing', 'promo'])
 
 function audienceLabel(audience: Audience) {
@@ -42,7 +49,7 @@ function audienceLabel(audience: Audience) {
     case 'all_assistant_coaches':
       return 'All assistant coaches'
     case 'all_staff':
-      return 'All coaches + assistants'
+      return 'All coaches + assistants + head coaches'
     default:
       return 'Custom targeting'
   }
@@ -67,7 +74,8 @@ export async function POST(req: Request) {
     if (meErr) {
       return noStore(NextResponse.json({ ok: false, error: 'PROFILE_LOOKUP_FAILED', details: meErr.message }, { status: 500 }))
     }
-    if (!me?.role || !SENDER_ROLES.has(me.role)) {
+    const myRole: Role | null = isRole(me?.role) ? me.role : null
+    if (!isSenderRole(myRole)) {
       return noStore(NextResponse.json({ ok: false, error: 'FORBIDDEN' }, { status: 403 }))
     }
 
@@ -102,13 +110,13 @@ export async function POST(req: Request) {
     }
 
     if (audience === 'all_members') {
-      await addFromRoles(['member'])
+      await addFromRoles(['member', 'champion', 'vip'])
     } else if (audience === 'all_coaches') {
       await addFromRoles(['coach'])
     } else if (audience === 'all_assistant_coaches') {
       await addFromRoles(['assistant_coach'])
     } else if (audience === 'all_staff') {
-      await addFromRoles(['coach', 'assistant_coach'])
+      await addFromRoles(['coach', 'assistant_coach', 'head_coach'])
     } else if (audience === 'custom') {
       const uniqueIds = Array.from(new Set((Array.isArray(b.user_ids) ? b.user_ids : []).map((s) => String(s).trim()).filter(Boolean)))
       requestedUserIds = uniqueIds.length
@@ -155,7 +163,7 @@ export async function POST(req: Request) {
             {
               ok: false,
               error: 'NO_ELIGIBLE_RECIPIENTS',
-              details: 'Only members, coaches, and assistant coaches can receive notifications from this screen.',
+              details: 'Only members, champions, VIPs, coaches, assistant coaches, and head coaches can receive notifications from this screen.',
               audience_label: audienceLabel(audience),
               eligible_roles: eligibleRoles,
               delivery_feedback: {

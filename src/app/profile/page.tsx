@@ -10,6 +10,7 @@ import ProfileIdPhoto from '@/components/ProfileIdPhoto'
 import type { Plan } from '@/components/SubscribeDialog'
 import { createSupabaseRSC } from '@/lib/supabaseServer'
 import { getSessionUser, type Role } from '@/lib/session'
+import { hasLifetimeGymAccess, isMemberLikeRole } from '@/lib/rbac'
 
 type ProfileRow = {
   user_id: string
@@ -145,7 +146,7 @@ export default async function ProfilePage() {
     .order('paid_at', { ascending: false })
     .limit(500)) as { data: SubRow[] | null }
 
-  const canManagePhoto = ['member', 'coach', 'assistant_coach'].includes(me.role)
+  const canManagePhoto = ['member', 'champion', 'vip', 'coach', 'assistant_coach', 'head_coach'].includes(me.role)
 
   return (
     <main>
@@ -191,6 +192,12 @@ export default async function ProfilePage() {
               <div>
                 <span className="text-[hsl(var(--muted))]">Role:</span> {p.role ?? 'member'}
               </div>
+              {(isMemberLikeRole(me.role) || hasLifetimeGymAccess(me.role)) ? (
+                <div>
+                  <span className="text-[hsl(var(--muted))]">Access:</span>{' '}
+                  {hasLifetimeGymAccess(me.role) ? 'Always active' : 'Membership-based'}
+                </div>
+              ) : null}
               {p.member_id ? (
                 <div>
                   <span className="text-[hsl(var(--muted))]">Member ID:</span> {p.member_id}

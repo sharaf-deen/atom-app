@@ -1,11 +1,15 @@
-export const APP_ROLES = ['member', 'assistant_coach', 'coach', 'reception', 'admin', 'super_admin'] as const
+export const APP_ROLES = ['member', 'champion', 'vip', 'assistant_coach', 'coach', 'head_coach', 'reception', 'admin', 'super_admin'] as const
 export type Role = (typeof APP_ROLES)[number]
 
-export const STAFF_ROLES = ['reception', 'assistant_coach', 'coach', 'admin', 'super_admin'] as const satisfies readonly Role[]
+export const MEMBER_LIKE_ROLES = ['member', 'champion', 'vip'] as const satisfies readonly Role[]
+export const STAFF_ROLES = ['reception', 'assistant_coach', 'coach', 'head_coach', 'admin', 'super_admin'] as const satisfies readonly Role[]
 export const FRONT_DESK_ROLES = ['reception', 'admin', 'super_admin'] as const satisfies readonly Role[]
 export const ADMIN_ROLES = ['admin', 'super_admin'] as const satisfies readonly Role[]
 export const SUPER_ADMIN_ROLES = ['super_admin'] as const satisfies readonly Role[]
-export const COACH_ROLES = ['coach', 'assistant_coach'] as const satisfies readonly Role[]
+export const COACH_ROLES = ['coach', 'assistant_coach', 'head_coach'] as const satisfies readonly Role[]
+export const LIFETIME_ACCESS_ROLES = ['assistant_coach', 'coach', 'head_coach', 'champion', 'vip'] as const satisfies readonly Role[]
+export const NOTIFICATION_MANAGER_ROLES = ['head_coach', 'admin', 'super_admin'] as const satisfies readonly Role[]
+export const NOTIFICATION_RECIPIENT_ROLES = ['member', 'champion', 'vip', 'assistant_coach', 'coach', 'head_coach'] as const satisfies readonly Role[]
 
 export type NavIconKey =
   | 'home'
@@ -46,6 +50,20 @@ const APP_NAV_BY_ROLE: MenuByRole = {
     { label: 'Packages & Promos', href: '/packages-and-promos', icon: 'gift' },
     { label: 'Contact Admin', href: '/contact', icon: 'user-cog' },
   ],
+  champion: [
+    { label: 'Notifications', href: '/notifications', icon: 'bell' },
+    { label: 'Schedule', href: '/schedule', icon: 'calendar' },
+    { label: 'My Profile', href: '/profile', icon: 'id' },
+    { label: 'Packages & Promos', href: '/packages-and-promos', icon: 'gift' },
+    { label: 'Contact Admin', href: '/contact', icon: 'user-cog' },
+  ],
+  vip: [
+    { label: 'Notifications', href: '/notifications', icon: 'bell' },
+    { label: 'Schedule', href: '/schedule', icon: 'calendar' },
+    { label: 'My Profile', href: '/profile', icon: 'id' },
+    { label: 'Packages & Promos', href: '/packages-and-promos', icon: 'gift' },
+    { label: 'Contact Admin', href: '/contact', icon: 'user-cog' },
+  ],
   assistant_coach: [
     { label: 'Training Useful', href: '/training-useful', icon: 'dashboard' },
     { label: 'Notifications', href: '/notifications', icon: 'bell' },
@@ -54,6 +72,13 @@ const APP_NAV_BY_ROLE: MenuByRole = {
     { label: 'Packages & Promos', href: '/packages-and-promos', icon: 'gift' },
   ],
   coach: [
+    { label: 'Training Useful', href: '/training-useful', icon: 'dashboard' },
+    { label: 'Notifications', href: '/notifications', icon: 'bell' },
+    { label: 'Schedule', href: '/schedule', icon: 'calendar' },
+    { label: 'My Profile', href: '/profile', icon: 'id' },
+    { label: 'Packages & Promos', href: '/packages-and-promos', icon: 'gift' },
+  ],
+  head_coach: [
     { label: 'Training Useful', href: '/training-useful', icon: 'dashboard' },
     { label: 'Notifications', href: '/notifications', icon: 'bell' },
     { label: 'Schedule', href: '/schedule', icon: 'calendar' },
@@ -137,6 +162,18 @@ export function hasAnyRole(role: Role | null | undefined, allowed: readonly Role
   return !!role && allowed.includes(role)
 }
 
+export function isMemberLikeRole(role: Role | null | undefined) {
+  return hasAnyRole(role, MEMBER_LIKE_ROLES)
+}
+
+export function hasLifetimeGymAccess(role: Role | null | undefined) {
+  return hasAnyRole(role, LIFETIME_ACCESS_ROLES)
+}
+
+export function hasVisibleNotificationInbox(role: Role | null | undefined) {
+  return hasAnyRole(role, NOTIFICATION_RECIPIENT_ROLES)
+}
+
 export function canAccessAdminDashboard(role: Role | null | undefined) {
   return hasAnyRole(role, ADMIN_ROLES)
 }
@@ -146,7 +183,7 @@ export function canAccessMembersList(role: Role | null | undefined) {
 }
 
 export function canOpenOtherMemberProfile(role: Role | null | undefined) {
-  return canAccessMembersList(role) || role === 'coach'
+  return canAccessMembersList(role) || role === 'coach' || role === 'head_coach'
 }
 
 export function canAccessCrm(role: Role | null | undefined) {
@@ -165,7 +202,7 @@ export function canAccessMemberProfile(
   const isSelf = !!args.viewerUserId && !!args.targetUserId && args.viewerUserId === args.targetUserId
   if (isSelf) return true
   if (canAccessMembersList(role)) return true
-  if (role === 'coach') return normalizeRole(args.targetRole ?? 'member') === 'member'
+  if (role === 'coach' || role === 'head_coach') return isMemberLikeRole(normalizeRole(args.targetRole ?? 'member'))
   return false
 }
 
@@ -230,7 +267,7 @@ export function canAccessCoaches(role: Role | null | undefined) {
 }
 
 export function canAccessTrainingUseful(role: Role | null | undefined) {
-  return hasAnyRole(role, ['coach', 'assistant_coach', 'admin', 'super_admin'])
+  return hasAnyRole(role, ['coach', 'assistant_coach', 'head_coach', 'admin', 'super_admin'])
 }
 
 export function canManageCoaches(role: Role | null | undefined) {
@@ -250,7 +287,7 @@ export function canAccessNotifications(role: Role | null | undefined) {
 }
 
 export function canManageNotifications(role: Role | null | undefined) {
-  return hasAnyRole(role, ADMIN_ROLES)
+  return hasAnyRole(role, NOTIFICATION_MANAGER_ROLES)
 }
 
 export function canAccessInvoices(role: Role | null | undefined) {
@@ -493,10 +530,16 @@ export function allowedRolesLabel(roles: readonly Role[]) {
 
 export function roleLabel(role: Role | null | undefined) {
   switch (role) {
+    case 'champion':
+      return 'Champion'
+    case 'vip':
+      return 'VIP'
     case 'assistant_coach':
       return 'Assistant coach'
     case 'coach':
       return 'Coach'
+    case 'head_coach':
+      return 'Head coach'
     case 'reception':
       return 'Reception'
     case 'admin':

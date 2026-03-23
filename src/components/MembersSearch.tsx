@@ -10,8 +10,11 @@ import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card'
 
 type Role =
   | 'member'
+  | 'champion'
+  | 'vip'
   | 'assistant_coach'
   | 'coach'
+  | 'head_coach'
   | 'reception'
   | 'admin'
   | 'super_admin'

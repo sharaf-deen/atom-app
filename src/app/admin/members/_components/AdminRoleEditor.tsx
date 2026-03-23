@@ -17,8 +17,11 @@ type Props = {
 function isRole(v: unknown): v is Role {
   return (
     v === 'member' ||
+    v === 'champion' ||
+    v === 'vip' ||
     v === 'assistant_coach' ||
     v === 'coach' ||
+    v === 'head_coach' ||
     v === 'reception' ||
     v === 'admin' ||
     v === 'super_admin'
@@ -38,8 +41,11 @@ export default function AdminRoleEditor({ userId, currentRole, options, compact,
     const safe = (options ?? []).filter((o) => isRole(o?.id) && typeof o?.label === 'string')
     return safe.length ? safe : ([
       { id: 'member', label: 'Member' },
+      { id: 'champion', label: 'Champion' },
+      { id: 'vip', label: 'VIP' },
       { id: 'assistant_coach', label: 'Assistant Coach' },
       { id: 'coach', label: 'Coach' },
+      { id: 'head_coach', label: 'Head Coach' },
       { id: 'reception', label: 'Reception' },
       { id: 'admin', label: 'Admin' },
       { id: 'super_admin', label: 'Super Admin' },

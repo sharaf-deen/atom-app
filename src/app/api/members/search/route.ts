@@ -5,7 +5,7 @@ export const revalidate = 0
 
 import { NextResponse } from 'next/server'
 import { getSessionUser } from '@/lib/session'
-import { canOpenOtherMemberProfile, normalizeRole, type Role } from '@/lib/rbac'
+import { MEMBER_LIKE_ROLES, canOpenOtherMemberProfile, normalizeRole, type Role } from '@/lib/rbac'
 import { createSupabaseAdminClient } from '@/lib/supabaseAdmin'
 
 type MemberRow = {
@@ -97,7 +97,7 @@ export async function GET(req: Request) {
       `,
         { count: 'exact' },
       )
-      .eq('role', 'member')
+      .in('role', [...MEMBER_LIKE_ROLES])
       .order('created_at', { ascending: false })
       .range(from, to)
 
@@ -108,7 +108,7 @@ export async function GET(req: Request) {
         `member_id.ilike.%${q}%`,
       ]
 
-      if (me.role !== 'coach') {
+      if (me.role !== 'coach' && me.role !== 'head_coach') {
         ors.push(`email.ilike.%${q}%`)
         ors.push(`phone.ilike.%${q}%`)
         if (qDigits.length >= 4) {
@@ -134,10 +134,10 @@ export async function GET(req: Request) {
 
     const items: MemberRow[] = (data ?? []).map((r: any) => ({
       user_id: r.user_id,
-      email: me.role === 'coach' ? null : r.email ?? null,
+      email: me.role === 'coach' || me.role === 'head_coach' ? null : r.email ?? null,
       first_name: r.first_name ?? null,
       last_name: r.last_name ?? null,
-      phone: me.role === 'coach' ? null : r.phone ?? null,
+      phone: me.role === 'coach' || me.role === 'head_coach' ? null : r.phone ?? null,
       role: (r.role ?? null) as Role | null,
       created_at: r.created_at ?? null,
       member_id: r.member_id ?? null,
@@ -180,7 +180,9 @@ export async function GET(req: Request) {
           if (Math.max(total - used, 0) > 0) activeSet.add(mid)
         }
 
-        for (const it of items) it.is_active = activeSet.has(it.user_id)
+        for (const it of items) {
+          it.is_active = it.role === 'champion' || it.role === 'vip' ? true : activeSet.has(it.user_id)
+        }
       } else {
         console.error('Error fetching subscriptions (search active flag):', subsError)
         for (const it of items) it.is_active = null

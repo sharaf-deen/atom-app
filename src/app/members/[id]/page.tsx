@@ -24,6 +24,7 @@ import AccessDeniedPage from '@/components/AccessDeniedPage'
 import { createSupabaseRSC } from '@/lib/supabaseServer'
 import { createSupabaseAdminClient } from '@/lib/supabaseAdmin'
 import { getSessionUser, type Role } from '@/lib/session'
+import { hasLifetimeGymAccess, isMemberLikeRole } from '@/lib/rbac'
 import { addDays, cairoToday, diffDays } from '@/lib/cairoDate'
 import QrImage from '@/components/QrImage'
 import SubscribeDialog, { type Plan } from '@/components/SubscribeDialog'
@@ -146,8 +147,14 @@ function humanPlan(p?: Plan | null) {
 
 function humanRole(role?: Role | null) {
   switch (role) {
+    case 'champion':
+      return 'Champion'
+    case 'vip':
+      return 'VIP'
     case 'assistant_coach':
       return 'Assistant coach'
+    case 'head_coach':
+      return 'Head coach'
     case 'super_admin':
       return 'Super admin'
     case 'coach':
@@ -260,7 +267,7 @@ function buildMembershipSummary(
   subs: SubscriptionRow[],
   today: string,
 ): MembershipSummary {
-  if (isSelf && (viewedRole === 'coach' || viewedRole === 'assistant_coach')) {
+  if (isSelf && hasLifetimeGymAccess(viewedRole)) {
     return {
       tone: 'success',
       label: 'Staff access',
@@ -730,7 +737,7 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
 
   const STAFF: Role[] = ['reception', 'admin', 'super_admin']
   const canViewMembersList = STAFF.includes(me.role)
-  const canOpenOtherProfiles = canViewMembersList || me.role === 'coach'
+  const canOpenOtherProfiles = canViewMembersList || me.role === 'coach' || me.role === 'head_coach'
   const canManageSubscriptions = ['admin', 'super_admin'].includes(me.role)
   const canCreateSubscription = STAFF.includes(me.role)
   const canResendInvite = STAFF.includes(me.role)
@@ -747,8 +754,8 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
         title="Member"
         subtitle="Access restricted."
         signedInAs={me.email}
-        message="Only Reception / Admin / Super Admin can view other members. Coaches can only open a read-only member profile from the home lookup."
-        allowed="coach (read-only members only), reception, admin, super_admin"
+        message="Only Reception / Admin / Super Admin can view other members. Coaches and head coaches can only open read-only member, champion, and VIP profiles from the home lookup."
+        allowed="coach / head_coach (read-only member, champion, and VIP profiles only), reception, admin, super_admin"
         nextPath={nextPath}
         showBackHome
         showProfile
@@ -766,7 +773,7 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
 
   const isSelf = me.id === profile.user_id
   const canDeleteUser = me.role === 'super_admin' && !isSelf
-  const isCoachViewingOtherMember = me.role === 'coach' && !isSelf
+  const isCoachViewingOtherMember = (me.role === 'coach' || me.role === 'head_coach') && !isSelf
   const receptionDeskView = me.role === 'reception' && !isSelf
 
   if (!canOpenOtherProfiles && !isSelf) {
@@ -775,8 +782,8 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
         title="Member"
         subtitle="Access restricted."
         signedInAs={me.email}
-        message="Only Reception / Admin / Super Admin can view other members. Coaches can only open a read-only member profile from the home lookup."
-        allowed="coach (read-only members only), reception, admin, super_admin"
+        message="Only Reception / Admin / Super Admin can view other members. Coaches and head coaches can only open read-only member, champion, and VIP profiles from the home lookup."
+        allowed="coach / head_coach (read-only member, champion, and VIP profiles only), reception, admin, super_admin"
         nextPath={nextPath}
         showBackHome
         showProfile
@@ -784,14 +791,14 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
     )
   }
 
-  if (isCoachViewingOtherMember && profile.role !== 'member') {
+  if (isCoachViewingOtherMember && !isMemberLikeRole(profile.role)) {
     return (
       <AccessDeniedPage
         title="Member"
         subtitle="Access restricted."
         signedInAs={me.email}
-        message="Coach access is limited to read-only member profiles only."
-        allowed="member profiles only"
+        message="Coach access is limited to read-only member, champion, and VIP profiles only."
+        allowed="member, champion, and VIP profiles only"
         nextPath={nextPath}
         showBackHome
         showProfile
@@ -916,9 +923,10 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
   const viewedRole = profile.role ?? 'member'
   const coachTrainingUseful = coachSafeView ? buildCoachTrainingUseful(subs, attendance, today) : null
   const receptionDeskUseful = receptionDeskView ? buildReceptionDeskUseful(subs, attendance, today, outstandingTotal) : null
-  const deskWorkflow = !coachSafeView && viewedRole === 'member' ? buildDeskWorkflow(subs, today, outstandingTotal) : null
-  const deskTriageSignals = !coachSafeView && viewedRole === 'member' ? buildDeskTriageSignals(subs, today, outstandingTotal) : []
-  const settleQuickActionSub = !coachSafeView && viewedRole === 'member'
+  const isMemberLikeViewedRole = isMemberLikeRole(viewedRole)
+  const deskWorkflow = !coachSafeView && isMemberLikeViewedRole ? buildDeskWorkflow(subs, today, outstandingTotal) : null
+  const deskTriageSignals = !coachSafeView && isMemberLikeViewedRole ? buildDeskTriageSignals(subs, today, outstandingTotal) : []
+  const settleQuickActionSub = !coachSafeView && isMemberLikeViewedRole
     ? [...subs]
         .filter((s) => Math.max(Number(s.amount_due ?? 0), 0) > 0)
         .sort((a, b) => Math.max(Number(b.amount_due ?? 0), 0) - Math.max(Number(a.amount_due ?? 0), 0))[0] ?? null
@@ -928,17 +936,17 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
   const lastAttendance = attendance[0]?.date ?? null
   const fullName = `${profile.first_name ?? ''} ${profile.last_name ?? ''}`.trim() || '—'
   const age = ageYears(profile.date_of_birth)
-  const showSubscriptionActions = canCreateSubscription && viewedRole === 'member' && !coachSafeView
+  const showSubscriptionActions = canCreateSubscription && isMemberLikeViewedRole && !coachSafeView
 
   const subtitle = coachSafeView
-    ? 'Read-only coach view.'
+    ? 'Read-only coach view with only safe member information.'
     : receptionDeskView
-      ? 'Front-desk member view.'
+      ? 'Front-desk member view focused on renewal, due, contact and check-in readiness.'
       : isSelf
-        ? viewedRole === 'member'
-          ? 'Profile and membership.'
-          : 'Profile and staff access.'
-        : 'Member overview.'
+        ? isMemberLikeViewedRole
+          ? 'Your profile, QR code and membership details.'
+          : 'Your profile, QR code and staff access overview.'
+        : 'Fast member overview built for field usage on mobile and tablet.'
 
   const right = canViewMembersList ? (
     <Link
@@ -980,6 +988,15 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
 
             <div>
               <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">{fullName}</h1>
+              <p className="mt-2 max-w-3xl text-sm text-[hsl(var(--muted))] sm:text-base">
+                {coachSafeView
+                  ? 'Only training-useful information is shown here. No private contact data, finance data or member QR is displayed.'
+                  : receptionDeskView
+                    ? 'This view is optimized for front-desk usage: contact, due, renewal, check-in readiness and fast actions.'
+                    : isSelf
+                      ? 'Everything important is grouped here for quick reading on mobile.'
+                      : 'Identity, subscription status, QR code and operational info grouped in one clear mobile-first page.'}
+              </p>
             </div>
           </div>
         </Surface>
@@ -1009,7 +1026,7 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
               <SummaryCard
                 label="Coach access"
                 value="Read-only"
-                hint="Private data hidden."
+                hint="Private contact and financial data are hidden in this view."
                 icon={<UserRound size={18} strokeWidth={2.1} />}
               />
             </>
@@ -1018,13 +1035,13 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
               <SummaryCard
                 label="Outstanding due"
                 value={outstandingTotal > 0 ? fmtMoneyEGP(outstandingTotal) : 'No due'}
-                hint={outstandingTotal > 0 ? 'Collect at desk.' : undefined}
+                hint={outstandingTotal > 0 ? 'Collect or follow up at the desk.' : 'Nothing due at the moment.'}
                 icon={<Wallet size={18} strokeWidth={2.1} />}
               />
               <SummaryCard
                 label="Last payment"
                 value={latestPayment ? fmtDate(latestPayment) : '—'}
-                hint={undefined}
+                hint="Most recent recorded payment date."
                 icon={<CreditCard size={18} strokeWidth={2.1} />}
               />
               <SummaryCard
@@ -1039,19 +1056,19 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
               <SummaryCard
                 label="Outstanding due"
                 value={outstandingTotal > 0 ? fmtMoneyEGP(outstandingTotal) : 'No due'}
-                hint={outstandingTotal > 0 ? 'Unpaid balance.' : undefined}
+                hint={outstandingTotal > 0 ? 'Unpaid balance on subscriptions.' : 'Nothing due at the moment.'}
                 icon={<Wallet size={18} strokeWidth={2.1} />}
               />
               <SummaryCard
                 label={canViewAttendance ? 'Attendance · 30 days' : 'Last payment'}
                 value={canViewAttendance ? recentAttendanceValid : latestPayment ? fmtDate(latestPayment) : '—'}
-                hint={canViewAttendance ? (lastAttendance ? `Last check-in ${fmtDate(lastAttendance)}` : 'No recent attendance.') : undefined}
+                hint={canViewAttendance ? (lastAttendance ? `Last check-in ${fmtDate(lastAttendance)}` : 'No recent attendance.') : 'Latest recorded payment date.'}
                 icon={canViewAttendance ? <ScanLine size={18} strokeWidth={2.1} /> : <CreditCard size={18} strokeWidth={2.1} />}
               />
               <SummaryCard
                 label="Joined"
                 value={fmtDate(profile.created_at)}
-                hint={undefined}
+                hint={profile.email ?? profile.phone ?? 'No extra contact info.'}
                 icon={<CalendarDays size={18} strokeWidth={2.1} />}
               />
             </>
@@ -1064,6 +1081,9 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
               <ScanLine size={18} className="text-black" />
               <h2 className="text-base font-semibold tracking-tight">Reception desk summary</h2>
             </div>
+            <p className="mt-1 text-sm text-[hsl(var(--muted))]">
+              The most useful front-desk information at a glance.
+            </p>
 
             <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
               <SummaryCard
@@ -1100,6 +1120,9 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
               <ShieldCheck size={18} className="text-black" />
               <h2 className="text-base font-semibold tracking-tight">Training useful</h2>
             </div>
+            <p className="mt-1 text-sm text-[hsl(var(--muted))]">
+              Quick coach-only reading for what matters around the mat.
+            </p>
 
             <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
               <SummaryCard
@@ -1138,7 +1161,9 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
                   {receptionDeskView ? 'Reception quick actions' : 'Quick actions'}
                 </div>
                 <p className="mt-1 text-sm text-[hsl(var(--muted))]">
-                  {deskWorkflow ? deskWorkflow.nextStep : receptionDeskView ? 'Front-desk actions.' : 'Fast actions.'}
+                  {receptionDeskView
+                    ? (deskWorkflow ? `${deskWorkflow.nextStep} — ${deskWorkflow.nextHint}` : 'Keep the most common desk actions visible and fast on mobile.')
+                    : (deskWorkflow ? `${deskWorkflow.nextStep} — ${deskWorkflow.nextHint}` : 'Keep high-frequency actions visible without opening extra screens.')}
                 </p>
               </div>
 
@@ -1215,12 +1240,19 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
               <Wallet size={18} className="text-black" />
               <h2 className="text-base font-semibold tracking-tight">Desk workflow</h2>
             </div>
+            <p className="mt-1 text-sm text-[hsl(var(--muted))]">
+              Recommended order for the current member before moving to the next desk action.
+            </p>
+
             {deskTriageSignals.length ? (
               <div className="mt-3 space-y-2">
                 <div className="flex flex-wrap gap-2">
                   {deskTriageSignals.map((item, idx) => (
                     <TinyBadge key={`${item.label}-${idx}`} tone={item.tone}>{item.label}</TinyBadge>
                   ))}
+                </div>
+                <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] px-3 py-2 text-xs text-[hsl(var(--muted))]">
+                  Handle the member in this order: overdue / today, then any due amount, then missing paid date review.
                 </div>
               </div>
             ) : null}
@@ -1323,10 +1355,13 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
                 <QrCode size={18} className="text-black" />
                 <h2 className="text-base font-semibold tracking-tight">QR code</h2>
               </div>
+              <p className="mt-1 text-sm text-[hsl(var(--muted))]">Show this code at reception for attendance scanning.</p>
+
               <div className="mt-4 flex min-h-[220px] items-center justify-center rounded-2xl border border-dashed border-[hsl(var(--border))] bg-[hsl(var(--bg))] p-4">
                 {profile.qr_code ? (
                   <div className="text-center">
                     <QrImage value={profile.qr_code} size={180} />
+                    <div className="mt-3 text-xs text-[hsl(var(--muted))]">Ready for kiosk or front-desk scan.</div>
                   </div>
                 ) : (
                   <div className="text-sm text-[hsl(var(--muted))]">No QR code.</div>
@@ -1340,6 +1375,13 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <h2 className="text-base font-semibold tracking-tight">Subscriptions</h2>
+              <p className="mt-1 text-sm text-[hsl(var(--muted))]">
+                {coachSafeView
+                  ? 'Only training-useful subscription status is visible here.'
+                  : receptionDeskView
+                    ? 'Clean front-desk reading of status now, dues and payment details.'
+                    : 'Status now, billing and quick actions grouped in one clean card view.'}
+              </p>
             </div>
             <TinyBadge>{subs.length} record(s)</TinyBadge>
           </div>
@@ -1452,7 +1494,7 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
                       ) : null}
                     </div>
 
-                    {!coachSafeView && canManageSubscriptions && viewedRole === 'member' ? (
+                    {!coachSafeView && canManageSubscriptions && isMemberLikeViewedRole ? (
                       <div className="mt-4 border-t border-[hsl(var(--border))] pt-4">
                         <SubscriptionManageRowActions sub={s} />
                       </div>
