@@ -58,6 +58,8 @@ function roleLabel(role: Role) {
       return 'Coach'
     case 'assistant_coach':
       return 'Assistant coach'
+    case 'head_coach':
+      return 'Head coach'
     case 'admin':
       return 'Admin preview'
     case 'super_admin':
@@ -75,7 +77,7 @@ function coachLinks(role: Role): QuickLink[] {
     { href: '/packages-and-promos', label: 'Packages & promos', desc: 'Keep current offers close on the mat.', icon: Gift },
   ]
 
-  if (role === 'coach') {
+  if (role === 'coach' || role === 'head_coach') {
     base.splice(1, 0, {
       href: '/members',
       label: 'Member lookup',
@@ -132,7 +134,7 @@ export default async function TrainingUsefulPage() {
   const qrCode = user.qr_code ?? profile?.qr_code ?? null
   const links = coachLinks(user.role)
   const joinedHint = profile?.created_at ? `Staff account active since ${fmtDate(profile.created_at)}` : 'Staff tools are ready for daily use.'
-  const isCoachView = user.role === 'coach'
+  const isCoachView = user.role === 'coach' || user.role === 'head_coach'
   const isAssistantView = user.role === 'assistant_coach'
 
   return (

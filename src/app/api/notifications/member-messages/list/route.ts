@@ -41,7 +41,7 @@ export async function GET(req: Request) {
       .maybeSingle<{ role: string | null }>()
 
     if (meErr) return noStore(500, { ok: false, error: 'PROFILE_LOOKUP_FAILED', details: meErr.message })
-    if (!me?.role || !['admin', 'super_admin'].includes(me.role)) {
+    if (!me?.role || !['admin', 'super_admin', 'head_coach'].includes(me.role)) {
       return noStore(403, { ok: false, error: 'FORBIDDEN' })
     }
 

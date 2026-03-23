@@ -39,7 +39,7 @@ export async function GET(req: Request) {
       return noStore(
         NextResponse.json({ ok: false, error: 'PROFILE_LOOKUP_FAILED', details: meErr.message }, { status: 500 })
       )
-    if (!me?.role || !['admin', 'super_admin'].includes(me.role)) {
+    if (!me?.role || !['admin', 'super_admin', 'head_coach'].includes(me.role)) {
       return noStore(NextResponse.json({ ok: false, error: 'FORBIDDEN' }, { status: 403 }))
     }
 

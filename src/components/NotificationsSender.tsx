@@ -20,6 +20,7 @@ type Counts = {
   members: number
   coaches: number
   assistant_coaches: number
+  head_coaches: number
 }
 
 type SendFeedback = {
@@ -43,8 +44,14 @@ function roleLabel(role: string) {
       return 'Members'
     case 'coach':
       return 'Coaches'
+    case 'head_coach':
+      return 'Head coaches'
     case 'assistant_coach':
       return 'Assistant coaches'
+    case 'champion':
+      return 'Champions'
+    case 'vip':
+      return 'VIPs'
     default:
       return role
   }
@@ -74,6 +81,7 @@ export default function NotificationsSender() {
             members: Number(j.members || 0),
             coaches: Number(j.coaches || 0),
             assistant_coaches: Number(j.assistant_coaches || 0),
+            head_coaches: Number(j.head_coaches || 0),
           })
         }
       } catch {}
@@ -95,14 +103,14 @@ export default function NotificationsSender() {
   const targetPreview = useMemo(() => {
     const eligibleRoles =
       audience === 'all_members'
-        ? ['member']
+        ? ['member', 'champion', 'vip']
         : audience === 'all_coaches'
           ? ['coach']
           : audience === 'all_assistant_coaches'
             ? ['assistant_coach']
             : audience === 'all_staff'
-              ? ['coach', 'assistant_coach']
-              : ['member', 'coach', 'assistant_coach']
+              ? ['coach', 'assistant_coach', 'head_coach']
+              : ['member', 'champion', 'vip', 'coach', 'assistant_coach', 'head_coach']
 
     const audienceLabel =
       audience === 'all_members'
@@ -112,7 +120,7 @@ export default function NotificationsSender() {
           : audience === 'all_assistant_coaches'
             ? 'All assistant coaches'
             : audience === 'all_staff'
-              ? 'All coaches + assistants'
+              ? 'All coaches + assistants + head coaches'
               : customMode === 'pick'
                 ? 'Custom selection'
                 : 'Custom emails'
@@ -127,15 +135,15 @@ export default function NotificationsSender() {
     } else if (audience === 'all_assistant_coaches') {
       estimatedRecipients = counts?.assistant_coaches ?? 0
     } else if (audience === 'all_staff') {
-      estimatedRecipients = (counts?.coaches ?? 0) + (counts?.assistant_coaches ?? 0)
+      estimatedRecipients = (counts?.coaches ?? 0) + (counts?.assistant_coaches ?? 0) + (counts?.head_coaches ?? 0)
     } else if (customMode === 'pick') {
       estimatedRecipients = selectedIds.length
       estimateHint =
-        'Selected users are still filtered server-side to roles with a visible inbox: members, coaches, and assistant coaches.'
+        'Selected users are still filtered server-side to roles with a visible inbox: members, champions, VIPs, coaches, assistant coaches, and head coaches.'
     } else {
       estimatedRecipients = parsedEmails.length
       estimateHint =
-        'This is the number of email inputs. Only matching member, coach, or assistant coach profiles will actually receive the message.'
+        'This is the number of email inputs. Only matching member, champion, VIP, coach, assistant coach, or head coach profiles will actually receive the message.'
     }
 
     return {
@@ -147,7 +155,7 @@ export default function NotificationsSender() {
   }, [audience, counts, customMode, parsedEmails.length, selectedIds.length])
 
   const recipientGuardrail =
-    'Only members, coaches, and assistant coaches can receive notifications from this screen. Admin, super admin, and reception are excluded until they have a visible inbox flow.'
+    'Only members, champions, VIPs, coaches, assistant coaches, and head coaches can receive notifications from this screen. Admin, super admin, and reception are excluded until they have a visible inbox flow.'
 
   async function onSend(e: React.FormEvent) {
     e.preventDefault()
@@ -230,7 +238,7 @@ export default function NotificationsSender() {
               <option value="all_members">All members</option>
               <option value="all_coaches">All coaches</option>
               <option value="all_assistant_coaches">All assistant coaches</option>
-              <option value="all_staff">All coaches + assistants</option>
+              <option value="all_staff">All coaches + assistants + head coaches</option>
               <option value="custom">Custom…</option>
             </Select>
 

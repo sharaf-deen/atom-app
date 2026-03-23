@@ -4,7 +4,7 @@ import { useMemo, useState, useTransition } from 'react'
 import type { FormEvent } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 
-type Role = 'member' | 'assistant_coach' | 'coach' | 'reception' | 'admin' | 'super_admin'
+type Role = 'member' | 'champion' | 'vip' | 'assistant_coach' | 'coach' | 'head_coach' | 'reception' | 'admin' | 'super_admin'
 
 function clampInt(v: number, min: number, max: number) {
   if (!Number.isFinite(v)) return min
@@ -12,7 +12,7 @@ function clampInt(v: number, min: number, max: number) {
 }
 
 function normalizeRole(v: string) {
-  const allowed: Role[] = ['member', 'assistant_coach', 'coach', 'reception', 'admin', 'super_admin']
+  const allowed: Role[] = ['member', 'champion', 'vip', 'assistant_coach', 'coach', 'head_coach', 'reception', 'admin', 'super_admin']
   return (allowed as string[]).includes(v) ? (v as Role) : ''
 }
 
@@ -93,8 +93,11 @@ export default function AdminMembersFilters({
         >
           <option value="">All roles</option>
           <option value="member">Member</option>
+          <option value="champion">Champion</option>
+          <option value="vip">VIP</option>
           <option value="assistant_coach">Assistant Coach</option>
           <option value="coach">Coach</option>
+          <option value="head_coach">Head Coach</option>
           <option value="reception">Reception</option>
           <option value="admin">Admin</option>
           <option value="super_admin">Super Admin</option>

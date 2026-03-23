@@ -10,8 +10,11 @@ begin
     insert into public.roles (id, label)
     values
       ('member', 'Member'),
+      ('champion', 'Champion'),
+      ('vip', 'VIP'),
       ('assistant_coach', 'Assistant Coach'),
       ('coach', 'Coach'),
+      ('head_coach', 'Head Coach'),
       ('reception', 'Reception'),
       ('admin', 'Admin'),
       ('super_admin', 'Super Admin')

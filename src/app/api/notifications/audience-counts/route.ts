@@ -49,7 +49,7 @@ export async function GET() {
     if (meErr) return json(500, { ok: false, error: 'PROFILE_ERROR', details: meErr.message })
 
     const role = (me?.role ?? 'member') as string
-    if (role !== 'admin' && role !== 'super_admin') {
+    if (role !== 'admin' && role !== 'super_admin' && role !== 'head_coach') {
       return json(403, { ok: false, error: 'FORBIDDEN' })
     }
 
@@ -62,13 +62,16 @@ export async function GET() {
       })
     }
 
-    const [members, coaches, assistant_coaches] = await Promise.all([
+    const [membersBase, champions, vips, coaches, assistant_coaches, head_coaches] = await Promise.all([
       countRole(admin, 'member'),
+      countRole(admin, 'champion'),
+      countRole(admin, 'vip'),
       countRole(admin, 'coach'),
       countRole(admin, 'assistant_coach'),
+      countRole(admin, 'head_coach'),
     ])
 
-    return json(200, { ok: true, members, coaches, assistant_coaches })
+    return json(200, { ok: true, members: membersBase + champions + vips, coaches, assistant_coaches, head_coaches })
   } catch (e: any) {
     console.error('notifications/audience-counts error:', e)
     return json(500, { ok: false, error: 'SERVER_ERROR', details: e?.message ?? String(e) })
