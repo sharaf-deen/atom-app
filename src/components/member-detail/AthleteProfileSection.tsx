@@ -1,6 +1,7 @@
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
-import { Award, Dumbbell, FileText, Medal, ShieldCheck, Upload } from 'lucide-react'
+import type { ReactNode } from 'react'
+import { Award, Dumbbell, FileText, Medal, Save, ShieldCheck, Trash2, Trophy, Upload } from 'lucide-react'
 import { createSupabaseAdminClient } from '@/lib/supabaseAdmin'
 import { createSupabaseRSC } from '@/lib/supabaseServer'
 import { isMemberLikeRole } from '@/lib/rbac'
@@ -26,7 +27,11 @@ type BeltPromotionRow = {
   notes: string | null
   created_at: string | null
   created_by: string | null
+  updated_at?: string | null
+  updated_by?: string | null
 }
+
+type CompetitionResult = 'gold' | 'silver' | 'bronze' | 'other'
 
 type CompetitionResultRow = {
   id: string
@@ -35,10 +40,12 @@ type CompetitionResultRow = {
   competition_date: string
   division: string | null
   category: string | null
-  result: 'gold' | 'silver' | 'bronze' | 'other'
+  result: CompetitionResult
   notes: string | null
   created_at: string | null
   created_by: string | null
+  updated_at: string | null
+  updated_by: string | null
 }
 
 type ProgramLevel = 'beginner' | 'intermediate' | 'advanced' | 'competitor'
@@ -56,6 +63,7 @@ const PROGRAM_OPTIONS = ['beginner', 'intermediate', 'advanced', 'competitor'] a
 const KID_BELTS = ['white', 'grey', 'yellow', 'orange', 'green'] as const
 const ADULT_BELTS = ['white', 'blue', 'purple', 'brown', 'black'] as const
 const ALL_BELTS = Array.from(new Set([...KID_BELTS, ...ADULT_BELTS]))
+const RESULT_OPTIONS = ['gold', 'silver', 'bronze', 'other'] as const satisfies readonly CompetitionResult[]
 const CERTIFICATE_MAX_BYTES = 8 * 1024 * 1024
 
 function fmtDate(dateStr?: string | null) {
@@ -86,7 +94,7 @@ function beltLabel(code?: string | null) {
   return titleCase(code)
 }
 
-function resultLabel(result?: CompetitionResultRow['result'] | null) {
+function resultLabel(result?: CompetitionResult | null) {
   if (!result) return '—'
   return titleCase(result)
 }
@@ -113,6 +121,10 @@ function isProgramLevel(value: string): value is ProgramLevel {
 
 function isBeltCode(value: string) {
   return (ALL_BELTS as readonly string[]).includes(value)
+}
+
+function isCompetitionResult(value: string): value is CompetitionResult {
+  return (RESULT_OPTIONS as readonly string[]).includes(value)
 }
 
 function canEditAthleteProfile(viewerRole: Role | null | undefined, targetRole: Role | null | undefined) {
@@ -174,6 +186,11 @@ async function uploadCertificateFile(
   }
 }
 
+async function deleteCertificatePath(admin: ReturnType<typeof createSupabaseAdminClient>, path?: string | null) {
+  if (!path) return
+  await admin.storage.from('belt-certificates').remove([path])
+}
+
 async function saveTrainingProfileAction(formData: FormData) {
   'use server'
 
@@ -195,14 +212,48 @@ async function saveTrainingProfileAction(formData: FormData) {
   const admin = createSupabaseAdminClient()
   const upsert = await admin
     .from('member_training_profiles')
-    .upsert({
-      member_user_id: memberUserId,
-      program_level: programLevelRaw,
-      updated_by: me.id,
-    }, { onConflict: 'member_user_id' })
+    .upsert(
+      {
+        member_user_id: memberUserId,
+        program_level: programLevelRaw,
+        updated_by: me.id,
+      },
+      { onConflict: 'member_user_id' },
+    )
 
   if (upsert.error) {
     throw new Error(upsert.error.message)
+  }
+
+  revalidatePath(nextPath)
+  redirect(nextPath)
+}
+
+async function deleteTrainingProfileAction(formData: FormData) {
+  'use server'
+
+  const me = await getSessionUser()
+  const nextPath = String(formData.get('nextPath') || '/members')
+  const memberUserId = String(formData.get('memberUserId') || '')
+  const targetRoleRaw = String(formData.get('targetRole') || '')
+
+  if (!me || !memberUserId || !targetRoleRaw) {
+    redirect(nextPath)
+  }
+
+  const targetRole = targetRoleRaw as Role
+  if (!canEditAthleteProfile(me.role, targetRole)) {
+    redirect(nextPath)
+  }
+
+  const admin = createSupabaseAdminClient()
+  const del = await admin
+    .from('member_training_profiles')
+    .delete()
+    .eq('member_user_id', memberUserId)
+
+  if (del.error) {
+    throw new Error(del.error.message)
   }
 
   revalidatePath(nextPath)
@@ -249,10 +300,236 @@ async function addBeltPromotionAction(formData: FormData) {
     certificate_size_bytes: upload.certificate_size_bytes,
     notes,
     created_by: me.id,
+    updated_by: me.id,
   })
 
   if (insert.error) {
     throw new Error(insert.error.message)
+  }
+
+  revalidatePath(nextPath)
+  redirect(nextPath)
+}
+
+async function saveBeltPromotionAction(formData: FormData) {
+  'use server'
+
+  const me = await getSessionUser()
+  const nextPath = String(formData.get('nextPath') || '/members')
+  const memberUserId = String(formData.get('memberUserId') || '')
+  const targetRoleRaw = String(formData.get('targetRole') || '')
+  const beltPromotionId = String(formData.get('beltPromotionId') || '').trim()
+  const beltCode = String(formData.get('belt_code') || '').trim().toLowerCase()
+  const promotedAt = String(formData.get('promoted_at') || '').trim()
+  const notes = String(formData.get('notes') || '').trim() || null
+  const certificate = formData.get('certificate')
+
+  if (!me || !memberUserId || !targetRoleRaw || !beltPromotionId || !beltCode || !promotedAt) {
+    redirect(nextPath)
+  }
+
+  const targetRole = targetRoleRaw as Role
+  if (!canEditAthleteProfile(me.role, targetRole) || !isBeltCode(beltCode)) {
+    redirect(nextPath)
+  }
+
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(promotedAt)) {
+    redirect(nextPath)
+  }
+
+  const admin = createSupabaseAdminClient()
+  const existingRes = await admin
+    .from('member_belt_promotions')
+    .select('id, certificate_path')
+    .eq('id', beltPromotionId)
+    .eq('member_user_id', memberUserId)
+    .maybeSingle<{ id: string; certificate_path: string | null }>()
+
+  if (existingRes.error || !existingRes.data) {
+    throw new Error(existingRes.error?.message || 'Belt promotion not found.')
+  }
+
+  let upload = {
+    certificate_path: existingRes.data.certificate_path,
+    certificate_mime: null as string | null,
+    certificate_filename: null as string | null,
+    certificate_size_bytes: null as number | null,
+  }
+
+  const hasReplacement = certificate && typeof (certificate as any)?.arrayBuffer === 'function' && Number((certificate as File).size || 0) > 0
+  if (hasReplacement) {
+    const newUpload = await uploadCertificateFile(admin, memberUserId, beltPromotionId, certificate)
+    await deleteCertificatePath(admin, existingRes.data.certificate_path)
+    upload = newUpload
+  }
+
+  const update = await admin
+    .from('member_belt_promotions')
+    .update({
+      belt_code: beltCode,
+      promoted_at: promotedAt,
+      notes,
+      certificate_path: upload.certificate_path,
+      certificate_mime: hasReplacement ? upload.certificate_mime : undefined,
+      certificate_filename: hasReplacement ? upload.certificate_filename : undefined,
+      certificate_size_bytes: hasReplacement ? upload.certificate_size_bytes : undefined,
+      updated_by: me.id,
+    })
+    .eq('id', beltPromotionId)
+    .eq('member_user_id', memberUserId)
+
+  if (update.error) {
+    throw new Error(update.error.message)
+  }
+
+  revalidatePath(nextPath)
+  redirect(nextPath)
+}
+
+async function deleteBeltPromotionAction(formData: FormData) {
+  'use server'
+
+  const me = await getSessionUser()
+  const nextPath = String(formData.get('nextPath') || '/members')
+  const memberUserId = String(formData.get('memberUserId') || '')
+  const targetRoleRaw = String(formData.get('targetRole') || '')
+  const beltPromotionId = String(formData.get('beltPromotionId') || '').trim()
+
+  if (!me || !memberUserId || !targetRoleRaw || !beltPromotionId) {
+    redirect(nextPath)
+  }
+
+  const targetRole = targetRoleRaw as Role
+  if (!canEditAthleteProfile(me.role, targetRole)) {
+    redirect(nextPath)
+  }
+
+  const admin = createSupabaseAdminClient()
+  const existingRes = await admin
+    .from('member_belt_promotions')
+    .select('id, certificate_path')
+    .eq('id', beltPromotionId)
+    .eq('member_user_id', memberUserId)
+    .maybeSingle<{ id: string; certificate_path: string | null }>()
+
+  if (existingRes.error || !existingRes.data) {
+    throw new Error(existingRes.error?.message || 'Belt promotion not found.')
+  }
+
+  await deleteCertificatePath(admin, existingRes.data.certificate_path)
+
+  const del = await admin
+    .from('member_belt_promotions')
+    .delete()
+    .eq('id', beltPromotionId)
+    .eq('member_user_id', memberUserId)
+
+  if (del.error) {
+    throw new Error(del.error.message)
+  }
+
+  revalidatePath(nextPath)
+  redirect(nextPath)
+}
+
+async function saveCompetitionResultAction(formData: FormData) {
+  'use server'
+
+  const me = await getSessionUser()
+  const nextPath = String(formData.get('nextPath') || '/members')
+  const memberUserId = String(formData.get('memberUserId') || '')
+  const targetRoleRaw = String(formData.get('targetRole') || '')
+  const resultId = String(formData.get('resultId') || '').trim()
+  const competitionName = String(formData.get('competition_name') || '').trim()
+  const competitionDate = String(formData.get('competition_date') || '').trim()
+  const division = String(formData.get('division') || '').trim() || null
+  const category = String(formData.get('category') || '').trim() || null
+  const result = String(formData.get('result') || '').trim().toLowerCase()
+  const notes = String(formData.get('notes') || '').trim() || null
+
+  if (!me || !memberUserId || !targetRoleRaw || !competitionName || !competitionDate || !isCompetitionResult(result)) {
+    redirect(nextPath)
+  }
+
+  const targetRole = targetRoleRaw as Role
+  if (!canEditAthleteProfile(me.role, targetRole)) {
+    redirect(nextPath)
+  }
+
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(competitionDate)) {
+    redirect(nextPath)
+  }
+
+  const admin = createSupabaseAdminClient()
+
+  if (resultId) {
+    const update = await admin
+      .from('member_competition_results')
+      .update({
+        competition_name: competitionName,
+        competition_date: competitionDate,
+        division,
+        category,
+        result,
+        notes,
+        updated_by: me.id,
+      })
+      .eq('id', resultId)
+      .eq('member_user_id', memberUserId)
+
+    if (update.error) {
+      throw new Error(update.error.message)
+    }
+  } else {
+    const insert = await admin.from('member_competition_results').insert({
+      id: crypto.randomUUID(),
+      member_user_id: memberUserId,
+      competition_name: competitionName,
+      competition_date: competitionDate,
+      division,
+      category,
+      result,
+      notes,
+      created_by: me.id,
+      updated_by: me.id,
+    })
+
+    if (insert.error) {
+      throw new Error(insert.error.message)
+    }
+  }
+
+  revalidatePath(nextPath)
+  redirect(nextPath)
+}
+
+async function deleteCompetitionResultAction(formData: FormData) {
+  'use server'
+
+  const me = await getSessionUser()
+  const nextPath = String(formData.get('nextPath') || '/members')
+  const memberUserId = String(formData.get('memberUserId') || '')
+  const targetRoleRaw = String(formData.get('targetRole') || '')
+  const resultId = String(formData.get('resultId') || '').trim()
+
+  if (!me || !memberUserId || !targetRoleRaw || !resultId) {
+    redirect(nextPath)
+  }
+
+  const targetRole = targetRoleRaw as Role
+  if (!canEditAthleteProfile(me.role, targetRole)) {
+    redirect(nextPath)
+  }
+
+  const admin = createSupabaseAdminClient()
+  const del = await admin
+    .from('member_competition_results')
+    .delete()
+    .eq('id', resultId)
+    .eq('member_user_id', memberUserId)
+
+  if (del.error) {
+    throw new Error(del.error.message)
   }
 
   revalidatePath(nextPath)
@@ -265,7 +542,7 @@ function badgeToneClass(tone: 'neutral' | 'success' | 'warning') {
   return 'border-[hsl(var(--border))] bg-[hsl(var(--bg))] text-[hsl(var(--muted))]'
 }
 
-function TinyBadge({ children, tone = 'neutral' }: { children: React.ReactNode; tone?: 'neutral' | 'success' | 'warning' }) {
+function TinyBadge({ children, tone = 'neutral' }: { children: ReactNode; tone?: 'neutral' | 'success' | 'warning' }) {
   return <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold ${badgeToneClass(tone)}`}>{children}</span>
 }
 
@@ -283,14 +560,14 @@ export default async function AthleteProfileSection({ memberUserId, targetRole, 
       .maybeSingle<TrainingProfileRow>(),
     db
       .from('member_belt_promotions')
-      .select('id, member_user_id, belt_code, promoted_at, certificate_path, certificate_filename, certificate_mime, certificate_size_bytes, notes, created_at, created_by')
+      .select('id, member_user_id, belt_code, promoted_at, certificate_path, certificate_filename, certificate_mime, certificate_size_bytes, notes, created_at, created_by, updated_at, updated_by')
       .eq('member_user_id', memberUserId)
       .order('promoted_at', { ascending: false })
       .order('created_at', { ascending: false })
       .returns<BeltPromotionRow[]>(),
     db
       .from('member_competition_results')
-      .select('id, member_user_id, competition_name, competition_date, division, category, result, notes, created_at, created_by')
+      .select('id, member_user_id, competition_name, competition_date, division, category, result, notes, created_at, created_by, updated_at, updated_by')
       .eq('member_user_id', memberUserId)
       .order('competition_date', { ascending: false })
       .order('created_at', { ascending: false })
@@ -369,7 +646,11 @@ export default async function AthleteProfileSection({ memberUserId, targetRole, 
           </div>
           <div className="mt-3 text-lg font-semibold tracking-tight">{competitionRows.length}</div>
           <div className="mt-1 text-sm text-[hsl(var(--muted))]">
-            {competitionRows.length > 0 ? 'Read-only for now.' : 'No competition result added yet.'}
+            {competitionRows.length > 0
+              ? canEdit
+                ? 'Editable by head coach and super admin.'
+                : 'Competition record available.'
+              : 'No competition result added yet.'}
           </div>
         </div>
 
@@ -386,7 +667,7 @@ export default async function AthleteProfileSection({ memberUserId, targetRole, 
       </div>
 
       {canEdit ? (
-        <div className="mt-4 grid gap-4 xl:grid-cols-2">
+        <div className="mt-4 grid gap-4 xl:grid-cols-3">
           <form action={saveTrainingProfileAction} className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4 shadow-soft">
             <div className="flex items-center justify-between gap-3">
               <div>
@@ -410,12 +691,25 @@ export default async function AthleteProfileSection({ memberUserId, targetRole, 
                 ))}
               </select>
             </label>
-            <button
-              type="submit"
-              className="mt-4 inline-flex items-center justify-center rounded-2xl border border-black bg-black px-4 py-2 text-sm font-medium text-white transition hover:opacity-90"
-            >
-              Save program
-            </button>
+            <div className="mt-4 flex flex-wrap gap-2">
+              <button
+                type="submit"
+                className="inline-flex items-center justify-center gap-2 rounded-2xl border border-black bg-black px-4 py-2 text-sm font-medium text-white transition hover:opacity-90"
+              >
+                <Save size={14} />
+                Save program
+              </button>
+              {training ? (
+                <button
+                  type="submit"
+                  formAction={deleteTrainingProfileAction}
+                  className="inline-flex items-center justify-center gap-2 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-2 text-sm font-medium text-rose-700 transition hover:bg-rose-100"
+                >
+                  <Trash2 size={14} />
+                  Remove program
+                </button>
+              ) : null}
+            </div>
           </form>
 
           <form action={addBeltPromotionAction} className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4 shadow-soft">
@@ -484,6 +778,92 @@ export default async function AthleteProfileSection({ memberUserId, targetRole, 
               Save promotion
             </button>
           </form>
+
+          <form action={saveCompetitionResultAction} className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4 shadow-soft">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <h3 className="text-sm font-semibold tracking-tight">Add competition result</h3>
+                <p className="mt-1 text-xs text-[hsl(var(--muted))]">Add a new podium or competition result.</p>
+              </div>
+              <TinyBadge tone="warning">Editable</TinyBadge>
+            </div>
+            <input type="hidden" name="memberUserId" value={memberUserId} />
+            <input type="hidden" name="targetRole" value={targetRole ?? 'member'} />
+            <input type="hidden" name="nextPath" value={nextPath} />
+
+            <label className="mt-4 block text-sm">
+              <span className="mb-2 block text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Competition name</span>
+              <input
+                type="text"
+                name="competition_name"
+                placeholder="AJP Cairo Open"
+                className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none transition focus:border-black"
+              />
+            </label>
+
+            <div className="mt-3 grid gap-3 sm:grid-cols-2">
+              <label className="block text-sm">
+                <span className="mb-2 block text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Competition date</span>
+                <input
+                  type="date"
+                  name="competition_date"
+                  defaultValue={new Date().toISOString().slice(0, 10)}
+                  className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none transition focus:border-black"
+                />
+              </label>
+              <label className="block text-sm">
+                <span className="mb-2 block text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Result</span>
+                <select
+                  name="result"
+                  defaultValue="gold"
+                  className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none transition focus:border-black"
+                >
+                  {RESULT_OPTIONS.map((option) => (
+                    <option key={option} value={option}>{resultLabel(option)}</option>
+                  ))}
+                </select>
+              </label>
+            </div>
+
+            <div className="mt-3 grid gap-3 sm:grid-cols-2">
+              <label className="block text-sm">
+                <span className="mb-2 block text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Division</span>
+                <input
+                  type="text"
+                  name="division"
+                  placeholder="Gi / NoGi / Teens"
+                  className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none transition focus:border-black"
+                />
+              </label>
+              <label className="block text-sm">
+                <span className="mb-2 block text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Category</span>
+                <input
+                  type="text"
+                  name="category"
+                  placeholder="-42kg / Kids 3"
+                  className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none transition focus:border-black"
+                />
+              </label>
+            </div>
+
+            <label className="mt-3 block text-sm">
+              <span className="mb-2 block text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Note</span>
+              <textarea
+                name="notes"
+                rows={3}
+                placeholder="Optional note"
+                className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none transition focus:border-black"
+              />
+            </label>
+
+            <button
+              type="submit"
+              className="mt-4 inline-flex items-center justify-center gap-2 rounded-2xl border border-black bg-black px-4 py-2 text-sm font-medium text-white transition hover:opacity-90"
+            >
+              <Trophy size={14} />
+              Save result
+            </button>
+          </form>
         </div>
       ) : null}
 
@@ -504,30 +884,135 @@ export default async function AthleteProfileSection({ memberUserId, targetRole, 
                 const certificateUrl = certificateUrlById.get(row.id) ?? null
                 return (
                   <div key={row.id} className="rounded-2xl border border-[hsl(var(--border))] bg-white/70 p-4">
-                    <div className="flex flex-wrap items-center gap-2">
-                      {index === 0 ? <TinyBadge tone="success">Current</TinyBadge> : null}
-                      <TinyBadge>{beltLabel(row.belt_code)}</TinyBadge>
-                      <TinyBadge>{fmtDate(row.promoted_at)}</TinyBadge>
-                      {row.certificate_path ? <TinyBadge tone="warning">Certificate attached</TinyBadge> : null}
-                    </div>
-                    {row.notes ? <p className="mt-3 text-sm text-[hsl(var(--muted))]">{row.notes}</p> : null}
-                    {row.certificate_path ? (
-                      <div className="mt-3 flex flex-wrap items-center gap-3 text-sm">
-                        {certificateUrl ? (
-                          <a
-                            href={certificateUrl}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="inline-flex items-center justify-center rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-1.5 shadow-soft transition hover:bg-[hsl(var(--bg))]"
-                          >
-                            View certificate
-                          </a>
+                    {canEdit ? (
+                      <form action={saveBeltPromotionAction} className="grid gap-3">
+                        <input type="hidden" name="memberUserId" value={memberUserId} />
+                        <input type="hidden" name="targetRole" value={targetRole ?? 'member'} />
+                        <input type="hidden" name="nextPath" value={nextPath} />
+                        <input type="hidden" name="beltPromotionId" value={row.id} />
+
+                        <div className="flex flex-wrap items-center gap-2">
+                          {index === 0 ? <TinyBadge tone="success">Current</TinyBadge> : null}
+                          <TinyBadge>{beltLabel(row.belt_code)}</TinyBadge>
+                          <TinyBadge>{fmtDate(row.promoted_at)}</TinyBadge>
+                          {row.updated_at ? <TinyBadge>Updated {fmtDate(row.updated_at)}</TinyBadge> : null}
+                          {row.certificate_path ? <TinyBadge tone="warning">Certificate attached</TinyBadge> : null}
+                        </div>
+
+                        <div className="grid gap-3 sm:grid-cols-2">
+                          <label className="block text-sm">
+                            <span className="mb-2 block text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Belt</span>
+                            <select
+                              name="belt_code"
+                              defaultValue={row.belt_code}
+                              className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none transition focus:border-black"
+                            >
+                              {beltChoices.map((belt) => (
+                                <option key={belt} value={belt}>{beltLabel(belt)}</option>
+                              ))}
+                            </select>
+                          </label>
+                          <label className="block text-sm">
+                            <span className="mb-2 block text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Promotion date</span>
+                            <input
+                              type="date"
+                              name="promoted_at"
+                              defaultValue={row.promoted_at}
+                              className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none transition focus:border-black"
+                            />
+                          </label>
+                        </div>
+
+                        <label className="block text-sm">
+                          <span className="mb-2 block text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Attestation note</span>
+                          <textarea
+                            name="notes"
+                            rows={2}
+                            defaultValue={row.notes ?? ''}
+                            className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none transition focus:border-black"
+                          />
+                        </label>
+
+                        <label className="block text-sm">
+                          <span className="mb-2 block text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Replace certificate</span>
+                          <input
+                            type="file"
+                            name="certificate"
+                            accept=".pdf,image/jpeg,image/png,image/webp"
+                            className="block w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm"
+                          />
+                          <span className="mt-2 block text-xs text-[hsl(var(--muted))]">Leave empty to keep the current file.</span>
+                        </label>
+
+                        {row.certificate_path ? (
+                          <div className="flex flex-wrap items-center gap-3 text-sm">
+                            {certificateUrl ? (
+                              <a
+                                href={certificateUrl}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="inline-flex items-center justify-center rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-1.5 shadow-soft transition hover:bg-[hsl(var(--bg))]"
+                              >
+                                View certificate
+                              </a>
+                            ) : null}
+                            <span className="break-all text-[hsl(var(--muted))]">
+                              {row.certificate_filename || 'certificate'}{row.certificate_size_bytes ? ` · ${formatBytes(row.certificate_size_bytes)}` : ''}
+                            </span>
+                          </div>
                         ) : null}
-                        <span className="text-[hsl(var(--muted))] break-all">
-                          {row.certificate_filename || 'certificate'}{row.certificate_size_bytes ? ` · ${formatBytes(row.certificate_size_bytes)}` : ''}
-                        </span>
-                      </div>
-                    ) : null}
+
+                        <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
+                          <div className="flex flex-wrap gap-2 text-xs text-[hsl(var(--muted))]">
+                            {row.created_at ? <TinyBadge>Created {fmtDate(row.created_at)}</TinyBadge> : null}
+                          </div>
+                          <div className="flex flex-wrap gap-2">
+                            <button
+                              type="submit"
+                              className="inline-flex items-center justify-center gap-2 rounded-2xl border border-black bg-black px-4 py-2 text-sm font-medium text-white transition hover:opacity-90"
+                            >
+                              <Save size={14} />
+                              Save
+                            </button>
+                            <button
+                              type="submit"
+                              formAction={deleteBeltPromotionAction}
+                              className="inline-flex items-center justify-center gap-2 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-2 text-sm font-medium text-rose-700 transition hover:bg-rose-100"
+                            >
+                              <Trash2 size={14} />
+                              Remove
+                            </button>
+                          </div>
+                        </div>
+                      </form>
+                    ) : (
+                      <>
+                        <div className="flex flex-wrap items-center gap-2">
+                          {index === 0 ? <TinyBadge tone="success">Current</TinyBadge> : null}
+                          <TinyBadge>{beltLabel(row.belt_code)}</TinyBadge>
+                          <TinyBadge>{fmtDate(row.promoted_at)}</TinyBadge>
+                          {row.certificate_path ? <TinyBadge tone="warning">Certificate attached</TinyBadge> : null}
+                        </div>
+                        {row.notes ? <p className="mt-3 text-sm text-[hsl(var(--muted))]">{row.notes}</p> : null}
+                        {row.certificate_path ? (
+                          <div className="mt-3 flex flex-wrap items-center gap-3 text-sm">
+                            {certificateUrl ? (
+                              <a
+                                href={certificateUrl}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="inline-flex items-center justify-center rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-1.5 shadow-soft transition hover:bg-[hsl(var(--bg))]"
+                              >
+                                View certificate
+                              </a>
+                            ) : null}
+                            <span className="break-all text-[hsl(var(--muted))]">
+                              {row.certificate_filename || 'certificate'}{row.certificate_size_bytes ? ` · ${formatBytes(row.certificate_size_bytes)}` : ''}
+                            </span>
+                          </div>
+                        ) : null}
+                      </>
+                    )}
                   </div>
                 )
               })}
@@ -549,14 +1034,114 @@ export default async function AthleteProfileSection({ memberUserId, targetRole, 
             <div className="mt-4 grid gap-3">
               {competitionRows.map((row) => (
                 <div key={row.id} className="rounded-2xl border border-[hsl(var(--border))] bg-white/70 p-4">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <TinyBadge>{resultLabel(row.result)}</TinyBadge>
-                    <TinyBadge>{fmtDate(row.competition_date)}</TinyBadge>
-                    {row.division ? <TinyBadge>{row.division}</TinyBadge> : null}
-                    {row.category ? <TinyBadge>{row.category}</TinyBadge> : null}
-                  </div>
-                  <div className="mt-3 text-sm font-medium">{row.competition_name}</div>
-                  {row.notes ? <p className="mt-2 text-sm text-[hsl(var(--muted))]">{row.notes}</p> : null}
+                  {canEdit ? (
+                    <form action={saveCompetitionResultAction} className="grid gap-3">
+                      <input type="hidden" name="memberUserId" value={memberUserId} />
+                      <input type="hidden" name="targetRole" value={targetRole ?? 'member'} />
+                      <input type="hidden" name="nextPath" value={nextPath} />
+                      <input type="hidden" name="resultId" value={row.id} />
+
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        <label className="block text-sm">
+                          <span className="mb-2 block text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Competition name</span>
+                          <input
+                            type="text"
+                            name="competition_name"
+                            defaultValue={row.competition_name}
+                            className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none transition focus:border-black"
+                          />
+                        </label>
+                        <label className="block text-sm">
+                          <span className="mb-2 block text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Competition date</span>
+                          <input
+                            type="date"
+                            name="competition_date"
+                            defaultValue={row.competition_date}
+                            className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none transition focus:border-black"
+                          />
+                        </label>
+                      </div>
+
+                      <div className="grid gap-3 sm:grid-cols-3">
+                        <label className="block text-sm">
+                          <span className="mb-2 block text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Result</span>
+                          <select
+                            name="result"
+                            defaultValue={row.result}
+                            className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none transition focus:border-black"
+                          >
+                            {RESULT_OPTIONS.map((option) => (
+                              <option key={option} value={option}>{resultLabel(option)}</option>
+                            ))}
+                          </select>
+                        </label>
+                        <label className="block text-sm">
+                          <span className="mb-2 block text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Division</span>
+                          <input
+                            type="text"
+                            name="division"
+                            defaultValue={row.division ?? ''}
+                            className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none transition focus:border-black"
+                          />
+                        </label>
+                        <label className="block text-sm">
+                          <span className="mb-2 block text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Category</span>
+                          <input
+                            type="text"
+                            name="category"
+                            defaultValue={row.category ?? ''}
+                            className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none transition focus:border-black"
+                          />
+                        </label>
+                      </div>
+
+                      <label className="block text-sm">
+                        <span className="mb-2 block text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Note</span>
+                        <textarea
+                          name="notes"
+                          rows={2}
+                          defaultValue={row.notes ?? ''}
+                          className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none transition focus:border-black"
+                        />
+                      </label>
+
+                      <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
+                        <div className="flex flex-wrap gap-2 text-xs text-[hsl(var(--muted))]">
+                          <TinyBadge>{resultLabel(row.result)}</TinyBadge>
+                          <TinyBadge>{fmtDate(row.competition_date)}</TinyBadge>
+                          {row.updated_at ? <TinyBadge>Updated {fmtDate(row.updated_at)}</TinyBadge> : null}
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          <button
+                            type="submit"
+                            className="inline-flex items-center justify-center gap-2 rounded-2xl border border-black bg-black px-4 py-2 text-sm font-medium text-white transition hover:opacity-90"
+                          >
+                            <Save size={14} />
+                            Save
+                          </button>
+                          <button
+                            type="submit"
+                            formAction={deleteCompetitionResultAction}
+                            className="inline-flex items-center justify-center gap-2 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-2 text-sm font-medium text-rose-700 transition hover:bg-rose-100"
+                          >
+                            <Trash2 size={14} />
+                            Remove
+                          </button>
+                        </div>
+                      </div>
+                    </form>
+                  ) : (
+                    <>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <TinyBadge>{resultLabel(row.result)}</TinyBadge>
+                        <TinyBadge>{fmtDate(row.competition_date)}</TinyBadge>
+                        {row.division ? <TinyBadge>{row.division}</TinyBadge> : null}
+                        {row.category ? <TinyBadge>{row.category}</TinyBadge> : null}
+                      </div>
+                      <div className="mt-3 text-sm font-medium">{row.competition_name}</div>
+                      {row.notes ? <p className="mt-2 text-sm text-[hsl(var(--muted))]">{row.notes}</p> : null}
+                    </>
+                  )}
                 </div>
               ))}
             </div>
