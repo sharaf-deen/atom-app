@@ -253,21 +253,16 @@ function proofBadge(entry: Pick<EntryRow, 'receipt_path' | 'receipt_filename' | 
   )
 }
 
-function proofCell(entry: Pick<EntryRow, 'id' | 'receipt_path' | 'receipt_filename' | 'receipt_size_bytes'>) {
+function proofCell(entry: Pick<EntryRow, 'id' | 'receipt_path' | 'receipt_filename' | 'receipt_size_bytes'>, viewHref: string) {
   if (!entry.receipt_path) return proofBadge(entry)
 
   return (
     <div className="space-y-2">
       {proofBadge(entry)}
       <div className="flex flex-wrap items-center gap-2">
-        <a
-          href={`/api/admin/personal-funds/${entry.id}/receipt`}
-          target="_blank"
-          rel="noreferrer"
-          className={actionLinkClass()}
-        >
+        <Link href={viewHref} prefetch={false} className={actionLinkClass()}>
           View
-        </a>
+        </Link>
         <a
           href={`/api/admin/personal-funds/${entry.id}/receipt?download=1`}
           className={actionLinkClass()}
@@ -617,6 +612,7 @@ export default async function PersonalFundsPage({
   const deleted = safeStr(searchParams.deleted)
   const errorMsg = safeStr(searchParams.error)
   const editId = safeStr(searchParams.edit).trim()
+  const previewId = safeStr(searchParams.preview).trim()
 
   const returnQS = buildQS({
     preset,
@@ -708,6 +704,27 @@ export default async function PersonalFundsPage({
     }
   }
 
+  let previewEntry: EntryRow | null = null
+  let previewLoadError = ''
+  if (previewId) {
+    const local = entries.find((entry) => entry.id === previewId)
+    if (local) {
+      previewEntry = local
+    } else {
+      const { data, error } = await admin
+        .from('personal_fund_entries')
+        .select('id,entry_date,person_id,kind,amount,payment_method,note,created_at,receipt_path,receipt_mime,receipt_filename,receipt_size_bytes')
+        .eq('id', previewId)
+        .maybeSingle<EntryRow>()
+
+      if (error || !data) {
+        previewLoadError = error?.message || 'Could not load the selected receipt preview.'
+      } else {
+        previewEntry = data
+      }
+    }
+  }
+
   const personCards = people
     .map((person) => {
       const bucket = perPerson.get(person.id) ?? { advanced: 0, paidPersonally: 0, reimbursed: 0, entries: 0 }
@@ -734,6 +751,7 @@ export default async function PersonalFundsPage({
   ].filter(Boolean)
 
   const returnParams = Object.fromEntries(new URLSearchParams(returnQS).entries())
+  const closePreviewHref = `/admin/personal-funds?${buildQS({ ...returnParams, page: String(page), edit: editEntry?.id ?? '' })}`
   const editPersonLabel = editEntry ? personById.get(editEntry.person_id)?.label ?? 'Unknown person' : ''
   const editingInCurrentPage = editEntry ? entries.some((entry) => entry.id === editEntry?.id) : false
 
@@ -784,7 +802,7 @@ export default async function PersonalFundsPage({
             <div className="space-y-3">
               <div>
                 <div className="text-[11px] uppercase tracking-wide text-[hsl(var(--muted))]">Proof</div>
-                <div className="mt-1">{proofCell(entry)}</div>
+                <div className="mt-1">{proofCell(entry, `/admin/personal-funds?${buildQS({ ...returnParams, page: String(page), edit: editEntry?.id ?? '', preview: entry.id })}`)}</div>
               </div>
               <div>
                 <div className="text-[11px] uppercase tracking-wide text-[hsl(var(--muted))]">Actions</div>
@@ -955,9 +973,9 @@ export default async function PersonalFundsPage({
                         {editEntry.receipt_filename || 'receipt'}{editEntry.receipt_size_bytes ? ` · ${formatBytes(editEntry.receipt_size_bytes)}` : ''}
                       </div>
                       <div className="mt-3 flex flex-wrap items-center gap-2">
-                        <a href={`/api/admin/personal-funds/${editEntry.id}/receipt`} target="_blank" rel="noreferrer" className={actionLinkClass()}>
+                        <Link href={`/admin/personal-funds?${buildQS({ ...returnParams, page: String(page), edit: editEntry.id, preview: editEntry.id })}`} prefetch={false} className={actionLinkClass()}>
                           View current receipt
-                        </a>
+                        </Link>
                         <a href={`/api/admin/personal-funds/${editEntry.id}/receipt?download=1`} className={actionLinkClass()}>
                           Download
                         </a>
@@ -1197,6 +1215,72 @@ export default async function PersonalFundsPage({
             ) : null}
           </CardContent>
         </Card>
+
+        {previewId ? (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-3 sm:p-6">
+            <div className="max-h-[92vh] w-full max-w-5xl overflow-hidden rounded-3xl border border-[hsl(var(--border))] bg-white shadow-soft">
+              <div className="flex flex-wrap items-start justify-between gap-3 border-b border-[hsl(var(--border))] px-4 py-3 sm:px-6">
+                <div className="min-w-0">
+                  <div className="text-sm font-semibold">Receipt preview</div>
+                  {previewEntry ? (
+                    <div className="mt-1 text-sm text-[hsl(var(--muted))] break-all">
+                      {previewEntry.receipt_filename || 'receipt'}
+                      {previewEntry.receipt_size_bytes ? ` · ${formatBytes(previewEntry.receipt_size_bytes)}` : ''}
+                    </div>
+                  ) : (
+                    <div className="mt-1 text-sm text-[hsl(var(--muted))]">Loading preview…</div>
+                  )}
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  {previewEntry?.receipt_path ? (
+                    <a href={`/api/admin/personal-funds/${previewEntry.id}/receipt?download=1`} className={actionLinkClass()}>
+                      Download
+                    </a>
+                  ) : null}
+                  <Link href={closePreviewHref} prefetch={false} className={actionLinkClass()}>
+                    Close
+                  </Link>
+                </div>
+              </div>
+
+              <div className="max-h-[calc(92vh-84px)] overflow-auto bg-[hsl(var(--bg))] p-3 sm:p-4">
+                {previewLoadError ? (
+                  <InlineAlert variant="error" title="Receipt preview">
+                    {previewLoadError}
+                  </InlineAlert>
+                ) : !previewEntry?.receipt_path ? (
+                  <InlineAlert variant="warning" title="Receipt preview">
+                    No receipt is attached to this entry.
+                  </InlineAlert>
+                ) : previewEntry.receipt_mime === 'application/pdf' ? (
+                  <iframe
+                    title="Receipt preview"
+                    src={`/api/admin/personal-funds/${previewEntry.id}/receipt`}
+                    className="h-[75vh] w-full rounded-2xl border border-[hsl(var(--border))] bg-white"
+                  />
+                ) : (previewEntry.receipt_mime || '').startsWith('image/') ? (
+                  <div className="rounded-2xl border border-[hsl(var(--border))] bg-white p-2">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={`/api/admin/personal-funds/${previewEntry.id}/receipt`}
+                      alt={previewEntry.receipt_filename || 'Receipt preview'}
+                      className="mx-auto max-h-[75vh] w-auto max-w-full rounded-xl"
+                    />
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    <InlineAlert variant="info" title="Preview not supported inline">
+                      This file type cannot be previewed directly here. Use Download instead.
+                    </InlineAlert>
+                    <a href={`/api/admin/personal-funds/${previewEntry.id}/receipt?download=1`} className={actionLinkClass()}>
+                      Download file
+                    </a>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        ) : null}
       </Section>
     </main>
   )
