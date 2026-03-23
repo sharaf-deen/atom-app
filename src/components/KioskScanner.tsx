@@ -183,18 +183,18 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className }: 
       const stored = window.localStorage.getItem('atom:kiosk') === '1'
       if (kioskRequested || stored) {
         setKioskMode(true)
-        setFullScreen(true)
       }
       if (kioskRequested) {
         window.localStorage.setItem('atom:kiosk', '1')
+        router.replace('/scan')
       }
     } catch {
       if (kioskRequested) {
         setKioskMode(true)
-        setFullScreen(true)
+        router.replace('/scan')
       }
     }
-  }, [kioskRequested])
+  }, [kioskRequested, router])
 
   useEffect(() => {
     if (!kioskMode) {
@@ -257,6 +257,21 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className }: 
     }, 2000) as any
   }
 
+  const kioskExitHoldProps = kioskMode
+    ? {
+        onMouseDown: startExitHold,
+        onMouseUp: cancelExitHold,
+        onMouseLeave: cancelExitHold,
+        onTouchStart: startExitHold,
+        onTouchEnd: cancelExitHold,
+        onTouchCancel: cancelExitHold,
+        onPointerDown: startExitHold,
+        onPointerUp: cancelExitHold,
+        onPointerLeave: cancelExitHold,
+        onPointerCancel: cancelExitHold,
+      }
+    : {}
+
   async function confirmExitKiosk() {
     setExitError(null)
     const res = await verifyExitPin(exitPin || '')
@@ -288,8 +303,19 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className }: 
       window.localStorage.setItem('atom:kiosk', '1')
     } catch {}
     setKioskMode(true)
-    setFullScreen(true)
-    router.replace('/scan?kiosk=1')
+    router.replace('/scan')
+  }
+
+  function exitKioskMode() {
+    try {
+      window.localStorage.setItem('atom:kiosk', '0')
+    } catch {}
+    cancelExitHold()
+    setExitOpen(false)
+    setExitError(null)
+    setExitPin('')
+    setKioskMode(false)
+    router.replace('/scan')
   }
 
   const [ScannerComponent, setScannerComponent] = useState<ComponentType<any> | null>(null)
@@ -574,20 +600,25 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className }: 
                     Retry
                   </Button>
                 ) : null}
-                <Button
-                  variant="outline"
-                  className="!bg-transparent !text-white !border-white/30 hover:!bg-white/10"
-                  onClick={() => {
-                    if (!kioskMode) setFullScreen(false)
-                  }}
-                  onPointerDown={kioskMode ? startExitHold : undefined}
-                  onPointerUp={kioskMode ? cancelExitHold : undefined}
-                  onPointerLeave={kioskMode ? cancelExitHold : undefined}
-                  onPointerCancel={kioskMode ? cancelExitHold : undefined}
-                  title={kioskMode ? 'Hold 2s to exit kiosk' : 'Exit full screen'}
-                >
-                  {kioskMode ? (exitHolding ? 'Holding…' : 'Hold to exit') : 'Exit full screen'}
-                </Button>
+                {kioskMode ? (
+                  <button
+                    type="button"
+                    className="inline-flex items-center justify-center rounded-full border border-white/30 bg-transparent px-4 py-2 text-sm font-medium text-white transition hover:bg-white/10"
+                    title="Hold 2s to exit kiosk"
+                    {...kioskExitHoldProps}
+                  >
+                    {exitHolding ? 'Holding…' : 'Hold to exit'}
+                  </button>
+                ) : (
+                  <Button
+                    variant="outline"
+                    className="!bg-transparent !text-white !border-white/30 hover:!bg-white/10"
+                    onClick={() => setFullScreen(false)}
+                    title="Exit full screen"
+                  >
+                    Exit full screen
+                  </Button>
+                )}
               </div>
             </div>
           </div>
@@ -656,7 +687,7 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className }: 
                 {kioskMode ? <Badge>Kiosk</Badge> : null}
               </div>
               <p className="mt-1 text-sm text-[hsl(var(--muted))]">
-                Fast front-desk scanning with full-screen mode, kiosk mode, repeat-scan guardrails, presence context and clear entrance decision cues.
+                Fast front-desk scanning with optional kiosk mode, full-screen controls, repeat-scan guardrails, presence context and clear entrance decision cues.
               </p>
             </div>
 
@@ -676,7 +707,7 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className }: 
             />
             <ActionChip
               icon={<Smartphone size={16} strokeWidth={2.1} />}
-              label={kioskMode ? 'Kiosk mode + full screen' : 'Standard scanner view'}
+              label={kioskMode ? (fullScreen ? 'Kiosk mode active · full screen' : 'Kiosk mode active in page') : 'Standard scanner view'}
             />
             <ActionChip
               icon={online ? <ShieldCheck size={16} strokeWidth={2.1} /> : <WifiOff size={16} strokeWidth={2.1} />}
@@ -707,13 +738,20 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className }: 
               Flip camera
             </Button>
             <Button variant="outline" onClick={() => setFullScreen(true)} title="Open camera in full screen">
-              <Expand size={16} className="mr-2" />
+              {fullScreen ? <Minimize2 size={16} className="mr-2" /> : <Expand size={16} className="mr-2" />}
               Full screen
             </Button>
-            <Button variant="outline" onClick={enterKioskMode} title="Enter kiosk mode (hide nav + keep awake)">
-              <Smartphone size={16} className="mr-2" />
-              Kiosk mode
-            </Button>
+            {kioskMode ? (
+              <Button variant="outline" onClick={exitKioskMode} title="Leave kiosk mode">
+                <Smartphone size={16} className="mr-2" />
+                Exit kiosk mode
+              </Button>
+            ) : (
+              <Button variant="outline" onClick={enterKioskMode} title="Keep kiosk mode available on this page">
+                <Smartphone size={16} className="mr-2" />
+                Enable kiosk mode
+              </Button>
+            )}
             <Button variant="outline" onClick={manualRescan} disabled={!paused && status === 'idle'} title="Resume scanning">
               <RefreshCw size={16} className="mr-2" />
               Rescan
@@ -758,6 +796,7 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className }: 
                 <ul className="mt-2 space-y-2 text-sm text-[hsl(var(--muted))]">
                   <li>Keep only one QR code in the frame.</li>
                   <li>Use the back camera for faster detection.</li>
+                  <li>Kiosk mode now stays available inside this page. Use Full screen only when you want it.</li>
                   <li>Use the result page cue first: Let in, Check desk or Open profile.</li>
                   <li>Tap Rescan after any blocked or invalid attempt.</li>
                   <li>Use kiosk mode for the academy entrance.</li>
