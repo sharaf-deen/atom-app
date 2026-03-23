@@ -119,7 +119,7 @@ export default function NotificationsList({ isAdmin = false, sentOnly = false }:
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [openId, setOpenId] = useState<string | null>(null)
   const [actionMsg, setActionMsg] = useState('')
-  const [audCounts, setAudCounts] = useState<{ members: number; coaches: number; assistant_coaches: number } | null>(
+  const [audCounts, setAudCounts] = useState<{ members: number; coaches: number; assistant_coaches: number; head_coaches: number } | null>(
     null,
   )
 
@@ -164,15 +164,16 @@ export default function NotificationsList({ isAdmin = false, sentOnly = false }:
           members: Number(j.members || 0),
           coaches: Number(j.coaches || 0),
           assistant_coaches: Number(j.assistant_coaches || 0),
+          head_coaches: Number(j.head_coaches || 0),
         }
         setAudCounts(next)
         return next
       }
     } catch {}
-    return { members: 0, coaches: 0, assistant_coaches: 0 }
+    return { members: 0, coaches: 0, assistant_coaches: 0, head_coaches: 0 }
   }
 
-  function groupSent(rows: any[], counts: { members: number; coaches: number; assistant_coaches: number }): Item[] {
+  function groupSent(rows: any[], counts: { members: number; coaches: number; assistant_coaches: number; head_coaches: number }): Item[] {
     const norm = (s: any) => String(s ?? '').trim().replace(/\s+/g, ' ')
     const timeKey = (iso: any) => {
       const s = String(iso ?? '')
@@ -230,7 +231,7 @@ export default function NotificationsList({ isAdmin = false, sentOnly = false }:
         if (counts.members > 0 && n === counts.members) item.recipient_name = 'All members'
         else if (counts.coaches > 0 && n === counts.coaches) item.recipient_name = 'All coaches'
         else if (counts.assistant_coaches > 0 && n === counts.assistant_coaches) item.recipient_name = 'All assistant coaches'
-        else if (counts.coaches + counts.assistant_coaches > 0 && n === counts.coaches + counts.assistant_coaches) item.recipient_name = 'All coaches + assistants'
+        else if (counts.coaches + counts.assistant_coaches + counts.head_coaches > 0 && n === counts.coaches + counts.assistant_coaches + counts.head_coaches) item.recipient_name = 'All coaches + assistants + head coaches'
         else item.recipient_name = `Custom (${n})`
         item.recipient_email = null
       } else {

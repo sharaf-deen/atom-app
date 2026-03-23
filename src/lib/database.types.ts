@@ -906,7 +906,7 @@ export type Database = {
       freeze_request_status: "pending" | "approved" | "denied" | "canceled"
       payment_method: "cash" | "card" | "transfer" | "online"
       promo_discount_type: "percent" | "amount"
-      user_role: "admin" | "coach" | "assistant_coach" | "member" | "reception" | "super_admin"
+      user_role: "admin" | "coach" | "assistant_coach" | "head_coach" | "member" | "champion" | "vip" | "reception" | "super_admin"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -1037,7 +1037,7 @@ export const Constants = {
       freeze_request_status: ["pending", "approved", "denied", "canceled"],
       payment_method: ["cash", "card", "transfer", "online"],
       promo_discount_type: ["percent", "amount"],
-      user_role: ["admin", "coach", "assistant_coach", "member", "reception", "super_admin"],
+      user_role: ["admin", "coach", "assistant_coach", "head_coach", "member", "champion", "vip", "reception", "super_admin"],
     },
   },
 } as const

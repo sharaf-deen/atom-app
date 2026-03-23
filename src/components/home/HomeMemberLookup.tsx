@@ -6,8 +6,11 @@ import Input from '@/components/ui/Input'
 
 type Role =
   | 'member'
+  | 'champion'
+  | 'vip'
   | 'assistant_coach'
   | 'coach'
+  | 'head_coach'
   | 'reception'
   | 'admin'
   | 'super_admin'

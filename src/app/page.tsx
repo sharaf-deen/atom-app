@@ -7,6 +7,7 @@ import Link from 'next/link'
 import Image from 'next/image'
 import { createSupabaseRSC } from '@/lib/supabaseServer'
 import { getSessionUser, type Role } from '@/lib/session'
+import { hasLifetimeGymAccess, isMemberLikeRole } from '@/lib/rbac'
 import { getSupabaseAdminClientCached } from '@/lib/requestCache'
 import { addDays, cairoToday, diffDays } from '@/lib/cairoDate'
 import HomeNotificationsTile from '@/components/HomeNotificationsTile'
@@ -156,7 +157,17 @@ function isFrozenNow(sub: Pick<SubscriptionLite, 'subscription_type' | 'frozen_f
   return from ? today >= from && today < until : today < until
 }
 
-function buildMembershipSnapshot(subs: SubscriptionLite[], today: string): MembershipSnapshot {
+function buildMembershipSnapshot(role: Role, subs: SubscriptionLite[], today: string): MembershipSnapshot {
+  if (hasLifetimeGymAccess(role)) {
+    return {
+      tone: 'success',
+      eyebrow: 'Always active access',
+      title: 'Role-based access',
+      meta: 'Your access is active in the gym without a standard renewal flow.',
+      extra: null,
+    }
+  }
+
   const activeTime = subs.find((s) => {
     if (s.status !== 'active') return false
     if ((s.subscription_type ?? 'time') !== 'time') return false
@@ -458,7 +469,7 @@ function buildMemberPriorities(snapshot: MembershipSnapshot, unreadCount: number
   ]
 }
 
-function buildStaffPriorities(role: 'coach' | 'assistant_coach', unreadCount: number, hasQr: boolean): PriorityItem[] {
+function buildStaffPriorities(role: 'coach' | 'assistant_coach' | 'head_coach', unreadCount: number, hasQr: boolean): PriorityItem[] {
   return [
     {
       href: '/profile',
@@ -477,14 +488,14 @@ function buildStaffPriorities(role: 'coach' | 'assistant_coach', unreadCount: nu
       tone: unreadCount > 0 ? 'warning' : 'neutral',
     },
     {
-      href: role === 'coach' ? '/members' : '/schedule',
-      eyebrow: role === 'coach' ? 'Lookup today' : 'Training useful',
-      title: role === 'coach' ? 'Open member lookup' : 'Open the schedule',
+      href: role === 'assistant_coach' ? '/schedule' : '/members',
+      eyebrow: role === 'assistant_coach' ? 'Training useful' : 'Lookup today',
+      title: role === 'assistant_coach' ? 'Open the schedule' : 'Open member lookup',
       desc:
-        role === 'coach'
-          ? 'Search a member quickly with read-only access when you need to help on the mat.'
-          : 'Keep the day moving with fast access to your schedule and staff shortcuts.',
-      icon: role === 'coach' ? UserRoundSearch : CalendarDays,
+        role === 'assistant_coach'
+          ? 'Keep the day moving with fast access to your schedule and staff shortcuts.'
+          : 'Search a member quickly with read-only access when you need to help on the mat.',
+      icon: role === 'assistant_coach' ? CalendarDays : UserRoundSearch,
       tone: 'neutral',
     },
     {
@@ -684,8 +695,11 @@ function HeroCard({
 }) {
   const roleCopy: Record<Role, string> = {
     member: 'Everything important at a glance: membership, QR code and useful updates.',
+    champion: 'Member tools with always-active gym access.',
+    vip: 'Member tools with always-active gym access.',
     coach: 'Fast access to your staff tools, QR code and a read-only member lookup.',
     assistant_coach: 'Fast access to your staff tools, QR code and useful updates.',
+    head_coach: 'Coach shortcuts plus notification control and a read-only member lookup.',
     reception: 'Built for quick actions at the front desk: scan, member creation and daily queues.',
     admin: 'Daily operations first: members, finance, reporting and control.',
     super_admin: 'Full operational overview with direct access to all critical areas.',
@@ -741,7 +755,7 @@ function MembershipCard({ snapshot }: { snapshot: MembershipSnapshot }) {
   )
 }
 
-function StaffAccessCard({ role }: { role: 'coach' | 'assistant_coach' }) {
+function StaffAccessCard({ role }: { role: 'coach' | 'assistant_coach' | 'head_coach' }) {
   return (
     <Surface className="p-4 sm:p-5">
       <div className="inline-flex rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold text-emerald-700">
@@ -751,7 +765,9 @@ function StaffAccessCard({ role }: { role: 'coach' | 'assistant_coach' }) {
       <p className="mt-2 text-sm text-[hsl(var(--muted))]">
         {role === 'coach'
           ? 'Your coach access is designed for daily training operations.'
-          : 'Your assistant coach access is designed for daily training operations.'}
+          : role === 'head_coach'
+            ? 'Your head coach access is designed for daily training operations.'
+            : 'Your assistant coach access is designed for daily training operations.'}
       </p>
       <div className="mt-4 flex items-center gap-2 text-sm font-medium">
         <Link href="/profile" className="inline-flex items-center gap-1 hover:underline">
@@ -887,7 +903,7 @@ export default async function HomePage() {
   ])
 
   const avatarPath = user.id_photo_path ?? profile?.id_photo_path ?? null
-  const avatarUrl = ['member', 'coach', 'assistant_coach'].includes(user.role) ? await getSignedAvatar(avatarPath) : ''
+  const avatarUrl = ['member', 'champion', 'vip', 'coach', 'assistant_coach', 'head_coach'].includes(user.role) ? await getSignedAvatar(avatarPath) : ''
   const memberId = user.member_id ?? profile?.member_id ?? null
   const qrCode = user.qr_code ?? profile?.qr_code ?? null
 
@@ -895,9 +911,9 @@ export default async function HomePage() {
   let opsKpis: OpsKpis | null = null
   let healthSnapshot: HealthLite | null = null
 
-  if (user.role === 'member') {
+  if (isMemberLikeRole(user.role) || hasLifetimeGymAccess(user.role)) {
     const subs = await getSubscriptionsLite(user.id)
-    memberSnapshot = buildMembershipSnapshot(subs, cairoToday())
+    memberSnapshot = buildMembershipSnapshot(user.role, subs, cairoToday())
   }
 
   if (['reception', 'admin', 'super_admin'].includes(user.role)) {
@@ -919,7 +935,7 @@ export default async function HomePage() {
           joinedAt={profile?.created_at ?? null}
         />
 
-        {user.role === 'member' ? (
+        {isMemberLikeRole(user.role) ? (
           <>
             <PriorityGrid
               title="Your access today"
@@ -940,7 +956,7 @@ export default async function HomePage() {
           </>
         ) : null}
 
-        {(user.role === 'coach' || user.role === 'assistant_coach') ? (
+        {(user.role === 'coach' || user.role === 'assistant_coach' || user.role === 'head_coach') ? (
           <>
             <PriorityGrid
               title="Training useful today"
@@ -957,7 +973,7 @@ export default async function HomePage() {
               />
             </div>
 
-            {user.role === 'coach' ? (
+            {(user.role === 'coach' || user.role === 'head_coach') ? (
               <HomeMemberLookup
                 title="Quick member lookup"
                 subtitle="Coach access is read-only. Search fast when you need help on the mat."
