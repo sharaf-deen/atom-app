@@ -477,13 +477,13 @@ function buildStaffPriorities(role: 'coach' | 'assistant_coach', unreadCount: nu
       tone: unreadCount > 0 ? 'warning' : 'neutral',
     },
     {
-      href: '/training-useful',
+      href: role === 'coach' ? '/members' : '/schedule',
       eyebrow: role === 'coach' ? 'Lookup today' : 'Training useful',
-      title: role === 'coach' ? 'Open training hub' : 'Open training hub',
+      title: role === 'coach' ? 'Open member lookup' : 'Open the schedule',
       desc:
         role === 'coach'
-          ? 'Open your training hub for read-only member lookup, staff updates and quick schedule access.'
-          : 'Open your training hub for schedule, QR access and useful staff shortcuts.',
+          ? 'Search a member quickly with read-only access when you need to help on the mat.'
+          : 'Keep the day moving with fast access to your schedule and staff shortcuts.',
       icon: role === 'coach' ? UserRoundSearch : CalendarDays,
       tone: 'neutral',
     },
@@ -810,9 +810,8 @@ function memberActions(): QuickAction[] {
   ]
 }
 
-function coachActions(role: 'coach' | 'assistant_coach'): QuickAction[] {
+function coachActions(): QuickAction[] {
   return [
-    { href: '/training-useful', label: 'Training useful', desc: 'Open your coach hub for today\'s training-floor shortcuts.', icon: LayoutDashboard },
     { href: '/profile', label: 'My profile', desc: 'Identity, QR code and personal info.', icon: IdCard },
     { href: '/schedule', label: 'Schedule', desc: 'Open the latest class schedule.', icon: CalendarDays },
     { href: '/notifications', label: 'Notifications', desc: 'Read the latest staff updates.', icon: Bell },
@@ -924,7 +923,7 @@ export default async function HomePage() {
           <>
             <PriorityGrid
               title="Your access today"
-              subtitle="The essentials only, so you know what matters right now."
+              subtitle="The essentials only. Open what matters next."
               items={buildMemberPriorities(memberSnapshot!, unreadNotificationsCount, Boolean(qrCode))}
             />
 
@@ -933,25 +932,10 @@ export default async function HomePage() {
               <QrCard qrCode={qrCode} />
             </div>
 
-            <div className="grid gap-4 lg:grid-cols-[1fr_1fr]">
-              <HomeNotificationsTile
-                href="/notifications"
-                label="Notifications"
-                desc="Open your inbox and see unread updates."
-                initialCount={unreadNotificationsCount}
-              />
-              <SummaryCard
-                label="Useful next step"
-                value="Check your profile"
-                hint="See your subscription history, QR code and identity details."
-                href="/profile"
-              />
-            </div>
-
             <QuickActions
               title="Quick actions"
-              subtitle="The essentials only, with no extra steps on mobile."
-              items={memberActions()}
+              subtitle="Keep the next step simple."
+              items={memberActions().slice(0, 3)}
             />
           </>
         ) : null}
@@ -960,44 +944,23 @@ export default async function HomePage() {
           <>
             <PriorityGrid
               title="Training useful today"
-              subtitle="Fast access cues built for the training floor."
+              subtitle="Useful only, with less repetition."
               items={buildStaffPriorities(user.role, unreadNotificationsCount, Boolean(qrCode))}
             />
 
-            <div className="grid gap-4 lg:grid-cols-[1.05fr_0.95fr]">
-              <StaffAccessCard role={user.role} />
+            <div className="grid gap-4 lg:grid-cols-[0.9fr_1.1fr]">
               <QrCard qrCode={qrCode} />
-            </div>
-
-            <div className="grid gap-4 lg:grid-cols-[1fr_1fr]">
-              <HomeNotificationsTile
-                href="/notifications"
-                label="Notifications"
-                desc="Open your staff updates and unread messages."
-                initialCount={unreadNotificationsCount}
-              />
-              <SummaryCard
-                label="Role focus"
-                value={user.role === 'coach' ? 'Open training hub' : 'Training useful hub'}
-                hint={
-                  user.role === 'coach'
-                    ? 'Your training hub keeps read-only member lookup, QR and staff shortcuts in one place.'
-                    : 'Your training hub keeps QR, schedule, notifications and useful field shortcuts together.'
-                }
-                href="/training-useful"
+              <QuickActions
+                title="Coach shortcuts"
+                subtitle="The most useful staff actions first."
+                items={coachActions().slice(0, 3)}
               />
             </div>
-
-            <QuickActions
-              title="Staff quick actions"
-              subtitle="Shortcuts built for training-floor usage on phone or tablet."
-              items={coachActions(user.role)}
-            />
 
             {user.role === 'coach' ? (
               <HomeMemberLookup
                 title="Quick member lookup"
-                subtitle="Coach access is read-only. Search by first name, last name or member ID."
+                subtitle="Coach access is read-only. Search fast when you need help on the mat."
                 canOpenProfile
                 showSensitiveFields={false}
               />
@@ -1009,44 +972,27 @@ export default async function HomePage() {
           <>
             <PriorityGrid
               title="Today’s priorities"
-              subtitle="The front-desk queue in the order you are most likely to need it."
+              subtitle="Overview first, then your next desk action."
               items={buildReceptionPriorities(opsKpis!)}
             />
 
-            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-              <SummaryCard label="Scans today" value={opsKpis?.scansToday ?? 0} hint={`Attendance today · ${cairoToday()}`} href="/scan" />
-              <SummaryCard label="Expiring in 7 days" value={opsKpis?.expiring7Count ?? 0} hint="Members to contact soon." href="/admin/expiring-soon" />
+            <div className="grid gap-4 sm:grid-cols-3">
+              <SummaryCard label="Scans today" value={opsKpis?.scansToday ?? 0} hint={`Attendance · ${cairoToday()}`} href="/scan" />
+              <SummaryCard label="Expiring soon" value={opsKpis?.expiring7Count ?? 0} hint="Members to renew soon." href="/admin/expiring-soon" />
               <SummaryCard label="Outstanding dues" value={opsKpis?.outstandingCount ?? 0} hint={fmtMoneyEGP(opsKpis?.outstandingTotal ?? 0)} href="/admin/outstanding-dues" />
-              <SummaryCard label="Active members" value={opsKpis?.activeCount ?? 0} hint="Current active subscriptions." href="/members" />
             </div>
 
             <QuickActions
-              title="Front desk actions"
-              subtitle="The most common tasks first, optimized for speed."
-              items={receptionActions()}
+              title="Quick actions"
+              subtitle="The desk tools used most often."
+              items={receptionActions().slice(0, 5)}
             />
 
-            <div className="grid gap-4 lg:grid-cols-[1.15fr_0.85fr]">
-              <HomeMemberLookup
-                title="Member lookup"
-                subtitle="Search fast and open the member page when you need to act."
-                canOpenProfile
-              />
-              <div className="space-y-4">
-                <HomeNotificationsTile
-                  href="/notifications"
-                  label="Notifications"
-                  desc="Keep reception updates visible and easy to open."
-                  initialCount={unreadNotificationsCount}
-                />
-                <SummaryCard
-                  label="Kiosk"
-                  value="Create member quickly"
-                  hint="Open the kiosk flow for new members at the desk."
-                  href="/kiosk"
-                />
-              </div>
-            </div>
+            <HomeMemberLookup
+              title="Member lookup"
+              subtitle="Open a member fast when the desk needs action."
+              canOpenProfile
+            />
           </>
         ) : null}
 
@@ -1054,47 +1000,40 @@ export default async function HomePage() {
           <>
             <PriorityGrid
               title="Operations today"
-              subtitle="Your highest-value admin shortcuts, with cues that match today’s situation."
+              subtitle="Priorities first, then your main admin tools."
               items={buildAdminPriorities(opsKpis!, healthSnapshot, user.role)}
             />
 
-            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-              <SummaryCard label="Active members" value={opsKpis?.activeCount ?? 0} hint="Subscriptions currently active." href="/members" />
-              <SummaryCard label="Expiring in 7 days" value={opsKpis?.expiring7Count ?? 0} hint="Renewals needing attention." href="/admin/expiring-soon" />
+            <div className="grid gap-4 sm:grid-cols-3">
+              <SummaryCard label="Expiring soon" value={opsKpis?.expiring7Count ?? 0} hint="Renewals needing attention." href="/admin/expiring-soon" />
               <SummaryCard label="Outstanding total" value={fmtMoneyEGP(opsKpis?.outstandingTotal ?? 0)} hint={`${opsKpis?.outstandingCount ?? 0} member(s) with dues`} href="/admin/outstanding-dues" />
               <SummaryCard label="Scans today" value={opsKpis?.scansToday ?? 0} hint={`Kiosk attendance · ${cairoToday()}`} href="/admin/scan-audit" />
             </div>
 
             <QuickActions
-              title="Operations shortcuts"
-              subtitle="Jump directly to the pages that matter most in daily admin work."
-              items={adminActions(user.role)}
+              title="Admin shortcuts"
+              subtitle="Keep the main operations close."
+              items={adminActions(user.role).slice(0, user.role === 'super_admin' ? 7 : 6)}
             />
 
             <div className="grid gap-4 lg:grid-cols-[1.15fr_0.85fr]">
               <HomeMemberLookup
                 title="Member lookup"
-                subtitle="Search and open member pages without leaving the dashboard flow."
+                subtitle="Search and open member pages without leaving the dashboard."
                 canOpenProfile
               />
               <div className="space-y-4">
                 <HomeNotificationsTile
                   href="/notifications"
                   label="Notifications"
-                  desc="Keep unread operational updates visible."
+                  desc="Unread operational updates, without extra dashboard noise."
                   initialCount={unreadNotificationsCount}
                 />
                 <SummaryCard
-                  label="Admin dashboard"
-                  value="Open full reporting"
-                  hint="Revenue, exports and detailed operational controls."
+                  label="Full admin view"
+                  value="Open admin dashboard"
+                  hint="Reporting, exports and extended operational controls."
                   href="/admin"
-                />
-                <SummaryCard
-                  label="Finance"
-                  value="Payments + expenses"
-                  hint="Move quickly between payments, cash report and expenses."
-                  href="/admin/payments"
                 />
               </div>
             </div>
