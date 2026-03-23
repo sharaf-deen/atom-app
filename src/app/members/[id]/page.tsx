@@ -16,7 +16,6 @@ import {
   ScanLine,
   ShieldCheck,
   UserRound,
-  Trophy,
   Wallet,
 } from 'lucide-react'
 import PageHeader from '@/components/layout/PageHeader'
@@ -25,7 +24,6 @@ import AccessDeniedPage from '@/components/AccessDeniedPage'
 import { createSupabaseRSC } from '@/lib/supabaseServer'
 import { createSupabaseAdminClient } from '@/lib/supabaseAdmin'
 import { getSessionUser, type Role } from '@/lib/session'
-import { hasLifetimeGymAccess, isMemberLikeRole } from '@/lib/rbac'
 import { addDays, cairoToday, diffDays } from '@/lib/cairoDate'
 import QrImage from '@/components/QrImage'
 import SubscribeDialog, { type Plan } from '@/components/SubscribeDialog'
@@ -33,6 +31,8 @@ import SubscriptionManageRowActions from '@/components/SubscriptionManageRowActi
 import ResendInviteButton from '@/components/ResendInviteButton'
 import DeleteUserButton from '@/components/DeleteUserButton'
 import SettleDueDialog from '@/components/SettleDueDialog'
+import AthleteProfileSection from '@/components/member-detail/AthleteProfileSection'
+import { hasLifetimeGymAccess, isMemberLikeRole } from '@/lib/rbac'
 
 type ProfileRow = {
   user_id: string
@@ -70,36 +70,6 @@ type AttendanceRow = {
   valid: boolean | null
   from_sessions: boolean | null
   subscription_id: string | null
-}
-
-type AthleteProfileRow = {
-  member_user_id: string
-  program_level: 'beginner' | 'intermediate' | 'advanced' | 'competitor' | null
-  notes: string | null
-  updated_at: string | null
-  updated_by: string | null
-}
-
-type BeltPromotionRow = {
-  id: string
-  member_user_id: string
-  belt_code: string
-  promoted_at: string
-  certificate_path: string | null
-  notes: string | null
-  created_at: string | null
-}
-
-type CompetitionResultRow = {
-  id: string
-  member_user_id: string
-  competition_name: string
-  competition_date: string
-  division: string | null
-  category: string | null
-  result: 'gold' | 'silver' | 'bronze' | 'other'
-  notes: string | null
-  created_at: string | null
 }
 
 type SummaryTone = 'success' | 'warning' | 'danger' | 'neutral'
@@ -186,14 +156,14 @@ function humanRole(role?: Role | null) {
       return 'Super admin'
     case 'coach':
       return 'Coach'
-    case 'reception':
-      return 'Reception'
-    case 'admin':
-      return 'Admin'
     case 'champion':
       return 'Champion'
     case 'vip':
       return 'VIP'
+    case 'reception':
+      return 'Reception'
+    case 'admin':
+      return 'Admin'
     default:
       return 'Member'
   }
@@ -212,49 +182,6 @@ function humanPayment(method?: string | null) {
     default:
       return '—'
   }
-}
-
-function humanProgramLevel(level?: AthleteProfileRow['program_level']) {
-  switch (level) {
-    case 'beginner':
-      return 'Beginner'
-    case 'intermediate':
-      return 'Intermediate'
-    case 'advanced':
-      return 'Advanced'
-    case 'competitor':
-      return 'Competitor'
-    default:
-      return 'Not set'
-  }
-}
-
-function humanBeltCode(code?: string | null) {
-  if (!code) return 'Not set'
-  return code
-    .split(/[_-]/g)
-    .filter(Boolean)
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join(' ')
-}
-
-function humanCompetitionResult(result?: CompetitionResultRow['result'] | null) {
-  switch (result) {
-    case 'gold':
-      return 'Gold'
-    case 'silver':
-      return 'Silver'
-    case 'bronze':
-      return 'Bronze'
-    default:
-      return 'Result logged'
-  }
-}
-
-function competitionResultTone(result?: CompetitionResultRow['result'] | null): SummaryTone {
-  if (result === 'gold') return 'success'
-  if (result === 'silver' || result === 'bronze') return 'warning'
-  return 'neutral'
 }
 
 function isUuid(v: string) {
@@ -341,17 +268,15 @@ function buildMembershipSummary(
   subs: SubscriptionRow[],
   today: string,
 ): MembershipSummary {
-  if (hasLifetimeGymAccess(viewedRole)) {
-    const isMemberBenefit = viewedRole === 'champion' || viewedRole === 'vip'
+  if (viewedRole && hasLifetimeGymAccess(viewedRole)) {
+    const isStaffRole = viewedRole === 'assistant_coach' || viewedRole === 'coach' || viewedRole === 'head_coach'
     return {
       tone: 'success',
-      label: isMemberBenefit ? `${humanRole(viewedRole)} access` : 'Staff access',
+      label: isStaffRole ? 'Staff access' : 'Special access',
       title: 'Always active',
-      hint: isMemberBenefit
-        ? 'This profile keeps always-active gym access.'
-        : isSelf
-          ? 'Your staff access is active in the app.'
-          : 'This staff profile keeps always-active gym access.',
+      hint: isStaffRole
+        ? (isSelf ? 'Your staff access is active in the app.' : 'Staff access is active in the app.')
+        : 'This profile has lifetime gym access.',
     }
   }
 
@@ -833,8 +758,8 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
         title="Member"
         subtitle="Access restricted."
         signedInAs={me.email}
-        message="Only Reception / Admin / Super Admin can view other members. Coach and Head coach can only open a read-only member profile from the home lookup."
-        allowed="coach / head coach (read-only members only), reception, admin, super_admin"
+        message="Only Reception / Admin / Super Admin can view other members freely. Coaches and Head coaches can only open read-only member-like profiles from the home lookup."
+        allowed="coach/head_coach (read-only member-like profiles only), reception, admin, super_admin"
         nextPath={nextPath}
         showBackHome
         showProfile
@@ -861,8 +786,8 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
         title="Member"
         subtitle="Access restricted."
         signedInAs={me.email}
-        message="Only Reception / Admin / Super Admin can view other members. Coach and Head coach can only open a read-only member profile from the home lookup."
-        allowed="coach / head coach (read-only members only), reception, admin, super_admin"
+        message="Only Reception / Admin / Super Admin can view other members freely. Coaches and Head coaches can only open read-only member-like profiles from the home lookup."
+        allowed="coach/head_coach (read-only member-like profiles only), reception, admin, super_admin"
         nextPath={nextPath}
         showBackHome
         showProfile
@@ -870,14 +795,14 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
     )
   }
 
-  if (isCoachViewingOtherMember && !isMemberLikeRole(profile.role ?? 'member')) {
+  if (isCoachViewingOtherMember && !isMemberLikeRole(profile.role)) {
     return (
       <AccessDeniedPage
         title="Member"
         subtitle="Access restricted."
         signedInAs={me.email}
-        message="Coach access is limited to read-only member profiles only."
-        allowed="member profiles only"
+        message="Coach and Head coach access is limited to read-only member-like profiles only."
+        allowed="member, champion, and VIP profiles only"
         nextPath={nextPath}
         showBackHome
         showProfile
@@ -949,40 +874,6 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
     attendance = (data ?? []) as AttendanceRow[]
   }
 
-  const viewedRole = profile.role ?? 'member'
-  const showAthleteProfile = isMemberLikeRole(viewedRole)
-  let athleteProfile: AthleteProfileRow | null = null
-  let beltPromotions: BeltPromotionRow[] = []
-  let competitionResults: CompetitionResultRow[] = []
-
-  if (showAthleteProfile) {
-    const [athleteRes, beltsRes, resultsRes] = await Promise.all([
-      db
-        .from('member_training_profiles')
-        .select('member_user_id, program_level, notes, updated_at, updated_by')
-        .eq('member_user_id', profile.user_id)
-        .maybeSingle(),
-      db
-        .from('member_belt_promotions')
-        .select('id, member_user_id, belt_code, promoted_at, certificate_path, notes, created_at')
-        .eq('member_user_id', profile.user_id)
-        .order('promoted_at', { ascending: false })
-        .order('created_at', { ascending: false })
-        .limit(100),
-      db
-        .from('member_competition_results')
-        .select('id, member_user_id, competition_name, competition_date, division, category, result, notes, created_at')
-        .eq('member_user_id', profile.user_id)
-        .order('competition_date', { ascending: false })
-        .order('created_at', { ascending: false })
-        .limit(100),
-    ])
-
-    athleteProfile = (athleteRes.data ?? null) as AthleteProfileRow | null
-    beltPromotions = (beltsRes.data ?? []) as BeltPromotionRow[]
-    competitionResults = (resultsRes.data ?? []) as CompetitionResultRow[]
-  }
-
   const subPlanById = new Map<string, Plan | null>(subs.map((s) => [s.id, s.plan]))
 
   const hasAnyCurrentPlanNow = subs.some((s) => {
@@ -1031,8 +922,9 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
     }
   }
 
-  const summary = buildMembershipSummary(viewedRole, isSelf, subs, today)
+  const summary = buildMembershipSummary(profile.role, isSelf, subs, today)
   const outstandingTotal = subs.reduce((sum, s) => sum + Math.max(Number(s.amount_due ?? 0), 0), 0)
+  const viewedRole = profile.role ?? 'member'
   const coachTrainingUseful = coachSafeView ? buildCoachTrainingUseful(subs, attendance, today) : null
   const receptionDeskUseful = receptionDeskView ? buildReceptionDeskUseful(subs, attendance, today, outstandingTotal) : null
   const deskWorkflow = !coachSafeView && viewedRole === 'member' ? buildDeskWorkflow(subs, today, outstandingTotal) : null
@@ -1048,21 +940,18 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
   const fullName = `${profile.first_name ?? ''} ${profile.last_name ?? ''}`.trim() || '—'
   const age = ageYears(profile.date_of_birth)
   const showSubscriptionActions = canCreateSubscription && viewedRole === 'member' && !coachSafeView
-  const canEditAthleteProfileSoon = (me.role === 'head_coach' || me.role === 'super_admin') && showAthleteProfile
-  const currentBelt = beltPromotions[0] ?? null
-  const latestCompetitionResult = competitionResults[0] ?? null
-  const currentYear = today.slice(0, 4)
-  const podiumsThisYear = competitionResults.filter((row) => row.competition_date.startsWith(currentYear) && row.result !== 'other').length
 
   const subtitle = coachSafeView
-    ? 'Read-only coach view with only safe member information.'
+    ? 'Read-only coach view.'
     : receptionDeskView
-      ? 'Front-desk member view focused on renewal, due, contact and check-in readiness.'
+      ? 'Front-desk member view.'
       : isSelf
-        ? isMemberLikeRole(viewedRole)
-          ? 'Your profile, QR code and membership details.'
-          : 'Your profile, QR code and staff access overview.'
-        : 'Fast member overview built for field usage on mobile and tablet.'
+        ? hasLifetimeGymAccess(viewedRole)
+          ? viewedRole === 'champion' || viewedRole === 'vip'
+            ? 'Profile and lifetime access.'
+            : 'Profile and staff access.'
+          : 'Profile and membership.'
+        : 'Member overview.'
 
   const right = canViewMembersList ? (
     <Link
@@ -1104,15 +993,6 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
 
             <div>
               <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">{fullName}</h1>
-              <p className="mt-2 max-w-3xl text-sm text-[hsl(var(--muted))] sm:text-base">
-                {coachSafeView
-                  ? 'Only training-useful information is shown here. No private contact data, finance data or member QR is displayed.'
-                  : receptionDeskView
-                    ? 'This view is optimized for front-desk usage: contact, due, renewal, check-in readiness and fast actions.'
-                    : isSelf
-                      ? 'Everything important is grouped here for quick reading on mobile.'
-                      : 'Identity, subscription status, QR code and operational info grouped in one clear mobile-first page.'}
-              </p>
             </div>
           </div>
         </Surface>
@@ -1142,7 +1022,7 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
               <SummaryCard
                 label="Coach access"
                 value="Read-only"
-                hint="Private contact and financial data are hidden in this view."
+                hint="Private data hidden."
                 icon={<UserRound size={18} strokeWidth={2.1} />}
               />
             </>
@@ -1151,13 +1031,13 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
               <SummaryCard
                 label="Outstanding due"
                 value={outstandingTotal > 0 ? fmtMoneyEGP(outstandingTotal) : 'No due'}
-                hint={outstandingTotal > 0 ? 'Collect or follow up at the desk.' : 'Nothing due at the moment.'}
+                hint={outstandingTotal > 0 ? 'Collect at desk.' : undefined}
                 icon={<Wallet size={18} strokeWidth={2.1} />}
               />
               <SummaryCard
                 label="Last payment"
                 value={latestPayment ? fmtDate(latestPayment) : '—'}
-                hint="Most recent recorded payment date."
+                hint={undefined}
                 icon={<CreditCard size={18} strokeWidth={2.1} />}
               />
               <SummaryCard
@@ -1172,19 +1052,19 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
               <SummaryCard
                 label="Outstanding due"
                 value={outstandingTotal > 0 ? fmtMoneyEGP(outstandingTotal) : 'No due'}
-                hint={outstandingTotal > 0 ? 'Unpaid balance on subscriptions.' : 'Nothing due at the moment.'}
+                hint={outstandingTotal > 0 ? 'Unpaid balance.' : undefined}
                 icon={<Wallet size={18} strokeWidth={2.1} />}
               />
               <SummaryCard
                 label={canViewAttendance ? 'Attendance · 30 days' : 'Last payment'}
                 value={canViewAttendance ? recentAttendanceValid : latestPayment ? fmtDate(latestPayment) : '—'}
-                hint={canViewAttendance ? (lastAttendance ? `Last check-in ${fmtDate(lastAttendance)}` : 'No recent attendance.') : 'Latest recorded payment date.'}
+                hint={canViewAttendance ? (lastAttendance ? `Last check-in ${fmtDate(lastAttendance)}` : 'No recent attendance.') : undefined}
                 icon={canViewAttendance ? <ScanLine size={18} strokeWidth={2.1} /> : <CreditCard size={18} strokeWidth={2.1} />}
               />
               <SummaryCard
                 label="Joined"
                 value={fmtDate(profile.created_at)}
-                hint={profile.email ?? profile.phone ?? 'No extra contact info.'}
+                hint={undefined}
                 icon={<CalendarDays size={18} strokeWidth={2.1} />}
               />
             </>
@@ -1197,9 +1077,6 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
               <ScanLine size={18} className="text-black" />
               <h2 className="text-base font-semibold tracking-tight">Reception desk summary</h2>
             </div>
-            <p className="mt-1 text-sm text-[hsl(var(--muted))]">
-              The most useful front-desk information at a glance.
-            </p>
 
             <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
               <SummaryCard
@@ -1236,9 +1113,6 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
               <ShieldCheck size={18} className="text-black" />
               <h2 className="text-base font-semibold tracking-tight">Training useful</h2>
             </div>
-            <p className="mt-1 text-sm text-[hsl(var(--muted))]">
-              Quick coach-only reading for what matters around the mat.
-            </p>
 
             <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
               <SummaryCard
@@ -1277,9 +1151,7 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
                   {receptionDeskView ? 'Reception quick actions' : 'Quick actions'}
                 </div>
                 <p className="mt-1 text-sm text-[hsl(var(--muted))]">
-                  {receptionDeskView
-                    ? (deskWorkflow ? `${deskWorkflow.nextStep} — ${deskWorkflow.nextHint}` : 'Keep the most common desk actions visible and fast on mobile.')
-                    : (deskWorkflow ? `${deskWorkflow.nextStep} — ${deskWorkflow.nextHint}` : 'Keep high-frequency actions visible without opening extra screens.')}
+                  {deskWorkflow ? deskWorkflow.nextStep : receptionDeskView ? 'Front-desk actions.' : 'Fast actions.'}
                 </p>
               </div>
 
@@ -1356,19 +1228,12 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
               <Wallet size={18} className="text-black" />
               <h2 className="text-base font-semibold tracking-tight">Desk workflow</h2>
             </div>
-            <p className="mt-1 text-sm text-[hsl(var(--muted))]">
-              Recommended order for the current member before moving to the next desk action.
-            </p>
-
             {deskTriageSignals.length ? (
               <div className="mt-3 space-y-2">
                 <div className="flex flex-wrap gap-2">
                   {deskTriageSignals.map((item, idx) => (
                     <TinyBadge key={`${item.label}-${idx}`} tone={item.tone}>{item.label}</TinyBadge>
                   ))}
-                </div>
-                <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] px-3 py-2 text-xs text-[hsl(var(--muted))]">
-                  Handle the member in this order: overdue / today, then any due amount, then missing paid date review.
                 </div>
               </div>
             ) : null}
@@ -1471,13 +1336,10 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
                 <QrCode size={18} className="text-black" />
                 <h2 className="text-base font-semibold tracking-tight">QR code</h2>
               </div>
-              <p className="mt-1 text-sm text-[hsl(var(--muted))]">Show this code at reception for attendance scanning.</p>
-
               <div className="mt-4 flex min-h-[220px] items-center justify-center rounded-2xl border border-dashed border-[hsl(var(--border))] bg-[hsl(var(--bg))] p-4">
                 {profile.qr_code ? (
                   <div className="text-center">
                     <QrImage value={profile.qr_code} size={180} />
-                    <div className="mt-3 text-xs text-[hsl(var(--muted))]">Ready for kiosk or front-desk scan.</div>
                   </div>
                 ) : (
                   <div className="text-sm text-[hsl(var(--muted))]">No QR code.</div>
@@ -1487,125 +1349,19 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
           ) : null}
         </div>
 
-        {showAthleteProfile ? (
-          <Surface className="p-4 sm:p-5">
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-              <div>
-                <h2 className="text-base font-semibold tracking-tight">Athlete profile</h2>
-                <p className="mt-1 text-sm text-[hsl(var(--muted))]">Program, belt history and competition results in one structured block.</p>
-              </div>
-              <div className="flex flex-wrap items-center gap-2">
-                <TinyBadge>{competitionResults.length} result(s)</TinyBadge>
-                {canEditAthleteProfileSoon ? <TinyBadge tone="warning">Read-only in V1</TinyBadge> : null}
-              </div>
-            </div>
-
-            <div className="mt-4 rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] px-4 py-3 text-sm text-[hsl(var(--muted))]">
-              3 podiums in one calendar year can unlock a 50% discount on any membership renewal.
-            </div>
-
-            {athleteProfile?.notes ? (
-              <div className="mt-3 rounded-2xl border border-[hsl(var(--border))] bg-white/70 px-4 py-3 text-sm text-[hsl(var(--muted))]">
-                {athleteProfile.notes}
-              </div>
-            ) : null}
-
-            <div className="mt-4 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-              <SummaryCard
-                label="Program"
-                value={humanProgramLevel(athleteProfile?.program_level ?? null)}
-                hint={athleteProfile?.updated_at ? `Last update ${fmtDate(athleteProfile.updated_at)}` : 'No program level saved yet.'}
-                icon={<UserRound size={18} strokeWidth={2.1} />}
-              />
-              <SummaryCard
-                label="Current belt"
-                value={humanBeltCode(currentBelt?.belt_code ?? null)}
-                hint={currentBelt?.promoted_at ? `Promoted ${fmtDate(currentBelt.promoted_at)}` : 'No belt promotion saved yet.'}
-                icon={<ShieldCheck size={18} strokeWidth={2.1} />}
-              />
-              <SummaryCard
-                label={`Podiums · ${currentYear}`}
-                value={podiumsThisYear}
-                hint={podiumsThisYear >= 3 ? 'Eligible for the 50% renewal rule.' : 'Track podiums across the current year.'}
-                icon={<Trophy size={18} strokeWidth={2.1} />}
-              />
-              <SummaryCard
-                label="Latest result"
-                value={latestCompetitionResult ? humanCompetitionResult(latestCompetitionResult.result) : 'No result yet'}
-                hint={latestCompetitionResult ? `${latestCompetitionResult.competition_name} · ${fmtDate(latestCompetitionResult.competition_date)}` : 'No competition result saved yet.'}
-                icon={<CalendarDays size={18} strokeWidth={2.1} />}
-              />
-            </div>
-
-            <div className="mt-5 grid gap-4 xl:grid-cols-2">
-              <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4 shadow-soft">
-                <div className="flex items-center justify-between gap-2">
-                  <h3 className="text-sm font-semibold tracking-tight">Belt history</h3>
-                  <TinyBadge>{beltPromotions.length} item(s)</TinyBadge>
-                </div>
-
-                {beltPromotions.length === 0 ? (
-                  <div className="mt-4 rounded-2xl border border-[hsl(var(--border))] bg-white/70 px-4 py-3 text-sm text-[hsl(var(--muted))]">
-                    No belt promotion saved yet.
-                  </div>
-                ) : (
-                  <div className="mt-4 grid gap-3">
-                    {beltPromotions.map((belt) => (
-                      <div key={belt.id} className="rounded-2xl border border-[hsl(var(--border))] bg-white/70 p-4">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <TinyBadge tone="success">{humanBeltCode(belt.belt_code)}</TinyBadge>
-                          <TinyBadge>{fmtDate(belt.promoted_at)}</TinyBadge>
-                          {belt.certificate_path ? <TinyBadge>Certificate on file</TinyBadge> : null}
-                        </div>
-                        {belt.notes ? <p className="mt-3 text-sm text-[hsl(var(--muted))]">{belt.notes}</p> : null}
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4 shadow-soft">
-                <div className="flex items-center justify-between gap-2">
-                  <h3 className="text-sm font-semibold tracking-tight">Competition results</h3>
-                  <TinyBadge>{competitionResults.length} item(s)</TinyBadge>
-                </div>
-
-                {competitionResults.length === 0 ? (
-                  <div className="mt-4 rounded-2xl border border-[hsl(var(--border))] bg-white/70 px-4 py-3 text-sm text-[hsl(var(--muted))]">
-                    No competition result saved yet.
-                  </div>
-                ) : (
-                  <div className="mt-4 grid gap-3">
-                    {competitionResults.map((result) => (
-                      <div key={result.id} className="rounded-2xl border border-[hsl(var(--border))] bg-white/70 p-4">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <TinyBadge tone={competitionResultTone(result.result)}>{humanCompetitionResult(result.result)}</TinyBadge>
-                          <TinyBadge>{fmtDate(result.competition_date)}</TinyBadge>
-                          {result.category ? <TinyBadge>{result.category}</TinyBadge> : null}
-                          {result.division ? <TinyBadge>{result.division}</TinyBadge> : null}
-                        </div>
-                        <div className="mt-3 text-sm font-medium">{result.competition_name}</div>
-                        {result.notes ? <p className="mt-2 text-sm text-[hsl(var(--muted))]">{result.notes}</p> : null}
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </div>
-          </Surface>
-        ) : null}
+        <AthleteProfileSection
+          memberUserId={profile.user_id}
+          targetRole={profile.role}
+          viewerRole={me.role}
+          isSelf={isSelf}
+          age={age}
+          nextPath={nextPath}
+        />
 
         <Surface className="p-4 sm:p-5">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <h2 className="text-base font-semibold tracking-tight">Subscriptions</h2>
-              <p className="mt-1 text-sm text-[hsl(var(--muted))]">
-                {coachSafeView
-                  ? 'Only training-useful subscription status is visible here.'
-                  : receptionDeskView
-                    ? 'Clean front-desk reading of status now, dues and payment details.'
-                    : 'Status now, billing and quick actions grouped in one clean card view.'}
-              </p>
             </div>
             <TinyBadge>{subs.length} record(s)</TinyBadge>
           </div>
