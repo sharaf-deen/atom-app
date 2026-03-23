@@ -96,7 +96,7 @@ export default async function ScanPage() {
     <main>
       <PageHeader
         title="Scan — Check-in & Validity"
-        subtitle="Fast front-desk scanning with clearer entrance decision cues, presence context and kiosk-ready flow."
+        subtitle="Fast front-desk scanning with clearer entrance decision cues, presence context and optional kiosk mode."
       />
 
       <Section className="max-w-5xl space-y-5">
@@ -117,8 +117,8 @@ export default async function ScanPage() {
           />
           <QuickLink
             href="/scan?kiosk=1"
-            label="Open kiosk mode"
-            desc="Launch the full-screen entrance scanner with auto-return flow."
+            label="Enable kiosk mode"
+            desc="Keep kiosk mode available inside this page, then choose full screen only when needed."
             icon={<ScanLine size={18} strokeWidth={2.1} />}
           />
           {showAudit ? (
@@ -141,7 +141,7 @@ export default async function ScanPage() {
           />
           <FlowCard
             title="2. Use kiosk for the entrance"
-            body="Kiosk mode opens directly in full screen, keeps the device awake and returns automatically to the next scan after each result."
+            body="Kiosk mode stays available inside this page, keeps the device awake and still lets the operator flip camera or choose full screen manually."
             icon={<ScanLine size={18} strokeWidth={2.1} />}
           />
           <FlowCard
@@ -160,7 +160,7 @@ export default async function ScanPage() {
               Use the back camera when possible and keep only one QR in the frame.
             </div>
             <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-3 text-sm text-[hsl(var(--muted))]">
-              In kiosk mode, the result page auto-returns to the scanner and highlights the fastest decision cue: let in, check desk or open profile.
+              In kiosk mode, the result page auto-returns to the scanner and highlights the fastest decision cue: let in, check desk or open profile. Full screen stays optional.
             </div>
           </div>
         </div>
