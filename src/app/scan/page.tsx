@@ -4,7 +4,7 @@ export const revalidate = 0
 
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
-import { ClipboardList, ScanLine, ShieldCheck, UserPlus, Users } from 'lucide-react'
+import { ClipboardList, ScanLine, UserPlus, Users } from 'lucide-react'
 import { getSessionUser } from '@/lib/session'
 import KioskScanner from '@/components/KioskScanner'
 import type { Role } from '@/lib/session'
@@ -46,30 +46,6 @@ function QuickLink({
   )
 }
 
-function FlowCard({
-  title,
-  body,
-  icon,
-}: {
-  title: string
-  body: string
-  icon: React.ReactNode
-}) {
-  return (
-    <div className="rounded-3xl border border-[hsl(var(--border))] bg-white p-4 shadow-soft">
-      <div className="flex items-start gap-3">
-        <span className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-black">
-          {icon}
-        </span>
-        <div>
-          <div className="text-sm font-semibold tracking-tight">{title}</div>
-          <p className="mt-1 text-sm text-[hsl(var(--muted))]">{body}</p>
-        </div>
-      </div>
-    </div>
-  )
-}
-
 export default async function ScanPage() {
   const user = await getSessionUser()
 
@@ -94,10 +70,7 @@ export default async function ScanPage() {
 
   return (
     <main>
-      <PageHeader
-        title="Scan — Check-in & Validity"
-        subtitle="Fast front-desk scanning with clearer entrance decision cues, presence context and optional kiosk mode."
-      />
+      <PageHeader title="Scan — Check-in & Validity" subtitle="Fast front-desk scanner with optional kiosk mode." />
 
       <Section className="max-w-5xl space-y-5">
         <KioskHealthBadge />
@@ -106,26 +79,26 @@ export default async function ScanPage() {
           <QuickLink
             href="/members"
             label="Members"
-            desc="Find a member quickly before or after a scan."
+            desc="Open member list."
             icon={<Users size={18} strokeWidth={2.1} />}
           />
           <QuickLink
             href="/kiosk"
             label="Create member"
-            desc="Open the front-desk member creation flow."
+            desc="Create a new member."
             icon={<UserPlus size={18} strokeWidth={2.1} />}
           />
           <QuickLink
             href="/scan?kiosk=1"
             label="Enable kiosk mode"
-            desc="Keep kiosk mode available inside this page, then choose full screen only when needed."
+            desc="Keep kiosk mode ready on this page."
             icon={<ScanLine size={18} strokeWidth={2.1} />}
           />
           {showAudit ? (
             <QuickLink
               href="/admin/scan-audit"
               label="Scan audit"
-              desc="Review scan history, device tag and scanner context."
+              desc="Review scan history."
               icon={<ClipboardList size={18} strokeWidth={2.1} />}
             />
           ) : (
@@ -133,37 +106,7 @@ export default async function ScanPage() {
           )}
         </div>
 
-        <div className="grid gap-3 lg:grid-cols-3">
-          <FlowCard
-            title="1. Read the entrance cue fast"
-            body="Result pages now make the next decision obvious in one second: let in, check desk or open profile."
-            icon={<ShieldCheck size={18} strokeWidth={2.1} />}
-          />
-          <FlowCard
-            title="2. Use kiosk for the entrance"
-            body="Kiosk mode stays available inside this page, keeps the device awake and still lets the operator flip camera or choose full screen manually."
-            icon={<ScanLine size={18} strokeWidth={2.1} />}
-          />
-          <FlowCard
-            title="3. Separate QR, subscription and repeat cases"
-            body="Repeat-scan protection avoids immediate double check-ins, while the result page separates allowed entry, blocked membership, frozen membership and QR/member issues."
-            icon={<Users size={18} strokeWidth={2.1} />}
-          />
-        </div>
-
         <KioskScanner size="md" ratio="1:1" />
-
-        <div className="rounded-3xl border border-[hsl(var(--border))] bg-white p-4 shadow-soft">
-          <h2 className="text-base font-semibold tracking-tight">Front-desk tips</h2>
-          <div className="mt-3 grid gap-3 sm:grid-cols-2">
-            <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-3 text-sm text-[hsl(var(--muted))]">
-              Use the back camera when possible and keep only one QR in the frame.
-            </div>
-            <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-3 text-sm text-[hsl(var(--muted))]">
-              In kiosk mode, the result page auto-returns to the scanner and highlights the fastest decision cue: let in, check desk or open profile. Full screen stays optional.
-            </div>
-          </div>
-        </div>
       </Section>
     </main>
   )

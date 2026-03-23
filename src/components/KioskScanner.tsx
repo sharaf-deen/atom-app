@@ -439,7 +439,7 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className }: 
           sp.set('repeatSeconds', String(Math.max(1, Math.round(repeatAgeMs / 1000))))
           if (kioskMode) sp.set('kiosk', '1')
           setStatus('ok')
-          setMsg('Same member scanned again — reusing the latest entrance decision and presence context.')
+          setMsg('Same member scanned again — opening the latest result.')
           router.push(`/scan/result?${sp.toString()}`)
           didNavigate = true
           return
@@ -582,11 +582,7 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className }: 
                   {!online ? (
                     <span className="rounded-full border border-rose-400/30 bg-rose-500/10 px-2 py-0.5 text-rose-100">Offline</span>
                   ) : null}
-                  {!kioskMode ? (
-                    <span className="text-white/50">• Press ESC to exit</span>
-                  ) : (
-                    <span className="text-white/50">• Hold Exit 2s</span>
-                  )}
+                  {!kioskMode ? <span className="text-white/50">• ESC exits full screen</span> : null}
                 </div>
               </div>
 
@@ -687,7 +683,7 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className }: 
                 {kioskMode ? <Badge>Kiosk</Badge> : null}
               </div>
               <p className="mt-1 text-sm text-[hsl(var(--muted))]">
-                Fast front-desk scanning with optional kiosk mode, full-screen controls, repeat-scan guardrails, presence context and clear entrance decision cues.
+                Front-desk scanner with optional kiosk mode and clear result cues.
               </p>
             </div>
 
@@ -699,28 +695,26 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className }: 
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
             <ActionChip
               icon={<ScanLine size={16} strokeWidth={2.1} />}
-              label={paused ? 'Paused until rescan' : kioskMode ? 'Ready for next member' : 'Ready for next QR'}
+              label={paused ? 'Paused' : kioskMode ? 'Ready for next member' : 'Ready'}
             />
             <ActionChip
               icon={<Camera size={16} strokeWidth={2.1} />}
-              label={facingMode === 'environment' ? 'Back camera active' : 'Front camera active'}
+              label={facingMode === 'environment' ? 'Back camera' : 'Front camera'}
             />
             <ActionChip
               icon={<Smartphone size={16} strokeWidth={2.1} />}
-              label={kioskMode ? (fullScreen ? 'Kiosk mode active · full screen' : 'Kiosk mode active in page') : 'Standard scanner view'}
+              label={kioskMode ? (fullScreen ? 'Kiosk + full screen' : 'Kiosk in page') : 'Standard view'}
             />
             <ActionChip
               icon={online ? <ShieldCheck size={16} strokeWidth={2.1} /> : <WifiOff size={16} strokeWidth={2.1} />}
-              label={online ? (kioskMode ? 'Auto-return + decision cues' : 'Decision cues ready') : 'Internet required'}
+              label={online ? (kioskMode ? 'Auto-return ready' : 'Result cues ready') : 'Internet required'}
             />
           </div>
 
           {!online ? (
             <div className="rounded-2xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800">
               <div className="font-semibold">Offline</div>
-              <div className="mt-1 text-xs">
-                Internet connection lost. Scanning requires internet access. Reconnect, then tap Retry.
-              </div>
+              <div className="mt-1 text-xs">Reconnect, then tap Retry.</div>
               <div className="mt-3 flex flex-wrap gap-2">
                 <Button variant="outline" onClick={retryNow}>
                   Retry
@@ -774,7 +768,7 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className }: 
 
             <div className="space-y-3">
               <div className="rounded-3xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] p-4">
-                <div className="text-sm font-semibold tracking-tight">Current scanner message</div>
+                <div className="text-sm font-semibold tracking-tight">Message</div>
                 <p
                   className={
                     'mt-2 text-sm ' +
@@ -792,23 +786,17 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className }: 
               </div>
 
               <div className="rounded-3xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] p-4">
-                <div className="text-sm font-semibold tracking-tight">Desk decision tips</div>
+                <div className="text-sm font-semibold tracking-tight">Scanner notes</div>
                 <ul className="mt-2 space-y-2 text-sm text-[hsl(var(--muted))]">
-                  <li>Keep only one QR code in the frame.</li>
-                  <li>Use the back camera for faster detection.</li>
-                  <li>Kiosk mode now stays available inside this page. Use Full screen only when you want it.</li>
-                  <li>Use the result page cue first: Let in, Check desk or Open profile.</li>
-                  <li>Tap Rescan after any blocked or invalid attempt.</li>
-                  <li>Use kiosk mode for the academy entrance.</li>
-                  <li>Kiosk mode returns automatically to the next scan after the result page.</li>
+                  <li>Keep one QR code in frame.</li>
+                  <li>Use the back camera when possible.</li>
+                  <li>Use the result cue first: let in, check desk, or open profile.</li>
+                  <li>Tap Rescan after a blocked or invalid attempt.</li>
                 </ul>
               </div>
             </div>
           </div>
 
-          <div className="text-sm text-[hsl(var(--muted))]">
-            The scanner validates the member and opens a result page with a stronger entrance decision cue for the desk.
-          </div>
         </div>
       </CardContent>
     </Card>

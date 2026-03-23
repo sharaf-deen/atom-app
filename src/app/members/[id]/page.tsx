@@ -931,14 +931,14 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
   const showSubscriptionActions = canCreateSubscription && viewedRole === 'member' && !coachSafeView
 
   const subtitle = coachSafeView
-    ? 'Read-only coach view with only safe member information.'
+    ? 'Read-only coach view.'
     : receptionDeskView
-      ? 'Front-desk member view focused on renewal, due, contact and check-in readiness.'
+      ? 'Front-desk member view.'
       : isSelf
         ? viewedRole === 'member'
-          ? 'Your profile, QR code and membership details.'
-          : 'Your profile, QR code and staff access overview.'
-        : 'Fast member overview built for field usage on mobile and tablet.'
+          ? 'Profile and membership.'
+          : 'Profile and staff access.'
+        : 'Member overview.'
 
   const right = canViewMembersList ? (
     <Link
@@ -980,15 +980,6 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
 
             <div>
               <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">{fullName}</h1>
-              <p className="mt-2 max-w-3xl text-sm text-[hsl(var(--muted))] sm:text-base">
-                {coachSafeView
-                  ? 'Only training-useful information is shown here. No private contact data, finance data or member QR is displayed.'
-                  : receptionDeskView
-                    ? 'This view is optimized for front-desk usage: contact, due, renewal, check-in readiness and fast actions.'
-                    : isSelf
-                      ? 'Everything important is grouped here for quick reading on mobile.'
-                      : 'Identity, subscription status, QR code and operational info grouped in one clear mobile-first page.'}
-              </p>
             </div>
           </div>
         </Surface>
@@ -1018,7 +1009,7 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
               <SummaryCard
                 label="Coach access"
                 value="Read-only"
-                hint="Private contact and financial data are hidden in this view."
+                hint="Private data hidden."
                 icon={<UserRound size={18} strokeWidth={2.1} />}
               />
             </>
@@ -1027,13 +1018,13 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
               <SummaryCard
                 label="Outstanding due"
                 value={outstandingTotal > 0 ? fmtMoneyEGP(outstandingTotal) : 'No due'}
-                hint={outstandingTotal > 0 ? 'Collect or follow up at the desk.' : 'Nothing due at the moment.'}
+                hint={outstandingTotal > 0 ? 'Collect at desk.' : undefined}
                 icon={<Wallet size={18} strokeWidth={2.1} />}
               />
               <SummaryCard
                 label="Last payment"
                 value={latestPayment ? fmtDate(latestPayment) : '—'}
-                hint="Most recent recorded payment date."
+                hint={undefined}
                 icon={<CreditCard size={18} strokeWidth={2.1} />}
               />
               <SummaryCard
@@ -1048,19 +1039,19 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
               <SummaryCard
                 label="Outstanding due"
                 value={outstandingTotal > 0 ? fmtMoneyEGP(outstandingTotal) : 'No due'}
-                hint={outstandingTotal > 0 ? 'Unpaid balance on subscriptions.' : 'Nothing due at the moment.'}
+                hint={outstandingTotal > 0 ? 'Unpaid balance.' : undefined}
                 icon={<Wallet size={18} strokeWidth={2.1} />}
               />
               <SummaryCard
                 label={canViewAttendance ? 'Attendance · 30 days' : 'Last payment'}
                 value={canViewAttendance ? recentAttendanceValid : latestPayment ? fmtDate(latestPayment) : '—'}
-                hint={canViewAttendance ? (lastAttendance ? `Last check-in ${fmtDate(lastAttendance)}` : 'No recent attendance.') : 'Latest recorded payment date.'}
+                hint={canViewAttendance ? (lastAttendance ? `Last check-in ${fmtDate(lastAttendance)}` : 'No recent attendance.') : undefined}
                 icon={canViewAttendance ? <ScanLine size={18} strokeWidth={2.1} /> : <CreditCard size={18} strokeWidth={2.1} />}
               />
               <SummaryCard
                 label="Joined"
                 value={fmtDate(profile.created_at)}
-                hint={profile.email ?? profile.phone ?? 'No extra contact info.'}
+                hint={undefined}
                 icon={<CalendarDays size={18} strokeWidth={2.1} />}
               />
             </>
@@ -1073,9 +1064,6 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
               <ScanLine size={18} className="text-black" />
               <h2 className="text-base font-semibold tracking-tight">Reception desk summary</h2>
             </div>
-            <p className="mt-1 text-sm text-[hsl(var(--muted))]">
-              The most useful front-desk information at a glance.
-            </p>
 
             <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
               <SummaryCard
@@ -1112,9 +1100,6 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
               <ShieldCheck size={18} className="text-black" />
               <h2 className="text-base font-semibold tracking-tight">Training useful</h2>
             </div>
-            <p className="mt-1 text-sm text-[hsl(var(--muted))]">
-              Quick coach-only reading for what matters around the mat.
-            </p>
 
             <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
               <SummaryCard
@@ -1153,9 +1138,7 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
                   {receptionDeskView ? 'Reception quick actions' : 'Quick actions'}
                 </div>
                 <p className="mt-1 text-sm text-[hsl(var(--muted))]">
-                  {receptionDeskView
-                    ? (deskWorkflow ? `${deskWorkflow.nextStep} — ${deskWorkflow.nextHint}` : 'Keep the most common desk actions visible and fast on mobile.')
-                    : (deskWorkflow ? `${deskWorkflow.nextStep} — ${deskWorkflow.nextHint}` : 'Keep high-frequency actions visible without opening extra screens.')}
+                  {deskWorkflow ? deskWorkflow.nextStep : receptionDeskView ? 'Front-desk actions.' : 'Fast actions.'}
                 </p>
               </div>
 
@@ -1232,19 +1215,12 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
               <Wallet size={18} className="text-black" />
               <h2 className="text-base font-semibold tracking-tight">Desk workflow</h2>
             </div>
-            <p className="mt-1 text-sm text-[hsl(var(--muted))]">
-              Recommended order for the current member before moving to the next desk action.
-            </p>
-
             {deskTriageSignals.length ? (
               <div className="mt-3 space-y-2">
                 <div className="flex flex-wrap gap-2">
                   {deskTriageSignals.map((item, idx) => (
                     <TinyBadge key={`${item.label}-${idx}`} tone={item.tone}>{item.label}</TinyBadge>
                   ))}
-                </div>
-                <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] px-3 py-2 text-xs text-[hsl(var(--muted))]">
-                  Handle the member in this order: overdue / today, then any due amount, then missing paid date review.
                 </div>
               </div>
             ) : null}
@@ -1347,13 +1323,10 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
                 <QrCode size={18} className="text-black" />
                 <h2 className="text-base font-semibold tracking-tight">QR code</h2>
               </div>
-              <p className="mt-1 text-sm text-[hsl(var(--muted))]">Show this code at reception for attendance scanning.</p>
-
               <div className="mt-4 flex min-h-[220px] items-center justify-center rounded-2xl border border-dashed border-[hsl(var(--border))] bg-[hsl(var(--bg))] p-4">
                 {profile.qr_code ? (
                   <div className="text-center">
                     <QrImage value={profile.qr_code} size={180} />
-                    <div className="mt-3 text-xs text-[hsl(var(--muted))]">Ready for kiosk or front-desk scan.</div>
                   </div>
                 ) : (
                   <div className="text-sm text-[hsl(var(--muted))]">No QR code.</div>
@@ -1367,13 +1340,6 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <h2 className="text-base font-semibold tracking-tight">Subscriptions</h2>
-              <p className="mt-1 text-sm text-[hsl(var(--muted))]">
-                {coachSafeView
-                  ? 'Only training-useful subscription status is visible here.'
-                  : receptionDeskView
-                    ? 'Clean front-desk reading of status now, dues and payment details.'
-                    : 'Status now, billing and quick actions grouped in one clean card view.'}
-              </p>
             </div>
             <TinyBadge>{subs.length} record(s)</TinyBadge>
           </div>
