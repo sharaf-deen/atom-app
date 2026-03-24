@@ -1,7 +1,7 @@
 // src/components/KioskScanner.tsx
 'use client'
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ComponentType, ReactNode } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import {
@@ -77,7 +77,7 @@ function parseMemberText(text: string): string | null {
 function errToString(err: unknown) {
   if (typeof err === 'string') return err
   if (err && typeof err === 'object' && 'message' in err) {
-    const m = (err as any).message
+    const m = (err as { message?: unknown }).message
     if (typeof m === 'string') return m
   }
   try {
@@ -85,7 +85,6 @@ function errToString(err: unknown) {
   } catch {}
   return 'Camera error'
 }
-
 
 function buildResultParams(j: ScanResponse, kioskMode: boolean) {
   const sp = new URLSearchParams()
@@ -172,12 +171,6 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className }: 
   const [kioskMode, setKioskMode] = useState(false)
   const wakeLockRef = useRef<any>(null)
 
-  const [exitOpen, setExitOpen] = useState(false)
-  const [exitPin, setExitPin] = useState('')
-  const [exitError, setExitError] = useState<string | null>(null)
-  const [exitHolding, setExitHolding] = useState(false)
-  const exitHoldRef = useRef<number | null>(null)
-
   useEffect(() => {
     try {
       const stored = window.localStorage.getItem('atom:kiosk') === '1'
@@ -228,76 +221,6 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className }: 
     }
   }, [kioskMode])
 
-  async function verifyExitPin(pin: string): Promise<{ ok: boolean; message?: string }> {
-    const r = await fetch('/api/kiosk/verify-exit-pin', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ pin }),
-    })
-    const j = await r.json().catch(() => ({ ok: false }))
-    return { ok: !!j?.ok && r.ok, message: j?.message }
-  }
-
-  function cancelExitHold() {
-    if (exitHoldRef.current) window.clearTimeout(exitHoldRef.current)
-    exitHoldRef.current = null
-    setExitHolding(false)
-  }
-
-  function startExitHold() {
-    if (!kioskMode) return
-    cancelExitHold()
-    setExitHolding(true)
-    exitHoldRef.current = window.setTimeout(() => {
-      exitHoldRef.current = null
-      setExitHolding(false)
-      setExitError(null)
-      setExitPin('')
-      setExitOpen(true)
-    }, 2000) as any
-  }
-
-  const kioskExitHoldProps = kioskMode
-    ? {
-        onMouseDown: startExitHold,
-        onMouseUp: cancelExitHold,
-        onMouseLeave: cancelExitHold,
-        onTouchStart: startExitHold,
-        onTouchEnd: cancelExitHold,
-        onTouchCancel: cancelExitHold,
-        onPointerDown: startExitHold,
-        onPointerUp: cancelExitHold,
-        onPointerLeave: cancelExitHold,
-        onPointerCancel: cancelExitHold,
-      }
-    : {}
-
-  async function confirmExitKiosk() {
-    setExitError(null)
-    const res = await verifyExitPin(exitPin || '')
-    if (!res.ok) {
-      setExitError(res.message || 'Invalid PIN')
-      return
-    }
-
-    try {
-      window.localStorage.setItem('atom:kiosk', '0')
-    } catch {}
-
-    cancelExitHold()
-    setExitOpen(false)
-    setKioskMode(false)
-    setFullScreen(false)
-    router.replace('/scan')
-  }
-
-  function closeExitModal() {
-    cancelExitHold()
-    setExitOpen(false)
-    setExitError(null)
-    setExitPin('')
-  }
-
   function enterKioskMode() {
     try {
       window.localStorage.setItem('atom:kiosk', '1')
@@ -310,11 +233,8 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className }: 
     try {
       window.localStorage.setItem('atom:kiosk', '0')
     } catch {}
-    cancelExitHold()
-    setExitOpen(false)
-    setExitError(null)
-    setExitPin('')
     setKioskMode(false)
+    setFullScreen(false)
     router.replace('/scan')
   }
 
@@ -404,7 +324,6 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className }: 
   useEffect(() => {
     return () => {
       if (resumeTimerRef.current) window.clearTimeout(resumeTimerRef.current)
-      if (exitHoldRef.current) window.clearTimeout(exitHoldRef.current)
     }
   }, [])
 
@@ -439,7 +358,7 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className }: 
           sp.set('repeatSeconds', String(Math.max(1, Math.round(repeatAgeMs / 1000))))
           if (kioskMode) sp.set('kiosk', '1')
           setStatus('ok')
-          setMsg('Same member scanned again — opening the latest result.')
+          setMsg('Same member scanned again — latest decision reused.')
           router.push(`/scan/result?${sp.toString()}`)
           didNavigate = true
           return
@@ -562,111 +481,71 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className }: 
 
   if (fullScreen) {
     return (
-      <>
-        <div className="fixed inset-0 z-50 bg-black/90 text-white">
-          <div className="absolute inset-x-0 top-0 z-10 border-b border-white/10 bg-black/50 backdrop-blur-md">
-            <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-3 px-4 py-3">
-              <div className="min-w-[220px]">
-                <div className="flex items-center gap-2">
-                  <div className="text-base font-semibold">Scan member QR</div>
-                  {kioskMode ? (
-                    <span className="rounded-full border border-emerald-400/30 bg-emerald-500/10 px-2 py-0.5 text-xs text-emerald-100">
-                      Kiosk mode
-                    </span>
-                  ) : null}
-                </div>
-                <div className="mt-1 flex flex-wrap items-center gap-2 text-xs">
-                  <span className={(status === 'error' ? 'text-rose-200' : status === 'ok' ? 'text-emerald-200' : status === 'invalid' ? 'text-amber-200' : 'text-white/80') + ' truncate'}>
-                    {msg}
-                  </span>
-                  {!online ? (
-                    <span className="rounded-full border border-rose-400/30 bg-rose-500/10 px-2 py-0.5 text-rose-100">Offline</span>
-                  ) : null}
-                  {!kioskMode ? <span className="text-white/50">• ESC exits full screen</span> : null}
-                </div>
-              </div>
-
+      <div className="fixed inset-0 z-50 bg-black/90 text-white">
+        <div className="absolute inset-x-0 top-0 z-10 border-b border-white/10 bg-black/50 backdrop-blur-md">
+          <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-3 px-4 py-3">
+            <div className="min-w-[220px]">
               <div className="flex items-center gap-2">
-                {!online ? (
-                  <Button
-                    variant="outline"
-                    className="!bg-transparent !text-white !border-white/30 hover:!bg-white/10"
-                    onClick={retryNow}
-                  >
-                    Retry
-                  </Button>
-                ) : null}
+                <div className="text-base font-semibold">Scan member QR</div>
                 {kioskMode ? (
-                  <button
-                    type="button"
-                    className="inline-flex items-center justify-center rounded-full border border-white/30 bg-transparent px-4 py-2 text-sm font-medium text-white transition hover:bg-white/10"
-                    title="Hold 2s to exit kiosk"
-                    {...kioskExitHoldProps}
-                  >
-                    {exitHolding ? 'Holding…' : 'Hold to exit'}
-                  </button>
-                ) : (
-                  <Button
-                    variant="outline"
-                    className="!bg-transparent !text-white !border-white/30 hover:!bg-white/10"
-                    onClick={() => setFullScreen(false)}
-                    title="Exit full screen"
-                  >
-                    Exit full screen
-                  </Button>
-                )}
+                  <span className="rounded-full border border-emerald-400/30 bg-emerald-500/10 px-2 py-0.5 text-xs text-emerald-100">
+                    Kiosk mode
+                  </span>
+                ) : null}
+              </div>
+              <div className="mt-1 flex flex-wrap items-center gap-2 text-xs">
+                <span className={(status === 'error' ? 'text-rose-200' : status === 'ok' ? 'text-emerald-200' : status === 'invalid' ? 'text-amber-200' : 'text-white/80') + ' truncate'}>
+                  {msg}
+                </span>
+                {!online ? (
+                  <span className="rounded-full border border-rose-400/30 bg-rose-500/10 px-2 py-0.5 text-rose-100">Offline</span>
+                ) : null}
+                {!kioskMode ? <span className="text-white/50">• Press ESC to exit</span> : null}
               </div>
             </div>
-          </div>
 
-          <div className="mx-auto flex h-full max-w-6xl flex-col px-4 pb-4 pt-20">
-            <div className="flex-1">
-              <div className="relative h-full w-full overflow-hidden rounded-3xl border border-white/20 bg-black shadow-soft">
-                {scannerEl}
-                {scannerOverlay}
-              </div>
+            <div className="flex items-center gap-2">
+              {!online ? (
+                <Button
+                  variant="outline"
+                  className="!bg-transparent !text-white !border-white/30 hover:!bg-white/10"
+                  onClick={retryNow}
+                >
+                  Retry
+                </Button>
+              ) : null}
+              {kioskMode ? (
+                <Button
+                  variant="outline"
+                  className="!bg-transparent !text-white !border-white/30 hover:!bg-white/10"
+                  onClick={exitKioskMode}
+                  title="Exit kiosk mode"
+                >
+                  Exit kiosk mode
+                </Button>
+              ) : (
+                <Button
+                  variant="outline"
+                  className="!bg-transparent !text-white !border-white/30 hover:!bg-white/10"
+                  onClick={() => setFullScreen(false)}
+                  title="Exit full screen"
+                >
+                  Exit full screen
+                </Button>
+              )}
             </div>
           </div>
         </div>
 
-        {exitOpen ? (
-          <div className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/60 p-4">
-            <div className="w-full max-w-sm rounded-2xl border border-[hsl(var(--border))] bg-white p-4 text-gray-900 shadow-soft">
-              <div className="text-base font-semibold">Exit kiosk</div>
-              <p className="mt-1 text-sm text-gray-600">Hold confirmed. Enter PIN to exit kiosk mode.</p>
-
-              <input
-                className="mt-3 w-full rounded-xl border border-[hsl(var(--border))] px-3 py-2 text-sm outline-none"
-                type="password"
-                inputMode="numeric"
-                placeholder="PIN"
-                value={exitPin}
-                onChange={(e) => setExitPin(e.target.value)}
-                autoFocus
-              />
-
-              {exitError ? <p className="mt-2 text-sm text-rose-700">{exitError}</p> : null}
-
-              <div className="mt-4 flex justify-end gap-2">
-                <button
-                  type="button"
-                  className="rounded-xl border border-[hsl(var(--border))] bg-white px-4 py-2 text-sm font-medium"
-                  onClick={closeExitModal}
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  className="rounded-xl bg-black px-4 py-2 text-sm font-medium text-white"
-                  onClick={confirmExitKiosk}
-                >
-                  Exit
-                </button>
-              </div>
+        <div className="mx-auto flex h-full max-w-6xl flex-col px-4 pb-4 pt-20">
+          <div className="flex-1">
+            <div className="relative h-full w-full overflow-hidden rounded-3xl border border-white/20 bg-black shadow-soft">
+              {scannerEl}
+              {scannerOverlay}
             </div>
           </div>
-        ) : null}
-      </>
+        </div>
+      </div>
     )
   }
 
@@ -683,7 +562,7 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className }: 
                 {kioskMode ? <Badge>Kiosk</Badge> : null}
               </div>
               <p className="mt-1 text-sm text-[hsl(var(--muted))]">
-                Front-desk scanner with optional kiosk mode and clear result cues.
+                Flip camera, open full screen manually, or keep kiosk mode active inside this page.
               </p>
             </div>
 
@@ -695,26 +574,28 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className }: 
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
             <ActionChip
               icon={<ScanLine size={16} strokeWidth={2.1} />}
-              label={paused ? 'Paused' : kioskMode ? 'Ready for next member' : 'Ready'}
+              label={paused ? 'Paused until rescan' : kioskMode ? 'Ready for next member' : 'Ready for next QR'}
             />
             <ActionChip
               icon={<Camera size={16} strokeWidth={2.1} />}
-              label={facingMode === 'environment' ? 'Back camera' : 'Front camera'}
+              label={facingMode === 'environment' ? 'Back camera active' : 'Front camera active'}
             />
             <ActionChip
               icon={<Smartphone size={16} strokeWidth={2.1} />}
-              label={kioskMode ? (fullScreen ? 'Kiosk + full screen' : 'Kiosk in page') : 'Standard view'}
+              label={kioskMode ? (fullScreen ? 'Kiosk mode active · full screen' : 'Kiosk mode active in page') : 'Standard scanner view'}
             />
             <ActionChip
               icon={online ? <ShieldCheck size={16} strokeWidth={2.1} /> : <WifiOff size={16} strokeWidth={2.1} />}
-              label={online ? (kioskMode ? 'Auto-return ready' : 'Result cues ready') : 'Internet required'}
+              label={online ? (kioskMode ? 'Auto-return active' : 'Decision cues ready') : 'Internet required'}
             />
           </div>
 
           {!online ? (
             <div className="rounded-2xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800">
               <div className="font-semibold">Offline</div>
-              <div className="mt-1 text-xs">Reconnect, then tap Retry.</div>
+              <div className="mt-1 text-xs">
+                Internet connection lost. Scanning requires internet access. Reconnect, then tap Retry.
+              </div>
               <div className="mt-3 flex flex-wrap gap-2">
                 <Button variant="outline" onClick={retryNow}>
                   Retry
@@ -768,7 +649,7 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className }: 
 
             <div className="space-y-3">
               <div className="rounded-3xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] p-4">
-                <div className="text-sm font-semibold tracking-tight">Message</div>
+                <div className="text-sm font-semibold tracking-tight">Current scanner message</div>
                 <p
                   className={
                     'mt-2 text-sm ' +
@@ -786,17 +667,17 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className }: 
               </div>
 
               <div className="rounded-3xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] p-4">
-                <div className="text-sm font-semibold tracking-tight">Scanner notes</div>
+                <div className="text-sm font-semibold tracking-tight">Desk tips</div>
                 <ul className="mt-2 space-y-2 text-sm text-[hsl(var(--muted))]">
-                  <li>Keep one QR code in frame.</li>
+                  <li>Keep one QR code in the frame.</li>
                   <li>Use the back camera when possible.</li>
-                  <li>Use the result cue first: let in, check desk, or open profile.</li>
+                  <li>Kiosk mode stays inside this page.</li>
+                  <li>Use Full screen only when needed.</li>
                   <li>Tap Rescan after a blocked or invalid attempt.</li>
                 </ul>
               </div>
             </div>
           </div>
-
         </div>
       </CardContent>
     </Card>
