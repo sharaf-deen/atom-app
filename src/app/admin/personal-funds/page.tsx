@@ -34,10 +34,21 @@ type EntryRow = {
   payment_method: string | null
   note: string | null
   created_at: string
+  created_by: string | null
+  updated_at: string | null
+  updated_by: string | null
   receipt_path: string | null
   receipt_mime: string | null
   receipt_filename: string | null
   receipt_size_bytes: number | null
+}
+
+type ProfileMini = {
+  user_id: string
+  role: string | null
+  first_name: string | null
+  last_name: string | null
+  email: string | null
 }
 
 const PER_PAGE = 25
@@ -123,6 +134,27 @@ function paymentLabel(v?: string | null) {
   if (s === 'instapay') return 'Instapay'
   if (s === 'bank_transfer') return 'Bank transfer'
   return s.replace(/_/g, ' ')
+}
+
+function roleLabel(v?: string | null) {
+  const s = (v || '').trim()
+  if (!s) return 'Unknown role'
+  return s.replace(/_/g, ' ').replace(/\b\w/g, (m) => m.toUpperCase())
+}
+
+function profileDisplayName(profile?: ProfileMini | null) {
+  if (!profile) return 'Unknown staff'
+  const full = `${profile.first_name ?? ''} ${profile.last_name ?? ''}`.trim()
+  if (full) return full
+  if (profile.email) return profile.email
+  return 'Unknown staff'
+}
+
+function profileMetaLine(profile?: ProfileMini | null) {
+  if (!profile) return 'Unknown staff'
+  const role = roleLabel(profile.role)
+  const email = (profile.email || '').trim()
+  return email ? `${role} · ${email}` : role
 }
 
 function kindLabel(kind: EntryKind) {
@@ -402,6 +434,7 @@ async function addEntryAction(formData: FormData) {
       receipt_filename,
       receipt_size_bytes,
       created_by: me.id,
+      updated_by: me.id,
     },
   ])
 
@@ -497,6 +530,7 @@ async function updateEntryAction(formData: FormData) {
       amount,
       payment_method,
       note: note || null,
+      updated_by: me.id,
       receipt_path,
       receipt_mime,
       receipt_filename,
@@ -667,7 +701,7 @@ export default async function PersonalFundsPage({
   let entriesQuery = admin
     .from('personal_fund_entries')
     .select(
-      'id,entry_date,person_id,kind,amount,payment_method,note,created_at,receipt_path,receipt_mime,receipt_filename,receipt_size_bytes',
+      'id,entry_date,person_id,kind,amount,payment_method,note,created_at,created_by,updated_at,updated_by,receipt_path,receipt_mime,receipt_filename,receipt_size_bytes',
       { count: 'exact' }
     )
     .order('entry_date', { ascending: false })
@@ -693,7 +727,7 @@ export default async function PersonalFundsPage({
   if (editId) {
     const { data, error } = await admin
       .from('personal_fund_entries')
-      .select('id,entry_date,person_id,kind,amount,payment_method,note,created_at,receipt_path,receipt_mime,receipt_filename,receipt_size_bytes')
+      .select('id,entry_date,person_id,kind,amount,payment_method,note,created_at,created_by,updated_at,updated_by,receipt_path,receipt_mime,receipt_filename,receipt_size_bytes')
       .eq('id', editId)
       .maybeSingle<EntryRow>()
 
@@ -713,7 +747,7 @@ export default async function PersonalFundsPage({
     } else {
       const { data, error } = await admin
         .from('personal_fund_entries')
-        .select('id,entry_date,person_id,kind,amount,payment_method,note,created_at,receipt_path,receipt_mime,receipt_filename,receipt_size_bytes')
+        .select('id,entry_date,person_id,kind,amount,payment_method,note,created_at,created_by,updated_at,updated_by,receipt_path,receipt_mime,receipt_filename,receipt_size_bytes')
         .eq('id', previewId)
         .maybeSingle<EntryRow>()
 
@@ -723,6 +757,25 @@ export default async function PersonalFundsPage({
         previewEntry = data
       }
     }
+  }
+
+  const profileIds = Array.from(new Set([
+    ...entries.map((entry) => entry.created_by).filter(Boolean),
+    ...entries.map((entry) => entry.updated_by).filter(Boolean),
+    editEntry?.created_by || '',
+    editEntry?.updated_by || '',
+    previewEntry?.created_by || '',
+    previewEntry?.updated_by || '',
+  ].filter(Boolean))) as string[]
+
+  let profileById = new Map<string, ProfileMini>()
+  if (profileIds.length > 0) {
+    const { data: profileRows } = await admin
+      .from('profiles')
+      .select('user_id,role,first_name,last_name,email')
+      .in('user_id', profileIds)
+
+    profileById = new Map(((profileRows ?? []) as ProfileMini[]).map((profile) => [profile.user_id, profile]))
   }
 
   const personCards = people
@@ -758,6 +811,9 @@ export default async function PersonalFundsPage({
   const entryCards = entries.map((entry) => {
     const personLabel = personById.get(entry.person_id)?.label ?? 'Unknown person'
     const createdLabel = new Date(entry.created_at).toLocaleString('en-GB', { timeZone: 'Africa/Cairo' })
+    const updatedLabel = entry.updated_at ? new Date(entry.updated_at).toLocaleString('en-GB', { timeZone: 'Africa/Cairo' }) : ''
+    const creatorProfile = entry.created_by ? profileById.get(entry.created_by) : null
+    const updaterProfile = entry.updated_by ? profileById.get(entry.updated_by) : null
     const isEditing = editEntry?.id === entry.id
 
     return {
@@ -796,6 +852,14 @@ export default async function PersonalFundsPage({
               <div>
                 <div className="text-[11px] uppercase tracking-wide text-[hsl(var(--muted))]">Recorded</div>
                 <div className="mt-1 text-sm">{createdLabel}</div>
+                <div className="mt-1 text-sm font-medium">{profileDisplayName(creatorProfile)}</div>
+                <div className="text-xs text-[hsl(var(--muted))]">{profileMetaLine(creatorProfile)}</div>
+              </div>
+              <div>
+                <div className="text-[11px] uppercase tracking-wide text-[hsl(var(--muted))]">Last update</div>
+                <div className="mt-1 text-sm">{updatedLabel || '—'}</div>
+                <div className="mt-1 text-sm font-medium">{entry.updated_by ? profileDisplayName(updaterProfile) : '—'}</div>
+                <div className="text-xs text-[hsl(var(--muted))]">{entry.updated_by ? profileMetaLine(updaterProfile) : 'No edits yet'}</div>
               </div>
             </div>
 
@@ -834,7 +898,7 @@ export default async function PersonalFundsPage({
     <main>
       <PageHeader
         title="Personal Funds"
-        subtitle="Track partner advances, gym expenses paid personally, reimbursements, and attached proof. V2 keeps editing and receipts, and now makes cash-affecting personal fund entries visible in Cash Report without changing Payments or Expenses flows."
+        subtitle="Track partner advances, personal expenses, reimbursements, and proof. Admin and super admin can edit any stored entry from the modal."
         right={
           <div className="flex flex-wrap items-center gap-2">
             <Button asChild variant="outline" href="/admin">
@@ -1220,6 +1284,19 @@ export default async function PersonalFundsPage({
                     </InlineAlert>
                   )}
 
+                  <div className="grid gap-3 rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] px-4 py-3 text-sm sm:grid-cols-2">
+                    <div>
+                      <div className="text-[11px] uppercase tracking-wide text-[hsl(var(--muted))]">Recorded by</div>
+                      <div className="mt-1 font-medium">{profileDisplayName(editEntry.created_by ? profileById.get(editEntry.created_by) : null)}</div>
+                      <div className="text-xs text-[hsl(var(--muted))]">{profileMetaLine(editEntry.created_by ? profileById.get(editEntry.created_by) : null)}</div>
+                    </div>
+                    <div>
+                      <div className="text-[11px] uppercase tracking-wide text-[hsl(var(--muted))]">Last update</div>
+                      <div className="mt-1 font-medium">{editEntry.updated_at ? new Date(editEntry.updated_at).toLocaleString('en-GB', { timeZone: 'Africa/Cairo' }) : '—'}</div>
+                      <div className="text-xs text-[hsl(var(--muted))]">{editEntry.updated_by ? profileDisplayName(profileById.get(editEntry.updated_by) ?? null) : 'No edits yet'}</div>
+                    </div>
+                  </div>
+
                   <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
                     <Input label="Date" name="entry_date" type="date" defaultValue={editEntry.entry_date} />
 
@@ -1285,7 +1362,7 @@ export default async function PersonalFundsPage({
                     <Button asChild variant="outline" href={`/admin/personal-funds?${returnQS}`}>
                       Cancel
                     </Button>
-                    <div className="text-xs text-[hsl(var(--muted))]">Admins and super admins can edit any stored entry from this modal.</div>
+                    <div className="text-xs text-[hsl(var(--muted))]">Admin and super admin can edit or delete any stored entry, including entries created by another admin.</div>
                   </div>
                 </form>
               </div>
