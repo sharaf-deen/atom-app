@@ -11,6 +11,7 @@ import {
   CalendarDays,
   CreditCard,
   Mail,
+  MessageCircle,
   Phone,
   QrCode,
   ScanLine,
@@ -32,7 +33,8 @@ import ResendInviteButton from '@/components/ResendInviteButton'
 import DeleteUserButton from '@/components/DeleteUserButton'
 import SettleDueDialog from '@/components/SettleDueDialog'
 import AthleteProfileSection from '@/components/member-detail/AthleteProfileSection'
-import { hasLifetimeGymAccess, isMemberLikeRole } from '@/lib/rbac'
+import MemberNotifyButton from '@/components/member-detail/MemberNotifyButton'
+import { canManageNotifications as canManageMemberNotifications, hasLifetimeGymAccess, isMemberLikeRole } from '@/lib/rbac'
 
 type ProfileRow = {
   user_id: string
@@ -186,6 +188,19 @@ function humanPayment(method?: string | null) {
 
 function isUuid(v: string) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(v)
+}
+
+function toWhatsAppHref(phone?: string | null) {
+  if (!phone) return null
+  const digits = String(phone).replace(/\D/g, '')
+  if (!digits) return null
+  if (digits.startsWith('00')) return `https://wa.me/${digits.slice(2)}`
+  if (digits.startsWith('0')) return `https://wa.me/20${digits.slice(1)}`
+  return `https://wa.me/${digits}`
+}
+
+function canReceiveDirectNotification(role?: Role | null) {
+  return ['member', 'coach', 'assistant_coach', 'head_coach', 'champion', 'vip'].includes(String(role ?? ''))
 }
 
 function ageYears(dob?: string | null) {
@@ -940,6 +955,9 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
   const fullName = `${profile.first_name ?? ''} ${profile.last_name ?? ''}`.trim() || '—'
   const age = ageYears(profile.date_of_birth)
   const showSubscriptionActions = canCreateSubscription && viewedRole === 'member' && !coachSafeView
+  const whatsappHref = !coachSafeView && !isSelf ? toWhatsAppHref(profile.phone) : null
+  const showContactActions = !coachSafeView && !isSelf && !!(profile.phone || profile.email)
+  const canSendDirectNotification = !coachSafeView && !isSelf && canManageMemberNotifications(me.role) && canReceiveDirectNotification(profile.role)
 
   const subtitle = coachSafeView
     ? 'Read-only coach view.'
@@ -1143,7 +1161,7 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
           </Surface>
         ) : null}
 
-        {(showSubscriptionActions || canResendInvite || receptionDeskView) ? (
+        {(showSubscriptionActions || canResendInvite || receptionDeskView || showContactActions || canSendDirectNotification) ? (
           <Surface className="p-4 sm:p-5">
             <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
               <div className="min-w-0 flex-1">
@@ -1156,11 +1174,17 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
               </div>
 
               <div className="flex flex-wrap gap-2">
-                {receptionDeskView && profile.phone ? (
-                  <QuickLink href={`tel:${profile.phone}`} label="Call member" icon={<Phone size={16} />} external />
+                {showContactActions && whatsappHref ? (
+                  <QuickLink href={whatsappHref} label="WhatsApp" icon={<MessageCircle size={16} />} external />
                 ) : null}
-                {receptionDeskView && profile.email ? (
-                  <QuickLink href={`mailto:${profile.email}`} label="Email member" icon={<Mail size={16} />} external />
+                {showContactActions && profile.phone ? (
+                  <QuickLink href={`tel:${profile.phone}`} label="Call" icon={<Phone size={16} />} external />
+                ) : null}
+                {showContactActions && profile.email ? (
+                  <QuickLink href={`mailto:${profile.email}`} label="Email" icon={<Mail size={16} />} external />
+                ) : null}
+                {canSendDirectNotification ? (
+                  <MemberNotifyButton userId={profile.user_id} fullName={fullName} memberId={profile.member_id} />
                 ) : null}
                 {receptionDeskView ? (
                   <QuickLink href="/scan" label="Open scan" icon={<ScanLine size={16} />} />
