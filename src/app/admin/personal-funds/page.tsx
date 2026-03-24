@@ -824,69 +824,73 @@ export default async function PersonalFundsPage({
       node: (
         <div key={entry.id} className="rounded-2xl border border-[hsl(var(--border))] bg-white p-4 shadow-soft">
           <div className="flex flex-wrap items-start justify-between gap-3">
-            <div className="space-y-1">
-              <div className="text-xs text-[hsl(var(--muted))]">{entry.entry_date}</div>
-              <div className="text-base font-semibold">{personLabel}</div>
-              <div className="flex flex-wrap items-center gap-2">
+            <div className="min-w-0 space-y-1">
+              <div className="flex flex-wrap items-center gap-2 text-xs text-[hsl(var(--muted))]">
+                <span>{entry.entry_date}</span>
                 {kindBadge(entry.kind)}
                 {cashEffectBadge(entry.kind)}
               </div>
+              <div className="text-base font-semibold">{personLabel}</div>
             </div>
-            <div className="text-right">
-              <div className="text-xs text-[hsl(var(--muted))]">Amount</div>
-              <div className="text-lg font-semibold">{formatEGP(Number(entry.amount ?? 0))}</div>
+            <div className="text-left sm:text-right">
+              <div className="text-[11px] uppercase tracking-wide text-[hsl(var(--muted))]">Amount</div>
+              <div className="text-lg font-semibold leading-none">{formatEGP(Number(entry.amount ?? 0))}</div>
               <div className="mt-2">{balanceImpact(entry.kind, Number(entry.amount ?? 0))}</div>
             </div>
           </div>
 
-          <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-            <div className="space-y-3">
-              <div>
-                <div className="text-[11px] uppercase tracking-wide text-[hsl(var(--muted))]">Payment</div>
-                <div className="mt-1 text-sm">{paymentLabel(entry.payment_method)}</div>
-              </div>
-              <div>
-                <div className="text-[11px] uppercase tracking-wide text-[hsl(var(--muted))]">Note</div>
-                <div className="mt-1 text-sm break-words">{entry.note || '—'}</div>
-              </div>
-              <div>
-                <div className="text-[11px] uppercase tracking-wide text-[hsl(var(--muted))]">Recorded</div>
-                <div className="mt-1 text-sm">{createdLabel}</div>
-                <div className="mt-1 text-sm font-medium">{profileDisplayName(creatorProfile)}</div>
-                <div className="text-xs text-[hsl(var(--muted))]">{profileMetaLine(creatorProfile)}</div>
-              </div>
-              <div>
-                <div className="text-[11px] uppercase tracking-wide text-[hsl(var(--muted))]">Last update</div>
-                <div className="mt-1 text-sm">{updatedLabel || '—'}</div>
-                <div className="mt-1 text-sm font-medium">{entry.updated_by ? profileDisplayName(updaterProfile) : '—'}</div>
-                <div className="text-xs text-[hsl(var(--muted))]">{entry.updated_by ? profileMetaLine(updaterProfile) : 'No edits yet'}</div>
-              </div>
+          <div className="mt-4 grid gap-3 lg:grid-cols-2 xl:grid-cols-4">
+            <div className="rounded-xl bg-[hsl(var(--bg))] px-3 py-2">
+              <div className="text-[11px] uppercase tracking-wide text-[hsl(var(--muted))]">Payment</div>
+              <div className="mt-1 text-sm font-medium">{paymentLabel(entry.payment_method)}</div>
+            </div>
+            <div className="rounded-xl bg-[hsl(var(--bg))] px-3 py-2">
+              <div className="text-[11px] uppercase tracking-wide text-[hsl(var(--muted))]">Recorded by</div>
+              <div className="mt-1 text-sm font-medium">{profileDisplayName(creatorProfile)}</div>
+              <div className="text-xs text-[hsl(var(--muted))]">{createdLabel}</div>
+            </div>
+            <div className="rounded-xl bg-[hsl(var(--bg))] px-3 py-2">
+              <div className="text-[11px] uppercase tracking-wide text-[hsl(var(--muted))]">Last update</div>
+              <div className="mt-1 text-sm font-medium">{entry.updated_by ? profileDisplayName(updaterProfile) : '—'}</div>
+              <div className="text-xs text-[hsl(var(--muted))]">{updatedLabel || 'No edits yet'}</div>
+            </div>
+            <div className="rounded-xl bg-[hsl(var(--bg))] px-3 py-2">
+              <div className="text-[11px] uppercase tracking-wide text-[hsl(var(--muted))]">Proof</div>
+              <div className="mt-1">{proofBadge(entry)}</div>
+            </div>
+          </div>
+
+          <div className="mt-3 grid gap-3 xl:grid-cols-[minmax(0,1fr)_auto] xl:items-start">
+            <div className="rounded-xl border border-[hsl(var(--border))] px-3 py-2">
+              <div className="text-[11px] uppercase tracking-wide text-[hsl(var(--muted))]">Note</div>
+              <div className="mt-1 text-sm break-words">{entry.note || '—'}</div>
             </div>
 
-            <div className="space-y-3">
-              <div>
-                <div className="text-[11px] uppercase tracking-wide text-[hsl(var(--muted))]">Proof</div>
-                <div className="mt-1">{proofCell(entry, `/admin/personal-funds?${buildQS({ ...returnParams, page: String(page), edit: editEntry?.id ?? '', preview: entry.id })}`)}</div>
-              </div>
-              <div>
-                <div className="text-[11px] uppercase tracking-wide text-[hsl(var(--muted))]">Actions</div>
-                <div className="mt-1 flex flex-wrap items-center gap-2">
-                  <Link
-                    prefetch={false}
-                    href={`/admin/personal-funds?${buildQS({ ...returnParams, edit: entry.id })}`}
-                    className={actionLinkClass()}
-                  >
-                    {isEditing ? 'Editing' : 'Edit'}
+            <div className="flex flex-wrap items-center gap-2 xl:justify-end">
+              {entry.receipt_path ? (
+                <>
+                  <Link href={`/admin/personal-funds?${buildQS({ ...returnParams, page: String(page), edit: editEntry?.id ?? '', preview: entry.id })}`} prefetch={false} className={actionLinkClass()}>
+                    View
                   </Link>
-                  <form action={deleteEntryAction}>
-                    <input type="hidden" name="id" value={entry.id} />
-                    <input type="hidden" name="return_qs" value={returnQS} />
-                    <Button variant="outline" size="sm" type="submit">
-                      Delete
-                    </Button>
-                  </form>
-                </div>
-              </div>
+                  <a href={`/api/admin/personal-funds/${entry.id}/receipt?download=1`} className={actionLinkClass()}>
+                    Download
+                  </a>
+                </>
+              ) : null}
+              <Link
+                prefetch={false}
+                href={`/admin/personal-funds?${buildQS({ ...returnParams, edit: entry.id })}`}
+                className={actionLinkClass()}
+              >
+                {isEditing ? 'Editing' : 'Edit'}
+              </Link>
+              <form action={deleteEntryAction}>
+                <input type="hidden" name="id" value={entry.id} />
+                <input type="hidden" name="return_qs" value={returnQS} />
+                <Button variant="outline" size="sm" type="submit">
+                  Delete
+                </Button>
+              </form>
             </div>
           </div>
         </div>
@@ -898,7 +902,7 @@ export default async function PersonalFundsPage({
     <main>
       <PageHeader
         title="Personal Funds"
-        subtitle="Track partner advances, personal expenses, reimbursements, and proof. Admin and super admin can edit any stored entry from the modal."
+        subtitle="Track advances, personal expenses, reimbursements, and private proof."
         right={
           <div className="flex flex-wrap items-center gap-2">
             <Button asChild variant="outline" href="/admin">
@@ -966,12 +970,11 @@ export default async function PersonalFundsPage({
           </InlineAlert>
         ) : null}
 
-        <InlineAlert variant="info" title="How balances and cash visibility work">
+        <InlineAlert variant="info" title="Balance rules">
           <div className="space-y-1">
-            <div><strong>Advance to gym</strong> and <strong>Expense paid personally</strong> increase what the gym owes to that person.</div>
-            <div><strong>Reimbursement from gym</strong> decreases what the gym still owes.</div>
-            <div><strong>Cash Report visibility:</strong> <strong>Advance to gym</strong> is treated as <strong>cash in</strong>, <strong>Reimbursement from gym</strong> is treated as <strong>cash out</strong>, and <strong>Expense paid personally</strong> stays <strong>off-cash</strong> until the gym reimburses it.</div>
-            <div><strong>Receipt / invoice</strong> is optional proof, stays private in storage, and can be replaced later.</div>
+            <div><strong>Advance</strong> and <strong>Personal expense</strong> increase what the gym owes.</div>
+            <div><strong>Reimbursement</strong> decreases what the gym owes.</div>
+            <div><strong>Cash Report:</strong> Advance = cash in, Reimbursement = cash out, Personal expense = off-cash until reimbursed.</div>
           </div>
         </InlineAlert>
 
@@ -1078,7 +1081,7 @@ export default async function PersonalFundsPage({
 
                 <div className="flex flex-wrap items-center gap-2">
                   <Button type="submit" disabled={people.length === 0}>Add entry</Button>
-                  <div className="text-xs text-[hsl(var(--muted))]">This V1.2 keeps Personal Funds isolated. Editing and receipt replacement do not change Cash Report yet.</div>
+                  <div className="text-xs text-[hsl(var(--muted))]">Editing and receipt replacement stay inside Personal Funds.</div>
                 </div>
               </form>
             </CardContent>
@@ -1118,10 +1121,14 @@ export default async function PersonalFundsPage({
                           </form>
                         ) : null}
                       </div>
-                      <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                      <div className="mt-3 grid gap-2 sm:grid-cols-3">
                         <div className="rounded-xl bg-[hsl(var(--bg))] px-3 py-2 text-sm">
-                          <div className="text-[11px] text-[hsl(var(--muted))]">Outstanding owed</div>
+                          <div className="text-[11px] text-[hsl(var(--muted))]">Outstanding</div>
                           <div className="mt-1 font-semibold">{formatEGP(person.outstanding)}</div>
+                        </div>
+                        <div className="rounded-xl bg-[hsl(var(--bg))] px-3 py-2 text-sm">
+                          <div className="text-[11px] text-[hsl(var(--muted))]">Advanced + personal</div>
+                          <div className="mt-1 font-semibold">{formatEGP(person.advanced + person.paidPersonally)}</div>
                         </div>
                         <div className="rounded-xl bg-[hsl(var(--bg))] px-3 py-2 text-sm">
                           <div className="text-[11px] text-[hsl(var(--muted))]">Reimbursed</div>
@@ -1183,7 +1190,7 @@ export default async function PersonalFundsPage({
                 <Button asChild variant="outline" href="/admin/personal-funds?preset=90d">
                   Reset
                 </Button>
-                <div className="text-xs text-[hsl(var(--muted))]">Balances above stay all time. Filters apply to the entries list below.</div>
+                <div className="text-xs text-[hsl(var(--muted))]">Top totals stay all time.</div>
               </div>
 
               {activeFilters.length > 0 ? (
@@ -1202,10 +1209,11 @@ export default async function PersonalFundsPage({
         <Card>
           <CardHeader>
             <CardTitle>Entries</CardTitle>
+            
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
-              <div className="text-[hsl(var(--muted))]">Showing {entries.length} of {count ?? 0} result(s)</div>
+              <div className="text-[hsl(var(--muted))]">Showing {entries.length} of {count ?? 0}</div>
               <div className="text-[hsl(var(--muted))]">Page {Math.min(page, totalPages)} of {totalPages}</div>
             </div>
 
@@ -1237,20 +1245,15 @@ export default async function PersonalFundsPage({
 
         {editEntry ? (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-3 sm:p-6">
-            <div className="max-h-[92vh] w-full max-w-3xl overflow-hidden rounded-3xl border border-[hsl(var(--border))] bg-white shadow-soft">
+            <div className="max-h-[92vh] w-full max-w-5xl overflow-hidden rounded-3xl border border-[hsl(var(--border))] bg-white shadow-soft">
               <div className="flex flex-wrap items-start justify-between gap-3 border-b border-[hsl(var(--border))] px-4 py-3 sm:px-6">
                 <div className="min-w-0">
                   <div className="text-sm font-semibold">Edit entry</div>
                   <div className="mt-1 text-sm text-[hsl(var(--muted))]">
                     {editPersonLabel} · {kindLabel(editEntry.kind)} · {formatEGP(Number(editEntry.amount ?? 0))}
                   </div>
-                  <div className="mt-1 text-xs text-[hsl(var(--muted))]">
-                    Recorded on {new Date(editEntry.created_at).toLocaleString('en-GB', { timeZone: 'Africa/Cairo' })}.
-                  </div>
                   {!editingInCurrentPage ? (
-                    <div className="mt-1 text-xs text-[hsl(var(--muted))]">
-                      This entry is loaded from storage and may be outside the current filtered page.
-                    </div>
+                    <div className="mt-1 text-xs text-[hsl(var(--muted))]">Loaded from storage outside the current page.</div>
                   ) : null}
                 </div>
                 <Link href={`/admin/personal-funds?${returnQS}`} prefetch={false} className={actionLinkClass()}>
@@ -1259,117 +1262,124 @@ export default async function PersonalFundsPage({
               </div>
 
               <div className="max-h-[calc(92vh-84px)] overflow-auto p-4 sm:p-6">
-                <form action={updateEntryAction} className="space-y-4">
+                <form action={updateEntryAction} className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
                   <input type="hidden" name="return_qs" value={returnQS} />
                   <input type="hidden" name="id" value={editEntry.id} />
 
-                  {editEntry.receipt_path ? (
-                    <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] px-4 py-3 text-sm">
-                      <div className="font-medium">Current receipt</div>
-                      <div className="mt-1 text-[hsl(var(--muted))] break-all">
-                        {editEntry.receipt_filename || 'receipt'}{editEntry.receipt_size_bytes ? ` · ${formatBytes(editEntry.receipt_size_bytes)}` : ''}
+                  <div className="space-y-4">
+                    {editEntry.receipt_path ? (
+                      <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] px-4 py-3 text-sm">
+                        <div className="font-medium">Current receipt</div>
+                        <div className="mt-1 break-all text-[hsl(var(--muted))]">
+                          {editEntry.receipt_filename || 'receipt'}{editEntry.receipt_size_bytes ? ` · ${formatBytes(editEntry.receipt_size_bytes)}` : ''}
+                        </div>
+                        <div className="mt-3 flex flex-wrap items-center gap-2">
+                          <Link href={`/admin/personal-funds?${buildQS({ ...returnParams, page: String(page), edit: editEntry.id, preview: editEntry.id })}`} prefetch={false} className={actionLinkClass()}>
+                            View current receipt
+                          </Link>
+                          <a href={`/api/admin/personal-funds/${editEntry.id}/receipt?download=1`} className={actionLinkClass()}>
+                            Download
+                          </a>
+                        </div>
                       </div>
-                      <div className="mt-3 flex flex-wrap items-center gap-2">
-                        <Link href={`/admin/personal-funds?${buildQS({ ...returnParams, page: String(page), edit: editEntry.id, preview: editEntry.id })}`} prefetch={false} className={actionLinkClass()}>
-                          View current receipt
-                        </Link>
-                        <a href={`/api/admin/personal-funds/${editEntry.id}/receipt?download=1`} className={actionLinkClass()}>
-                          Download
-                        </a>
-                      </div>
+                    ) : (
+                      <InlineAlert variant="info" title="Current receipt">
+                        No receipt attached yet.
+                      </InlineAlert>
+                    )}
+
+                    <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+                      <Input label="Date" name="entry_date" type="date" defaultValue={editEntry.entry_date} />
+
+                      <Select label="Person" name="person_id" defaultValue={editEntry.person_id} disabled={people.length === 0}>
+                        <option value="">Choose person</option>
+                        {people.map((person) => (
+                          <option key={person.id} value={person.id}>{person.label}</option>
+                        ))}
+                      </Select>
+
+                      <Select label="Type" name="kind" defaultValue={editEntry.kind} disabled={people.length === 0}>
+                        <option value="advance_to_gym">Advance to gym</option>
+                        <option value="expense_paid_personally">Expense paid personally</option>
+                        <option value="reimbursement_from_gym">Reimbursement from gym</option>
+                      </Select>
+
+                      <Input label="Amount (EGP)" name="amount" type="number" min="0.01" step="0.01" placeholder="0.00" defaultValue={String(editEntry.amount)} disabled={people.length === 0} />
                     </div>
-                  ) : (
-                    <InlineAlert variant="info" title="Current receipt">
-                      No receipt attached yet.
-                    </InlineAlert>
-                  )}
 
-                  <div className="grid gap-3 rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] px-4 py-3 text-sm sm:grid-cols-2">
-                    <div>
-                      <div className="text-[11px] uppercase tracking-wide text-[hsl(var(--muted))]">Recorded by</div>
-                      <div className="mt-1 font-medium">{profileDisplayName(editEntry.created_by ? profileById.get(editEntry.created_by) : null)}</div>
-                      <div className="text-xs text-[hsl(var(--muted))]">{profileMetaLine(editEntry.created_by ? profileById.get(editEntry.created_by) : null)}</div>
+                    <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+                      <Select label="Payment method" name="payment_method" defaultValue={editEntry.payment_method ?? 'cash'} disabled={people.length === 0}>
+                        <option value="cash">Cash</option>
+                        <option value="visa">Visa card</option>
+                        <option value="instapay">Instapay</option>
+                        <option value="bank_transfer">Bank transfer</option>
+                      </Select>
+
+                      <Input
+                        label={editEntry.receipt_path ? 'Replace receipt / invoice' : 'Receipt / invoice'}
+                        name="receipt"
+                        type="file"
+                        accept=".pdf,image/jpeg,image/png,image/webp"
+                        hint={editEntry.receipt_path ? 'Optional replacement. Max 8MB.' : 'Optional proof. PDF, JPG, PNG, WEBP. Max 8MB.'}
+                        disabled={people.length === 0}
+                        className="file:mr-3 file:rounded-xl file:border-0 file:bg-black file:px-3 file:py-2 file:text-sm file:font-medium file:text-white"
+                      />
                     </div>
-                    <div>
-                      <div className="text-[11px] uppercase tracking-wide text-[hsl(var(--muted))]">Last update</div>
-                      <div className="mt-1 font-medium">{editEntry.updated_at ? new Date(editEntry.updated_at).toLocaleString('en-GB', { timeZone: 'Africa/Cairo' }) : '—'}</div>
-                      <div className="text-xs text-[hsl(var(--muted))]">{editEntry.updated_by ? profileDisplayName(profileById.get(editEntry.updated_by) ?? null) : 'No edits yet'}</div>
+
+                    <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] px-4 py-3 text-sm text-[hsl(var(--muted))]">
+                      <strong className="text-[hsl(var(--fg))]">Cash Report:</strong> Advance = cash in, Reimbursement = cash out, Personal expense = off-cash until reimbursed.
                     </div>
-                  </div>
 
-                  <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-                    <Input label="Date" name="entry_date" type="date" defaultValue={editEntry.entry_date} />
+                    {editEntry.receipt_path ? (
+                      <label className="flex items-start gap-2 rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] px-3 py-2 text-sm">
+                        <input type="checkbox" name="remove_receipt" value="1" className="mt-0.5" />
+                        <span>Remove current receipt if you do not upload a replacement.</span>
+                      </label>
+                    ) : null}
 
-                    <Select label="Person" name="person_id" defaultValue={editEntry.person_id} disabled={people.length === 0}>
-                      <option value="">Choose person</option>
-                      {people.map((person) => (
-                        <option key={person.id} value={person.id}>{person.label}</option>
-                      ))}
-                    </Select>
-
-                    <Select label="Type" name="kind" defaultValue={editEntry.kind} disabled={people.length === 0}>
-                      <option value="advance_to_gym">Advance to gym</option>
-                      <option value="expense_paid_personally">Expense paid personally</option>
-                      <option value="reimbursement_from_gym">Reimbursement from gym</option>
-                    </Select>
-
-                    <Input label="Amount (EGP)" name="amount" type="number" min="0.01" step="0.01" placeholder="0.00" defaultValue={String(editEntry.amount)} disabled={people.length === 0} />
-                  </div>
-
-                  <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-                    <Select label="Payment method" name="payment_method" defaultValue={editEntry.payment_method ?? 'cash'} disabled={people.length === 0}>
-                      <option value="cash">Cash</option>
-                      <option value="visa">Visa card</option>
-                      <option value="instapay">Instapay</option>
-                      <option value="bank_transfer">Bank transfer</option>
-                    </Select>
-                    <Input
-                      label={editEntry.receipt_path ? 'Replace receipt / invoice' : 'Receipt / invoice'}
-                      name="receipt"
-                      type="file"
-                      accept=".pdf,image/jpeg,image/png,image/webp"
-                      hint={editEntry.receipt_path ? 'Optional. Upload a new file to replace the current private receipt. Max 8MB.' : 'Optional proof. Accepted: PDF, JPG, PNG, WEBP. Max 8MB.'}
-                      disabled={people.length === 0}
-                      className="file:mr-3 file:rounded-xl file:border-0 file:bg-black file:px-3 file:py-2 file:text-sm file:font-medium file:text-white"
-                    />
-                  </div>
-
-                  <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] px-4 py-3 text-sm text-[hsl(var(--muted))]">
-                    <div><strong className="text-[hsl(var(--fg))]">Cash Report effect:</strong> Advance to gym = cash in, Reimbursement from gym = cash out, Expense paid personally = off-cash until reimbursed.</div>
-                  </div>
-
-                  {editEntry.receipt_path ? (
-                    <label className="flex items-start gap-2 rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] px-3 py-2 text-sm">
-                      <input type="checkbox" name="remove_receipt" value="1" className="mt-0.5" />
-                      <span>Remove current receipt if you do not upload a replacement.</span>
+                    <label className="block">
+                      <span className="mb-1 block text-sm font-medium">Note</span>
+                      <textarea
+                        name="note"
+                        rows={3}
+                        defaultValue={editEntry.note ?? ''}
+                        placeholder="Optional details: what was paid, partial reimbursement, reference..."
+                        className="w-full rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm placeholder:text-[hsl(var(--muted))] outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-[hsl(var(--bg))]"
+                        disabled={people.length === 0}
+                      />
                     </label>
-                  ) : null}
 
-                  <label className="block">
-                    <span className="mb-1 block text-sm font-medium">Note</span>
-                    <textarea
-                      name="note"
-                      rows={3}
-                      defaultValue={editEntry.note ?? ''}
-                      placeholder="Optional details: what was paid, partial reimbursement, reference..."
-                      className="w-full rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm placeholder:text-[hsl(var(--muted))] outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-[hsl(var(--bg))]"
-                      disabled={people.length === 0}
-                    />
-                  </label>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Button type="submit" disabled={people.length === 0}>Save changes</Button>
+                      <Button asChild variant="outline" href={`/admin/personal-funds?${returnQS}`}>
+                        Cancel
+                      </Button>
+                    </div>
+                  </div>
 
-                  <div className="flex flex-wrap items-center gap-2">
-                    <Button type="submit" disabled={people.length === 0}>Save changes</Button>
-                    <Button asChild variant="outline" href={`/admin/personal-funds?${returnQS}`}>
-                      Cancel
-                    </Button>
-                    <div className="text-xs text-[hsl(var(--muted))]">Admin and super admin can edit or delete any stored entry, including entries created by another admin.</div>
+                  <div className="space-y-4">
+                    <div className="grid gap-3 rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] px-4 py-3 text-sm">
+                      <div>
+                        <div className="text-[11px] uppercase tracking-wide text-[hsl(var(--muted))]">Recorded by</div>
+                        <div className="mt-1 font-medium">{profileDisplayName(editEntry.created_by ? profileById.get(editEntry.created_by) : null)}</div>
+                        <div className="text-xs text-[hsl(var(--muted))]">{profileMetaLine(editEntry.created_by ? profileById.get(editEntry.created_by) : null)}</div>
+                      </div>
+                      <div>
+                        <div className="text-[11px] uppercase tracking-wide text-[hsl(var(--muted))]">Last update</div>
+                        <div className="mt-1 font-medium">{editEntry.updated_at ? new Date(editEntry.updated_at).toLocaleString('en-GB', { timeZone: 'Africa/Cairo' }) : '—'}</div>
+                        <div className="text-xs text-[hsl(var(--muted))]">{editEntry.updated_by ? profileDisplayName(profileById.get(editEntry.updated_by) ?? null) : 'No edits yet'}</div>
+                      </div>
+                    </div>
+
+                    <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] px-4 py-3 text-sm text-[hsl(var(--muted))]">
+                      Admin and super admin can edit or delete any stored entry.
+                    </div>
                   </div>
                 </form>
               </div>
             </div>
           </div>
         ) : null}
-
 
         {previewId ? (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-3 sm:p-6">
