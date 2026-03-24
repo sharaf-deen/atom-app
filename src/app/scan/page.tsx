@@ -70,7 +70,10 @@ export default async function ScanPage() {
 
   return (
     <main>
-      <PageHeader title="Scan — Check-in & Validity" subtitle="Fast front-desk scanner with optional kiosk mode." />
+      <PageHeader
+        title="Scan — Check-in & Validity"
+        subtitle="Fast front-desk scanning with optional kiosk mode."
+      />
 
       <Section className="max-w-5xl space-y-5">
         <KioskHealthBadge />
@@ -79,26 +82,26 @@ export default async function ScanPage() {
           <QuickLink
             href="/members"
             label="Members"
-            desc="Open member list."
+            desc="Find a member before or after a scan."
             icon={<Users size={18} strokeWidth={2.1} />}
           />
           <QuickLink
             href="/kiosk"
             label="Create member"
-            desc="Create a new member."
+            desc="Open the front-desk member creation flow."
             icon={<UserPlus size={18} strokeWidth={2.1} />}
           />
           <QuickLink
             href="/scan?kiosk=1"
             label="Enable kiosk mode"
-            desc="Keep kiosk mode ready on this page."
+            desc="Keep kiosk mode available inside this page. Full screen stays manual."
             icon={<ScanLine size={18} strokeWidth={2.1} />}
           />
           {showAudit ? (
             <QuickLink
               href="/admin/scan-audit"
               label="Scan audit"
-              desc="Review scan history."
+              desc="Review scan history and device context."
               icon={<ClipboardList size={18} strokeWidth={2.1} />}
             />
           ) : (
