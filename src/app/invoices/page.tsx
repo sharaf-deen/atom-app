@@ -124,7 +124,7 @@ export default async function InvoicesPage({
 
   return (
     <main>
-      <PageHeader title="Invoices" subtitle="Download receipts (PDF)" showReload={false} />
+      <PageHeader title="Invoices" subtitle="Download PDFs" showReload={false} />
 
       <Section className="space-y-4">
         {/* Filters (server-first via GET) */}
@@ -132,12 +132,12 @@ export default async function InvoicesPage({
           <CardContent>
             <form action="/invoices" method="get" className="flex flex-wrap items-end gap-3">
               <div className="flex flex-col gap-1 flex-1 min-w-[260px]">
-                <label className="text-xs text-[hsl(var(--muted))]">Search (invoice #, name, email, member code, or UUID)</label>
+                <label className="text-xs text-[hsl(var(--muted))]">Search</label>
                 <input
                   name="q"
                   defaultValue={q}
                   className="w-full min-w-0 rounded-xl border px-3 py-2 text-sm bg-white"
-                  placeholder="e.g. INV-123, Nazim, ATOM-000123, email, or UUID"
+                  placeholder="Invoice #, member, email or ID"
                 />
               </div>
 

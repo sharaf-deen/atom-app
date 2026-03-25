@@ -7,7 +7,6 @@ import Link from 'next/link'
 import Image from 'next/image'
 import { createSupabaseRSC } from '@/lib/supabaseServer'
 import { getSessionUser, type Role } from '@/lib/session'
-import { hasLifetimeGymAccess, isMemberLikeRole } from '@/lib/rbac'
 import { getSupabaseAdminClientCached } from '@/lib/requestCache'
 import { addDays, cairoToday, diffDays } from '@/lib/cairoDate'
 import HomeNotificationsTile from '@/components/HomeNotificationsTile'
@@ -157,17 +156,7 @@ function isFrozenNow(sub: Pick<SubscriptionLite, 'subscription_type' | 'frozen_f
   return from ? today >= from && today < until : today < until
 }
 
-function buildMembershipSnapshot(role: Role, subs: SubscriptionLite[], today: string): MembershipSnapshot {
-  if (hasLifetimeGymAccess(role)) {
-    return {
-      tone: 'success',
-      eyebrow: 'Always active access',
-      title: 'Role-based access',
-      meta: 'Your access is active in the gym without a standard renewal flow.',
-      extra: null,
-    }
-  }
-
+function buildMembershipSnapshot(subs: SubscriptionLite[], today: string): MembershipSnapshot {
   const activeTime = subs.find((s) => {
     if (s.status !== 'active') return false
     if ((s.subscription_type ?? 'time') !== 'time') return false
@@ -446,7 +435,7 @@ function buildMemberPriorities(snapshot: MembershipSnapshot, unreadCount: number
       href: '/profile',
       eyebrow: 'QR readiness',
       title: hasQr ? 'QR code ready' : 'QR missing',
-      desc: hasQr ? 'Show your QR code at reception for fast entry.' : 'Open your profile to confirm your QR code is available.',
+      desc: hasQr ? 'Show your QR code at reception.' : 'Open your profile to check your QR code.',
       icon: IdCard,
       tone: hasQr ? 'success' : 'warning',
     },
@@ -454,7 +443,7 @@ function buildMemberPriorities(snapshot: MembershipSnapshot, unreadCount: number
       href: '/notifications',
       eyebrow: 'Inbox today',
       title: unreadCount > 0 ? `${unreadCount} unread update(s)` : 'Inbox up to date',
-      desc: unreadCount > 0 ? 'Open your notifications before your next visit.' : 'No unread updates right now.',
+      desc: unreadCount > 0 ? 'Check notifications before your next visit.' : 'No unread updates.',
       icon: Bell,
       tone: unreadCount > 0 ? 'warning' : 'neutral',
     },
@@ -462,20 +451,20 @@ function buildMemberPriorities(snapshot: MembershipSnapshot, unreadCount: number
       href: '/schedule',
       eyebrow: 'Useful next step',
       title: 'Check today’s schedule',
-      desc: 'Open the latest class times before you head to the gym.',
+      desc: 'Open the latest class times.',
       icon: CalendarDays,
       tone: 'neutral',
     },
   ]
 }
 
-function buildStaffPriorities(role: 'coach' | 'assistant_coach' | 'head_coach', unreadCount: number, hasQr: boolean): PriorityItem[] {
+function buildStaffPriorities(role: 'coach' | 'assistant_coach', unreadCount: number, hasQr: boolean): PriorityItem[] {
   return [
     {
       href: '/profile',
       eyebrow: 'Your access today',
       title: hasQr ? 'QR ready for entry' : 'Open profile first',
-      desc: hasQr ? 'Your staff QR code is ready for daily access.' : 'Open your profile and confirm your QR code before heading to class.',
+      desc: hasQr ? 'Your staff QR code is ready.' : 'Open your profile to confirm your QR code.',
       icon: hasQr ? ShieldCheck : IdCard,
       tone: hasQr ? 'success' : 'warning',
     },
@@ -483,26 +472,26 @@ function buildStaffPriorities(role: 'coach' | 'assistant_coach' | 'head_coach', 
       href: '/notifications',
       eyebrow: 'Staff updates',
       title: unreadCount > 0 ? `${unreadCount} unread update(s)` : 'Inbox up to date',
-      desc: unreadCount > 0 ? 'Check your latest staff instructions and notices.' : 'No unread staff update right now.',
+      desc: unreadCount > 0 ? 'Check the latest staff updates.' : 'No unread staff updates.',
       icon: Bell,
       tone: unreadCount > 0 ? 'warning' : 'neutral',
     },
     {
-      href: role === 'assistant_coach' ? '/schedule' : '/members',
-      eyebrow: role === 'assistant_coach' ? 'Training useful' : 'Lookup today',
-      title: role === 'assistant_coach' ? 'Open the schedule' : 'Open member lookup',
+      href: role === 'coach' ? '/members' : '/schedule',
+      eyebrow: role === 'coach' ? 'Lookup today' : 'Training useful',
+      title: role === 'coach' ? 'Open member lookup' : 'Open the schedule',
       desc:
-        role === 'assistant_coach'
-          ? 'Keep the day moving with fast access to your schedule and staff shortcuts.'
-          : 'Search a member quickly with read-only access when you need to help on the mat.',
-      icon: role === 'assistant_coach' ? CalendarDays : UserRoundSearch,
+        role === 'coach'
+          ? 'Search a member quickly with read-only access when you need to help on the mat.'
+          : 'Keep the day moving with fast access to your schedule and staff shortcuts.',
+      icon: role === 'coach' ? UserRoundSearch : CalendarDays,
       tone: 'neutral',
     },
     {
       href: '/packages-and-promos',
       eyebrow: 'Useful shortcut',
       title: 'Open current offers',
-      desc: 'Keep the current promos close when members ask for quick information.',
+      desc: 'Keep current promos close.',
       icon: Gift,
       tone: 'neutral',
     },
@@ -515,7 +504,7 @@ function buildReceptionPriorities(ops: OpsKpis): PriorityItem[] {
       href: '/scan',
       eyebrow: 'Entrance flow',
       title: ops.scansToday > 0 ? `${ops.scansToday} scan(s) today` : 'Open scan now',
-      desc: ops.scansToday > 0 ? 'Keep the entrance moving with the scan and kiosk flow.' : 'No scan recorded yet today. Start with the scanner.',
+      desc: ops.scansToday > 0 ? 'Keep the entrance moving.' : 'No scan recorded yet today.',
       icon: ScanLine,
       tone: ops.scansToday > 0 ? 'success' : 'warning',
     },
@@ -523,7 +512,7 @@ function buildReceptionPriorities(ops: OpsKpis): PriorityItem[] {
       href: '/admin/expiring-soon',
       eyebrow: 'Renewals',
       title: ops.expiring7Count > 0 ? `${ops.expiring7Count} member(s) expiring soon` : 'No urgent renewal queue',
-      desc: ops.expiring7Count > 0 ? 'Review renewals first before the queue grows.' : 'The current renewal queue looks calm.',
+      desc: ops.expiring7Count > 0 ? 'Review renewals first.' : 'Renewals look calm.',
       icon: Clock3,
       tone: ops.expiring7Count > 0 ? 'warning' : 'neutral',
     },
@@ -539,7 +528,7 @@ function buildReceptionPriorities(ops: OpsKpis): PriorityItem[] {
       href: '/admin/crm',
       eyebrow: 'Follow-up queue',
       title: 'Open today’s CRM queue',
-      desc: 'Use the live queue for WhatsApp, calls, email and member follow-up.',
+      desc: 'Use the live follow-up queue.',
       icon: MessageSquare,
       tone: 'neutral',
     },
@@ -559,7 +548,7 @@ function buildAdminPriorities(ops: OpsKpis, health: HealthLite | null, role: 'ad
       href: '/admin/crm',
       eyebrow: 'Operations today',
       title: 'Open the follow-up queue',
-      desc: 'Review expiring members, dues and no-attendance cases in one live queue.',
+      desc: 'Review renewals, dues and no-attendance.',
       icon: MessageSquare,
       tone: ops.expiring7Count > 0 || ops.outstandingCount > 0 ? 'warning' : 'neutral',
     },
@@ -575,7 +564,7 @@ function buildAdminPriorities(ops: OpsKpis, health: HealthLite | null, role: 'ad
       href: '/admin/payments',
       eyebrow: 'Finance today',
       title: ops.outstandingCount > 0 ? `${fmtMoneyEGP(ops.outstandingTotal)} outstanding` : 'Finance looks clear',
-      desc: ops.outstandingCount > 0 ? 'Move quickly into payments, dues and cash review.' : 'Open payments and cash report when you need the detailed view.',
+      desc: ops.outstandingCount > 0 ? 'Open payments, dues and cash review.' : 'Open payments and cash report when you need the detailed view.',
       icon: CreditCard,
       tone: ops.outstandingCount > 0 ? 'warning' : 'neutral',
     },
@@ -695,11 +684,11 @@ function HeroCard({
 }) {
   const roleCopy: Record<Role, string> = {
     member: 'Everything important at a glance: membership, QR code and useful updates.',
-    champion: 'Member tools with always-active gym access.',
-    vip: 'Member tools with always-active gym access.',
+    champion: 'Your member essentials stay simple, with always-active access and useful updates.',
+    vip: 'Your member essentials stay simple, with always-active access and useful updates.',
     coach: 'Fast access to your staff tools, QR code and a read-only member lookup.',
+    head_coach: 'Fast access to staff tools, member lookup and athlete management actions.',
     assistant_coach: 'Fast access to your staff tools, QR code and useful updates.',
-    head_coach: 'Coach shortcuts plus notification control and a read-only member lookup.',
     reception: 'Built for quick actions at the front desk: scan, member creation and daily queues.',
     admin: 'Daily operations first: members, finance, reporting and control.',
     super_admin: 'Full operational overview with direct access to all critical areas.',
@@ -755,7 +744,7 @@ function MembershipCard({ snapshot }: { snapshot: MembershipSnapshot }) {
   )
 }
 
-function StaffAccessCard({ role }: { role: 'coach' | 'assistant_coach' | 'head_coach' }) {
+function StaffAccessCard({ role }: { role: 'coach' | 'assistant_coach' }) {
   return (
     <Surface className="p-4 sm:p-5">
       <div className="inline-flex rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold text-emerald-700">
@@ -765,9 +754,7 @@ function StaffAccessCard({ role }: { role: 'coach' | 'assistant_coach' | 'head_c
       <p className="mt-2 text-sm text-[hsl(var(--muted))]">
         {role === 'coach'
           ? 'Your coach access is designed for daily training operations.'
-          : role === 'head_coach'
-            ? 'Your head coach access is designed for daily training operations.'
-            : 'Your assistant coach access is designed for daily training operations.'}
+          : 'Your assistant coach access is designed for daily training operations.'}
       </p>
       <div className="mt-4 flex items-center gap-2 text-sm font-medium">
         <Link href="/profile" className="inline-flex items-center gap-1 hover:underline">
@@ -818,53 +805,53 @@ function QuickActions({ title, subtitle, items }: { title: string; subtitle?: st
 
 function memberActions(): QuickAction[] {
   return [
-    { href: '/profile', label: 'My profile', desc: 'Identity, subscription details and QR code.', icon: IdCard },
-    { href: '/schedule', label: 'Schedule', desc: 'See the current class schedule.', icon: CalendarDays },
-    { href: '/notifications', label: 'Notifications', desc: 'Read your latest updates.', icon: Bell },
-    { href: '/packages-and-promos', label: 'Packages & promos', desc: 'See current offers and packages.', icon: Gift },
-    { href: '/contact', label: 'Contact admin', desc: 'Send a message when you need help.', icon: UserCog },
+    { href: '/profile', label: 'My profile', desc: 'Profile, subscription and QR.', icon: IdCard },
+    { href: '/schedule', label: 'Schedule', desc: 'Current class schedule.', icon: CalendarDays },
+    { href: '/notifications', label: 'Notifications', desc: 'Latest updates.', icon: Bell },
+    { href: '/packages-and-promos', label: 'Packages & promos', desc: 'Current offers.', icon: Gift },
+    { href: '/contact', label: 'Contact admin', desc: 'Contact admin.', icon: UserCog },
   ]
 }
 
 function coachActions(): QuickAction[] {
   return [
-    { href: '/profile', label: 'My profile', desc: 'Identity, QR code and personal info.', icon: IdCard },
-    { href: '/schedule', label: 'Schedule', desc: 'Open the latest class schedule.', icon: CalendarDays },
-    { href: '/notifications', label: 'Notifications', desc: 'Read the latest staff updates.', icon: Bell },
-    { href: '/packages-and-promos', label: 'Packages & promos', desc: 'Quick access to current offers.', icon: Gift },
+    { href: '/profile', label: 'My profile', desc: 'Profile and QR.', icon: IdCard },
+    { href: '/schedule', label: 'Schedule', desc: 'Latest class schedule.', icon: CalendarDays },
+    { href: '/notifications', label: 'Notifications', desc: 'Latest staff updates.', icon: Bell },
+    { href: '/packages-and-promos', label: 'Packages & promos', desc: 'Current offers.', icon: Gift },
   ]
 }
 
 function receptionActions(): QuickAction[] {
   return [
-    { href: '/scan', label: 'Scan', desc: 'Fast attendance and QR validation.', icon: ScanLine },
-    { href: '/kiosk', label: 'Create member', desc: 'Open the front-desk member creation flow.', icon: IdCard },
-    { href: '/members', label: 'Members', desc: 'Search and manage members quickly.', icon: Users },
-    { href: '/admin/crm', label: 'CRM queue', desc: 'Work through follow-ups and contact priorities.', icon: MessageSquare },
-    { href: '/schedule', label: 'Schedule', desc: 'Check class times on the desk.', icon: CalendarDays },
-    { href: '/notifications', label: 'Notifications', desc: 'Read operational updates.', icon: Bell },
-    { href: '/packages-and-promos', label: 'Packages & promos', desc: 'Use offers at the desk when needed.', icon: Gift },
+    { href: '/scan', label: 'Scan', desc: 'Attendance and QR.', icon: ScanLine },
+    { href: '/kiosk', label: 'Create member', desc: 'Create member.', icon: IdCard },
+    { href: '/members', label: 'Members', desc: 'Search members.', icon: Users },
+    { href: '/admin/crm', label: 'CRM queue', desc: 'Follow-ups and priorities.', icon: MessageSquare },
+    { href: '/schedule', label: 'Schedule', desc: 'Class times.', icon: CalendarDays },
+    { href: '/notifications', label: 'Notifications', desc: 'Operational updates.', icon: Bell },
+    { href: '/packages-and-promos', label: 'Packages & promos', desc: 'Desk offers.', icon: Gift },
   ]
 }
 
 function adminActions(role: 'admin' | 'super_admin'): QuickAction[] {
   const base: QuickAction[] = [
-    { href: '/admin', label: 'Dashboard', desc: 'Operational KPIs and admin overview.', icon: LayoutDashboard },
-    { href: '/admin/crm', label: 'CRM queue', desc: 'Review follow-ups and daily contact priorities.', icon: MessageSquare },
-    { href: '/scan', label: 'Scan', desc: 'QR check-in and validation flow.', icon: ScanLine },
-    { href: '/members', label: 'Members', desc: 'Open the members workspace.', icon: Users },
-    { href: '/admin/payments', label: 'Payments', desc: 'Track subscription payments.', icon: CreditCard },
-    { href: '/admin/cash-report', label: 'Cash report', desc: 'Review daily payment summaries.', icon: Wallet },
-    { href: '/expenses', label: 'Expenses', desc: 'Open expenses and categories.', icon: Receipt },
-    { href: '/admin/personal-funds', label: 'Personal funds', desc: 'Review advances, reimbursements and proof.', icon: Wallet },
-    { href: '/admin/health-monitor', label: 'Health Monitor', desc: 'Open the latest health status and reports.', icon: ShieldCheck },
-    { href: '/admin/outstanding-dues', label: 'Outstanding dues', desc: 'Focus on unpaid balances.', icon: Wallet },
-    { href: '/admin/expiring-soon', label: 'Expiring soon', desc: 'Review urgent renewals.', icon: Bell },
+    { href: '/admin', label: 'Dashboard', desc: 'KPIs and overview.', icon: LayoutDashboard },
+    { href: '/admin/crm', label: 'CRM queue', desc: 'Follow-ups and priorities.', icon: MessageSquare },
+    { href: '/scan', label: 'Scan', desc: 'QR check-in.', icon: ScanLine },
+    { href: '/members', label: 'Members', desc: 'Members workspace.', icon: Users },
+    { href: '/admin/payments', label: 'Payments', desc: 'Subscription payments.', icon: CreditCard },
+    { href: '/admin/cash-report', label: 'Cash report', desc: 'Daily payment summaries.', icon: Wallet },
+    { href: '/expenses', label: 'Expenses', desc: 'Expenses and categories.', icon: Receipt },
+    { href: '/admin/personal-funds', label: 'Personal funds', desc: 'Advances and reimbursements.', icon: Wallet },
+    { href: '/admin/health-monitor', label: 'Health Monitor', desc: 'Latest health status.', icon: ShieldCheck },
+    { href: '/admin/outstanding-dues', label: 'Outstanding dues', desc: 'Unpaid balances.', icon: Wallet },
+    { href: '/admin/expiring-soon', label: 'Expiring soon', desc: 'Urgent renewals.', icon: Bell },
   ]
 
   if (role === 'super_admin') {
-    base.splice(8, 0, { href: '/store/admin', label: 'Store admin', desc: 'Manage products and store ops.', icon: LayoutDashboard })
-    base.push({ href: '/admin/permissions-audit', label: 'Permissions audit', desc: 'Review who can access what.', icon: UserCog })
+    base.splice(8, 0, { href: '/store/admin', label: 'Store admin', desc: 'Products and store ops.', icon: LayoutDashboard })
+    base.push({ href: '/admin/permissions-audit', label: 'Permissions audit', desc: 'Who can access what.', icon: UserCog })
   }
 
   return base
@@ -880,7 +867,7 @@ export default async function HomePage() {
           <Surface className="p-6 sm:p-8">
             <h1 className="text-2xl font-semibold tracking-tight">Welcome to ATOM</h1>
             <p className="mt-2 max-w-xl text-sm text-[hsl(var(--muted))] sm:text-base">
-              Sign in to access your role dashboard, QR code, subscriptions and daily operations.
+              Sign in to access your dashboard, QR code and daily tools.
             </p>
             <div className="mt-5">
               <Link
@@ -903,7 +890,7 @@ export default async function HomePage() {
   ])
 
   const avatarPath = user.id_photo_path ?? profile?.id_photo_path ?? null
-  const avatarUrl = ['member', 'champion', 'vip', 'coach', 'assistant_coach', 'head_coach'].includes(user.role) ? await getSignedAvatar(avatarPath) : ''
+  const avatarUrl = ['member', 'coach', 'assistant_coach'].includes(user.role) ? await getSignedAvatar(avatarPath) : ''
   const memberId = user.member_id ?? profile?.member_id ?? null
   const qrCode = user.qr_code ?? profile?.qr_code ?? null
 
@@ -911,9 +898,9 @@ export default async function HomePage() {
   let opsKpis: OpsKpis | null = null
   let healthSnapshot: HealthLite | null = null
 
-  if (isMemberLikeRole(user.role) || hasLifetimeGymAccess(user.role)) {
+  if (user.role === 'member') {
     const subs = await getSubscriptionsLite(user.id)
-    memberSnapshot = buildMembershipSnapshot(user.role, subs, cairoToday())
+    memberSnapshot = buildMembershipSnapshot(subs, cairoToday())
   }
 
   if (['reception', 'admin', 'super_admin'].includes(user.role)) {
@@ -935,11 +922,11 @@ export default async function HomePage() {
           joinedAt={profile?.created_at ?? null}
         />
 
-        {isMemberLikeRole(user.role) ? (
+        {user.role === 'member' ? (
           <>
             <PriorityGrid
               title="Your access today"
-              subtitle="The essentials only. Open what matters next."
+              subtitle="Only the essentials."
               items={buildMemberPriorities(memberSnapshot!, unreadNotificationsCount, Boolean(qrCode))}
             />
 
@@ -950,17 +937,17 @@ export default async function HomePage() {
 
             <QuickActions
               title="Quick actions"
-              subtitle="Keep the next step simple."
+              subtitle="Start with the next step."
               items={memberActions().slice(0, 3)}
             />
           </>
         ) : null}
 
-        {(user.role === 'coach' || user.role === 'assistant_coach' || user.role === 'head_coach') ? (
+        {(user.role === 'coach' || user.role === 'assistant_coach') ? (
           <>
             <PriorityGrid
               title="Training useful today"
-              subtitle="Useful only, with less repetition."
+              subtitle="Useful only."
               items={buildStaffPriorities(user.role, unreadNotificationsCount, Boolean(qrCode))}
             />
 
@@ -968,15 +955,15 @@ export default async function HomePage() {
               <QrCard qrCode={qrCode} />
               <QuickActions
                 title="Coach shortcuts"
-                subtitle="The most useful staff actions first."
+                subtitle="Most useful staff actions first."
                 items={coachActions().slice(0, 3)}
               />
             </div>
 
-            {(user.role === 'coach' || user.role === 'head_coach') ? (
+            {user.role === 'coach' ? (
               <HomeMemberLookup
                 title="Quick member lookup"
-                subtitle="Coach access is read-only. Search fast when you need help on the mat."
+                subtitle="Coach access is read-only."
                 canOpenProfile
                 showSensitiveFields={false}
               />
@@ -988,7 +975,7 @@ export default async function HomePage() {
           <>
             <PriorityGrid
               title="Today’s priorities"
-              subtitle="Overview first, then your next desk action."
+              subtitle="Overview first."
               items={buildReceptionPriorities(opsKpis!)}
             />
 
@@ -1000,13 +987,13 @@ export default async function HomePage() {
 
             <QuickActions
               title="Quick actions"
-              subtitle="The desk tools used most often."
+              subtitle="Most-used desk tools."
               items={receptionActions().slice(0, 5)}
             />
 
             <HomeMemberLookup
               title="Member lookup"
-              subtitle="Open a member fast when the desk needs action."
+              subtitle="Open a member fast."
               canOpenProfile
             />
           </>
@@ -1016,7 +1003,7 @@ export default async function HomePage() {
           <>
             <PriorityGrid
               title="Operations today"
-              subtitle="Priorities first, then your main admin tools."
+              subtitle="Priorities first."
               items={buildAdminPriorities(opsKpis!, healthSnapshot, user.role)}
             />
 
@@ -1028,27 +1015,27 @@ export default async function HomePage() {
 
             <QuickActions
               title="Admin shortcuts"
-              subtitle="Keep the main operations close."
+              subtitle="Keep main operations close."
               items={adminActions(user.role).slice(0, user.role === 'super_admin' ? 7 : 6)}
             />
 
             <div className="grid gap-4 lg:grid-cols-[1.15fr_0.85fr]">
               <HomeMemberLookup
                 title="Member lookup"
-                subtitle="Search and open member pages without leaving the dashboard."
+                subtitle="Search and open member pages fast."
                 canOpenProfile
               />
               <div className="space-y-4">
                 <HomeNotificationsTile
                   href="/notifications"
                   label="Notifications"
-                  desc="Unread operational updates, without extra dashboard noise."
+                  desc="Unread operational updates."
                   initialCount={unreadNotificationsCount}
                 />
                 <SummaryCard
                   label="Full admin view"
                   value="Open admin dashboard"
-                  hint="Reporting, exports and extended operational controls."
+                  hint="Reporting, exports and controls."
                   href="/admin"
                 />
               </div>

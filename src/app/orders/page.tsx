@@ -186,7 +186,7 @@ const baseParams = { status, from, to, page_size: String(pageSize) }
 
   return (
     <main>
-      <PageHeader title="My orders" subtitle="Server-first (fast) view of your orders." />
+      <PageHeader title="My orders" subtitle="Your order history" />
 
       <Section className="space-y-6">
         <Card>
@@ -214,7 +214,7 @@ const baseParams = { status, from, to, page_size: String(pageSize) }
                 href="/store"
                 className="inline-flex items-center rounded-xl border px-3 py-2 text-sm font-medium hover:bg-gray-50"
               >
-                Back to store
+                Store
               </Link>
             </div>
           </CardContent>
@@ -275,7 +275,7 @@ const baseParams = { status, from, to, page_size: String(pageSize) }
         ) : orders.length === 0 ? (
           <Card>
             <CardContent>
-              <div className="text-sm text-[hsl(var(--muted))]">No orders found for the current filters.</div>
+              <div className="text-sm text-[hsl(var(--muted))]">No orders for these filters.</div>
             </CardContent>
           </Card>
         ) : (
@@ -317,7 +317,7 @@ const baseParams = { status, from, to, page_size: String(pageSize) }
                         </ul>
                       </div>
                     ) : (
-                      <div className="text-sm text-gray-500">No items.</div>
+                      <div className="text-sm text-gray-500">No items</div>
                     )}
                   </CardContent>
                 </Card>
