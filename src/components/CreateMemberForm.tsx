@@ -128,9 +128,12 @@ export default function CreateMemberForm() {
       const j = await r.json().catch(() => ({} as any))
 
       if (!r.ok || !j?.ok) {
+        const isDuplicateEmail =
+          j?.error === 'EMAIL_ALREADY_USED_BY_MEMBER' || j?.error === 'EMAIL_ALREADY_USED_BY_AUTH_ACCOUNT'
         const msg = j?.details || j?.error || 'Failed to create member'
-        setStatus({ kind: 'error', msg })
-        toast.error('Create failed')
+        setStatus({ kind: isDuplicateEmail ? 'warning' : 'error', msg })
+        if (isDuplicateEmail) toast.warning('Email already used')
+        else toast.error('Create failed')
         return
       }
 
@@ -161,10 +164,10 @@ export default function CreateMemberForm() {
       } else if (outcome === 'existing_profile') {
         setStatus({
           kind: 'warning',
-          msg: 'This email already belongs to an existing member. Profile updated. No invite email was sent.',
+          msg: 'This email already belongs to an existing member. No changes were made. Open the existing profile instead.',
         })
-        toast.success('Existing member updated', {
-          description: 'No new invite email was sent.',
+        toast.warning('Email already used', {
+          description: 'No changes were made to the existing member.',
         })
       } else {
         setStatus({
@@ -197,7 +200,7 @@ export default function CreateMemberForm() {
     <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-5 shadow-soft">
       <h3 className="text-lg font-semibold">Create new member</h3>
       <p className="mt-1 text-sm text-[hsl(var(--muted))]">
-        If the email is new, an invite email will be sent. If the member already exists, the profile will be updated.
+        If the email is new, an invite email will be sent. If the email is already used, creation will be blocked to protect the existing account.
       </p>
 
       {status.msg ? (
