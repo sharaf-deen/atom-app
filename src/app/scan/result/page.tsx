@@ -1,7 +1,7 @@
-// src/app/scan/result/page.tsx
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
+import type { ReactNode } from 'react'
 import Image from 'next/image'
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
@@ -42,6 +42,29 @@ type SearchParams = {
   repeatSeconds?: string
 }
 
+type SubRow = {
+  id: string
+  plan: '1m' | '3m' | '6m' | '12m' | 'sessions' | null
+  subscription_type: 'time' | 'sessions' | null
+  status: string | null
+  start_date: string | null
+  end_date: string | null
+  sessions_total: number | null
+  sessions_used: number | null
+  paid_at: string | null
+  frozen_from: string | null
+  frozen_until: string | null
+}
+
+type SubscriptionSummary = {
+  stateLabel: string
+  stateTone: 'success' | 'warning' | 'danger'
+  startDate: string | null
+  endDate: string | null
+  durationLabel: string
+  detailLabel: string
+}
+
 function canAccess(role: Role) {
   return role === 'reception' || role === 'admin' || role === 'super_admin'
 }
@@ -50,24 +73,36 @@ function isUuid(v?: string | null) {
   return !!v && /^[0-9a-f-]{36}$/i.test(v)
 }
 
-function parseIntSafe(v?: string): number | null {
+function parseIntSafe(v?: string) {
   if (v === undefined || v === null || v === '') return null
   const n = Number(v)
   return Number.isFinite(n) ? Math.trunc(n) : null
 }
 
 function fmtDateNice(dateOnly?: string | null) {
-  if (!dateOnly) return ''
+  if (!dateOnly) return '—'
   const [y, m, d] = dateOnly.split('-').map(Number)
   if (!y || !m || !d) return dateOnly
   const dt = new Date(Date.UTC(y, m - 1, d))
   return dt.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: '2-digit' })
 }
 
+function fmtDateTimeNice(v?: string | null) {
+  if (!v) return '—'
+  const dt = new Date(v)
+  if (Number.isNaN(dt.getTime())) return v
+  return new Intl.DateTimeFormat(undefined, {
+    year: 'numeric',
+    month: 'short',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(dt)
+}
+
 function safeMessage(v?: string) {
   return (v || '').trim().slice(0, 180)
 }
-
 
 const CAIRO_TZ = 'Africa/Cairo'
 
@@ -98,26 +133,122 @@ function dateDaysAgoCairo(days: number) {
   return `${y}-${m}-${d}`
 }
 
-function fmtDateTimeNice(v?: string | null) {
-  if (!v) return '—'
-  const dt = new Date(v)
-  if (Number.isNaN(dt.getTime())) return v
-  return new Intl.DateTimeFormat(undefined, {
-    year: 'numeric',
-    month: 'short',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-  }).format(dt)
+function humanPlan(plan?: SubRow['plan']) {
+  switch (plan) {
+    case '1m':
+      return '1 month'
+    case '3m':
+      return '3 months'
+    case '6m':
+      return '6 months'
+    case '12m':
+      return '12 months'
+    case 'sessions':
+      return 'Sessions package'
+    default:
+      return 'Membership'
+  }
 }
 
-function StatusBadge({
-  tone,
-  children,
-}: {
-  tone: 'success' | 'warning' | 'danger'
-  children: React.ReactNode
-}) {
+function isFrozenNow(sub: Pick<SubRow, 'subscription_type' | 'frozen_from' | 'frozen_until'>, today: string) {
+  const st = (sub.subscription_type ?? 'time') as 'time' | 'sessions'
+  if (st !== 'time') return false
+  const until = sub.frozen_until
+  if (!until) return false
+  const from = sub.frozen_from
+  return from ? today >= from && today < until : today < until
+}
+
+function buildSubscriptionSummary(
+  subs: SubRow[],
+  today: string,
+  opts: {
+    valid: boolean
+    frozen: boolean
+    apiMessage: string
+    expiresOn: string | null
+    expiredOn: string | null
+    frozenUntil: string | null
+    daysRemaining: number | null
+    expiredDays: number | null
+    freezeDaysRemaining: number | null
+  }
+): SubscriptionSummary {
+  const activeTime = subs.find((s) => {
+    if (s.status !== 'active') return false
+    if ((s.subscription_type ?? 'time') !== 'time') return false
+    if (!s.end_date || s.end_date < today) return false
+    return true
+  })
+
+  if (activeTime) {
+    const frozenNow = isFrozenNow(activeTime, today) || opts.frozen
+    if (frozenNow) {
+      return {
+        stateLabel: 'FROZEN',
+        stateTone: 'warning',
+        startDate: activeTime.start_date ?? null,
+        endDate: activeTime.end_date ?? opts.frozenUntil ?? null,
+        durationLabel: humanPlan(activeTime.plan),
+        detailLabel:
+          typeof opts.freezeDaysRemaining === 'number'
+            ? `${opts.freezeDaysRemaining} day(s) left in freeze`
+            : opts.apiMessage || 'Membership temporarily frozen',
+      }
+    }
+
+    return {
+      stateLabel: opts.valid ? 'ACTIVE' : 'EXPIRED',
+      stateTone: opts.valid ? 'success' : 'danger',
+      startDate: activeTime.start_date ?? null,
+      endDate: activeTime.end_date ?? opts.expiresOn ?? null,
+      durationLabel: humanPlan(activeTime.plan),
+      detailLabel:
+        typeof opts.daysRemaining === 'number'
+          ? `${opts.daysRemaining} day(s) remaining`
+          : opts.apiMessage || 'Active membership',
+    }
+  }
+
+  const activeSessions = subs.find((s) => {
+    if (s.status !== 'active') return false
+    if ((s.subscription_type ?? (s.plan === 'sessions' ? 'sessions' : 'time')) !== 'sessions') return false
+    const remaining = Math.max(Number(s.sessions_total ?? 0) - Number(s.sessions_used ?? 0), 0)
+    return remaining > 0
+  })
+
+  if (activeSessions) {
+    const remaining = Math.max(Number(activeSessions.sessions_total ?? 0) - Number(activeSessions.sessions_used ?? 0), 0)
+    const total = Math.max(Number(activeSessions.sessions_total ?? 0), 0)
+    return {
+      stateLabel: opts.valid ? 'ACTIVE' : 'EXPIRED',
+      stateTone: opts.valid ? 'success' : 'danger',
+      startDate: activeSessions.start_date ?? null,
+      endDate: activeSessions.end_date ?? null,
+      durationLabel: humanPlan(activeSessions.plan),
+      detailLabel: total > 0 ? `${remaining}/${total} session(s) left` : opts.apiMessage || 'Sessions membership',
+    }
+  }
+
+  const latest = subs[0] ?? null
+  return {
+    stateLabel: opts.frozen ? 'FROZEN' : opts.valid ? 'ACTIVE' : 'EXPIRED',
+    stateTone: opts.frozen ? 'warning' : opts.valid ? 'success' : 'danger',
+    startDate: latest?.start_date ?? null,
+    endDate: latest?.end_date ?? opts.expiresOn ?? opts.expiredOn ?? opts.frozenUntil ?? null,
+    durationLabel: humanPlan(latest?.plan),
+    detailLabel:
+      opts.frozen
+        ? opts.apiMessage || 'Membership frozen'
+        : opts.valid
+          ? opts.apiMessage || 'Active membership'
+          : typeof opts.expiredDays === 'number'
+            ? `${opts.expiredDays} day(s) expired`
+            : opts.apiMessage || 'No active membership',
+  }
+}
+
+function StatusHero({ label, tone }: { label: string; tone: 'success' | 'warning' | 'danger' }) {
   const cls =
     tone === 'success'
       ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
@@ -125,65 +256,48 @@ function StatusBadge({
         ? 'border-sky-200 bg-sky-50 text-sky-700'
         : 'border-rose-200 bg-rose-50 text-rose-700'
 
-  return <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-semibold ${cls}`}>{children}</span>
-}
-
-function FactCard({
-  label,
-  value,
-  icon,
-}: {
-  label: string
-  value: React.ReactNode
-  icon: React.ReactNode
-}) {
   return (
-    <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <div className="text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">{label}</div>
-          <div className="mt-2 text-base font-semibold tracking-tight">{value}</div>
-        </div>
-        <span className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-[hsl(var(--border))] bg-white text-black">
-          {icon}
-        </span>
+    <div className={`inline-flex min-h-[112px] min-w-[180px] items-center justify-center rounded-3xl border px-6 py-5 text-center ${cls}`}>
+      <div>
+        <div className="text-[11px] font-semibold uppercase tracking-[0.24em] opacity-70">Membership</div>
+        <div className="mt-2 text-3xl font-black tracking-tight sm:text-4xl">{label}</div>
       </div>
     </div>
   )
 }
 
-function InfoStrip({
-  title,
-  body,
-  tone,
+function KeyFact({
+  label,
+  value,
+  icon,
+  emphasize = false,
 }: {
-  title: string
-  body: string
-  tone: 'success' | 'warning' | 'danger'
+  label: string
+  value: ReactNode
+  icon: ReactNode
+  emphasize?: boolean
 }) {
-  const cls =
-    tone === 'success'
-      ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
-      : tone === 'warning'
-        ? 'border-sky-200 bg-sky-50 text-sky-800'
-        : 'border-rose-200 bg-rose-50 text-rose-800'
-
   return (
-    <div className={`rounded-2xl border px-4 py-3 ${cls}`}>
-      <div className="text-sm font-semibold tracking-tight">{title}</div>
-      <p className="mt-1 text-sm">{body}</p>
+    <div className="rounded-3xl border border-[hsl(var(--border))] bg-white p-4 shadow-soft">
+      <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wide text-[hsl(var(--muted))]">
+        <span className="inline-flex h-8 w-8 items-center justify-center rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-black">
+          {icon}
+        </span>
+        <span>{label}</span>
+      </div>
+      <div className={`mt-3 ${emphasize ? 'text-2xl font-black tracking-tight' : 'text-base font-semibold tracking-tight'}`}>{value}</div>
     </div>
   )
 }
 
-function DecisionCard({
-  label,
-  value,
+function InlineInfo({
   tone,
+  title,
+  body,
 }: {
-  label: string
-  value: React.ReactNode
   tone: 'success' | 'warning' | 'danger'
+  title: string
+  body: string
 }) {
   const cls =
     tone === 'success'
@@ -193,9 +307,9 @@ function DecisionCard({
         : 'border-rose-200 bg-rose-50 text-rose-800'
 
   return (
-    <div className={`rounded-2xl border px-4 py-3 ${cls}`}>
-      <div className="text-[11px] font-semibold uppercase tracking-wide opacity-75">{label}</div>
-      <div className="mt-2 text-sm font-semibold tracking-tight">{value}</div>
+    <div className={`rounded-3xl border px-4 py-4 ${cls}`}>
+      <div className="text-sm font-semibold tracking-tight">{title}</div>
+      <div className="mt-1 text-sm opacity-90">{body}</div>
     </div>
   )
 }
@@ -224,12 +338,23 @@ export default async function ScanResultPage({ searchParams }: { searchParams: S
   const kioskMode = searchParams.kiosk === '1'
   const returnHref = kioskMode ? '/scan?kiosk=1' : '/scan'
   const apiMessage = safeMessage(searchParams.message)
-
   const memberId = isUuid(searchParams.memberId) ? (searchParams.memberId as string) : null
+
+  const daysRemaining = parseIntSafe(searchParams.daysRemaining)
+  const expiresOn = searchParams.expiresOn || null
+  const expiredDays = parseIntSafe(searchParams.expiredDays)
+  const expiredOn = searchParams.expiredOn || null
+  const frozenUntil = searchParams.frozenUntil || null
+  const freezeDaysRemaining = parseIntSafe(searchParams.freezeDaysRemaining)
+  const repeatScan = searchParams.repeat === '1'
+  const repeatSeconds = parseIntSafe(searchParams.repeatSeconds)
 
   let memberName = ''
   let memberCode = ''
   let signedPhoto = ''
+  let subscriptions: SubRow[] = []
+  let attendanceTodayScannedAt: string | null = null
+
   if (memberId) {
     try {
       const admin = getSupabaseAdminClientCached()
@@ -246,369 +371,138 @@ export default async function ScanResultPage({ searchParams }: { searchParams: S
         const { data } = await admin.storage.from('id-photos').createSignedUrl(p.id_photo_path, 60 * 5)
         signedPhoto = data?.signedUrl || ''
       }
-    } catch {
-      // ignore
-    }
-  }
 
-  const repeatScan = searchParams.repeat === '1'
-  const repeatSeconds = parseIntSafe(searchParams.repeatSeconds)
-
-  let attendanceTodayScannedAt: string | null = null
-  let attendanceTodayStatus: string | null = null
-  let recentValidAttendanceCount = 0
-  let validAttendance7dCount = 0
-  let lastAttendanceDate: string | null = null
-  let lastValidAttendanceAt: string | null = null
-  let lastValidAttendanceDate: string | null = null
-
-  if (memberId) {
-    try {
-      const admin = getSupabaseAdminClientCached()
       const today = todayDateOnlyCairo()
-      const since30 = dateDaysAgoCairo(30)
       const since7 = dateDaysAgoCairo(7)
-      const { data: attendanceRows } = await admin
-        .from('attendance')
-        .select('date, valid, status, scanned_at')
-        .eq('member_id', memberId)
-.gte('date', since30)
-        .order('date', { ascending: false })
-        .order('scanned_at', { ascending: false })
-        .limit(40)
 
-      const rows = (attendanceRows ?? []) as Array<{
-        date: string
-        valid: boolean | null
-        status: string | null
-        scanned_at: string | null
-      }>
+      const [{ data: subRows }, { data: attendanceRows }] = await Promise.all([
+        admin
+          .from('subscriptions')
+          .select('id, plan, subscription_type, status, start_date, end_date, sessions_total, sessions_used, paid_at, frozen_from, frozen_until')
+          .eq('member_id', memberId)
+          .order('paid_at', { ascending: false, nullsFirst: false })
+          .order('end_date', { ascending: false, nullsFirst: false })
+          .limit(10),
+        admin
+          .from('attendance')
+          .select('date, scanned_at')
+          .eq('member_id', memberId)
+          .gte('date', since7)
+          .order('date', { ascending: false })
+          .order('scanned_at', { ascending: false })
+          .limit(10),
+      ])
 
-      const todayRow = rows.find((row) => row.date === today) ?? null
+      subscriptions = (subRows ?? []) as SubRow[]
+      const todayRow = ((attendanceRows ?? []) as Array<{ date: string; scanned_at: string | null }>).find((row) => row.date === today) ?? null
       attendanceTodayScannedAt = todayRow?.scanned_at ?? null
-      attendanceTodayStatus = todayRow?.status ?? null
-      const validRows = rows.filter((row) => !!row.valid)
-      recentValidAttendanceCount = validRows.length
-      validAttendance7dCount = validRows.filter((row) => row.date >= since7).length
-      lastAttendanceDate = rows[0]?.date ?? null
-      lastValidAttendanceAt = validRows[0]?.scanned_at ?? null
-      lastValidAttendanceDate = validRows[0]?.date ?? null
     } catch {
       // ignore
     }
   }
 
-  const daysRemaining = parseIntSafe(searchParams.daysRemaining)
-  const expiresOn = searchParams.expiresOn || null
-  const expiredDays = parseIntSafe(searchParams.expiredDays)
-  const expiredOn = searchParams.expiredOn || null
-  const frozenUntil = searchParams.frozenUntil || null
-  const freezeDaysRemaining = parseIntSafe(searchParams.freezeDaysRemaining)
+  const today = todayDateOnlyCairo()
+  const summary = buildSubscriptionSummary(subscriptions, today, {
+    valid,
+    frozen,
+    apiMessage,
+    expiresOn,
+    expiredOn,
+    frozenUntil,
+    daysRemaining,
+    expiredDays,
+    freezeDaysRemaining,
+  })
 
+  const tone = summary.stateTone
   const soundKind = frozen ? 'frozen' : valid ? 'ok' : 'invalid'
-  const alreadyCheckedToday = apiMessage.toLowerCase().includes('already checked') || repeatScan
-  const alreadyHereToday = !!attendanceTodayScannedAt && alreadyCheckedToday
-  const recentActive = recentValidAttendanceCount > 0
-  const presenceTitle = alreadyHereToday
-    ? 'Member already here today'
-    : attendanceTodayScannedAt && valid
-      ? 'First valid entry recorded today'
-      : recentActive
-        ? 'Recent member activity found'
-        : 'No recent valid attendance found'
-
-  const presenceBody = alreadyHereToday
-    ? "Attendance is already in today's log. Let the member continue unless the desk needs to open the profile."
-    : attendanceTodayScannedAt && valid
-      ? "This scan was recorded today. The result page also shows the member's recent attendance context for faster desk decisions."
-      : recentActive
-        ? `Last valid attendance: ${lastValidAttendanceAt ? fmtDateTimeNice(lastValidAttendanceAt) : lastValidAttendanceDate ? fmtDateNice(lastValidAttendanceDate) : 'recently active'}.`
-        : 'No valid attendance was found in the recent period. Use the member profile if the desk needs more history.'
-
-  const presenceBadgeLabel = alreadyHereToday
-    ? 'Already here today'
-    : attendanceTodayScannedAt && valid
-      ? 'Recorded today'
-      : recentActive
-        ? 'Recent activity'
-        : 'No recent activity'
-
-  const presenceTone: 'success' | 'warning' | 'danger' = alreadyHereToday
-    ? 'warning'
-    : attendanceTodayScannedAt && valid
-      ? 'success'
-      : recentActive
-        ? 'success'
-        : 'danger'
-
-
-  const tone: 'success' | 'warning' | 'danger' = frozen ? 'warning' : valid ? 'success' : 'danger'
   const heroIcon = frozen ? (
-    <Snowflake size={30} strokeWidth={2.1} />
+    <Snowflake size={22} strokeWidth={2.1} />
   ) : valid ? (
-    <ShieldCheck size={30} strokeWidth={2.1} />
+    <ShieldCheck size={22} strokeWidth={2.1} />
   ) : (
-    <ShieldAlert size={30} strokeWidth={2.1} />
+    <ShieldAlert size={22} strokeWidth={2.1} />
   )
 
-  const title = frozen ? 'Subscription frozen' : valid ? 'Check-in allowed' : 'Check-in blocked'
+  const title = frozen ? 'Subscription frozen' : valid ? 'Membership active' : 'Membership expired'
   const subtitle = frozen
-    ? 'This membership is temporarily frozen.'
+    ? 'Do not allow entry until the freeze ends or the membership is updated.'
     : valid
-      ? 'Membership is valid for check-in.'
-      : 'Membership is not currently valid for check-in.'
-  const statusLabel = repeatScan ? (valid ? 'Already today' : 'Repeat scan') : frozen ? 'Frozen' : valid ? 'Valid' : 'Expired'
-
-  const nextStepTitle = frozen
-    ? 'Next step: open the member profile and review the freeze period.'
-    : valid
-      ? alreadyCheckedToday
-        ? 'Next step: no extra attendance action is needed.'
-        : 'Next step: let the member in and continue to the next scan.'
-      : 'Next step: open the member profile and renew or settle the membership.'
-
-  const nextStepBody = frozen
-    ? 'Do not allow check-in until the freeze ends or the membership is updated.'
-    : valid
-      ? alreadyCheckedToday
-        ? 'Attendance is already recorded for today. You can continue scanning unless the desk needs the member profile.'
-        : 'This result was recorded. You can continue scanning immediately.'
-      : memberId
-        ? 'Use the member profile to renew, settle dues or explain why check-in is blocked.'
-        : 'Re-scan the QR or open Members if the desk needs to search the person manually.'
-
-  const entranceDecision = frozen
-    ? 'Check desk'
-    : valid
-      ? alreadyCheckedToday
-        ? 'Let in'
-        : 'Let in'
-      : memberId
-        ? 'Open profile'
-        : 'Check QR'
-
-  const decisionReason = frozen
-    ? 'Subscription frozen'
-    : valid
-      ? alreadyCheckedToday
-        ? 'Attendance already recorded today'
-        : 'Membership valid for entry'
-      : memberId
-        ? 'Membership not valid right now'
-        : 'QR or member could not be validated'
-
-  const deskDecisionCue = frozen
-    ? 'Pause entry and review the freeze dates.'
-    : valid
-      ? alreadyCheckedToday
-        ? 'Let the member continue. No extra attendance action is needed.'
-        : 'Allow entry and move to the next scan.'
-      : memberId
-        ? 'Open the member profile to renew, settle or explain the block.'
-        : 'Check the QR and re-scan, or search the member manually.'
-
-  const primaryHref = !valid ? (memberId ? `/members/${memberId}` : '/members') : returnHref
-  const primaryLabel = !valid ? (memberId ? 'Open profile' : 'Check members') : 'Scan next'
-  const primaryIcon = !valid ? <QrCode size={16} className="mr-2" /> : <ScanLine size={16} className="mr-2" />
+      ? 'Membership is valid. You can let the member in.'
+      : 'Membership is not active. Send the member to reception.'
 
   const infoTitle = repeatScan
-    ? 'Repeated scan detected'
+    ? 'Repeated scan'
     : valid
-      ? alreadyCheckedToday
-        ? 'Already recorded today'
+      ? attendanceTodayScannedAt
+        ? 'Already scanned today'
         : 'Check-in recorded'
       : frozen
-        ? 'Check-in blocked by freeze'
-        : 'Check-in blocked by membership status'
+        ? 'Frozen membership'
+        : 'Expired membership'
 
   const infoBody = repeatScan
-    ? `Same QR scanned again${typeof repeatSeconds === 'number' ? ` after ${repeatSeconds}s` : ''}. Reusing the latest entrance decision and presence context for this member.`
-    : apiMessage || subtitle
+    ? `Same QR scanned again${typeof repeatSeconds === 'number' ? ` after ${repeatSeconds}s` : ''}.`
+    : attendanceTodayScannedAt && valid
+      ? `Attendance already recorded today at ${fmtDateTimeNice(attendanceTodayScannedAt)}.`
+      : apiMessage || subtitle
+
+  const primaryHref = valid ? returnHref : memberId ? `/members/${memberId}` : '/members'
+  const primaryLabel = valid ? 'Scan next' : memberId ? 'Open member' : 'Open members'
+  const primaryIcon = valid ? <ScanLine size={16} className="mr-2" /> : <QrCode size={16} className="mr-2" />
 
   return (
     <main className="min-h-[calc(100vh-3rem)] bg-[hsl(var(--bg))] p-4 sm:p-6">
       <ResultSound kind={soundKind} />
 
-      <div className="mx-auto max-w-4xl space-y-4">
+      <div className="mx-auto max-w-5xl space-y-4">
         <Card className="rounded-3xl border border-[hsl(var(--border))]">
           <CardContent>
             <div className="flex flex-col gap-5">
-              <div className="flex flex-wrap items-start justify-between gap-4">
-                <div className="min-w-0">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <StatusBadge tone={tone}>{statusLabel}</StatusBadge>
-                    {kioskMode ? <StatusBadge tone="warning">Auto-return enabled</StatusBadge> : null}
-                    {alreadyCheckedToday ? <StatusBadge tone="success">Already today</StatusBadge> : null}
-                    <StatusBadge tone={presenceTone}>{presenceBadgeLabel}</StatusBadge>
-                    {repeatScan ? <StatusBadge tone={valid ? 'success' : 'warning'}>Repeat scan</StatusBadge> : null}
-                    {attendanceTodayScannedAt ? <StatusBadge tone={valid ? 'success' : 'warning'}>Attendance today</StatusBadge> : null}
-                    <StatusBadge tone={tone}>{entranceDecision}</StatusBadge>
-                  </div>
-                  <h1 className="mt-3 text-2xl font-semibold tracking-tight sm:text-3xl">{title}</h1>
-                  <p className="mt-2 max-w-2xl text-sm text-[hsl(var(--muted))] sm:text-base">{subtitle}</p>
-                </div>
-
-                <div
-                  className={
-                    'inline-flex h-16 w-16 shrink-0 items-center justify-center rounded-3xl border ' +
-                    (tone === 'success'
-                      ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
-                      : tone === 'warning'
-                        ? 'border-sky-200 bg-sky-50 text-sky-700'
-                        : 'border-rose-200 bg-rose-50 text-rose-700')
-                  }
-                >
-                  {heroIcon}
-                </div>
-              </div>
-
-              <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_320px]">
-                {(memberName || memberCode || signedPhoto) ? (
-                  <div className="rounded-3xl border border-[hsl(var(--border))] bg-white p-4 shadow-soft">
-                    <div className="flex items-center gap-3">
-                      {signedPhoto ? (
-                        <div className="relative h-16 w-16 overflow-hidden rounded-full border bg-white">
-                          <Image src={signedPhoto} alt="Member photo" fill className="object-cover" />
-                        </div>
-                      ) : (
-                        <div className="flex h-16 w-16 items-center justify-center rounded-full border bg-white text-[hsl(var(--muted))]">
-                          <UserRound size={22} />
-                        </div>
-                      )}
-
-                      <div className="min-w-0">
-                        <div className="text-base font-semibold tracking-tight">{memberName || 'Member'}</div>
-                        {memberCode ? <div className="mt-1 text-sm text-[hsl(var(--muted))]">ID: {memberCode}</div> : null}
-                        <div className="mt-2 text-sm text-[hsl(var(--muted))]">Presence context below helps the desk understand whether the member is already here today or recently active.</div>
-                      </div>
+              <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                <div className="flex min-w-0 items-center gap-4">
+                  {signedPhoto ? (
+                    <div className="relative h-20 w-20 overflow-hidden rounded-full border bg-white sm:h-24 sm:w-24">
+                      <Image src={signedPhoto} alt="Member photo" fill className="object-cover" />
                     </div>
-                  </div>
-                ) : (
-                  <div className="rounded-3xl border border-[hsl(var(--border))] bg-white p-4 shadow-soft">
-                    <div className="text-base font-semibold tracking-tight">Member profile not loaded</div>
-                    <p className="mt-2 text-sm text-[hsl(var(--muted))]">The scan result is still valid, but no member details were loaded on this screen.</p>
-                  </div>
-                )}
-
-                <div className="rounded-3xl border border-[hsl(var(--border))] bg-white p-4 shadow-soft">
-                  <div className="flex items-start gap-3">
-                    <span className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-black">
-                      {valid ? <CircleCheckBig size={18} strokeWidth={2.1} /> : <CircleAlert size={18} strokeWidth={2.1} />}
-                    </span>
-                    <div>
-                      <div className="text-sm font-semibold tracking-tight">{nextStepTitle}</div>
-                      <p className="mt-1 text-sm text-[hsl(var(--muted))]">{nextStepBody}</p>
+                  ) : (
+                    <div className="flex h-20 w-20 items-center justify-center rounded-full border bg-white text-[hsl(var(--muted))] sm:h-24 sm:w-24">
+                      <UserRound size={28} />
                     </div>
+                  )}
+
+                  <div className="min-w-0">
+                    <div className="inline-flex items-center gap-2 rounded-full border border-[hsl(var(--border))] bg-[hsl(var(--card))] px-3 py-1 text-xs font-semibold text-[hsl(var(--muted))]">
+                      {heroIcon}
+                      Scan result
+                    </div>
+                    <h1 className="mt-3 text-2xl font-black tracking-tight sm:text-3xl">{memberName || 'Member'}</h1>
+                    <div className="mt-2 flex flex-wrap gap-2 text-sm text-[hsl(var(--muted))]">
+                      {memberCode ? <span>ID: {memberCode}</span> : null}
+                      <span>•</span>
+                      <span>{title}</span>
+                    </div>
+                    <p className="mt-3 max-w-2xl text-sm text-[hsl(var(--muted))] sm:text-base">{subtitle}</p>
                   </div>
                 </div>
+
+                <StatusHero label={summary.stateLabel} tone={tone} />
               </div>
 
-              <div className="grid gap-3 lg:grid-cols-3">
-                <DecisionCard label="Entrance decision" value={entranceDecision} tone={tone} />
-                <DecisionCard label="Reason" value={decisionReason} tone={tone} />
-                <DecisionCard label="Desk cue" value={deskDecisionCue} tone={tone} />
+              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                <KeyFact label="Status" value={summary.stateLabel} icon={<ShieldCheck size={18} strokeWidth={2.1} />} emphasize />
+                <KeyFact label="Start date" value={fmtDateNice(summary.startDate)} icon={<CalendarDays size={18} strokeWidth={2.1} />} />
+                <KeyFact label="End date" value={fmtDateNice(summary.endDate)} icon={<CalendarDays size={18} strokeWidth={2.1} />} />
+                <KeyFact label="Duration" value={summary.durationLabel} icon={<Clock3 size={18} strokeWidth={2.1} />} />
               </div>
 
-              <InfoStrip title={infoTitle} body={infoBody} tone={tone} />
-
-              <InfoStrip title={presenceTitle} body={presenceBody} tone={presenceTone} />
-
-              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                <FactCard
-                  label="Presence now"
-                  value={presenceBadgeLabel}
-                  icon={<UserRound size={18} strokeWidth={2.1} />}
-                />
-                <FactCard
-                  label="Last valid check-in"
-                  value={lastValidAttendanceAt ? fmtDateTimeNice(lastValidAttendanceAt) : lastValidAttendanceDate ? fmtDateNice(lastValidAttendanceDate) : '—'}
-                  icon={<Clock3 size={18} strokeWidth={2.1} />}
-                />
-                <FactCard
-                  label="Valid attendance · 7d"
-                  value={validAttendance7dCount > 0 ? validAttendance7dCount : '0'}
-                  icon={<CalendarDays size={18} strokeWidth={2.1} />}
-                />
-                <FactCard
-                  label="Valid attendance · 30d"
-                  value={recentValidAttendanceCount > 0 ? recentValidAttendanceCount : '0'}
-                  icon={<CircleCheckBig size={18} strokeWidth={2.1} />}
-                />
+              <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_240px]">
+                <InlineInfo tone={tone} title={infoTitle} body={infoBody} />
+                <KeyFact label="Subscription detail" value={summary.detailLabel} icon={<CircleCheckBig size={18} strokeWidth={2.1} />} />
               </div>
 
-              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                <FactCard
-                  label="Today attendance"
-                  value={attendanceTodayScannedAt ? 'Recorded' : 'Not recorded'}
-                  icon={<CircleCheckBig size={18} strokeWidth={2.1} />}
-                />
-                <FactCard
-                  label="Checked at"
-                  value={attendanceTodayScannedAt ? fmtDateTimeNice(attendanceTodayScannedAt) : '—'}
-                  icon={<Clock3 size={18} strokeWidth={2.1} />}
-                />
-                <FactCard
-                  label="Latest attendance date"
-                  value={lastAttendanceDate ? fmtDateNice(lastAttendanceDate) : '—'}
-                  icon={<CalendarDays size={18} strokeWidth={2.1} />}
-                />
-              </div>
-
-              {attendanceTodayStatus ? (
-                <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] px-4 py-3 text-sm text-[hsl(var(--muted))]">
-                  Today status: <span className="font-semibold text-black">{attendanceTodayStatus}</span>
-                  {lastAttendanceDate ? <span className="ml-2">• Latest attendance date: {fmtDateNice(lastAttendanceDate)}</span> : null}
-                </div>
-              ) : null}
-
-              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                {frozen ? (
-                  <>
-                    <FactCard
-                      label="Frozen until"
-                      value={frozenUntil ? fmtDateNice(frozenUntil) : '—'}
-                      icon={<CalendarDays size={18} strokeWidth={2.1} />}
-                    />
-                    <FactCard
-                      label="Days remaining"
-                      value={typeof freezeDaysRemaining === 'number' ? freezeDaysRemaining : '—'}
-                      icon={<Snowflake size={18} strokeWidth={2.1} />}
-                    />
-                    <FactCard label="Result" value="Check-in blocked" icon={<ShieldAlert size={18} strokeWidth={2.1} />} />
-                  </>
-                ) : valid ? (
-                  <>
-                    <FactCard
-                      label="Days remaining"
-                      value={typeof daysRemaining === 'number' ? daysRemaining : apiMessage || '—'}
-                      icon={<CalendarDays size={18} strokeWidth={2.1} />}
-                    />
-                    <FactCard
-                      label="Expires on"
-                      value={expiresOn ? fmtDateNice(expiresOn) : 'Sessions membership'}
-                      icon={<ShieldCheck size={18} strokeWidth={2.1} />}
-                    />
-                    <FactCard label="Result" value="Check-in allowed" icon={<CircleCheckBig size={18} strokeWidth={2.1} />} />
-                  </>
-                ) : (
-                  <>
-                    <FactCard
-                      label="Expired since"
-                      value={typeof expiredDays === 'number' ? `${expiredDays} day(s)` : '—'}
-                      icon={<Clock3 size={18} strokeWidth={2.1} />}
-                    />
-                    <FactCard
-                      label="Expired on"
-                      value={expiredOn ? fmtDateNice(expiredOn) : '—'}
-                      icon={<ShieldAlert size={18} strokeWidth={2.1} />}
-                    />
-                    <FactCard label="Result" value="Check-in blocked" icon={<CircleAlert size={18} strokeWidth={2.1} />} />
-                  </>
-                )}
-              </div>
-
-              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                <Link href={primaryHref}>
+              <div className="flex flex-col gap-3 sm:flex-row">
+                <Link href={primaryHref} className="sm:flex-1">
                   <Button className="w-full">
                     {primaryIcon}
                     {primaryLabel}
@@ -616,36 +510,27 @@ export default async function ScanResultPage({ searchParams }: { searchParams: S
                 </Link>
 
                 {memberId ? (
-                  <Link href={`/members/${memberId}`}>
+                  <Link href={`/members/${memberId}`} className="sm:flex-1">
                     <Button variant="outline" className="w-full">
                       <QrCode size={16} className="mr-2" />
-                      Open member
+                      Open profile
                     </Button>
                   </Link>
                 ) : null}
 
-                <Link href="/members">
-                  <Button variant="outline" className="w-full">
-                    <UserRound size={16} className="mr-2" />
-                    Members
-                  </Button>
-                </Link>
-
-                <Link href="/scan">
+                <Link href={returnHref} className="sm:flex-1">
                   <Button variant="outline" className="w-full">
                     <ArrowLeft size={16} className="mr-2" />
-                    Back to scanner
+                    Back to scan
                   </Button>
                 </Link>
-              </div>
-
-              <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] px-4 py-3 text-sm text-[hsl(var(--muted))]">
-                <AutoReturn seconds={7} href={returnHref} />
               </div>
             </div>
           </CardContent>
         </Card>
       </div>
+
+      {kioskMode ? <AutoReturn href={returnHref} seconds={7} /> : null}
     </main>
   )
 }
