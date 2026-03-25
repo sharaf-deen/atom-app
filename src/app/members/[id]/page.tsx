@@ -203,6 +203,11 @@ function canReceiveDirectNotification(role?: Role | null) {
   return ['member', 'coach', 'assistant_coach', 'head_coach', 'champion', 'vip'].includes(String(role ?? ''))
 }
 
+function shouldShowAthleteProfileOnMemberDetail(viewerRole?: Role | null, targetRole?: Role | null) {
+  if (viewerRole !== 'head_coach' && viewerRole !== 'super_admin') return false
+  return targetRole === 'member' || targetRole === 'coach' || targetRole === 'assistant_coach' || targetRole === 'vip' || targetRole === 'champion'
+}
+
 function ageYears(dob?: string | null) {
   if (!dob) return null
   const dateOnly = dob.length === 10 ? dob : dob.slice(0, 10)
@@ -1373,14 +1378,16 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
           ) : null}
         </div>
 
-        <AthleteProfileSection
-          memberUserId={profile.user_id}
-          targetRole={profile.role}
-          viewerRole={me.role}
-          isSelf={isSelf}
-          age={age}
-          nextPath={nextPath}
-        />
+        {shouldShowAthleteProfileOnMemberDetail(me.role, profile.role) ? (
+          <AthleteProfileSection
+            memberUserId={profile.user_id}
+            targetRole={profile.role}
+            viewerRole={me.role}
+            isSelf={isSelf}
+            age={age}
+            nextPath={nextPath}
+          />
+        ) : null}
 
         <Surface className="p-4 sm:p-5">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">

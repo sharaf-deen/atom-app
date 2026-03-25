@@ -7,6 +7,7 @@ import PageHeader from '@/components/layout/PageHeader'
 import Section from '@/components/layout/Section'
 import QrImage from '@/components/QrImage'
 import ProfileIdPhoto from '@/components/ProfileIdPhoto'
+import AthleteProfileSection from '@/components/member-detail/AthleteProfileSection'
 import type { Plan } from '@/components/SubscribeDialog'
 import { createSupabaseRSC } from '@/lib/supabaseServer'
 import { getSessionUser, type Role } from '@/lib/session'
@@ -93,6 +94,10 @@ function daysLeft(endDate?: string | null) {
   const t = todayDateOnlyUTC()
   const ms = new Date(`${endDate}T00:00:00Z`).getTime() - new Date(`${t}T00:00:00Z`).getTime()
   return Math.floor(ms / 86400000)
+}
+
+function shouldShowAthleteProfileOnSelfProfile(role?: Role | null) {
+  return role === 'member' || role === 'coach' || role === 'assistant_coach' || role === 'vip' || role === 'champion'
 }
 
 function humanPlan(p?: Plan | null) {
@@ -215,6 +220,18 @@ export default async function ProfilePage() {
             )}
           </div>
         </section>
+
+        {shouldShowAthleteProfileOnSelfProfile(p.role ?? me.role ?? 'member') ? (
+          <AthleteProfileSection
+            memberUserId={me.id}
+            targetRole={p.role ?? me.role ?? 'member'}
+            viewerRole={me.role}
+            isSelf
+            age={ageYears(p.date_of_birth)}
+            nextPath="/profile"
+            allowEdit={false}
+          />
+        ) : null}
 
         {/* Subscriptions (no attendance for member/coach/assistant coach) */}
         <section className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-5 shadow-soft space-y-3">
