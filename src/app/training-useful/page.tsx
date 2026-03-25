@@ -58,8 +58,6 @@ function roleLabel(role: Role) {
       return 'Coach'
     case 'assistant_coach':
       return 'Assistant coach'
-    case 'head_coach':
-      return 'Head coach'
     case 'admin':
       return 'Admin preview'
     case 'super_admin':
@@ -77,7 +75,7 @@ function coachLinks(role: Role): QuickLink[] {
     { href: '/packages-and-promos', label: 'Packages & promos', desc: 'Keep current offers close on the mat.', icon: Gift },
   ]
 
-  if (role === 'coach' || role === 'head_coach') {
+  if (role === 'coach') {
     base.splice(1, 0, {
       href: '/members',
       label: 'Member lookup',
@@ -134,14 +132,14 @@ export default async function TrainingUsefulPage() {
   const qrCode = user.qr_code ?? profile?.qr_code ?? null
   const links = coachLinks(user.role)
   const joinedHint = profile?.created_at ? `Staff account active since ${fmtDate(profile.created_at)}` : 'Staff tools are ready for daily use.'
-  const isCoachView = user.role === 'coach' || user.role === 'head_coach'
+  const isCoachView = user.role === 'coach'
   const isAssistantView = user.role === 'assistant_coach'
 
   return (
     <main>
       <PageHeader
         title="Training useful"
-        subtitle="Fast coach tools for the training floor: QR, schedule, staff updates and the most useful next actions."
+        subtitle="QR, schedule, staff updates and quick coach actions."
         right={<Button asChild href="/schedule" variant="outline">Open schedule</Button>}
       />
 
@@ -154,13 +152,13 @@ export default async function TrainingUsefulPage() {
                 <Badge className="bg-[hsl(var(--bg))] text-[hsl(var(--muted))]">Training floor shortcuts</Badge>
               </div>
               <div>
-                <h2 className="text-2xl font-semibold tracking-tight">Useful today, with less tapping</h2>
+                <h2 className="text-2xl font-semibold tracking-tight">Quick floor tools</h2>
                 <p className="mt-2 max-w-2xl text-sm text-[hsl(var(--muted))]">
                   {isCoachView
-                    ? 'Your hub keeps QR, schedule, staff updates and read-only member lookup in one place.'
+                    ? 'QR, schedule, staff updates and read-only member lookup in one place.'
                     : isAssistantView
-                      ? 'Your hub keeps QR, schedule, staff updates and the most useful field shortcuts together.'
-                      : 'Preview the coach-facing hub and the shortcuts available during daily training operations.'}
+                      ? 'QR, schedule, staff updates and useful field shortcuts.'
+                      : 'Preview the coach-facing shortcuts used during daily training.'}
                 </p>
               </div>
               <p className="text-xs text-[hsl(var(--muted))]">{joinedHint}</p>
@@ -171,14 +169,14 @@ export default async function TrainingUsefulPage() {
                 <div className="text-xs font-semibold uppercase tracking-wide text-[hsl(var(--muted))]">QR readiness</div>
                 <div className="mt-2 text-lg font-semibold tracking-tight">{qrCode ? 'Ready for entry' : 'Check profile first'}</div>
                 <p className="mt-1 text-sm text-[hsl(var(--muted))]">
-                  {qrCode ? 'Your QR code is ready for daily access.' : 'Open your profile to confirm your QR code is available.'}
+                  {qrCode ? 'Your QR code is ready.' : 'Open your profile to check your QR code.'}
                 </p>
               </div>
               <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] p-4">
                 <div className="text-xs font-semibold uppercase tracking-wide text-[hsl(var(--muted))]">Staff updates</div>
                 <div className="mt-2 text-lg font-semibold tracking-tight">{unreadCount > 0 ? `${unreadCount} unread` : 'Inbox up to date'}</div>
                 <p className="mt-1 text-sm text-[hsl(var(--muted))]">
-                  {unreadCount > 0 ? 'Check your latest staff instructions before the next class starts.' : 'No unread staff update right now.'}
+                  {unreadCount > 0 ? 'Check the latest update before class.' : 'No unread update right now.'}
                 </p>
               </div>
             </div>
@@ -190,7 +188,7 @@ export default async function TrainingUsefulPage() {
             <div className="flex items-start justify-between gap-3">
               <div>
                 <div className="text-sm font-semibold tracking-tight">My QR code</div>
-                <p className="mt-1 text-sm text-[hsl(var(--muted))]">Use this code for fast staff entry at the desk.</p>
+                <p className="mt-1 text-sm text-[hsl(var(--muted))]">Fast staff entry at the desk.</p>
               </div>
               <ShieldCheck size={18} className="mt-0.5 text-black" />
             </div>
@@ -207,7 +205,7 @@ export default async function TrainingUsefulPage() {
             <HomeNotificationsTile
               href="/notifications"
               label="Staff updates"
-              desc="Open your inbox and unread coach notifications."
+              desc="Open staff inbox."
               initialCount={unreadCount}
             />
 
@@ -218,10 +216,10 @@ export default async function TrainingUsefulPage() {
                   <div className="text-sm font-semibold tracking-tight">Role cue</div>
                   <p className="mt-1 text-sm text-[hsl(var(--muted))]">
                     {isCoachView
-                      ? 'Coach access includes a limited read-only member lookup with no financial or private contact data.'
+                      ? 'Read-only member lookup. No financial or private contact data.'
                       : isAssistantView
-                        ? 'Assistant coach access is optimized for QR, schedule, notifications and useful field shortcuts.'
-                        : 'Admins can preview the coach-facing shortcuts here without changing the coach management page.'}
+                        ? 'Assistant coach access keeps QR, schedule and updates close.'
+                        : 'Admins can preview coach shortcuts here.'}
                   </p>
                 </div>
               </div>
@@ -237,7 +235,7 @@ export default async function TrainingUsefulPage() {
           <div className="flex items-start justify-between gap-4">
             <div>
               <h2 className="text-lg font-semibold tracking-tight">Training quick actions</h2>
-              <p className="mt-1 text-sm text-[hsl(var(--muted))]">The shortest path to the tools coaches actually need on the floor.</p>
+              <p className="mt-1 text-sm text-[hsl(var(--muted))]">The coach tools used most often.</p>
             </div>
             <Badge className="bg-[hsl(var(--bg))] text-[hsl(var(--muted))]">Today-first shortcuts</Badge>
           </div>
@@ -268,7 +266,7 @@ export default async function TrainingUsefulPage() {
         {isCoachView ? (
           <HomeMemberLookup
             title="Quick member lookup"
-            subtitle="Coach access is read-only. Search by first name, last name or member ID."
+            subtitle="Read-only. Search by name or member ID."
             canOpenProfile
             showSensitiveFields={false}
           />
@@ -282,8 +280,8 @@ export default async function TrainingUsefulPage() {
                 <h2 className="text-lg font-semibold tracking-tight">Useful next step</h2>
                 <p className="mt-1 text-sm text-[hsl(var(--muted))]">
                   {isAssistantView
-                    ? 'Keep the day moving with schedule, QR and staff updates first. Open notifications before class if you have unread items.'
-                    : 'Use this page as a quick preview of the coach-facing shortcuts, then go back to the admin or coaches workspace when needed.'}
+                    ? 'Keep QR, schedule and updates close before class.'
+                    : 'Use this page as a quick preview, then return to the main workspace when needed.'}
                 </p>
               </div>
             </div>

@@ -190,7 +190,7 @@ export default async function AdminPage() {
     <main>
       <PageHeader
         title="Admin Dashboard"
-        subtitle={`Daily ops — Cairo time (${CAIRO_TZ}).`}
+        subtitle={`Daily ops · Cairo time (${CAIRO_TZ}).`}
         right={
           <div className="flex flex-wrap items-center gap-2">
             <Button asChild variant="outline" href="/scan?kiosk=1">
@@ -208,13 +208,13 @@ export default async function AdminPage() {
           <StatCard
             label="Active members"
             value={activeCount ?? 0}
-            hint={`Active subscriptions (end date ≥ ${today})`}
+            hint={`Active subscriptions as of ${today}`}
             href="/members"
           />
           <StatCard
             label="Expiring in 7 days"
             value={expiring7Count ?? 0}
-            hint={`${today} → ${next7}`}
+            hint={`Window: ${today} → ${next7}`}
             href="/admin/expiring-soon"
           />
           <StatCard
@@ -226,7 +226,7 @@ export default async function AdminPage() {
           <StatCard
             label="Scans today"
             value={scansToday}
-            hint={`Kiosk attendance — ${today}`}
+            hint={`Attendance — ${today}`}
             href="/admin/scan-audit"
           />
         </div>
