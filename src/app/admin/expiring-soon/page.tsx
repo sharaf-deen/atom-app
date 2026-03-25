@@ -544,16 +544,16 @@ export default async function ExpiringSoonPage({
         {focusToggle}
 
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
-          <SummaryCard label="Visible memberships" value={String(visibleRows.length)} hint={view === 'overdue' ? 'Rows currently overdue in this page view.' : 'Rows in the current filtered page view.'} />
-          <SummaryCard label="Action needed" value={String(actionNeededVisible)} hint={actionNeededVisible > 0 ? 'Rows that should usually be handled first at the desk.' : 'No urgent desk follow-up in the visible rows.'} />
-          <SummaryCard label="Visible due" value={fmtMoneyEGP(totalVisibleDue)} hint={dueVisible > 0 ? `${dueVisible} row(s) still have money due.` : 'No due in the current view.'} />
-          <SummaryCard label="Overdue now" value={String(overdueVisible)} hint={overdueVisible > 0 ? 'Needs fast renewal action.' : frozenVisible > 0 ? 'Nothing overdue. Frozen rows are still visible.' : 'Nothing overdue in the visible rows.'} />
-          <SummaryCard label="Missing paid date" value={String(missingPaidVisible)} hint={missingPaidVisible > 0 ? 'Review before closing the desk action.' : 'Every visible row already has a paid date.'} />
+          <SummaryCard label="Visible memberships" value={String(visibleRows.length)} hint={view === 'overdue' ? 'Rows currently overdue in this view.' : 'Rows in the current view.'} />
+          <SummaryCard label="Action needed" value={String(actionNeededVisible)} hint={actionNeededVisible > 0 ? 'Rows to handle first.' : 'No urgent desk follow-up in view.'} />
+          <SummaryCard label="Visible due" value={fmtMoneyEGP(totalVisibleDue)} hint={dueVisible > 0 ? `${dueVisible} row(s) still have money due.` : 'No due in this view.'} />
+          <SummaryCard label="Overdue now" value={String(overdueVisible)} hint={overdueVisible > 0 ? 'Needs fast renewal action.' : frozenVisible > 0 ? 'Nothing overdue. Frozen rows still visible.' : 'Nothing overdue in view.'} />
+          <SummaryCard label="Missing paid date" value={String(missingPaidVisible)} hint={missingPaidVisible > 0 ? 'Review before closing the desk action.' : 'Every visible row has a paid date.'} />
         </div>
 
         <div className="rounded-2xl border border-[hsl(var(--border))] bg-white p-4 shadow-soft">
           <div className="text-sm font-semibold">Action-needed triage</div>
-          <div className="mt-1 text-sm text-[hsl(var(--muted))]">Handle the most time-sensitive memberships first: overdue or ending today, then rows with money due, then rows missing a paid date.</div>
+          <div className="mt-1 text-sm text-[hsl(var(--muted))]">Handle overdue or today first, then rows with due amounts, then rows missing a paid date.</div>
           <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-[hsl(var(--muted))]">
             <TinyBadge tone="danger">{overdueVisible} overdue</TinyBadge>
             <TinyBadge tone="danger">{todayVisible} today</TinyBadge>
@@ -577,7 +577,7 @@ export default async function ExpiringSoonPage({
         {pager}
 
         <div className="max-w-3xl text-xs text-[hsl(var(--muted))]">
-          Tips: <b>Action needed first</b> keeps the desk focused on rows that are due, overdue or very close to expiry. <b>Missing paid date</b> highlights rows that still need payment-history review. When both renewal and money due exist, use <b>Settle due</b> first, then <b>Renew</b>. <b>Notify</b> sends an in-app reminder now and logs it in Membership Activity.
+          <b>Settle due</b> before <b>Renew</b> when both are needed. <b>Notify</b> sends an in-app reminder and logs it in Membership Activity.
         </div>
       </Section>
     </main>

@@ -398,7 +398,7 @@ export default async function HealthMonitorPage({ searchParams }: { searchParams
     <main>
       <PageHeader
         title="Health Monitor"
-        subtitle="Compact daily health view with one focus report and a simpler triage flow."
+        subtitle="Daily health view with one focus report."
         right={
           <div className="flex flex-wrap items-center gap-2">
             <RunHealthMonitorButton />
@@ -430,9 +430,9 @@ export default async function HealthMonitorPage({ searchParams }: { searchParams
             </div>
 
             <div className="flex flex-wrap gap-2 text-xs text-[hsl(var(--muted))]">
-              <span className="rounded-full border border-[hsl(var(--border))] px-3 py-1">Healthy = no important issue</span>
-              <span className="rounded-full border border-[hsl(var(--border))] px-3 py-1">Warning = needs attention</span>
-              <span className="rounded-full border border-[hsl(var(--border))] px-3 py-1">Critical = urgent review</span>
+              <span className="rounded-full border border-[hsl(var(--border))] px-3 py-1">Healthy</span>
+              <span className="rounded-full border border-[hsl(var(--border))] px-3 py-1">Warning</span>
+              <span className="rounded-full border border-[hsl(var(--border))] px-3 py-1">Critical</span>
             </div>
           </CardContent>
         </Card>
@@ -471,7 +471,7 @@ export default async function HealthMonitorPage({ searchParams }: { searchParams
             <CardContent className="space-y-4">
               <div>
                 <div className="text-sm font-medium">Triage</div>
-                <p className="mt-1 text-sm text-[hsl(var(--muted))]">Pick a report filter, then review one focus report instead of scanning multiple repeated sections.</p>
+                <p className="mt-1 text-sm text-[hsl(var(--muted))]">Pick a filter, then review one focus report.</p>
               </div>
 
               <div className="flex flex-wrap gap-2">
@@ -498,7 +498,7 @@ export default async function HealthMonitorPage({ searchParams }: { searchParams
 
               {latestNeedsReviewOverall ? (
                 <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4 text-sm text-[hsl(var(--muted))]">
-                  Latest report needing review: <strong>{formatCairoDateTime(latestNeedsReviewOverall.created_at)}</strong>.
+                  Latest review needed: <strong>{formatCairoDateTime(latestNeedsReviewOverall.created_at)}</strong>.
                 </div>
               ) : null}
             </CardContent>
@@ -509,7 +509,7 @@ export default async function HealthMonitorPage({ searchParams }: { searchParams
       <Section className="space-y-4">
         <div>
           <h2 className="text-lg font-semibold">Focus report</h2>
-          <p className="mt-1 text-sm text-[hsl(var(--muted))]">Open one recent report in detail without repeating the same overview blocks again.</p>
+          <p className="mt-1 text-sm text-[hsl(var(--muted))]">Open one recent report in detail.</p>
         </div>
 
         <FocusReportCard
