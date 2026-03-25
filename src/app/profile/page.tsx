@@ -10,7 +10,6 @@ import ProfileIdPhoto from '@/components/ProfileIdPhoto'
 import type { Plan } from '@/components/SubscribeDialog'
 import { createSupabaseRSC } from '@/lib/supabaseServer'
 import { getSessionUser, type Role } from '@/lib/session'
-import { hasLifetimeGymAccess, isMemberLikeRole } from '@/lib/rbac'
 
 type ProfileRow = {
   user_id: string
@@ -146,11 +145,11 @@ export default async function ProfilePage() {
     .order('paid_at', { ascending: false })
     .limit(500)) as { data: SubRow[] | null }
 
-  const canManagePhoto = ['member', 'champion', 'vip', 'coach', 'assistant_coach', 'head_coach'].includes(me.role)
+  const canManagePhoto = ['member', 'coach', 'assistant_coach'].includes(me.role)
 
   return (
     <main>
-      <PageHeader title="Profile" subtitle="Your account info" />
+      <PageHeader title="Profile" subtitle="Your details" />
 
       <Section className="space-y-6">
         
@@ -159,7 +158,7 @@ export default async function ProfilePage() {
           <section className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-5 shadow-soft">
             <h2 className="font-semibold">Profile photo</h2>
             <p className="mt-1 text-sm text-[hsl(var(--muted))]">
-              Upload a square photo (JPG/PNG/WEBP). Max 5 MB.
+              Square JPG, PNG or WEBP up to 5 MB.
             </p>
             <div className="mt-4">
               <ProfileIdPhoto userId={me.id} idPhotoPath={p.id_photo_path} />
@@ -192,12 +191,6 @@ export default async function ProfilePage() {
               <div>
                 <span className="text-[hsl(var(--muted))]">Role:</span> {p.role ?? 'member'}
               </div>
-              {(isMemberLikeRole(me.role) || hasLifetimeGymAccess(me.role)) ? (
-                <div>
-                  <span className="text-[hsl(var(--muted))]">Access:</span>{' '}
-                  {hasLifetimeGymAccess(me.role) ? 'Always active' : 'Membership-based'}
-                </div>
-              ) : null}
               {p.member_id ? (
                 <div>
                   <span className="text-[hsl(var(--muted))]">Member ID:</span> {p.member_id}
@@ -215,10 +208,10 @@ export default async function ProfilePage() {
             {p.qr_code ? (
               <div className="text-center">
                 <QrImage value={p.qr_code} size={180} />
-                <div className="text-xs text-[hsl(var(--muted))] mt-2">Show this code at reception</div>
+                <div className="mt-2 text-xs text-[hsl(var(--muted))]">Show this code at reception.</div>
               </div>
             ) : (
-              <div className="text-sm text-[hsl(var(--muted))]">No QR code.</div>
+              <div className="text-sm text-[hsl(var(--muted))]">No QR code yet.</div>
             )}
           </div>
         </section>

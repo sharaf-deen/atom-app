@@ -89,7 +89,7 @@ export default function MembersFilters({
           <Input
             value={q}
             onChange={(e) => setQ(e.target.value)}
-            placeholder="Search by name, email, phone or member id…"
+            placeholder="Search name, email, phone or member ID…"
             aria-label="Search members"
           />
         </div>
@@ -132,16 +132,16 @@ export default function MembersFilters({
 
         <div className="flex gap-2">
           <Button type="submit" disabled={isPending}>
-            {isPending ? 'Loading…' : 'Search'}
+            {isPending ? 'Loading…' : 'Apply'}
           </Button>
           <Button type="button" variant="outline" disabled={isPending} onClick={onReset}>
-            Reset
+            Clear
           </Button>
         </div>
       </div>
 
       <p className="mt-2 text-[11px] text-[hsl(var(--muted))]">
-        Tip: searching ignores the status filter (same behavior as before).
+        Search ignores status.
       </p>
     </form>
   )

@@ -113,7 +113,7 @@ export default async function MembersPage({
 
   return (
     <main>
-      <PageHeader title="Members" subtitle="Search and manage your member base" />
+      <PageHeader title="Members" subtitle="Search and manage members" />
 
       <Section className="space-y-4">
         <MembersFilters initialQ={q} initialStatus={q ? 'all' : status} initialPageSize={pageSize} />
