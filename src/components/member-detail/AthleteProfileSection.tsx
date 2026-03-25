@@ -68,14 +68,16 @@ const CERTIFICATE_MAX_BYTES = 8 * 1024 * 1024
 
 
 const EDITABLE_ATHLETE_TARGET_ROLES = ['member', 'champion', 'vip', 'assistant_coach', 'coach'] as const satisfies readonly Role[]
+type EditableAthleteTargetRole = (typeof EDITABLE_ATHLETE_TARGET_ROLES)[number]
 const SELF_VISIBLE_ATHLETE_ROLES = ['member', 'champion', 'vip', 'assistant_coach', 'coach'] as const satisfies readonly Role[]
+type SelfVisibleAthleteRole = (typeof SELF_VISIBLE_ATHLETE_ROLES)[number]
 
-function isEditableAthleteTargetRole(role: Role | null | undefined) {
-  return !!role && EDITABLE_ATHLETE_TARGET_ROLES.includes(role)
+function isEditableAthleteTargetRole(role: Role | null | undefined): role is EditableAthleteTargetRole {
+  return !!role && (EDITABLE_ATHLETE_TARGET_ROLES as readonly string[]).includes(role)
 }
 
-function isSelfVisibleAthleteRole(role: Role | null | undefined) {
-  return !!role && SELF_VISIBLE_ATHLETE_ROLES.includes(role)
+function isSelfVisibleAthleteRole(role: Role | null | undefined): role is SelfVisibleAthleteRole {
+  return !!role && (SELF_VISIBLE_ATHLETE_ROLES as readonly string[]).includes(role)
 }
 
 function fmtDate(dateStr?: string | null) {
