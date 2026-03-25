@@ -27,6 +27,14 @@ type CreateOutcome =
 
 type InviteMode = 'custom_qr' | 'custom_qr_failed' | 'supabase_default' | 'none'
 
+type ExistingMemberRef = {
+  user_id: string
+  email?: string | null
+  first_name?: string | null
+  last_name?: string | null
+  phone?: string | null
+}
+
 function ageFromDob(dob?: string) {
   if (!dob || !/^\d{4}-\d{2}-\d{2}$/.test(dob)) return null
   const [y, m, d] = dob.split('-').map(Number)
@@ -74,8 +82,10 @@ export default function CreateMemberForm() {
   const [createdEmail, setCreatedEmail] = useState<string | null>(null)
   const [createOutcome, setCreateOutcome] = useState<CreateOutcome | null>(null)
   const [inviteMode, setInviteMode] = useState<InviteMode>('none')
+  const [existingMember, setExistingMember] = useState<ExistingMemberRef | null>(null)
 
   function update<K extends keyof NewMemberPayload>(k: K, v: NewMemberPayload[K]) {
+    if (k === 'email') setExistingMember(null)
     setForm((f) => ({ ...f, [k]: v }))
   }
 
@@ -87,6 +97,7 @@ export default function CreateMemberForm() {
     setCreatedEmail(null)
     setCreateOutcome(null)
     setInviteMode('none')
+    setExistingMember(null)
   }
 
   const emailOk = !!(form.email || '').trim()
@@ -103,6 +114,7 @@ export default function CreateMemberForm() {
     setCreatedEmail(null)
     setCreateOutcome(null)
     setInviteMode('none')
+    setExistingMember(null)
 
     const email = (form.email || '').trim().toLowerCase()
 
@@ -128,12 +140,15 @@ export default function CreateMemberForm() {
       const j = await r.json().catch(() => ({} as any))
 
       if (!r.ok || !j?.ok) {
-        const isDuplicateEmail =
-          j?.error === 'EMAIL_ALREADY_USED_BY_MEMBER' || j?.error === 'EMAIL_ALREADY_USED_BY_AUTH_ACCOUNT'
         const msg = j?.details || j?.error || 'Failed to create member'
-        setStatus({ kind: isDuplicateEmail ? 'warning' : 'error', msg })
-        if (isDuplicateEmail) toast.warning('Email already used')
-        else toast.error('Create failed')
+        const duplicateMember = j?.existing_member?.user_id ? (j.existing_member as ExistingMemberRef) : null
+        setExistingMember(duplicateMember)
+        setStatus({ kind: 'error', msg })
+        toast.error(duplicateMember ? 'Email already used' : 'Create failed', {
+          description: duplicateMember
+            ? 'Open the existing member instead of creating a new one.'
+            : undefined,
+        })
         return
       }
 
@@ -164,10 +179,10 @@ export default function CreateMemberForm() {
       } else if (outcome === 'existing_profile') {
         setStatus({
           kind: 'warning',
-          msg: 'This email already belongs to an existing member. No changes were made. Open the existing profile instead.',
+          msg: 'This email already belongs to an existing member. Profile updated. No invite email was sent.',
         })
-        toast.warning('Email already used', {
-          description: 'No changes were made to the existing member.',
+        toast.success('Existing member updated', {
+          description: 'No new invite email was sent.',
         })
       } else {
         setStatus({
@@ -200,7 +215,7 @@ export default function CreateMemberForm() {
     <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-5 shadow-soft">
       <h3 className="text-lg font-semibold">Create new member</h3>
       <p className="mt-1 text-sm text-[hsl(var(--muted))]">
-        If the email is new, an invite email will be sent. If the email is already used, creation will be blocked to protect the existing account.
+        If the email is new, an invite email will be sent. Duplicate emails are blocked to protect the existing account.
       </p>
 
       {status.msg ? (
@@ -216,7 +231,31 @@ export default function CreateMemberForm() {
                     : 'info'
             }
           >
-            <span>{status.msg}</span>
+            <div className="grid gap-3">
+              <span>{status.msg}</span>
+              {existingMember?.user_id ? (
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    type="button"
+                    size="sm"
+                    onClick={() => router.push(`/members/${existingMember.user_id}`)}
+                  >
+                    Open existing member
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => {
+                      emailRef.current?.focus()
+                      emailRef.current?.select()
+                    }}
+                  >
+                    Use another email
+                  </Button>
+                </div>
+              ) : null}
+            </div>
           </InlineAlert>
         </div>
       ) : null}
@@ -234,6 +273,9 @@ export default function CreateMemberForm() {
             placeholder="name@example.com"
             disabled={busy}
           />
+          <span className="text-[11px] text-[hsl(var(--muted))]">
+            Reception / kiosk safety: if this email already exists, creation is blocked and you can open the existing member.
+          </span>
         </label>
 
         <label className="grid gap-1">
