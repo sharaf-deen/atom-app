@@ -48,7 +48,7 @@ export default async function MembersStatsCards({ pageSize }: Props) {
         >
           <div className="text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Total members</div>
           <div className="mt-1 text-xl font-semibold group-hover:underline">{total}</div>
-          <div className="mt-1 text-[11px] text-[hsl(var(--muted))]">Tap to list all members</div>
+          <div className="mt-1 text-[11px] text-[hsl(var(--muted))]">Open all members</div>
         </Link>
 
         <Link
@@ -58,7 +58,7 @@ export default async function MembersStatsCards({ pageSize }: Props) {
         >
           <div className="text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Active</div>
           <div className="mt-1 text-xl font-semibold text-emerald-600 group-hover:underline">{active}</div>
-          <div className="mt-1 text-[11px] text-[hsl(var(--muted))]">Tap to list active members</div>
+          <div className="mt-1 text-[11px] text-[hsl(var(--muted))]">Open active members</div>
         </Link>
 
         <Link
@@ -68,13 +68,13 @@ export default async function MembersStatsCards({ pageSize }: Props) {
         >
           <div className="text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Inactive</div>
           <div className="mt-1 text-xl font-semibold text-amber-600 group-hover:underline">{inactive}</div>
-          <div className="mt-1 text-[11px] text-[hsl(var(--muted))]">Tap to list inactive members</div>
+          <div className="mt-1 text-[11px] text-[hsl(var(--muted))]">Open inactive members</div>
         </Link>
       </div>
 
       {statsError ? (
         <div className="rounded-2xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-          Members counters could not be refreshed right now. {statsError}
+          Members counters are unavailable right now. {statsError}
         </div>
       ) : null}
     </>

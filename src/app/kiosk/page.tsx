@@ -34,7 +34,7 @@ export default async function KioskPage() {
 
   return (
     <main>
-      <PageHeader title="Kiosk" subtitle="Create members quickly at the front desk." />
+      <PageHeader title="Kiosk" subtitle="Create members fast" />
       <Section className="max-w-2xl space-y-6">
         <CreateMemberForm />
       </Section>
