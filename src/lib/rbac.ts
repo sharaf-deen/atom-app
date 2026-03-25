@@ -202,7 +202,18 @@ export function canAccessMemberProfile(
   const isSelf = !!args.viewerUserId && !!args.targetUserId && args.viewerUserId === args.targetUserId
   if (isSelf) return true
   if (canAccessMembersList(role)) return true
-  if (role === 'coach' || role === 'head_coach') return isMemberLikeRole(normalizeRole(args.targetRole ?? 'member'))
+
+  const normalizedTargetRole = normalizeRole(args.targetRole ?? 'member')
+
+  if (role === 'coach') return isMemberLikeRole(normalizedTargetRole)
+  if (role === 'head_coach') {
+    return normalizedTargetRole === 'member'
+      || normalizedTargetRole === 'champion'
+      || normalizedTargetRole === 'vip'
+      || normalizedTargetRole === 'assistant_coach'
+      || normalizedTargetRole === 'coach'
+  }
+
   return false
 }
 

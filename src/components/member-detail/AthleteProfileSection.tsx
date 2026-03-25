@@ -4,7 +4,6 @@ import type { ReactNode } from 'react'
 import { Award, Dumbbell, FileText, Medal, Save, ShieldCheck, Trash2, Trophy, Upload } from 'lucide-react'
 import { createSupabaseAdminClient } from '@/lib/supabaseAdmin'
 import { createSupabaseRSC } from '@/lib/supabaseServer'
-import { isMemberLikeRole } from '@/lib/rbac'
 import { getSessionUser, type Role } from '@/lib/session'
 
 type TrainingProfileRow = {
@@ -57,6 +56,7 @@ type Props = {
   isSelf: boolean
   age: number | null
   nextPath: string
+  allowEdit?: boolean
 }
 
 const PROGRAM_OPTIONS = ['beginner', 'intermediate', 'advanced', 'competitor'] as const satisfies readonly ProgramLevel[]
@@ -65,6 +65,18 @@ const ADULT_BELTS = ['white', 'blue', 'purple', 'brown', 'black'] as const
 const ALL_BELTS = Array.from(new Set([...KID_BELTS, ...ADULT_BELTS]))
 const RESULT_OPTIONS = ['gold', 'silver', 'bronze', 'other'] as const satisfies readonly CompetitionResult[]
 const CERTIFICATE_MAX_BYTES = 8 * 1024 * 1024
+
+
+const EDITABLE_ATHLETE_TARGET_ROLES = ['member', 'champion', 'vip', 'assistant_coach', 'coach'] as const satisfies readonly Role[]
+const SELF_VISIBLE_ATHLETE_ROLES = ['member', 'champion', 'vip', 'assistant_coach', 'coach'] as const satisfies readonly Role[]
+
+function isEditableAthleteTargetRole(role: Role | null | undefined) {
+  return !!role && EDITABLE_ATHLETE_TARGET_ROLES.includes(role)
+}
+
+function isSelfVisibleAthleteRole(role: Role | null | undefined) {
+  return !!role && SELF_VISIBLE_ATHLETE_ROLES.includes(role)
+}
 
 function fmtDate(dateStr?: string | null) {
   if (!dateStr) return '—'
@@ -129,7 +141,7 @@ function isCompetitionResult(value: string): value is CompetitionResult {
 
 function canEditAthleteProfile(viewerRole: Role | null | undefined, targetRole: Role | null | undefined) {
   if (viewerRole !== 'head_coach' && viewerRole !== 'super_admin') return false
-  return isMemberLikeRole(targetRole)
+  return isEditableAthleteTargetRole(targetRole)
 }
 
 async function uploadCertificateFile(
@@ -559,10 +571,17 @@ function DetailsEditor({ label, children }: { label: string; children: ReactNode
   )
 }
 
-export default async function AthleteProfileSection({ memberUserId, targetRole, viewerRole, isSelf, age, nextPath }: Props) {
+function canViewAthleteProfile(viewerRole: Role | null | undefined, targetRole: Role | null | undefined, isSelf: boolean) {
+  if (isSelf) return isSelfVisibleAthleteRole(targetRole)
+  return (viewerRole === 'head_coach' || viewerRole === 'super_admin') && isEditableAthleteTargetRole(targetRole)
+}
+
+export default async function AthleteProfileSection({ memberUserId, targetRole, viewerRole, isSelf, age, nextPath, allowEdit = true }: Props) {
+  if (!canViewAthleteProfile(viewerRole, targetRole, isSelf)) return null
+
   const adminDb = createSupabaseAdminClient()
   const sessionDb = createSupabaseRSC()
-  const canReadViaAdmin = !isSelf && (viewerRole === 'reception' || viewerRole === 'admin' || viewerRole === 'super_admin' || viewerRole === 'coach' || viewerRole === 'head_coach')
+  const canReadViaAdmin = !isSelf && (viewerRole === 'head_coach' || viewerRole === 'super_admin')
   const db = canReadViaAdmin ? adminDb : sessionDb
 
   const [{ data: training }, { data: belts }, { data: competitions }] = await Promise.all([
@@ -605,7 +624,7 @@ export default async function AthleteProfileSection({ memberUserId, targetRole, 
   )
   const certificateUrlById = new Map<string, string | null>(certificateUrls)
 
-  const canEdit = canEditAthleteProfile(viewerRole, targetRole)
+  const canEdit = allowEdit && canEditAthleteProfile(viewerRole, targetRole)
   const beltChoices = age !== null ? (age < 16 ? KID_BELTS : ADULT_BELTS) : ALL_BELTS
 
   return (
@@ -661,7 +680,7 @@ export default async function AthleteProfileSection({ memberUserId, targetRole, 
           <div className="mt-1 text-sm text-[hsl(var(--muted))]">
             {competitionRows.length > 0
               ? canEdit
-                ? 'Editable by head coach and super admin.'
+                ? 'Editable by coaches and super admin.'
                 : 'Competition record available.'
               : 'No competition result added yet.'}
           </div>
@@ -685,7 +704,7 @@ export default async function AthleteProfileSection({ memberUserId, targetRole, 
             <div className="flex items-center justify-between gap-3">
               <div>
                 <h3 className="text-sm font-semibold tracking-tight">Program tools</h3>
-                <p className="mt-1 text-xs text-[hsl(var(--muted))]">Head coach and super admin only.</p>
+                <p className="mt-1 text-xs text-[hsl(var(--muted))]">Coach, head coach, assistant coach, or super admin.</p>
               </div>
               <TinyBadge tone="warning">Editable</TinyBadge>
             </div>
