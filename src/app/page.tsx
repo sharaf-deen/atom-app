@@ -458,7 +458,7 @@ function buildMemberPriorities(snapshot: MembershipSnapshot, unreadCount: number
   ]
 }
 
-function buildStaffPriorities(role: 'coach' | 'assistant_coach', unreadCount: number, hasQr: boolean): PriorityItem[] {
+function buildStaffPriorities(role: 'coach' | 'assistant_coach' | 'head_coach', unreadCount: number, hasQr: boolean): PriorityItem[] {
   return [
     {
       href: '/profile',
@@ -477,14 +477,16 @@ function buildStaffPriorities(role: 'coach' | 'assistant_coach', unreadCount: nu
       tone: unreadCount > 0 ? 'warning' : 'neutral',
     },
     {
-      href: role === 'coach' ? '/members' : '/schedule',
-      eyebrow: role === 'coach' ? 'Lookup today' : 'Training useful',
-      title: role === 'coach' ? 'Open member lookup' : 'Open the schedule',
+      href: role === 'assistant_coach' ? '/schedule' : '/members',
+      eyebrow: role === 'assistant_coach' ? 'Training useful' : 'Lookup today',
+      title: role === 'assistant_coach' ? 'Open the schedule' : 'Open member lookup',
       desc:
-        role === 'coach'
-          ? 'Search a member quickly with read-only access when you need to help on the mat.'
-          : 'Keep the day moving with fast access to your schedule and staff shortcuts.',
-      icon: role === 'coach' ? UserRoundSearch : CalendarDays,
+        role === 'assistant_coach'
+          ? 'Keep the day moving with fast access to your schedule and staff shortcuts.'
+          : role === 'head_coach'
+            ? 'Open member lookup and athlete profile access when you need to manage training follow-up.'
+            : 'Search a member quickly with read-only access when you need to help on the mat.',
+      icon: role === 'assistant_coach' ? CalendarDays : UserRoundSearch,
       tone: 'neutral',
     },
     {
@@ -744,7 +746,7 @@ function MembershipCard({ snapshot }: { snapshot: MembershipSnapshot }) {
   )
 }
 
-function StaffAccessCard({ role }: { role: 'coach' | 'assistant_coach' }) {
+function StaffAccessCard({ role }: { role: 'coach' | 'assistant_coach' | 'head_coach' }) {
   return (
     <Surface className="p-4 sm:p-5">
       <div className="inline-flex rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold text-emerald-700">
@@ -754,7 +756,9 @@ function StaffAccessCard({ role }: { role: 'coach' | 'assistant_coach' }) {
       <p className="mt-2 text-sm text-[hsl(var(--muted))]">
         {role === 'coach'
           ? 'Your coach access is designed for daily training operations.'
-          : 'Your assistant coach access is designed for daily training operations.'}
+          : role === 'head_coach'
+            ? 'Your head coach access is designed for member lookup, athlete follow-up and daily training operations.'
+            : 'Your assistant coach access is designed for daily training operations.'}
       </p>
       <div className="mt-4 flex items-center gap-2 text-sm font-medium">
         <Link href="/profile" className="inline-flex items-center gap-1 hover:underline">
@@ -813,13 +817,19 @@ function memberActions(): QuickAction[] {
   ]
 }
 
-function coachActions(): QuickAction[] {
-  return [
+function coachActions(role: 'coach' | 'assistant_coach' | 'head_coach' = 'coach'): QuickAction[] {
+  const items: QuickAction[] = [
     { href: '/profile', label: 'My profile', desc: 'Profile and QR.', icon: IdCard },
     { href: '/schedule', label: 'Schedule', desc: 'Latest class schedule.', icon: CalendarDays },
     { href: '/notifications', label: 'Notifications', desc: 'Latest staff updates.', icon: Bell },
     { href: '/packages-and-promos', label: 'Packages & promos', desc: 'Current offers.', icon: Gift },
   ]
+
+  if (role !== 'assistant_coach') {
+    items.splice(1, 0, { href: '/members', label: 'Member lookup', desc: 'Open member pages fast.', icon: UserRoundSearch })
+  }
+
+  return items
 }
 
 function receptionActions(): QuickAction[] {
@@ -890,7 +900,7 @@ export default async function HomePage() {
   ])
 
   const avatarPath = user.id_photo_path ?? profile?.id_photo_path ?? null
-  const avatarUrl = ['member', 'coach', 'assistant_coach'].includes(user.role) ? await getSignedAvatar(avatarPath) : ''
+  const avatarUrl = ['member', 'champion', 'vip', 'coach', 'assistant_coach', 'head_coach'].includes(user.role) ? await getSignedAvatar(avatarPath) : ''
   const memberId = user.member_id ?? profile?.member_id ?? null
   const qrCode = user.qr_code ?? profile?.qr_code ?? null
 
@@ -943,7 +953,7 @@ export default async function HomePage() {
           </>
         ) : null}
 
-        {(user.role === 'coach' || user.role === 'assistant_coach') ? (
+        {(user.role === 'coach' || user.role === 'assistant_coach' || user.role === 'head_coach') ? (
           <>
             <PriorityGrid
               title="Training useful today"
@@ -953,17 +963,20 @@ export default async function HomePage() {
 
             <div className="grid gap-4 lg:grid-cols-[0.9fr_1.1fr]">
               <QrCard qrCode={qrCode} />
-              <QuickActions
-                title="Coach shortcuts"
-                subtitle="Most useful staff actions first."
-                items={coachActions().slice(0, 3)}
-              />
+              <div className="space-y-4">
+                <StaffAccessCard role={user.role} />
+                <QuickActions
+                  title={user.role === 'head_coach' ? 'Head coach shortcuts' : 'Coach shortcuts'}
+                  subtitle={user.role === 'head_coach' ? 'Member follow-up first.' : 'Most useful staff actions first.'}
+                  items={coachActions(user.role).slice(0, user.role === 'assistant_coach' ? 3 : 4)}
+                />
+              </div>
             </div>
 
-            {user.role === 'coach' ? (
+            {(user.role === 'coach' || user.role === 'head_coach') ? (
               <HomeMemberLookup
                 title="Quick member lookup"
-                subtitle="Coach access is read-only."
+                subtitle={user.role === "head_coach" ? "Head coach access includes athlete follow-up." : "Coach access is read-only."}
                 canOpenProfile
                 showSensitiveFields={false}
               />
