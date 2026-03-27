@@ -1,6 +1,8 @@
 // src/app/api/members/list/route.ts
 import { NextResponse } from 'next/server'
 import { createSupabaseRSC } from '@/lib/supabaseServer'
+import { cairoTodayDateOnly } from '@/lib/cairoTime'
+import { MEMBER_LIFETIME_ACCESS_ROLES, MEMBER_LIKE_ROLES, hasLifetimeGymAccess, type Role } from '@/lib/rbac'
 
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
@@ -10,7 +12,6 @@ const MAX_LIMIT = 200
 
 type Status = 'all' | 'active' | 'inactive'
 
-type Role = 'member' | 'champion' | 'vip' | 'assistant_coach' | 'coach' | 'head_coach' | 'reception' | 'admin' | 'super_admin'
 
 type MemberRow = {
   user_id: string
@@ -74,7 +75,7 @@ export async function GET(req: Request) {
     const from = (page - 1) * limit
     const to = from + limit - 1
 
-    const today = new Date().toISOString().slice(0, 10) // 'YYYY-MM-DD'
+    const today = cairoTodayDateOnly()
 
     async function addActiveFlag(items: MemberRow[]) {
       const ids = items.map((i) => i.user_id).filter(Boolean)
@@ -100,8 +101,7 @@ export async function GET(req: Request) {
         activeSet.add(mid)
       }
 
-      const lifetimeRoles = new Set<Role>(['champion', 'vip'])
-      return items.map((i) => ({ ...i, is_active: lifetimeRoles.has((i.role ?? 'member') as Role) || activeSet.has(i.user_id) }))
+      return items.map((i) => ({ ...i, is_active: hasLifetimeGymAccess(i.role) || activeSet.has(i.user_id) }))
     }
 
 
@@ -113,7 +113,7 @@ export async function GET(req: Request) {
           count: 'exact',
           head: false,
         })
-        .in('role', ['member', 'champion', 'vip'])
+        .in('role', [...MEMBER_LIKE_ROLES])
         .order('created_at', { ascending: false })
         .range(from, to)
 
@@ -160,7 +160,7 @@ export async function GET(req: Request) {
     const { data: lifetimeProfiles } = await supabase
       .from('profiles')
       .select('user_id')
-      .in('role', ['champion', 'vip'])
+      .in('role', [...MEMBER_LIFETIME_ACCESS_ROLES])
 
     for (const row of lifetimeProfiles ?? []) {
       if ((row as any)?.user_id) activeIds.add((row as any).user_id as string)
@@ -182,7 +182,7 @@ export async function GET(req: Request) {
           count: 'exact',
           head: false,
         })
-        .in('role', ['member', 'champion', 'vip'])
+        .in('role', [...MEMBER_LIKE_ROLES])
         .in('user_id', ids)
         .order('created_at', { ascending: false })
         .range(from, to)
@@ -211,7 +211,7 @@ export async function GET(req: Request) {
     const { data: profiles, error: profilesError } = await supabase
       .from('profiles')
       .select('user_id, email, first_name, last_name, phone, role, created_at, member_id, date_of_birth')
-      .in('role', ['member', 'champion', 'vip'])
+      .in('role', [...MEMBER_LIKE_ROLES])
       .order('created_at', { ascending: false })
 
     if (profilesError) {
