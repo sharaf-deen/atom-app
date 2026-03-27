@@ -3,6 +3,10 @@
 import { useMemo, useState } from 'react'
 import Button from '@/components/ui/Button'
 
+function formatWithRef(message: string, requestId?: string | null) {
+  return requestId ? `${message} · Ref ${requestId}` : message
+}
+
 export default function AdminRunExpiryButton() {
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState<string>('')
@@ -27,14 +31,15 @@ export default function AdminRunExpiryButton() {
         headers: { 'cache-control': 'no-store' },
       })
       const j = await r.json().catch(() => ({} as any))
+      const requestId = String(j?.request_id || r.headers.get('x-request-id') || '').trim() || null
       if (!r.ok || j?.ok === false) {
         setTone('error')
-        setMsg(`Error: ${j?.error || 'failed'}${j?.details ? ` – ${j.details}` : ''}`)
+        setMsg(formatWithRef(`Error: ${j?.error || 'failed'}${j?.details ? ` – ${j.details}` : ''}`, requestId))
       } else {
         const time = j?.time_expired ?? 0
         const sess = j?.sessions_expired ?? 0
         setTone('success')
-        setMsg(`Done. Time expired: ${time}, Sessions expired: ${sess}`)
+        setMsg(formatWithRef(`Done. Time expired: ${time}, Sessions expired: ${sess}`, requestId))
       }
     } catch (e: any) {
       setTone('error')

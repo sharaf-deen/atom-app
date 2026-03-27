@@ -10,12 +10,17 @@ type AutoReturnProps = {
   hideText?: boolean
 }
 
-type VerifyRes = { ok: boolean; message?: string }
+type VerifyRes = { ok: boolean; message?: string; request_id?: string }
 
 type WakeLockSentinel = {
   release?: () => Promise<void>
   addEventListener?: (type: string, listener: () => void) => void
   removeEventListener?: (type: string, listener: () => void) => void
+}
+
+
+function withRequestRef(message: string, requestId?: string | null) {
+  return requestId ? `${message} (ref ${requestId})` : message
 }
 
 function isKioskUrl(): boolean {
@@ -195,8 +200,9 @@ export default function AutoReturn({ seconds = 7, href = '/scan', hideText }: Au
         signal: controller.signal,
       })
       const j: VerifyRes = await r.json().catch(() => ({ ok: false }))
+      const requestId = String(j.request_id || r.headers.get('x-request-id') || '').trim() || null
       if (!r.ok || !j.ok) {
-        setExitError(j.message || 'Invalid PIN')
+        setExitError(withRequestRef(j.message || 'Invalid PIN', requestId))
         return
       }
 

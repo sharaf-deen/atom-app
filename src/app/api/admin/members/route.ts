@@ -2,15 +2,11 @@ export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
-import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { requireUser } from '@/lib/apiAuth'
+import { jsonWithApiRuntime, logApiError, startApiRuntime } from '@/lib/apiRuntime'
 import { canAccessMembersList, isRole } from '@/lib/rbac'
-
-function noStore(res: NextResponse) {
-  res.headers.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate')
-  return res
-}
 
 function sanitizeSearch(value: unknown) {
   return typeof value === 'string'
@@ -19,11 +15,12 @@ function sanitizeSearch(value: unknown) {
 }
 
 export async function POST(req: NextRequest) {
+  const meta = startApiRuntime('/api/admin/members')
   const gate = await requireUser()
-  if (!gate.ok) return noStore(gate.res)
+  if (!gate.ok) return gate.res
 
   if (!canAccessMembersList(gate.user.role)) {
-    return noStore(NextResponse.json({ ok: false, error: 'FORBIDDEN' }, { status: 403 }))
+    return jsonWithApiRuntime(meta, 403, { ok: false, error: 'FORBIDDEN' })
   }
 
   const body = await req.json().catch(() => ({} as any))
@@ -37,7 +34,8 @@ export async function POST(req: NextRequest) {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL
   const service = process.env.SUPABASE_SERVICE_ROLE_KEY
   if (!url || !service) {
-    return noStore(NextResponse.json({ ok: false, error: 'Server env missing' }, { status: 500 }))
+    logApiError(meta, 'env', 'SUPABASE env missing')
+    return jsonWithApiRuntime(meta, 500, { ok: false, error: 'Server env missing' })
   }
 
   const admin = createClient(url, service, {
@@ -59,10 +57,16 @@ export async function POST(req: NextRequest) {
     )
   }
 
-  const { data, error } = await query
-  if (error) {
-    return noStore(NextResponse.json({ ok: false, error: error.message }, { status: 400 }))
-  }
+  try {
+    const { data, error } = await query
+    if (error) {
+      logApiError(meta, 'query', error, { role, q, limit })
+      return jsonWithApiRuntime(meta, 400, { ok: false, error: error.message })
+    }
 
-  return noStore(NextResponse.json({ ok: true, members: data ?? [] }))
+    return jsonWithApiRuntime(meta, 200, { ok: true, members: data ?? [] })
+  } catch (error) {
+    logApiError(meta, 'unexpected', error, { role, q, limit })
+    return jsonWithApiRuntime(meta, 500, { ok: false, error: 'Server error' })
+  }
 }

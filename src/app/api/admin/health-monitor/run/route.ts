@@ -2,16 +2,11 @@ export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
-import { NextResponse } from 'next/server'
 import { createSupabaseAdminClient } from '@/lib/supabaseAdmin'
 import { createSupabaseServerActionClient } from '@/lib/supabaseServer'
 import { collectHealthMonitorSummary, sendHealthMonitorEmail } from '@/lib/healthMonitor'
 import { canAccessHealthMonitor, normalizeRole } from '@/lib/rbac'
-
-function noStore(res: NextResponse) {
-  res.headers.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate')
-  return res
-}
+import { jsonWithApiRuntime, logApiError, logApiWarn, startApiRuntime } from '@/lib/apiRuntime'
 
 async function getActorFromSession() {
   const supa = createSupabaseServerActionClient()
@@ -35,6 +30,8 @@ async function getActorFromSession() {
 }
 
 export async function GET(req: Request) {
+  const meta = startApiRuntime('/api/admin/health-monitor/run')
+
   try {
     const authHeader = req.headers.get('authorization') ?? ''
     const cronSecret = process.env.CRON_SECRET
@@ -46,12 +43,11 @@ export async function GET(req: Request) {
     if (!cronOk) {
       const sess = await getActorFromSession()
       if (!sess.ok) {
-        return noStore(
-          NextResponse.json(
-            { ok: false, error: sess.error, ...(sess as any).details ? { details: (sess as any).details } : {} },
-            { status: sess.status },
-          ),
-        )
+        return jsonWithApiRuntime(meta, sess.status, {
+          ok: false,
+          error: sess.error,
+          ...(('details' in sess) && sess.details ? { details: sess.details } : {}),
+        })
       }
       actorId = sess.actorId
       actorRole = sess.role
@@ -73,6 +69,12 @@ export async function GET(req: Request) {
       emailSent = !!result.sent
       emailError = result.error ?? null
       emailRecipients = result.recipients ?? []
+      if (emailError) {
+        logApiWarn(meta, 'send_email', {
+          email_error: emailError,
+          recipient_count: emailRecipients.length,
+        })
+      }
     }
 
     let reportId: string | null = null
@@ -93,28 +95,33 @@ export async function GET(req: Request) {
         .select('id')
         .maybeSingle<{ id: string }>()
 
-      if (error) persistError = error.message
-      else reportId = data?.id ?? null
+      if (error) {
+        persistError = error.message
+        logApiError(meta, 'persist_report', error, { mode: cronOk ? 'cron' : 'manual' })
+      } else {
+        reportId = data?.id ?? null
+      }
     }
 
-    return noStore(
-      NextResponse.json({
-        ok: true,
-        mode: cronOk ? 'cron' : 'manual',
-        actor_role: actorRole,
-        send_email: sendEmail,
-        email_sent: emailSent,
-        email_error: emailError,
-        email_recipients: emailRecipients,
-        persisted: persist,
-        persist_error: persistError,
-        report_id: reportId,
-        summary,
-      }),
-    )
+    return jsonWithApiRuntime(meta, 200, {
+      ok: true,
+      mode: cronOk ? 'cron' : 'manual',
+      actor_role: actorRole,
+      send_email: sendEmail,
+      email_sent: emailSent,
+      email_error: emailError,
+      email_recipients: emailRecipients,
+      persisted: persist,
+      persist_error: persistError,
+      report_id: reportId,
+      summary,
+    })
   } catch (e: any) {
-    return noStore(
-      NextResponse.json({ ok: false, error: 'SERVER_ERROR', details: e?.message ?? String(e) }, { status: 500 }),
-    )
+    logApiError(meta, 'unexpected', e)
+    return jsonWithApiRuntime(meta, 500, {
+      ok: false,
+      error: 'SERVER_ERROR',
+      details: e?.message ?? String(e),
+    })
   }
 }
