@@ -39,6 +39,12 @@ type AttendanceWrite = {
   source?: string
 }
 
+function sanitizeDeviceTag(value: string | null) {
+  return (value || '')
+    .replace(/[^a-zA-Z0-9._:-]+/g, '-')
+    .replace(/-+/g, '-')
+    .slice(0, 64) || null
+}
 
 function json(status: number, body: ScanResponse) {
   const res = NextResponse.json(body, { status })
@@ -136,7 +142,7 @@ export async function POST(req: Request) {
   }
 
   const today = cairoTodayDateOnly()
-  const deviceTag = (req.headers.get('x-device-tag') || '').slice(0, 64) || null
+  const deviceTag = sanitizeDeviceTag(req.headers.get('x-device-tag'))
 
   try {
     const { data: existingAttendance, error: existingErr } = await admin
@@ -165,7 +171,11 @@ export async function POST(req: Request) {
       return json(500, { ok: false, message: memberProfileErr.message })
     }
 
-    const memberRole = normalizeRole(memberProfile?.role ?? 'member')
+    if (!memberProfile) {
+      return json(404, { ok: false, message: 'Member not found' })
+    }
+
+    const memberRole = normalizeRole(memberProfile.role ?? 'member')
     if (hasLifetimeGymAccess(memberRole)) {
       await persistAttendance(admin, existingId, {
         member_id: memberId,

@@ -12,8 +12,13 @@ function canAccess(role: Role) {
   return role === 'reception' || role === 'admin' || role === 'super_admin'
 }
 
+function json(status: number, body: { ok: boolean; message?: string }) {
+  const res = NextResponse.json(body, { status })
+  res.headers.set('Cache-Control', 'no-store')
+  return res
+}
+
 function timingSafeEqual(a: string, b: string) {
-  // tiny constant-time-ish compare for short strings
   const aa = new TextEncoder().encode(a)
   const bb = new TextEncoder().encode(b)
   const len = Math.max(aa.length, bb.length)
@@ -26,12 +31,11 @@ function timingSafeEqual(a: string, b: string) {
 
 export async function POST(req: Request) {
   const user = await getSessionUser()
-  if (!user) return NextResponse.json({ ok: false, message: 'Unauthorized' }, { status: 401 })
-  if (!canAccess(user.role)) return NextResponse.json({ ok: false, message: 'Forbidden' }, { status: 403 })
+  if (!user) return json(401, { ok: false, message: 'Unauthorized' })
+  if (!canAccess(user.role)) return json(403, { ok: false, message: 'Forbidden' })
 
-  // Super admin can always exit without PIN
   if (user.role === 'super_admin') {
-    return NextResponse.json({ ok: true }, { status: 200 })
+    return json(200, { ok: true })
   }
 
   let body: Body = {}
@@ -42,17 +46,16 @@ export async function POST(req: Request) {
   }
 
   const pin = String(body.pin ?? '').trim()
-  if (!pin) return NextResponse.json({ ok: false, message: 'Missing PIN' }, { status: 400 })
+  if (!pin) return json(400, { ok: false, message: 'Missing PIN' })
 
   const expected = String(process.env.KIOSK_EXIT_PIN ?? '').trim()
   if (!expected) {
-    // Misconfigured environment
-    return NextResponse.json({ ok: false, message: 'Kiosk PIN not configured' }, { status: 500 })
+    return json(500, { ok: false, message: 'Kiosk PIN not configured' })
   }
 
   if (!timingSafeEqual(pin, expected)) {
-    return NextResponse.json({ ok: false, message: 'Invalid PIN' }, { status: 401 })
+    return json(401, { ok: false, message: 'Invalid PIN' })
   }
 
-  return NextResponse.json({ ok: true }, { status: 200 })
+  return json(200, { ok: true })
 }
