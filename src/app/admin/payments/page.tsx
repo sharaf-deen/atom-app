@@ -6,6 +6,9 @@ import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import AccessDeniedCard from '@/components/AccessDeniedCard'
 import Badge from '@/components/ui/Badge'
+import Button from '@/components/ui/Button'
+import Input from '@/components/ui/Input'
+import Select from '@/components/ui/Select'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card'
 import { Table } from '@/components/ui/Table'
 import EditPaymentDateButton from '@/components/EditPaymentDateButton'
@@ -208,7 +211,7 @@ export default async function AdminPaymentsPage({
     if (!memberIds.length) memberIds = []
   }
 
-  let rowsQuery = admin
+  let query = admin
     .from('subscription_payments')
     .select(
       'id, subscription_id, member_id, amount, payment_method, note, paid_at, created_at, member:profiles!subscription_payments_member_id_fkey(user_id,member_id,email,first_name,last_name,phone), actor:profiles!subscription_payments_created_by_fkey(user_id,email,first_name,last_name)',
@@ -218,32 +221,13 @@ export default async function AdminPaymentsPage({
     .lt('paid_at', endISO)
     .order('paid_at', { ascending: false })
 
-  rowsQuery = applyPaymentMethodFilter(rowsQuery as any, payment_method) as any
+  query = applyPaymentMethodFilter(query as any, payment_method) as any
   if (memberIds) {
-    if (!memberIds.length) rowsQuery = rowsQuery.in('member_id', [IMPOSSIBLE_MEMBER_ID])
-    else rowsQuery = rowsQuery.in('member_id', memberIds)
+    if (!memberIds.length) query = query.in('member_id', [IMPOSSIBLE_MEMBER_ID])
+    else query = query.in('member_id', memberIds)
   }
 
-  let totalsQuery = admin
-    .from('subscription_payments')
-    .select('amount, payment_method, member_id')
-    .gte('paid_at', startISO)
-    .lt('paid_at', endISO)
-    .limit(10000)
-
-  totalsQuery = applyPaymentMethodFilter(totalsQuery as any, payment_method) as any
-  if (memberIds) {
-    if (!memberIds.length) totalsQuery = totalsQuery.in('member_id', [IMPOSSIBLE_MEMBER_ID])
-    else totalsQuery = totalsQuery.in('member_id', memberIds)
-  }
-
-  const [rowsResult, totalsResult] = await Promise.allSettled([
-    rowsQuery.range(fromIdx, toIdx),
-    totalsQuery,
-  ])
-
-  const rowsValue = rowsResult.status === 'fulfilled' ? rowsResult.value : { data: null, error: new Error('Failed to load payments'), count: 0 }
-  const { data: rowsRaw, error: err, count } = rowsValue
+  const { data: rowsRaw, error: err, count } = await query.range(fromIdx, toIdx)
 
   const rows: PaymentRow[] = ((rowsRaw ?? []) as any[]).map((r) => ({
     id: String(r.id),
@@ -260,8 +244,22 @@ export default async function AdminPaymentsPage({
 
   let totals = { all: 0, cash: 0, instapay: 0, card: 0, bank_transfer: 0 }
 
-  if (totalsResult.status === 'fulfilled') {
-    for (const r of ((totalsResult.value as any)?.data ?? []) as any[]) {
+  try {
+    let totalsQuery = admin
+      .from('subscription_payments')
+      .select('amount, payment_method, member_id')
+      .gte('paid_at', startISO)
+      .lt('paid_at', endISO)
+      .limit(10000)
+
+    totalsQuery = applyPaymentMethodFilter(totalsQuery as any, payment_method) as any
+    if (memberIds) {
+      if (!memberIds.length) totalsQuery = totalsQuery.in('member_id', [IMPOSSIBLE_MEMBER_ID])
+      else totalsQuery = totalsQuery.in('member_id', memberIds)
+    }
+
+    const { data: allRows } = await totalsQuery
+    for (const r of (allRows ?? []) as any[]) {
       const amt = Number(r.amount ?? 0)
       if (!Number.isFinite(amt)) continue
       totals.all += amt
@@ -271,6 +269,8 @@ export default async function AdminPaymentsPage({
       else if (pm === 'card' || pm === 'visa') totals.card += amt
       else if (pm === 'bank_transfer') totals.bank_transfer += amt
     }
+  } catch {
+    // ignore totals failure
   }
 
   const totalPages = Math.max(1, Math.ceil(Number(count ?? 0) / PAGE_SIZE))
@@ -370,13 +370,13 @@ export default async function AdminPaymentsPage({
           </p>
         </div>
 
-        <div className="flex gap-2">
-          <Link prefetch={false} href="/admin" className="border px-4 py-2 rounded-lg hover:bg-gray-50">
+        <div className="grid w-full gap-2 sm:w-auto sm:grid-cols-2">
+          <Button asChild variant="outline" className="w-full" href="/admin">
             ← Admin
-          </Link>
-          <Link prefetch={false} href={cashReportHref} className="border px-4 py-2 rounded-lg hover:bg-gray-50">
+          </Button>
+          <Button asChild variant="outline" className="w-full" href={cashReportHref}>
             Filtered Cash Report
-          </Link>
+          </Button>
         </div>
       </div>
 
@@ -386,101 +386,54 @@ export default async function AdminPaymentsPage({
           <div className="text-sm text-[hsl(var(--muted))]">Egypt time (Africa/Cairo)</div>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="flex flex-wrap gap-2">
-            <Link prefetch={false} href={quickLinks.today} className="inline-flex items-center justify-center rounded-2xl border border-[hsl(var(--border))] bg-white px-4 py-2 text-sm font-medium hover:bg-[hsl(var(--bg))]/80">
-              Today
-            </Link>
-            <Link prefetch={false} href={quickLinks.seven} className="inline-flex items-center justify-center rounded-2xl border border-[hsl(var(--border))] bg-white px-4 py-2 text-sm font-medium hover:bg-[hsl(var(--bg))]/80">
-              Last 7 days
-            </Link>
-            <Link prefetch={false} href={quickLinks.month} className="inline-flex items-center justify-center rounded-2xl border border-[hsl(var(--border))] bg-white px-4 py-2 text-sm font-medium hover:bg-[hsl(var(--bg))]/80">
-              This month
-            </Link>
-            <Link prefetch={false} href={quickLinks.custom} className="inline-flex items-center justify-center rounded-2xl border border-[hsl(var(--border))] bg-white px-4 py-2 text-sm font-medium hover:bg-[hsl(var(--bg))]/80">
-              Custom
-            </Link>
-            <Link prefetch={false} href={quickLinks.reset} className="inline-flex items-center justify-center rounded-2xl border border-[hsl(var(--border))] bg-white px-4 py-2 text-sm font-medium hover:bg-[hsl(var(--bg))]/80">
-              Reset all
-            </Link>
+          <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-5">
+            <Button asChild variant="outline" className="w-full" href={quickLinks.today}>Today</Button>
+            <Button asChild variant="outline" className="w-full" href={quickLinks.seven}>Last 7 days</Button>
+            <Button asChild variant="outline" className="w-full" href={quickLinks.month}>This month</Button>
+            <Button asChild variant="outline" className="w-full" href={quickLinks.custom}>Custom</Button>
+            <Button asChild variant="outline" className="w-full" href={quickLinks.reset}>Reset all</Button>
           </div>
 
           <form method="get" className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
-            <label className="block">
-              <span className="mb-1 block text-sm font-medium">Preset</span>
-              <select
-                name="preset"
-                defaultValue={preset}
-                className="w-full rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              >
-                <option value="today">Today</option>
-                <option value="7d">Last 7 days</option>
-                <option value="month">This month</option>
-                <option value="custom">Custom</option>
-              </select>
-            </label>
+            <Select name="preset" defaultValue={preset} label="Preset">
+              <option value="today">Today</option>
+              <option value="7d">Last 7 days</option>
+              <option value="month">This month</option>
+              <option value="custom">Custom</option>
+            </Select>
 
-            <label className="block">
-              <span className="mb-1 block text-sm font-medium">From</span>
-              <input
-                type="date"
-                name="from"
-                defaultValue={from}
-                className="w-full rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              />
-            </label>
+            <Input type="date" name="from" defaultValue={from} label="From" />
 
-            <label className="block">
-              <span className="mb-1 block text-sm font-medium">To</span>
-              <input
-                type="date"
-                name="to"
-                defaultValue={to}
-                className="w-full rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              />
-            </label>
+            <Input type="date" name="to" defaultValue={to} label="To" />
 
-            <label className="block">
-              <span className="mb-1 block text-sm font-medium">Method</span>
-              <select
-                name="payment_method"
-                defaultValue={payment_method}
-                className="w-full rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              >
-                <option value="all">All</option>
-                <option value="cash">Cash</option>
-                <option value="instapay">Instapay</option>
-                <option value="card">Card</option>
-                <option value="bank_transfer">Bank transfer</option>
-              </select>
-            </label>
+            <Select name="payment_method" defaultValue={payment_method} label="Method">
+              <option value="all">All</option>
+              <option value="cash">Cash</option>
+              <option value="instapay">Instapay</option>
+              <option value="card">Card</option>
+              <option value="bank_transfer">Bank transfer</option>
+            </Select>
 
-            <label className="block sm:col-span-2 xl:col-span-2">
-              <span className="mb-1 block text-sm font-medium">Search member</span>
-              <input
+            <div className="sm:col-span-2 xl:col-span-2">
+              <Input
                 name="q"
                 defaultValue={q}
+                label="Search member"
                 placeholder="name / email / phone / ATOM-000123"
-                className="w-full rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
               />
-            </label>
+            </div>
 
-            <div className="sm:col-span-2 xl:col-span-6 flex flex-wrap items-center gap-2 pt-1">
-              <button className="inline-flex items-center justify-center rounded-2xl bg-black text-white px-4 py-2 text-sm font-medium hover:opacity-95">
-                Apply filters
-              </button>
-              <a href={`/api/admin/payments/export?${exportQS}`} className="inline-flex items-center justify-center rounded-2xl shadow-soft border border-[hsl(var(--border))] bg-white px-4 py-2 text-sm font-medium hover:bg-[hsl(var(--bg))]/80">
+            <div className="sm:col-span-2 xl:col-span-6 grid gap-2 pt-1 sm:grid-cols-2 xl:grid-cols-4">
+              <Button className="w-full">Apply filters</Button>
+              <a href={`/api/admin/payments/export?${exportQS}`} className="inline-flex min-h-[42px] w-full items-center justify-center rounded-2xl border border-[hsl(var(--border))] bg-white px-4 py-2 text-sm font-medium shadow-soft transition hover:bg-[hsl(var(--bg))]/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-[hsl(var(--bg))]">
                 Export filtered CSV
               </a>
-              <a href={`/api/admin/payments/export-pdf?${exportQS}`} className="inline-flex items-center justify-center rounded-2xl shadow-soft border border-[hsl(var(--border))] bg-white px-4 py-2 text-sm font-medium hover:bg-[hsl(var(--bg))]/80">
+              <a href={`/api/admin/payments/export-pdf?${exportQS}`} className="inline-flex min-h-[42px] w-full items-center justify-center rounded-2xl border border-[hsl(var(--border))] bg-white px-4 py-2 text-sm font-medium shadow-soft transition hover:bg-[hsl(var(--bg))]/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-[hsl(var(--bg))]">
                 Export filtered PDF
               </a>
-              <Link
-                prefetch={false}
-                href="/admin/payments"
-                className="inline-flex items-center justify-center rounded-2xl border border-[hsl(var(--border))] bg-white px-4 py-2 text-sm font-medium hover:bg-[hsl(var(--bg))]/80"
-              >
+              <Button asChild variant="outline" className="w-full" href="/admin/payments">
                 Reset
-              </Link>
+              </Button>
             </div>
           </form>
 
@@ -569,27 +522,27 @@ export default async function AdminPaymentsPage({
           <Table columns={tableColumns} rows={tableRows as any} keyField="id" stickyTopClassName="top-0" />
 
           {totalPages > 1 ? (
-            <div className="mt-4 flex items-center justify-between gap-3">
+            <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div className="text-sm text-[hsl(var(--muted))]">
                 Page {page} / {totalPages}
               </div>
-              <div className="flex items-center gap-2">
-                <Link
-                  prefetch={false}
+              <div className="grid w-full grid-cols-2 gap-2 sm:w-auto">
+                <Button
+                  asChild
+                  variant="outline"
+                  className={`w-full ${page <= 1 ? 'pointer-events-none opacity-50' : ''}`}
                   href={navLink(Math.max(1, page - 1))}
-                  aria-disabled={page <= 1}
-                  className={`rounded-xl border px-3 py-2 text-sm font-semibold ${page <= 1 ? 'pointer-events-none opacity-50' : 'hover:bg-black/[0.03]'}`}
                 >
                   Prev
-                </Link>
-                <Link
-                  prefetch={false}
+                </Button>
+                <Button
+                  asChild
+                  variant="outline"
+                  className={`w-full ${page >= totalPages ? 'pointer-events-none opacity-50' : ''}`}
                   href={navLink(Math.min(totalPages, page + 1))}
-                  aria-disabled={page >= totalPages}
-                  className={`rounded-xl border px-3 py-2 text-sm font-semibold ${page >= totalPages ? 'pointer-events-none opacity-50' : 'hover:bg-black/[0.03]'}`}
                 >
                   Next
-                </Link>
+                </Button>
               </div>
             </div>
           ) : null}
