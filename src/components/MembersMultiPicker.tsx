@@ -4,6 +4,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import Button from '@/components/ui/Button'
 import Input from '@/components/ui/Input'
+import InlineAlert from '@/components/ui/InlineAlert'
 
 type Member = {
   user_id: string
@@ -147,8 +148,10 @@ export default function MembersMultiPicker({
             type="button"
             onClick={() => runSearch(query)}
             disabled={disabled || loading}
+            loading={loading}
+            loadingText="Searching…"
           >
-            {loading ? 'Searching…' : 'Search'}
+            Search
           </Button>
           <Button
             type="button"
@@ -190,18 +193,19 @@ export default function MembersMultiPicker({
       </div>
 
       {/* Error */}
-      {err && (
-        <div className="mt-2 rounded-2xl border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-700">
-          {err}
-        </div>
-      )}
+      <div className="mt-2 space-y-2">
+        {loading ? <InlineAlert compact variant="info">Loading members…</InlineAlert> : null}
+        {err ? <InlineAlert variant="error">{err}</InlineAlert> : null}
+      </div>
 
       {/* Results list */}
       <div className="mt-3 max-h-64 overflow-auto rounded-2xl border border-[hsl(var(--border))] bg-white">
         {items.length === 0 && !loading ? (
-          <div className="p-3 text-sm text-[hsl(var(--muted))]">No results.</div>
+          <div className="p-3">
+            <InlineAlert compact variant="info">No results.</InlineAlert>
+          </div>
         ) : (
-          items.map((m, i) => (
+          items.map((m) => (
             <label
               key={m.user_id}
               className="flex items-center gap-2 px-3 py-2 border-b border-[hsl(var(--border))] last:border-b-0"

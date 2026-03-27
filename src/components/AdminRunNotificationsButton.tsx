@@ -1,22 +1,15 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useState } from 'react'
 import Button from '@/components/ui/Button'
-
-function formatWithRef(message: string, requestId?: string | null) {
-  return requestId ? `${message} · Ref ${requestId}` : message
-}
+import InlineAlert from '@/components/ui/InlineAlert'
+import { formatRequestRef } from '@/lib/requestRef'
 
 export default function AdminRunNotificationsButton() {
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState<string>('')
   const [tone, setTone] = useState<'neutral' | 'success' | 'error'>('neutral')
 
-  const msgClass = useMemo(() => {
-    if (tone === 'success') return 'border-emerald-200 bg-emerald-50 text-emerald-800'
-    if (tone === 'error') return 'border-rose-200 bg-rose-50 text-rose-800'
-    return 'border-[hsl(var(--border))] bg-[hsl(var(--bg))] text-[hsl(var(--muted))]'
-  }, [tone])
 
   async function run(dry = false) {
     if (busy) return
@@ -35,7 +28,7 @@ export default function AdminRunNotificationsButton() {
       const requestId = String(j?.request_id || r.headers.get('x-request-id') || '').trim() || null
       if (!r.ok || !j?.ok) {
         setTone('error')
-        setMsg(formatWithRef(j?.details || j?.error || 'Failed', requestId))
+        setMsg(formatRequestRef(j?.details || j?.error || 'Failed', requestId))
         return
       }
       const q1 = j?.queued?.expire_7d ?? 0
@@ -45,10 +38,7 @@ export default function AdminRunNotificationsButton() {
       const candidates2 = j?.candidates?.sessions_low ?? 0
       setTone('success')
       setMsg(
-        formatWithRef(
-          `${dry ? 'Dry-run complete' : 'Run complete'} — candidates: expire_7d=${candidates1}, sessions_low=${candidates2} · queued: expire_7d=${q1}, sessions_low=${q2} · sent=${sent}`,
-          requestId,
-        ),
+        formatRequestRef(`${dry ? 'Dry-run complete' : 'Run complete'} — candidates: expire_7d=${candidates1}, sessions_low=${candidates2} · queued: expire_7d=${q1}, sessions_low=${q2} · sent=${sent}`, requestId),
       )
     } catch (e: any) {
       setTone('error')
@@ -73,9 +63,13 @@ export default function AdminRunNotificationsButton() {
         Dry-run
       </Button>
       {msg ? (
-        <span role="status" aria-live="polite" className={`rounded-2xl border px-3 py-2 text-xs ${msgClass}`}>
+        <InlineAlert
+          compact
+          ariaLive="polite"
+          variant={tone === 'success' ? 'success' : tone === 'error' ? 'error' : 'info'}
+        >
           {msg}
-        </span>
+        </InlineAlert>
       ) : null}
     </div>
   )

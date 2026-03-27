@@ -16,17 +16,22 @@ export default function InlineAlert({
   children,
   className = '',
   role,
+  compact = false,
+  ariaLive,
 }: {
   variant?: Variant
   title?: string
   children: React.ReactNode
   className?: string
   role?: 'status' | 'alert'
+  compact?: boolean
+  ariaLive?: 'polite' | 'assertive'
 }) {
   const computedRole = role ?? (variant === 'error' ? 'alert' : 'status')
+  const sizeClass = compact ? 'rounded-xl px-3 py-2 text-xs' : 'rounded-2xl px-3 py-2 text-sm'
   return (
-    <div className={`rounded-2xl px-3 py-2 text-sm ${STYLES[variant]} ${className}`} role={computedRole}>
-      {title ? <div className="font-medium mb-0.5">{title}</div> : null}
+    <div className={`${sizeClass} ${STYLES[variant]} ${className}`} role={computedRole} aria-live={ariaLive}>
+      {title ? <div className="mb-0.5 font-medium">{title}</div> : null}
       <div className={variant === 'info' ? 'text-[hsl(var(--muted))]' : ''}>{children}</div>
     </div>
   )

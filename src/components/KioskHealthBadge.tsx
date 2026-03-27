@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useRef, useState } from 'react'
+import Button from '@/components/ui/Button'
 
 type HealthOk = {
   ok: true
@@ -174,27 +175,31 @@ export default function KioskHealthBadge({
       </div>
 
       <div className="flex items-center gap-2">
-        <button
+        <Button
           type="button"
+          variant="outline"
+          size="sm"
           onClick={() => {
             refresh()
           }}
           disabled={loading}
-          className="rounded-xl border border-black/10 px-2.5 py-1 text-xs font-semibold hover:bg-black/[0.03] disabled:opacity-60"
+          loading={loading}
+          loadingText="Refreshing…"
           title="Re-check connectivity & session"
         >
-          {loading ? '…' : 'Refresh'}
-        </button>
+          Refresh
+        </Button>
 
         {showReload ? (
-          <button
+          <Button
             type="button"
+            variant="outline"
+            size="sm"
             onClick={() => window.location.reload()}
-            className="rounded-xl border border-black/10 px-2.5 py-1 text-xs font-semibold hover:bg-black/[0.03]"
             title="Reload the kiosk page"
           >
             Reload
-          </button>
+          </Button>
         ) : null}
       </div>
     </div>
