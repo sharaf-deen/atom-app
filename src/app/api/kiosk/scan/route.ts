@@ -37,6 +37,8 @@ type AttendanceWrite = {
   source?: string
 }
 
+const LIFETIME_ACCESS_ROLES = ['assistant_coach', 'coach', 'head_coach', 'champion', 'vip'] as const
+
 function json(status: number, body: ScanResponse) {
   const res = NextResponse.json(body, { status })
   res.headers.set('Cache-Control', 'no-store')
@@ -165,6 +167,40 @@ export async function POST(req: Request) {
 
     const existingId = existingAttendance?.id ?? null
     const alreadyValidToday = !!existingAttendance?.valid
+
+    const { data: memberProfile, error: memberProfileErr } = await admin
+      .from('profiles')
+      .select('role')
+      .eq('user_id', memberId)
+      .maybeSingle<{ role: string | null }>()
+
+    if (memberProfileErr) {
+      return json(500, { ok: false, message: memberProfileErr.message })
+    }
+
+    const memberRole = (memberProfile?.role ?? 'member').trim()
+    if ((LIFETIME_ACCESS_ROLES as readonly string[]).includes(memberRole)) {
+      await persistAttendance(admin, existingId, {
+        member_id: memberId,
+        date: today,
+        valid: true,
+        status: 'ok',
+        from_sessions: false,
+        subscription_id: null,
+        scanned_by: actorId,
+        device_tag: deviceTag,
+      })
+
+      return json(200, {
+        ok: true,
+        valid: true,
+        member_id: memberId,
+        subscription_id: null,
+        days_remaining: null,
+        expires_on: null,
+        message: alreadyValidToday ? 'Already checked in today' : 'Always active access',
+      })
+    }
 
     const { data: timeSub, error: timeErr } = await admin
       .from('subscriptions')
