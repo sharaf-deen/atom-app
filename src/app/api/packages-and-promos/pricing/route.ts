@@ -4,6 +4,7 @@ export const revalidate = 0
 
 import { NextResponse } from 'next/server'
 import { createSupabaseServerActionClient } from '@/lib/supabaseServer'
+import { sanitizeText } from '@/lib/inputGuard'
 
 function noStore(res: NextResponse) {
   res.headers.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate')
@@ -17,15 +18,18 @@ function json(status: number, body: any) {
 function sanitizePricing(v: any) {
   if (!v || typeof v !== 'object') return null
 
-  const str = (x: any) => String(x ?? '').trim()
-  const arr = (x: any) => (Array.isArray(x) ? x : [])
+  const MAX_ROWS = 20
+  const label = (x: any) => sanitizeText(x, { max: 80 })
+  const price = (x: any) => sanitizeText(x, { max: 40 })
+  const note = (x: any) => sanitizeText(x, { max: 160 })
+  const arr = (x: any) => (Array.isArray(x) ? x.slice(0, MAX_ROWS) : [])
 
   const memberships = arr(v.memberships)
-    .map((r: any) => ({ label: str(r?.label), price: str(r?.price) }))
+    .map((r: any) => ({ label: label(r?.label), price: price(r?.price) }))
     .filter((r: any) => r.label && r.price)
 
   const dropIn = arr(v.dropIn)
-    .map((r: any) => ({ label: str(r?.label), price: str(r?.price || ''), note: str(r?.note || '') }))
+    .map((r: any) => ({ label: label(r?.label), price: price(r?.price || ''), note: note(r?.note || '') }))
     .filter((r: any) => r.label)
     .map((r: any) => ({
       label: r.label,
@@ -34,7 +38,7 @@ function sanitizePricing(v: any) {
     }))
 
   const privateTraining = arr(v.privateTraining)
-    .map((r: any) => ({ label: str(r?.label), price: str(r?.price || '') }))
+    .map((r: any) => ({ label: label(r?.label), price: price(r?.price || '') }))
     .filter((r: any) => r.label)
     .map((r: any) => ({ label: r.label, ...(r.price ? { price: r.price } : {}) }))
 
@@ -69,7 +73,6 @@ export async function POST(req: Request) {
     const user = auth.user
     if (!user) return json(401, { ok: false, error: 'NOT_AUTHENTICATED' })
 
-    // role check
     const { data: me, error: meErr } = await supa.from('profiles').select('role').eq('user_id', user.id).maybeSingle<{ role: string | null }>()
     if (meErr) return json(500, { ok: false, error: 'PROFILE_LOOKUP_FAILED', details: meErr.message })
     if (me?.role !== 'super_admin') return json(403, { ok: false, error: 'FORBIDDEN' })

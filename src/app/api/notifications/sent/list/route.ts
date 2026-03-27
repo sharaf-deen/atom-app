@@ -4,6 +4,7 @@ export const revalidate = 0
 
 import { NextResponse } from 'next/server'
 import { createSupabaseServerActionClient } from '@/lib/supabaseServer'
+import { clampInt, isSimpleKey, sanitizeSearch } from '@/lib/inputGuard'
 
 type Row = {
   id: string
@@ -12,7 +13,7 @@ type Row = {
   kind: string | null
   created_at: string
   read_at: string | null
-  user_id: string | null // destinataire
+  user_id: string | null
 }
 
 function noStore(res: NextResponse) {
@@ -24,33 +25,35 @@ export async function GET(req: Request) {
   try {
     const supa = createSupabaseServerActionClient()
 
-    // Auth
     const { data: auth } = await supa.auth.getUser()
     const user = auth.user
     if (!user) return noStore(NextResponse.json({ ok: false, error: 'NOT_AUTHENTICATED' }, { status: 401 }))
 
-    // Rôle
     const { data: me, error: meErr } = await supa
       .from('profiles')
       .select('role')
       .eq('user_id', user.id)
       .maybeSingle<{ role: string | null }>()
-    if (meErr)
+    if (meErr) {
       return noStore(
         NextResponse.json({ ok: false, error: 'PROFILE_LOOKUP_FAILED', details: meErr.message }, { status: 500 })
       )
+    }
     if (!me?.role || !['admin', 'super_admin', 'head_coach'].includes(me.role)) {
       return noStore(NextResponse.json({ ok: false, error: 'FORBIDDEN' }, { status: 403 }))
     }
 
-    // Params
     const { searchParams } = new URL(req.url)
-    const page = Math.max(1, Number(searchParams.get('page') || 1))
-    const limit = Math.min(100, Math.max(1, Number(searchParams.get('limit') || 20)))
-    const kind = (searchParams.get('kind') || '').trim()
-    const q = (searchParams.get('q') || '').trim()
+    const page = clampInt(searchParams.get('page'), 1, 1, 10_000)
+    const limit = clampInt(searchParams.get('limit'), 20, 1, 100)
+    const kindRaw = sanitizeSearch(searchParams.get('kind'), { max: 32 }).toLowerCase()
+    const q = sanitizeSearch(searchParams.get('q'), { max: 80 })
 
-    // Query (mes messages envoyés)
+    const kind = !kindRaw || kindRaw === 'all' ? '' : kindRaw
+    if (kind && !isSimpleKey(kind, 32)) {
+      return noStore(NextResponse.json({ ok: false, error: 'INVALID_KIND' }, { status: 400 }))
+    }
+
     let qy = supa
       .from('notifications')
       .select('id, title, body, kind, created_at, read_at, user_id', { count: 'exact' })
@@ -58,8 +61,11 @@ export async function GET(req: Request) {
       .is('deleted_for_sender_at', null)
       .order('created_at', { ascending: false })
 
-    if (kind && kind !== 'all') qy = qy.eq('kind', kind)
-    if (q) qy = qy.or(`title.ilike.%${q}%,body.ilike.%${q}%`)
+    if (kind) qy = qy.eq('kind', kind)
+    if (q) {
+      const esc = q.replace(/%/g, '\\%').replace(/_/g, '\\_')
+      qy = qy.or(`title.ilike.%${esc}%,body.ilike.%${esc}%`)
+    }
 
     const from = (page - 1) * limit
     const to = from + limit - 1
@@ -70,9 +76,8 @@ export async function GET(req: Request) {
 
     const items = (data ?? []) as Row[]
 
-    // Résoudre destinataires → profiles (nom + email)
     const ids = Array.from(new Set(items.map((r) => r.user_id).filter(Boolean))) as string[]
-    let map = new Map<string, { name: string; email: string | null }>()
+    const map = new Map<string, { name: string; email: string | null }>()
     if (ids.length > 0) {
       const { data: profs, error: pe } = await supa
         .from('profiles')
@@ -100,7 +105,7 @@ export async function GET(req: Request) {
         ok: true,
         page,
         pageSize: limit,
-        total: count ?? 0,
+        total: Number(count ?? 0),
         items: enriched,
       })
     )

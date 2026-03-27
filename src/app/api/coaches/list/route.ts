@@ -5,12 +5,18 @@ export const revalidate = 0
 import { NextResponse } from 'next/server'
 import { createSupabaseServerActionClient } from '@/lib/supabaseServer'
 import { canAccessCoaches, normalizeRole } from '@/lib/rbac'
+import { clampInt, sanitizeSearch } from '@/lib/inputGuard'
 
 type Role = 'coach' | 'assistant_coach'
 type Kind = 'all' | 'coach' | 'assistant_coach'
 
+function noStore(res: NextResponse) {
+  res.headers.set('Cache-Control', 'no-store')
+  return res
+}
+
 function normalizeQ(raw: string | null): string {
-  return (raw ?? '').trim()
+  return sanitizeSearch(raw, { max: 80 })
 }
 
 function digitsOnly(s: string): string {
@@ -22,15 +28,13 @@ const UUID_RE =
 
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url)
-  const kind = (searchParams.get('kind') || 'all') as Kind
+  const kindRaw = (searchParams.get('kind') || 'all').trim().toLowerCase()
+  const kind: Kind = kindRaw === 'coach' || kindRaw === 'assistant_coach' ? kindRaw : 'all'
   const q = normalizeQ(searchParams.get('q'))
   const qDigits = digitsOnly(q)
 
-  // Pagination
-  const limitParam = Number(searchParams.get('limit') || 20)
-  const pageParam = Number(searchParams.get('page') || 1)
-  const limit = Math.min(Math.max(limitParam, 1), 200)
-  const page = Math.max(pageParam, 1)
+  const limit = clampInt(searchParams.get('limit'), 20, 1, 200)
+  const page = clampInt(searchParams.get('page'), 1, 1, 1_000_000)
   const from = (page - 1) * limit
   const to = from + limit - 1
 
@@ -40,17 +44,15 @@ export async function GET(req: Request) {
   try {
     const supabase = createSupabaseServerActionClient()
 
-    // Auth check
     const { data: authData, error: authError } = await supabase.auth.getUser()
     if (authError) {
-      return NextResponse.json({ ok: false, error: authError.message }, { status: 401 })
+      return noStore(NextResponse.json({ ok: false, error: authError.message }, { status: 401 }))
     }
     const me = authData.user
     if (!me) {
-      return NextResponse.json({ ok: false, error: 'Not authenticated' }, { status: 401 })
+      return noStore(NextResponse.json({ ok: false, error: 'Not authenticated' }, { status: 401 }))
     }
 
-    // Role check (profiles)
     const { data: meProfile, error: meErr } = await supabase
       .from('profiles')
       .select('role')
@@ -58,12 +60,12 @@ export async function GET(req: Request) {
       .maybeSingle()
 
     if (meErr) {
-      return NextResponse.json({ ok: false, error: meErr.message }, { status: 403 })
+      return noStore(NextResponse.json({ ok: false, error: meErr.message }, { status: 403 }))
     }
 
     const myRole = normalizeRole(meProfile?.role)
     if (!canAccessCoaches(myRole)) {
-      return NextResponse.json({ ok: false, error: 'Forbidden' }, { status: 403 })
+      return noStore(NextResponse.json({ ok: false, error: 'Forbidden' }, { status: 403 }))
     }
 
     let qb = supabase
@@ -86,16 +88,16 @@ export async function GET(req: Request) {
       .range(from, to)
 
     if (q) {
+      const esc = q.replace(/%/g, '\\%').replace(/_/g, '\\_')
       const ors: string[] = [
-        `first_name.ilike.%${q}%`,
-        `last_name.ilike.%${q}%`,
-        `email.ilike.%${q}%`,
-        `member_id.ilike.%${q}%`,
-        `phone.ilike.%${q}%`,
+        `first_name.ilike.%${esc}%`,
+        `last_name.ilike.%${esc}%`,
+        `email.ilike.%${esc}%`,
+        `member_id.ilike.%${esc}%`,
+        `phone.ilike.%${esc}%`,
       ]
 
       if (qDigits.length >= 4) {
-        // Optional normalized phone digits column (if present)
         ors.push(`phone_digits.ilike.%${qDigits}%`)
       }
 
@@ -108,7 +110,7 @@ export async function GET(req: Request) {
 
     const { data, error, count } = await qb
     if (error) {
-      return NextResponse.json({ ok: false, error: error.message }, { status: 400 })
+      return noStore(NextResponse.json({ ok: false, error: error.message }, { status: 400 }))
     }
 
     const items = (data ?? []).map((r: any) => ({
@@ -122,12 +124,8 @@ export async function GET(req: Request) {
       member_id: r.member_id ?? null,
     }))
 
-    const res = NextResponse.json({ ok: true, items, page, limit, total: count ?? null })
-    res.headers.set('Cache-Control', 'no-store')
-    return res
+    return noStore(NextResponse.json({ ok: true, items, page, limit, total: Number(count ?? 0) }))
   } catch (e: any) {
-    const res = NextResponse.json({ ok: false, error: String(e?.message || e) }, { status: 500 })
-    res.headers.set('Cache-Control', 'no-store')
-    return res
+    return noStore(NextResponse.json({ ok: false, error: String(e?.message || e) }, { status: 500 }))
   }
 }
