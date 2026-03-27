@@ -8,6 +8,7 @@ import { toast } from 'sonner'
 import Button from '@/components/ui/Button'
 import InlineAlert from '@/components/ui/InlineAlert'
 import Modal from '@/components/ui/Modal'
+import { cairoToday } from '@/lib/cairoDate'
 
 type NewMemberPayload = {
   email: string
@@ -44,8 +45,8 @@ function ageFromDob(dob?: string) {
   // Strict validity check (avoid JS date rollover e.g. 2024-02-31)
   if (born.getUTCFullYear() !== y || born.getUTCMonth() !== m - 1 || born.getUTCDate() !== d) return null
 
-  const now = new Date()
-  const today = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()))
+  const [ty, tm, td] = cairoToday().split('-').map(Number)
+  const today = new Date(Date.UTC(ty, tm - 1, td))
   if (born.getTime() > today.getTime()) return null
 
   let age = today.getUTCFullYear() - born.getUTCFullYear()

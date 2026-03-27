@@ -3,6 +3,7 @@ import Link from 'next/link'
 import { Card } from '@/components/ui/Card'
 import { getSupabaseAdminClientCached } from '@/lib/requestCache'
 import { type Role } from '@/lib/session'
+import { cairoToday } from '@/lib/cairoDate'
 
 type Status = 'all' | 'active' | 'inactive'
 
@@ -43,8 +44,8 @@ function ageYears(dob?: string | null) {
   const born = new Date(Date.UTC(y, m - 1, d))
   if (isNaN(born.getTime())) return null
 
-  const now = new Date()
-  const today = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()))
+  const [ty, tm, td] = cairoToday().split('-').map(Number)
+  const today = new Date(Date.UTC(ty, tm - 1, td))
   let age = today.getUTCFullYear() - born.getUTCFullYear()
   const mm = today.getUTCMonth() - born.getUTCMonth()
   if (mm < 0 || (mm === 0 && today.getUTCDate() < born.getUTCDate())) age--

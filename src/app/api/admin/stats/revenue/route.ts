@@ -6,6 +6,7 @@ export const revalidate = 0 // no ISR
 import { NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { requireAdmin } from '@/lib/apiAuth'
+import { addDaysDateOnly, cairoRangeBoundsUTC, cairoTodayDateOnly } from '@/lib/cairoTime'
 
 type Plan = '1m' | '3m' | '6m' | '12m' | 'sessions'
 
@@ -15,15 +16,6 @@ function noStore(res: NextResponse) {
 }
 function isISODateOnly(s?: string | null) {
   return !!s && /^\d{4}-\d{2}-\d{2}$/.test(s)
-}
-function todayUTC() {
-  return new Date().toISOString().slice(0, 10) // YYYY-MM-DD
-}
-function addDays(dateOnly: string, days: number) {
-  const [y, m, d] = dateOnly.split('-').map(Number)
-  const dt = new Date(Date.UTC(y, m - 1, d))
-  dt.setUTCDate(dt.getUTCDate() + days)
-  return dt.toISOString().slice(0, 10)
 }
 
 export async function GET(req: Request) {
@@ -62,7 +54,7 @@ export async function GET(req: Request) {
       const resp = NextResponse.json({
         ok: true,
         mode: 'kpi',
-        date: todayUTC(),
+        date: cairoTodayDateOnly(),
         kpis: {
           active_members: Number(a?.[0]?.count ?? 0),
           dropin_with_credits: Number(d?.[0]?.count ?? 0),
@@ -89,18 +81,18 @@ export async function GET(req: Request) {
       let to = searchParams.get('to')
 
       if (!isISODateOnly(from) || !isISODateOnly(to) || (from! > to!)) {
-        to = todayUTC()
-        from = addDays(to, -29)
+        to = cairoTodayDateOnly()
+        from = addDaysDateOnly(to, -29)
       }
 
-      const toExclusive = addDays(to!, +1)
+      const { startISO, endISO } = cairoRangeBoundsUTC(from!, to!)
 
       // Récupère toutes les souscriptions payées dans l’intervalle (paid_at)
       const { data: rows, error: qErr } = await admin
         .from('subscriptions')
         .select('plan, amount, paid_at')
-        .gte('paid_at', from!)
-        .lt('paid_at', toExclusive)
+        .gte('paid_at', startISO)
+        .lt('paid_at', endISO)
         .limit(100000)
 
       if (qErr) {
@@ -112,7 +104,7 @@ export async function GET(req: Request) {
 
       const dailyMap = new Map<string, number>()
       // init toutes les dates à 0 (pour un graphe continu)
-      for (let d = from!; d < toExclusive; d = addDays(d, 1)) {
+      for (let d = from!; d <= to!; d = addDaysDateOnly(d, 1)) {
         dailyMap.set(d, 0)
       }
 
@@ -125,7 +117,7 @@ export async function GET(req: Request) {
 
         const paidAt = (r as any).paid_at as string | null
         if (paidAt) {
-          const day = new Date(paidAt).toISOString().slice(0, 10)
+          const day = cairoTodayDateOnly(new Date(paidAt))
           if (dailyMap.has(day)) {
             dailyMap.set(day, (dailyMap.get(day) || 0) + amt)
           }
