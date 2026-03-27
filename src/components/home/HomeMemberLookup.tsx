@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import Button from '@/components/ui/Button'
 import Input from '@/components/ui/Input'
+import InlineAlert from '@/components/ui/InlineAlert'
 
 type Role =
   | 'member'
@@ -237,14 +238,17 @@ export default function HomeMemberLookup({
         </div>
       </div>
 
-      {helperText ? <p className="mt-2 text-[11px] text-[hsl(var(--muted))]">{helperText}</p> : null}
-      <p className="mt-1 text-[11px] text-[hsl(var(--muted))]">Press Enter to search. Press Esc to clear.</p>
-
-      {error ? (
-        <div className="mt-3 rounded-2xl border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-700">
-          {error}
-        </div>
-      ) : null}
+      <div className="mt-3 space-y-2">
+        {helperText ? (
+          <InlineAlert compact variant={loading ? 'info' : hasSearched && !items.length && !error ? 'warning' : 'info'}>
+            {helperText}
+          </InlineAlert>
+        ) : null}
+        <p className="text-[11px] text-[hsl(var(--muted))]">Press Enter to search. Press Esc to clear.</p>
+        {error ? (
+          <InlineAlert variant="error">{error}</InlineAlert>
+        ) : null}
+      </div>
 
       {items.length > 0 ? (
         <div className="mt-4 grid gap-3">

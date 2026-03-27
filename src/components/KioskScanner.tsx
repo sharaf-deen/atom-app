@@ -18,6 +18,7 @@ import {
 import { Card, CardContent } from '@/components/ui/Card'
 import Button from '@/components/ui/Button'
 import Badge from '@/components/ui/Badge'
+import { formatRequestRef } from '@/lib/requestRef'
 
 function buildDeviceTag() {
   if (typeof window === 'undefined') return 'web-kiosk'
@@ -131,10 +132,6 @@ function classifyCameraError(err: unknown) {
   return raw || 'Camera error'
 }
 
-
-function withRequestRef(message: string, requestId?: string | null) {
-  return requestId ? `${message} (ref ${requestId})` : message
-}
 
 function buildResultParams(j: ScanResponse, kioskMode: boolean) {
   const sp = new URLSearchParams()
@@ -496,7 +493,7 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className }: 
 
         if (!r.ok || !j.ok) {
           setStatus(j.valid === false ? 'invalid' : 'error')
-          setMsg(withRequestRef(j?.message || 'Scan failed', requestId))
+          setMsg(formatRequestRef(j?.message || 'Scan failed', requestId, 'paren'))
           return
         }
 

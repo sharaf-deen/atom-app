@@ -4,14 +4,12 @@ import { useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import Button from '@/components/ui/Button'
+import { formatRequestRef } from '@/lib/requestRef'
 
 type Props = {
   sendEmail?: boolean
 }
 
-function withRef(message: string, requestId?: string | null) {
-  return requestId ? `${message} Ref ${requestId}.` : message
-}
 
 export default function RunHealthMonitorButton({ sendEmail = false }: Props) {
   const [loading, setLoading] = useState(false)
@@ -38,7 +36,7 @@ export default function RunHealthMonitorButton({ sendEmail = false }: Props) {
 
       if (!res.ok) {
         const msg = (json as any)?.details || (json as any)?.error || 'Failed'
-        toast.error(`Health monitor: ${withRef(String(msg), requestId)}`)
+        toast.error(`Health monitor: ${formatRequestRef(String(msg), requestId, 'sentence')}`)
         return
       }
 
@@ -61,13 +59,13 @@ export default function RunHealthMonitorButton({ sendEmail = false }: Props) {
       const base = `Status ${status}. Warnings ${warnings}. Scans today ${scans}. Orphans ${orphan}.${triage}${suffix}`
 
       if (persistError) {
-        toast.warning(withRef(base, requestId), { description: `Report save warning: ${persistError}` })
+        toast.warning(formatRequestRef(base, requestId, 'sentence'), { description: `Report save warning: ${persistError}` })
       } else if (status === 'critical') {
-        toast.error(withRef(base, requestId))
+        toast.error(formatRequestRef(base, requestId, 'sentence'))
       } else if (status === 'warning') {
-        toast.warning(withRef(base, requestId))
+        toast.warning(formatRequestRef(base, requestId, 'sentence'))
       } else {
-        toast.success(withRef(base, requestId))
+        toast.success(formatRequestRef(base, requestId, 'sentence'))
       }
 
       if (reportId) {

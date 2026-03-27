@@ -1,22 +1,15 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useState } from 'react'
 import Button from '@/components/ui/Button'
-
-function formatWithRef(message: string, requestId?: string | null) {
-  return requestId ? `${message} · Ref ${requestId}` : message
-}
+import InlineAlert from '@/components/ui/InlineAlert'
+import { formatRequestRef } from '@/lib/requestRef'
 
 export default function AdminRunExpiryButton() {
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState<string>('')
   const [tone, setTone] = useState<'neutral' | 'success' | 'error'>('neutral')
 
-  const msgClass = useMemo(() => {
-    if (tone === 'success') return 'border-emerald-200 bg-emerald-50 text-emerald-800'
-    if (tone === 'error') return 'border-rose-200 bg-rose-50 text-rose-800'
-    return 'border-[hsl(var(--border))] bg-[hsl(var(--bg))] text-[hsl(var(--muted))]'
-  }, [tone])
 
   async function run() {
     if (busy) return
@@ -34,12 +27,12 @@ export default function AdminRunExpiryButton() {
       const requestId = String(j?.request_id || r.headers.get('x-request-id') || '').trim() || null
       if (!r.ok || j?.ok === false) {
         setTone('error')
-        setMsg(formatWithRef(`Error: ${j?.error || 'failed'}${j?.details ? ` – ${j.details}` : ''}`, requestId))
+        setMsg(formatRequestRef(`Error: ${j?.error || 'failed'}${j?.details ? ` – ${j.details}` : ''}`, requestId))
       } else {
         const time = j?.time_expired ?? 0
         const sess = j?.sessions_expired ?? 0
         setTone('success')
-        setMsg(formatWithRef(`Done. Time expired: ${time}, Sessions expired: ${sess}`, requestId))
+        setMsg(formatRequestRef(`Done. Time expired: ${time}, Sessions expired: ${sess}`, requestId))
       }
     } catch (e: any) {
       setTone('error')
@@ -62,9 +55,13 @@ export default function AdminRunExpiryButton() {
         Run expiry now
       </Button>
       {msg ? (
-        <span role="status" aria-live="polite" className={`rounded-2xl border px-3 py-2 text-xs ${msgClass}`}>
+        <InlineAlert
+          compact
+          ariaLive="polite"
+          variant={tone === 'success' ? 'success' : tone === 'error' ? 'error' : 'info'}
+        >
           {msg}
-        </span>
+        </InlineAlert>
       ) : null}
     </div>
   )

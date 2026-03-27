@@ -7,6 +7,7 @@ import SubscribeDialog, { type Plan } from '@/components/SubscribeDialog'
 import Button from '@/components/ui/Button'
 import Input from '@/components/ui/Input'
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card'
+import InlineAlert from '@/components/ui/InlineAlert'
 
 type Role =
   | 'member'
@@ -426,15 +427,11 @@ export default function MembersSearch({ isStaff = false }: { isStaff?: boolean }
         {/* Stats */}
         <div className="mt-4">
           {statsLoading && (
-            <p className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] px-4 py-3 text-sm text-[hsl(var(--muted))]">
-              Loading members stats…
-            </p>
+            <InlineAlert variant="info">Loading members stats…</InlineAlert>
           )}
 
           {statsErr && !statsLoading && (
-            <p className="rounded-2xl border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-700">
-              Error loading stats: {statsErr}
-            </p>
+            <InlineAlert variant="error">Error loading stats: {statsErr}</InlineAlert>
           )}
 
           {stats && !statsLoading && !statsErr && (
@@ -493,14 +490,14 @@ export default function MembersSearch({ isStaff = false }: { isStaff?: boolean }
 
         {/* Error */}
         {loading && hasSearched && (
-          <div className="mt-3 rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] px-3 py-2 text-sm text-[hsl(var(--muted))]">
-            Loading results…
+          <div className="mt-3">
+            <InlineAlert variant="info">Loading results…</InlineAlert>
           </div>
         )}
 
         {err && (
-          <div className="mt-3 rounded-2xl border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-700">
-            {err}
+          <div className="mt-3">
+            <InlineAlert variant="error">{err}</InlineAlert>
           </div>
         )}
 

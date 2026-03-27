@@ -3,6 +3,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
+import { formatRequestRef } from '@/lib/requestRef'
 
 type AutoReturnProps = {
   seconds?: number
@@ -18,10 +19,6 @@ type WakeLockSentinel = {
   removeEventListener?: (type: string, listener: () => void) => void
 }
 
-
-function withRequestRef(message: string, requestId?: string | null) {
-  return requestId ? `${message} (ref ${requestId})` : message
-}
 
 function isKioskUrl(): boolean {
   try {
@@ -202,7 +199,7 @@ export default function AutoReturn({ seconds = 7, href = '/scan', hideText }: Au
       const j: VerifyRes = await r.json().catch(() => ({ ok: false }))
       const requestId = String(j.request_id || r.headers.get('x-request-id') || '').trim() || null
       if (!r.ok || !j.ok) {
-        setExitError(withRequestRef(j.message || 'Invalid PIN', requestId))
+        setExitError(formatRequestRef(j.message || 'Invalid PIN', requestId, 'paren'))
         return
       }
 
