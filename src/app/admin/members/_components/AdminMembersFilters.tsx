@@ -3,6 +3,9 @@
 import { useMemo, useState, useTransition } from 'react'
 import type { FormEvent } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
+import Button from '@/components/ui/Button'
+import Input from '@/components/ui/Input'
+import Select from '@/components/ui/Select'
 
 type Role = 'member' | 'champion' | 'vip' | 'assistant_coach' | 'coach' | 'head_coach' | 'reception' | 'admin' | 'super_admin'
 
@@ -71,23 +74,29 @@ export default function AdminMembersFilters({
     apply({ page: 1 })
   }
 
+  const hasFilters = Boolean(q.trim() || role || pageSize !== 10)
+
   return (
     <form onSubmit={onSubmit} className={className ?? ''}>
-      <div className="flex gap-2 flex-wrap items-center">
-        <input
-          className="border px-3 py-2 rounded-lg"
-          placeholder="Search name, email, phone"
+      <div className="grid gap-3 xl:grid-cols-[minmax(0,1.4fr)_220px_120px_auto_auto] xl:items-end">
+        <Input
+          type="search"
+          label="Search member"
+          placeholder="Name, email, phone, or ATOM ID"
           value={q}
           onChange={(e) => setQ(e.target.value)}
+          autoCapitalize="none"
+          autoCorrect="off"
+          spellCheck={false}
+          className="w-full"
         />
 
-        <select
-          className="border px-3 py-2 rounded-lg"
+        <Select
+          label="Role"
           value={role}
           onChange={(e) => {
             const v = e.target.value
             setRole(v)
-            // Reset to page 1 when changing filters.
             apply({ role: v, page: 1 })
           }}
         >
@@ -101,32 +110,41 @@ export default function AdminMembersFilters({
           <option value="reception">Reception</option>
           <option value="admin">Admin</option>
           <option value="super_admin">Super Admin</option>
-        </select>
+        </Select>
 
-        <button
-          type="submit"
-          disabled={isPending}
-          className="border px-4 py-2 rounded-lg hover:bg-gray-50 disabled:opacity-60"
+        <Select
+          label="Rows"
+          value={String(pageSize)}
+          onChange={(e) => {
+            const v = clampInt(Number(e.target.value), 5, 50)
+            setPageSize(v)
+            apply({ pageSize: v, page: 1 })
+          }}
         >
-          {isPending ? 'Loading…' : 'Search'}
-        </button>
+          <option value={5}>5</option>
+          <option value={10}>10</option>
+          <option value={20}>20</option>
+          <option value={50}>50</option>
+        </Select>
 
-        <div className="ml-auto flex gap-2 items-center">
-          <span className="text-sm text-[hsl(var(--muted))]">Rows:</span>
-          <select
-            className="border px-3 py-2 rounded-lg"
-            value={pageSize}
-            onChange={(e) => {
-              const v = clampInt(Number(e.target.value), 5, 50)
-              setPageSize(v)
-              apply({ pageSize: v, page: 1 })
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-1">
+          <Button type="submit" loading={isPending} loadingText="Loading…" className="w-full">
+            Search
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            className="w-full"
+            disabled={!hasFilters || isPending}
+            onClick={() => {
+              setQ('')
+              setRole('')
+              setPageSize(10)
+              apply({ q: '', role: '', page: 1, pageSize: 10 })
             }}
           >
-            <option value={5}>5</option>
-            <option value={10}>10</option>
-            <option value={20}>20</option>
-            <option value={50}>50</option>
-          </select>
+            Reset
+          </Button>
         </div>
       </div>
     </form>

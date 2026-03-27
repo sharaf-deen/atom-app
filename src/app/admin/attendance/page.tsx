@@ -14,8 +14,8 @@ import { Table } from '@/components/ui/Table'
 
 import InactiveNotifyClient from './inactive-notify-client'
 
-import { getSessionUserCached, getSupabaseAdminClientCached } from '@/lib/requestCache'
-import { addDaysDateOnly, cairoTodayDateOnly } from '@/lib/cairoTime'
+import { getSessionUser } from '@/lib/session'
+import { createSupabaseAdminClient } from '@/lib/supabaseAdmin'
 
 const CAIRO_TZ = 'Africa/Cairo'
 
@@ -32,6 +32,25 @@ type ProfileRow = {
   email: string | null
   phone: string | null
   member_id: string | null
+}
+
+function cairoToday() {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: CAIRO_TZ,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(new Date())
+  const y = parts.find((p) => p.type === 'year')?.value ?? '1970'
+  const m = parts.find((p) => p.type === 'month')?.value ?? '01'
+  const d = parts.find((p) => p.type === 'day')?.value ?? '01'
+  return `${y}-${m}-${d}`
+}
+
+function shiftDays(dateOnly: string, deltaDays: number) {
+  const d = new Date(`${dateOnly}T00:00:00Z`)
+  d.setUTCDate(d.getUTCDate() + deltaDays)
+  return d.toISOString().slice(0, 10)
 }
 
 function clampInt(v: number, min: number, max: number) {
@@ -60,7 +79,7 @@ export default async function AttendanceDashboard({
 }: {
   searchParams?: { period?: string; from?: string; to?: string; inactiveDays?: string }
 }) {
-  const user = await getSessionUserCached()
+  const user = await getSessionUser()
   const nextPath = '/admin/attendance'
 
   if (!user || (user.role !== 'admin' && user.role !== 'super_admin')) {
@@ -76,7 +95,7 @@ export default async function AttendanceDashboard({
     )
   }
 
-  const today = cairoTodayDateOnly()
+  const today = cairoToday()
   const period = (searchParams?.period ?? 'last14').trim()
   const inactiveDays = clampInt(Number(searchParams?.inactiveDays ?? 14), 7, 60)
 
@@ -87,10 +106,10 @@ export default async function AttendanceDashboard({
     from = today
     to = today
   } else if (period === 'last7') {
-    from = addDaysDateOnly(today, -6)
+    from = shiftDays(today, -6)
     to = today
   } else if (period === 'last30') {
-    from = addDaysDateOnly(today, -29)
+    from = shiftDays(today, -29)
     to = today
   } else if (period === 'custom') {
     const f = (searchParams?.from ?? '').trim()
@@ -99,12 +118,12 @@ export default async function AttendanceDashboard({
       from = f
       to = t
     } else {
-      from = addDaysDateOnly(today, -13)
+      from = shiftDays(today, -13)
       to = today
     }
   } else {
     // default last14
-    from = addDaysDateOnly(today, -13)
+    from = shiftDays(today, -13)
     to = today
   }
 
@@ -116,7 +135,7 @@ export default async function AttendanceDashboard({
   const profiles = new Map<string, ProfileRow>()
 
   try {
-    const admin = getSupabaseAdminClientCached()
+    const admin = createSupabaseAdminClient()
 
     // Attendance rows in range (for series + totals + top)
     const { data: att, error: attErr } = await admin
@@ -141,7 +160,7 @@ export default async function AttendanceDashboard({
     }
 
     const dates: string[] = []
-    for (let d = from; d <= to; d = addDaysDateOnly(d, 1)) dates.push(d)
+    for (let d = from; d <= to; d = shiftDays(d, 1)) dates.push(d)
 
     daySeries = dates.map((d) => {
       const v = byDay.get(d) ?? { total: 0, valid: 0 }
@@ -162,25 +181,14 @@ export default async function AttendanceDashboard({
       .sort((a, b) => b.count - a.count)
       .slice(0, 20)
 
-    // Active members list + attendance last N days (run in parallel)
-    const fromInact = addDaysDateOnly(today, -(inactiveDays - 1))
-    const [{ data: subs, error: subErr }, { data: recent, error: recErr }] = await Promise.all([
-      admin
-        .from('subscriptions')
-        .select('member_id, subscription_type, status, start_date, end_date')
-        .eq('status', 'active')
-        .limit(100000),
-      admin
-        .from('attendance')
-        .select('member_id,date,valid')
-        .gte('date', fromInact)
-        .lte('date', today)
-        .eq('valid', true)
-        .limit(100000),
-    ])
+    // Active members list (for inactivity)
+    const { data: subs, error: subErr } = await admin
+      .from('subscriptions')
+      .select('member_id, subscription_type, status, start_date, end_date')
+      .eq('status', 'active')
+      .limit(100000)
 
     if (subErr) throw new Error(subErr.message)
-    if (recErr) throw new Error(recErr.message)
 
     const activeMembers = new Set<string>()
     for (const s of subs ?? []) {
@@ -197,6 +205,18 @@ export default async function AttendanceDashboard({
         activeMembers.add(mid)
       }
     }
+
+    // Attendance last N days (valid only) for active members
+    const fromInact = shiftDays(today, -(inactiveDays - 1))
+    const { data: recent, error: recErr } = await admin
+      .from('attendance')
+      .select('member_id,date,valid')
+      .gte('date', fromInact)
+      .lte('date', today)
+      .eq('valid', true)
+      .limit(100000)
+
+    if (recErr) throw new Error(recErr.message)
 
     const lastValid = new Map<string, string>() // member_id -> last date
     for (const r of recent ?? []) {
@@ -228,59 +248,43 @@ export default async function AttendanceDashboard({
   }
 
   // Stats
-  let valid = 0
-  const uniqueMembers = new Set<string>()
-  const uniqueValidMembers = new Set<string>()
-  for (const row of rows) {
-    if (row.member_id) uniqueMembers.add(row.member_id)
-    if (row.valid) {
-      valid += 1
-      if (row.member_id) uniqueValidMembers.add(row.member_id)
-    }
-  }
   const total = rows.length
+  const valid = rows.filter((r) => r.valid).length
   const invalid = total - valid
-  const unique = uniqueMembers.size
-  const uniqueValid = uniqueValidMembers.size
+  const unique = new Set(rows.map((r) => r.member_id).filter(Boolean)).size
+  const uniqueValid = new Set(rows.filter((r) => r.valid).map((r) => r.member_id).filter(Boolean)).size
 
   const exportHref = `/api/admin/export/attendance?from=${from}&to=${to}`
 
   const filters = (
-    <form className="flex flex-col gap-3 md:flex-row md:items-end" action={nextPath} method="get">
-      <div className="w-full md:w-56">
-        <Select name="period" defaultValue={period} label="Period">
-          <option value="today">Today</option>
-          <option value="last7">Last 7 days</option>
-          <option value="last14">Last 14 days</option>
-          <option value="last30">Last 30 days</option>
-          <option value="custom">Custom</option>
-        </Select>
-      </div>
+    <form className="grid gap-3 lg:grid-cols-[220px_180px_180px_220px_auto] lg:items-end" action={nextPath} method="get">
+      <Select name="period" defaultValue={period} label="Period">
+        <option value="today">Today</option>
+        <option value="last7">Last 7 days</option>
+        <option value="last14">Last 14 days</option>
+        <option value="last30">Last 30 days</option>
+        <option value="custom">Custom</option>
+      </Select>
 
-      <div className="w-full md:w-44">
-        <label className="block text-xs font-medium text-[hsl(var(--muted))] mb-1">From</label>
-        <Input name="from" type="date" defaultValue={from} disabled={period !== 'custom'} />
-      </div>
+      <Input label="From" name="from" type="date" defaultValue={from} disabled={period !== 'custom'} />
 
-      <div className="w-full md:w-44">
-        <label className="block text-xs font-medium text-[hsl(var(--muted))] mb-1">To</label>
-        <Input name="to" type="date" defaultValue={to} disabled={period !== 'custom'} />
-      </div>
+      <Input label="To" name="to" type="date" defaultValue={to} disabled={period !== 'custom'} />
 
-      <div className="w-full md:w-44">
-        <label className="block text-xs font-medium text-[hsl(var(--muted))] mb-1">Inactive threshold</label>
-        <Input name="inactiveDays" type="number" min={7} max={60} defaultValue={String(inactiveDays)} />
-        <div className="mt-1 text-[11px] text-[hsl(var(--muted))]">days (valid check-ins)</div>
-      </div>
+      <Input
+        label="Inactive threshold"
+        name="inactiveDays"
+        type="number"
+        min={7}
+        max={60}
+        defaultValue={String(inactiveDays)}
+        hint="days (valid check-ins)"
+      />
 
-      <div className="flex gap-2">
-        <Button type="submit">Apply</Button>
-        <Link
-          href={nextPath}
-          className="inline-flex items-center justify-center rounded-xl border px-4 py-2 text-sm font-medium"
-        >
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-1">
+        <Button type="submit" className="w-full">Apply</Button>
+        <Button asChild variant="outline" className="w-full" href={nextPath}>
           Reset
-        </Link>
+        </Button>
       </div>
     </form>
   )
@@ -363,8 +367,8 @@ export default async function AttendanceDashboard({
 
   const headerRight = (
     <div className="flex items-center gap-2">
-      <Button asChild variant="outline" size="sm">
-                <a href={exportHref}>Export CSV</a>
+      <Button asChild variant="outline" size="sm" className="w-full sm:w-auto" href={exportHref}>
+        Export CSV
       </Button>
     </div>
   )
