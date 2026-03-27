@@ -50,6 +50,7 @@ function buildDeviceTag() {
 
 type ScanResponse = {
   ok: boolean
+  request_id?: string
   valid?: boolean
   message?: string
   member_id?: string
@@ -128,6 +129,11 @@ function classifyCameraError(err: unknown) {
     return 'Failed to load camera scanner'
   }
   return raw || 'Camera error'
+}
+
+
+function withRequestRef(message: string, requestId?: string | null) {
+  return requestId ? `${message} (ref ${requestId})` : message
 }
 
 function buildResultParams(j: ScanResponse, kioskMode: boolean) {
@@ -486,10 +492,11 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className }: 
         }
 
         const j: ScanResponse = await r.json().catch(() => ({ ok: false, message: 'Invalid response' }))
+        const requestId = String(j?.request_id || r.headers.get('x-request-id') || '').trim() || null
 
         if (!r.ok || !j.ok) {
           setStatus(j.valid === false ? 'invalid' : 'error')
-          setMsg(j?.message || 'Scan failed')
+          setMsg(withRequestRef(j?.message || 'Scan failed', requestId))
           return
         }
 

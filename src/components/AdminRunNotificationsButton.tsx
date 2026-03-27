@@ -3,6 +3,10 @@
 import { useMemo, useState } from 'react'
 import Button from '@/components/ui/Button'
 
+function formatWithRef(message: string, requestId?: string | null) {
+  return requestId ? `${message} · Ref ${requestId}` : message
+}
+
 export default function AdminRunNotificationsButton() {
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState<string>('')
@@ -28,9 +32,10 @@ export default function AdminRunNotificationsButton() {
         headers: { 'cache-control': 'no-store' },
       })
       const j = await r.json().catch(() => ({} as any))
+      const requestId = String(j?.request_id || r.headers.get('x-request-id') || '').trim() || null
       if (!r.ok || !j?.ok) {
         setTone('error')
-        setMsg(j?.details || j?.error || 'Failed')
+        setMsg(formatWithRef(j?.details || j?.error || 'Failed', requestId))
         return
       }
       const q1 = j?.queued?.expire_7d ?? 0
@@ -40,7 +45,10 @@ export default function AdminRunNotificationsButton() {
       const candidates2 = j?.candidates?.sessions_low ?? 0
       setTone('success')
       setMsg(
-        `${dry ? 'Dry-run complete' : 'Run complete'} — candidates: expire_7d=${candidates1}, sessions_low=${candidates2} · queued: expire_7d=${q1}, sessions_low=${q2} · sent=${sent}`
+        formatWithRef(
+          `${dry ? 'Dry-run complete' : 'Run complete'} — candidates: expire_7d=${candidates1}, sessions_low=${candidates2} · queued: expire_7d=${q1}, sessions_low=${q2} · sent=${sent}`,
+          requestId,
+        ),
       )
     } catch (e: any) {
       setTone('error')
