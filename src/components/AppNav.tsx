@@ -12,7 +12,7 @@ import RoleMenu from '@/components/RoleMenu'
 import NotificationsBell from '@/components/NotificationsBell'
 import HideMenuOnRoutes from '@/components/HideMenuOnRoutes'
 
-// ✅ Pages d’auth sur lesquelles on ne veut afficher ni Menu, ni Logout, ni lien Login
+// Pages d’auth sur lesquelles on ne veut afficher ni Menu, ni Logout, ni lien Login
 const AUTH_ROUTES = ['/login', '/signup', '/reset-password']
 
 export default async function AppNav() {
@@ -37,9 +37,9 @@ export default async function AppNav() {
           <span className="sr-only">ATOM Jiu-Jitsu</span>
         </Link>
 
-        {/* Bouton Menu — caché sur "/" et sur les pages d’auth */}
+        {/* Bouton Menu — visible sur Home, caché seulement sur les pages d’auth */}
         {user && (
-          <HideMenuOnRoutes routes={['/', ...AUTH_ROUTES]}>
+          <HideMenuOnRoutes routes={AUTH_ROUTES}>
             <RoleMenu items={items} />
           </HideMenuOnRoutes>
         )}
