@@ -149,21 +149,32 @@ function displayName(p?: ProfileLite | null) {
   return name || p?.email || p?.member_id || 'Member'
 }
 
+function isFrozenNow(s: Pick<SubscriptionRow, 'frozen_until'>, today: string) {
+  return !!s.frozen_until && s.frozen_until >= today
+}
+
+function isCurrentMembership(s: Pick<SubscriptionRow, 'status' | 'end_date' | 'frozen_until'>, today: string) {
+  if (isFrozenNow(s, today)) return s.status === 'active' || s.status === 'paused'
+  if (s.status !== 'active') return false
+  return !s.end_date || s.end_date >= today
+}
+
 function statusLabel(s: SubscriptionRow, today: string) {
-  const frozen = !!s.frozen_until && s.frozen_until >= today
+  const frozen = isFrozenNow(s, today)
   if (frozen) return 'Frozen'
-  if (s.status === 'active') return 'Active'
+  if (isCurrentMembership(s, today)) return 'Active'
   if (s.status === 'expired') return 'Expired'
   if (s.status === 'paused') return 'Paused'
   if (s.status === 'cancelled') return 'Cancelled'
+  if (s.status === 'active' && !!s.end_date && s.end_date < today) return 'Expired'
   return s.status ? s.status[0].toUpperCase() + s.status.slice(1) : 'Membership'
 }
 
 function statusTone(s: SubscriptionRow, today: string): 'neutral' | 'warning' | 'danger' | 'success' {
-  const frozen = !!s.frozen_until && s.frozen_until >= today
+  const frozen = isFrozenNow(s, today)
   if (frozen) return 'warning'
-  if (s.status === 'active') return 'success'
-  if (s.status === 'expired' || s.status === 'cancelled') return 'danger'
+  if (isCurrentMembership(s, today)) return 'success'
+  if (s.status === 'expired' || s.status === 'cancelled' || (s.status === 'active' && !!s.end_date && s.end_date < today)) return 'danger'
   if (s.status === 'paused') return 'warning'
   return 'neutral'
 }
@@ -197,16 +208,27 @@ function subscriptionRank(s: SubscriptionRow, today: string) {
   const due = Math.max(Number(s.amount_due ?? 0), 0)
   const daysLeft = s.end_date ? diffDays(today, s.end_date) : 999
   let score = 0
-  if (s.status === 'active') score += 100
-  if (!!s.frozen_until && s.frozen_until >= today) score -= 20
+  if (isCurrentMembership(s, today)) score += 1000
+  else if (s.status === 'active') score += 200
+  else if (due > 0) score += 100
+  if (isFrozenNow(s, today)) score -= 20
   score += Math.min(due, 5000) / 100
   score += Math.max(0, 15 - Math.abs(daysLeft))
   return score
 }
 
-function chooseSubscription(current: SubscriptionRow | undefined, incoming: SubscriptionRow, today: string) {
-  if (!current) return incoming
-  return subscriptionRank(incoming, today) > subscriptionRank(current, today) ? incoming : current
+function chooseMemberSubscription(rows: SubscriptionRow[], today: string) {
+  if (!rows.length) return undefined
+
+  const deduped = Array.from(new Map(rows.map((row) => [row.id, row] as const)).values())
+  const currentRows = deduped.filter((row) => isCurrentMembership(row, today))
+  const pool = currentRows.length ? currentRows : deduped
+
+  let best = pool[0]
+  for (const row of pool.slice(1)) {
+    if (subscriptionRank(row, today) > subscriptionRank(best, today)) best = row
+  }
+  return best
 }
 
 function normalizeWhatsappPhone(phone: string | null | undefined) {
@@ -318,7 +340,7 @@ export default async function AdminCrmPage({
     if (activeRes.error) throw new Error(activeRes.error.message)
     if (dueRes.error) throw new Error(dueRes.error.message)
 
-    const subsByMember = new Map<string, SubscriptionRow>()
+    const rowsByMember = new Map<string, SubscriptionRow[]>()
     const allRows = [
       ...(((activeRes.data ?? []) as RawSubscriptionRow[]) ?? []),
       ...(((dueRes.data ?? []) as RawSubscriptionRow[]) ?? []),
@@ -326,7 +348,15 @@ export default async function AdminCrmPage({
 
     for (const row of allRows) {
       if (!row?.member_id) continue
-      subsByMember.set(row.member_id, chooseSubscription(subsByMember.get(row.member_id), row, today))
+      const current = rowsByMember.get(row.member_id) ?? []
+      current.push(row)
+      rowsByMember.set(row.member_id, current)
+    }
+
+    const subsByMember = new Map<string, SubscriptionRow>()
+    for (const [memberId, rows] of rowsByMember) {
+      const chosen = chooseMemberSubscription(rows, today)
+      if (chosen) subsByMember.set(memberId, chosen)
     }
 
     const attendanceRows = await getAttendanceRows([...subsByMember.keys()], since30)
