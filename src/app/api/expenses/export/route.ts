@@ -7,7 +7,7 @@ import { NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { createSupabaseServerActionClient } from '@/lib/supabaseServer'
 import { canAccessExpenses, normalizeRole, type Role } from '@/lib/rbac'
-
+import { isISODateOnly, isSimpleKey, sanitizeSearch } from '@/lib/inputGuard'
 
 function json(status: number, body: any) {
   const res = NextResponse.json(body, { status })
@@ -18,14 +18,6 @@ function json(status: number, body: any) {
 function csvCell(v: unknown) {
   const s = String(v ?? '')
   return `"${s.replace(/"/g, '""')}"`
-}
-
-function isISODateOnly(s?: string | null) {
-  return !!s && /^\d{4}-\d{2}-\d{2}$/.test(s)
-}
-
-function sanitizeSearch(v: string) {
-  return (v || '').replace(/[%,_]/g, ' ').replace(/\s+/g, ' ').trim()
 }
 
 function makeAdminClient() {
@@ -65,12 +57,12 @@ export async function GET(req: Request) {
     if (!admin) return json(500, { ok: false, error: 'SERVICE_ROLE_MISSING' })
 
     const { searchParams } = new URL(req.url)
-    const from = searchParams.get('from') ?? ''
-    const to = searchParams.get('to') ?? ''
-    const category = searchParams.get('category') ?? 'all'
-    const payment_method = searchParams.get('payment_method') ?? 'all'
+    const from = (searchParams.get('from') ?? '').trim()
+    const to = (searchParams.get('to') ?? '').trim()
+    const categoryRaw = (searchParams.get('category') ?? 'all').trim().toLowerCase()
+    const payment_method = (searchParams.get('payment_method') ?? 'all').trim().toLowerCase()
     const qRaw = searchParams.get('q') ?? ''
-    const qText = sanitizeSearch(qRaw)
+    const qText = sanitizeSearch(qRaw, { max: 120 })
 
     if (!isISODateOnly(from) || !isISODateOnly(to) || from > to) {
       return json(400, { ok: false, error: 'INVALID_RANGE', hint: 'Use ?from=YYYY-MM-DD&to=YYYY-MM-DD with from ≤ to' })
@@ -79,6 +71,11 @@ export async function GET(req: Request) {
     const allowedMethods = new Set(['all', 'cash', 'visa', 'instapay', 'bank_transfer'])
     if (!allowedMethods.has(payment_method)) {
       return json(400, { ok: false, error: 'INVALID_PAYMENT_METHOD' })
+    }
+
+    const category = !categoryRaw || categoryRaw === 'all' ? 'all' : categoryRaw
+    if (category !== 'all' && !isSimpleKey(category, 64)) {
+      return json(400, { ok: false, error: 'INVALID_CATEGORY' })
     }
 
     const { data: cats } = await admin.from('expense_categories').select('key,label').eq('is_active', true)
@@ -94,8 +91,8 @@ export async function GET(req: Request) {
       .order('id', { ascending: false })
       .limit(100000)
 
-    if (category && category !== 'all') q = q.eq('category_key', category)
-    if (payment_method && payment_method !== 'all') q = q.eq('payment_method', payment_method)
+    if (category !== 'all') q = q.eq('category_key', category)
+    if (payment_method !== 'all') q = q.eq('payment_method', payment_method)
     if (qText) {
       const like = `%${qText}%`
       q = q.or(`description.ilike.${like},category_key.ilike.${like},payment_method.ilike.${like}`)

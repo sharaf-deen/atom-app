@@ -5,24 +5,12 @@ export const revalidate = 0
 
 import { NextResponse } from 'next/server'
 import { createSupabaseServerActionClient } from '@/lib/supabaseServer'
+import { clampInt, isSimpleKey, sanitizeSearch } from '@/lib/inputGuard'
 
 function json(status: number, body: any) {
   const res = NextResponse.json(body, { status })
   res.headers.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate')
   return res
-}
-
-function intParam(v: string | null, def: number, min: number, max: number) {
-  const n = Number(v || '')
-  if (!Number.isFinite(n)) return def
-  return Math.max(min, Math.min(max, Math.floor(n)))
-}
-
-function cleanQ(v: string | null) {
-  const s = (v || '').trim()
-  if (!s) return ''
-  // prevent Supabase `or()` parsing issues (commas separate conditions)
-  return s.slice(0, 80).replace(/[,]/g, ' ').trim()
 }
 
 export async function GET(req: Request) {
@@ -34,11 +22,16 @@ export async function GET(req: Request) {
     if (!auth.user) return json(401, { ok: false, error: 'NOT_AUTHENTICATED' })
 
     const url = new URL(req.url)
-    const page = intParam(url.searchParams.get('page'), 1, 1, 10_000)
-    const limit = intParam(url.searchParams.get('limit'), 5, 1, 50)
-    const kind = (url.searchParams.get('kind') || '').trim()
-    const q = cleanQ(url.searchParams.get('q'))
+    const page = clampInt(url.searchParams.get('page'), 1, 1, 10_000)
+    const limit = clampInt(url.searchParams.get('limit'), 5, 1, 50)
+    const kindRaw = sanitizeSearch(url.searchParams.get('kind'), { max: 32 }).toLowerCase()
+    const q = sanitizeSearch(url.searchParams.get('q'), { max: 80 })
     const unread = url.searchParams.get('unread') === '1'
+
+    const kind = !kindRaw || kindRaw === 'all' ? '' : kindRaw
+    if (kind && !isSimpleKey(kind, 32)) {
+      return json(400, { ok: false, error: 'INVALID_KIND' })
+    }
 
     const from = (page - 1) * limit
     const to = from + limit - 1
@@ -52,7 +45,7 @@ export async function GET(req: Request) {
       .range(from, to)
 
     if (unread) qy = qy.is('read_at', null)
-    if (kind && kind !== 'all') qy = qy.eq('kind', kind)
+    if (kind) qy = qy.eq('kind', kind)
 
     if (q) {
       const esc = q.replace(/%/g, '\\%').replace(/_/g, '\\_')
