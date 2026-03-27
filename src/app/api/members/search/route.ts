@@ -5,7 +5,8 @@ export const revalidate = 0
 
 import { NextResponse } from 'next/server'
 import { getSessionUser } from '@/lib/session'
-import { MEMBER_LIKE_ROLES, canOpenOtherMemberProfile, normalizeRole, type Role } from '@/lib/rbac'
+import { MEMBER_LIKE_ROLES, canOpenOtherMemberProfile, hasLifetimeGymAccess, type Role } from '@/lib/rbac'
+import { cairoTodayDateOnly } from '@/lib/cairoTime'
 import { createSupabaseAdminClient } from '@/lib/supabaseAdmin'
 
 type MemberRow = {
@@ -79,7 +80,7 @@ export async function GET(req: Request) {
 
   try {
     const admin = createSupabaseAdminClient()
-    const today = new Date().toISOString().slice(0, 10)
+    const today = cairoTodayDateOnly()
 
     let qb = admin
       .from('profiles')
@@ -97,7 +98,7 @@ export async function GET(req: Request) {
       `,
         { count: 'exact' },
       )
-      .in('role', [...MEMBER_LIKE_ROLES])
+.in('role', [...MEMBER_LIKE_ROLES])
       .order('created_at', { ascending: false })
       .range(from, to)
 
@@ -181,7 +182,7 @@ export async function GET(req: Request) {
         }
 
         for (const it of items) {
-          it.is_active = it.role === 'champion' || it.role === 'vip' ? true : activeSet.has(it.user_id)
+          it.is_active = hasLifetimeGymAccess(it.role) ? true : activeSet.has(it.user_id)
         }
       } else {
         console.error('Error fetching subscriptions (search active flag):', subsError)

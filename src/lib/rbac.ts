@@ -2,6 +2,7 @@ export const APP_ROLES = ['member', 'champion', 'vip', 'assistant_coach', 'coach
 export type Role = (typeof APP_ROLES)[number]
 
 export const MEMBER_LIKE_ROLES = ['member', 'champion', 'vip'] as const satisfies readonly Role[]
+export const MEMBER_LIFETIME_ACCESS_ROLES = ['champion', 'vip'] as const satisfies readonly Role[]
 export const STAFF_ROLES = ['reception', 'assistant_coach', 'coach', 'head_coach', 'admin', 'super_admin'] as const satisfies readonly Role[]
 export const FRONT_DESK_ROLES = ['reception', 'admin', 'super_admin'] as const satisfies readonly Role[]
 export const ADMIN_ROLES = ['admin', 'super_admin'] as const satisfies readonly Role[]

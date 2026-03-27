@@ -193,7 +193,7 @@ export default function InactiveNotifyClient({
         <div className="mt-1 text-[11px] text-[hsl(var(--muted))]">Tip: leave empty to use the default message.</div>
       </div>
 
-      <Table columns={cols} rows={rows} keyField="id" />
+      <Table columns={cols} rows={rows} keyField="id" stickyTopClassName="top-0" />
     </div>
   )
 }

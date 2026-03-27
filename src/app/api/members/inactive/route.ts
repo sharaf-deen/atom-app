@@ -1,6 +1,7 @@
 // src/app/api/members/inactive/route.ts
 import { NextResponse } from 'next/server'
 import { createSupabaseRSC } from '@/lib/supabaseServer'
+import { cairoTodayDateOnly } from '@/lib/cairoTime'
 
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
@@ -61,7 +62,7 @@ export async function GET(req: Request) {
     const limit = intParam(url.searchParams.get('limit'), DEFAULT_LIMIT, 1, MAX_LIMIT)
 
     const from = (page - 1) * limit
-    const today = new Date().toISOString().slice(0, 10) // YYYY-MM-DD
+    const today = cairoTodayDateOnly()
 
     // 1) Tous les membres (role='member')
     const { data: profiles, error: profilesError } = await supabase
