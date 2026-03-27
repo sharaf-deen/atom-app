@@ -7,7 +7,7 @@ import Link from 'next/link'
 import Image from 'next/image'
 import { createSupabaseRSC } from '@/lib/supabaseServer'
 import { getSessionUser, type Role } from '@/lib/session'
-import { getAppNavForRole, hasLifetimeGymAccess, isMemberLikeRole, type NavIconKey } from '@/lib/rbac'
+import { hasLifetimeGymAccess, isMemberLikeRole } from '@/lib/rbac'
 import { getSupabaseAdminClientCached } from '@/lib/requestCache'
 import { addDays, cairoToday, diffDays } from '@/lib/cairoDate'
 import HomeNotificationsTile from '@/components/HomeNotificationsTile'
@@ -112,20 +112,6 @@ type QuickAction = {
   icon: IconType
 }
 
-const HOME_MENU_ICON_MAP: Record<NavIconKey, IconType> = {
-  home: House,
-  dashboard: LayoutDashboard,
-  bell: Bell,
-  gift: Gift,
-  id: IdCard,
-  scan: ScanLine,
-  users: Users,
-  'user-cog': UserCog,
-  bag: ShoppingBag,
-  wallet: Wallet,
-  calendar: CalendarDays,
-  'file-text': FileText,
-}
 
 function humanizeRole(role: string) {
   const s = role.replace(/_/g, ' ')
@@ -821,21 +807,6 @@ async function QrCard({ qrCode }: { qrCode?: string | null }) {
   )
 }
 
-function dashboardMenuActions(role: Role): QuickAction[] {
-  const seen = new Set<string>()
-  return getAppNavForRole(role)
-    .filter((item) => {
-      if (seen.has(item.href)) return false
-      seen.add(item.href)
-      return true
-    })
-    .map((item) => ({
-      href: item.href,
-      label: item.label,
-      desc: `Open ${item.label.toLowerCase()}.`,
-      icon: HOME_MENU_ICON_MAP[item.icon] ?? LayoutDashboard,
-    }))
-}
 
 function QuickActions({ title, subtitle, items }: { title: string; subtitle?: string; items: QuickAction[] }) {
   return (
@@ -967,12 +938,6 @@ export default async function HomePage() {
           avatarUrl={avatarUrl || undefined}
           memberId={memberId}
           joinedAt={profile?.created_at ?? null}
-        />
-
-        <QuickActions
-          title="Dashboard menu"
-          subtitle="Same shortcuts as the menu, visible directly on home."
-          items={dashboardMenuActions(user.role)}
         />
 
         {isMemberLikeRole(user.role) ? (
