@@ -13,6 +13,7 @@ import Select from '@/components/ui/Select'
 import Button from '@/components/ui/Button'
 import Badge from '@/components/ui/Badge'
 import Forbidden from '@/components/Forbidden'
+import { formatDateTimeInCairo } from '@/lib/cairoTime'
 import { getSessionUser, type Role } from '@/lib/session'
 
 type AuditRow = {
@@ -74,10 +75,8 @@ function displayName(p?: ProfileMini | null) {
 
 function fmtWhen(ts: string | null) {
   if (!ts) return '—'
-  const d = new Date(ts)
-  // Use a stable, readable format (server locale may vary)
-  const iso = d.toISOString().replace('T', ' ').slice(0, 16)
-  return iso + ' UTC'
+  const formatted = formatDateTimeInCairo(ts)
+  return formatted === '—' ? '—' : `${formatted.slice(0, 16)} Cairo`
 }
 
 function shortJSON(v: any) {
