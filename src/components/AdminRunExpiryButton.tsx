@@ -1,14 +1,23 @@
 'use client'
 
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
+import Button from '@/components/ui/Button'
 
 export default function AdminRunExpiryButton() {
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState<string>('')
+  const [tone, setTone] = useState<'neutral' | 'success' | 'error'>('neutral')
+
+  const msgClass = useMemo(() => {
+    if (tone === 'success') return 'border-emerald-200 bg-emerald-50 text-emerald-800'
+    if (tone === 'error') return 'border-rose-200 bg-rose-50 text-rose-800'
+    return 'border-[hsl(var(--border))] bg-[hsl(var(--bg))] text-[hsl(var(--muted))]'
+  }, [tone])
 
   async function run() {
     if (busy) return
     setBusy(true)
+    setTone('neutral')
     setMsg('')
     try {
       const r = await fetch('/api/admin/expire', {
@@ -19,13 +28,16 @@ export default function AdminRunExpiryButton() {
       })
       const j = await r.json().catch(() => ({} as any))
       if (!r.ok || j?.ok === false) {
+        setTone('error')
         setMsg(`Error: ${j?.error || 'failed'}${j?.details ? ` – ${j.details}` : ''}`)
       } else {
         const time = j?.time_expired ?? 0
         const sess = j?.sessions_expired ?? 0
+        setTone('success')
         setMsg(`Done. Time expired: ${time}, Sessions expired: ${sess}`)
       }
     } catch (e: any) {
+      setTone('error')
       setMsg(`Error: ${e?.message || String(e)}`)
     } finally {
       setBusy(false)
@@ -33,18 +45,22 @@ export default function AdminRunExpiryButton() {
   }
 
   return (
-    <div className="flex items-center gap-2">
-      <button
-        className={`px-3 py-2 rounded border ${busy ? 'bg-gray-200 text-gray-500' : 'hover:bg-gray-50'}`}
+    <div className="flex flex-wrap items-center gap-2">
+      <Button
+        type="button"
         onClick={run}
         disabled={busy}
+        loading={busy}
+        loadingText="Running…"
         title="Run the daily expiry job now"
       >
-        {busy ? 'Running…' : 'Run expiry now'}
-      </button>
-      {msg && (
-        <span className="text-sm text-gray-600">{msg}</span>
-      )}
+        Run expiry now
+      </Button>
+      {msg ? (
+        <span role="status" aria-live="polite" className={`rounded-2xl border px-3 py-2 text-xs ${msgClass}`}>
+          {msg}
+        </span>
+      ) : null}
     </div>
   )
 }

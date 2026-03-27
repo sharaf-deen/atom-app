@@ -1,9 +1,8 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import Button from '@/components/ui/Button'
 import Input from '@/components/ui/Input'
-import { cairoToday } from '@/lib/cairoDate'
 
 type Role =
   | 'member'
@@ -48,8 +47,8 @@ function ageYears(dob?: string | null) {
   const born = new Date(Date.UTC(y, m - 1, d))
   if (Number.isNaN(born.getTime())) return null
 
-  const [ty, tm, td] = cairoToday().split('-').map(Number)
-  const today = new Date(Date.UTC(ty, tm - 1, td))
+  const now = new Date()
+  const today = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()))
   let age = today.getUTCFullYear() - born.getUTCFullYear()
   const mm = today.getUTCMonth() - born.getUTCMonth()
   if (mm < 0 || (mm === 0 && today.getUTCDate() < born.getUTCDate())) age--
@@ -120,14 +119,35 @@ export default function HomeMemberLookup({
   const [hasSearched, setHasSearched] = useState(false)
   const [items, setItems] = useState<MemberRow[]>([])
 
+  const abortRef = useRef<AbortController | null>(null)
+  const requestSeqRef = useRef(0)
+
   const trimmed = q.trim()
 
   const helperText = useMemo(() => {
+    if (loading) return 'Searching…'
     if (!hasSearched) return 'Tip: this lookup is made for fast checks on mobile.'
     if (error) return ''
     if (!items.length) return 'No members found.'
     return `${items.length} result${items.length > 1 ? 's' : ''} shown.`
-  }, [error, hasSearched, items.length])
+  }, [error, hasSearched, items.length, loading])
+
+  function resetLookup({ keepQuery = false }: { keepQuery?: boolean } = {}) {
+    abortRef.current?.abort()
+    abortRef.current = null
+    requestSeqRef.current += 1
+    setLoading(false)
+    setError('')
+    setHasSearched(false)
+    setItems([])
+    if (!keepQuery) setQ('')
+  }
+
+  useEffect(() => {
+    return () => {
+      abortRef.current?.abort()
+    }
+  }, [])
 
   async function runSearch() {
     const query = trimmed
@@ -138,6 +158,12 @@ export default function HomeMemberLookup({
       return
     }
 
+    abortRef.current?.abort()
+    const controller = new AbortController()
+    abortRef.current = controller
+    const requestSeq = requestSeqRef.current + 1
+    requestSeqRef.current = requestSeq
+
     setLoading(true)
     setError('')
     setHasSearched(true)
@@ -146,8 +172,10 @@ export default function HomeMemberLookup({
       const r = await fetch(`/api/members/search?q=${encodeURIComponent(query)}&limit=5&ts=${Date.now()}`, {
         headers: { Accept: 'application/json' },
         cache: 'no-store',
+        signal: controller.signal,
       })
       const j = await r.json().catch(() => ({} as any))
+      if (requestSeq !== requestSeqRef.current) return
 
       if (!r.ok || !j?.ok) {
         setError(j?.error || 'Search failed')
@@ -157,10 +185,14 @@ export default function HomeMemberLookup({
 
       setItems(Array.isArray(j.items) ? (j.items as MemberRow[]) : [])
     } catch (e: any) {
+      if (controller.signal.aborted || requestSeq !== requestSeqRef.current) return
       setError(String(e?.message || e))
       setItems([])
     } finally {
-      setLoading(false)
+      if (requestSeq === requestSeqRef.current) {
+        setLoading(false)
+        if (abortRef.current === controller) abortRef.current = null
+      }
     }
   }
 
@@ -181,6 +213,10 @@ export default function HomeMemberLookup({
                 e.preventDefault()
                 runSearch()
               }
+              if (e.key === 'Escape' && (q || hasSearched || items.length)) {
+                e.preventDefault()
+                resetLookup()
+              }
             }}
             placeholder="Search member…"
             aria-label="Search member"
@@ -188,25 +224,21 @@ export default function HomeMemberLookup({
         </div>
 
         <div className="flex gap-2">
-          <Button onClick={runSearch} disabled={loading || !trimmed}>
-            {loading ? 'Searching…' : 'Search'}
+          <Button onClick={runSearch} disabled={loading || !trimmed} loading={loading} loadingText="Searching…">
+            Search
           </Button>
           <Button
             variant="outline"
-            disabled={loading && !hasSearched}
-            onClick={() => {
-              setQ('')
-              setItems([])
-              setError('')
-              setHasSearched(false)
-            }}
+            disabled={!loading && !q && !hasSearched && !items.length}
+            onClick={() => resetLookup()}
           >
-            Reset
+            {loading ? 'Stop / Reset' : 'Reset'}
           </Button>
         </div>
       </div>
 
       {helperText ? <p className="mt-2 text-[11px] text-[hsl(var(--muted))]">{helperText}</p> : null}
+      <p className="mt-1 text-[11px] text-[hsl(var(--muted))]">Press Enter to search. Press Esc to clear.</p>
 
       {error ? (
         <div className="mt-3 rounded-2xl border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-700">
