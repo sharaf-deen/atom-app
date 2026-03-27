@@ -855,15 +855,16 @@ function receptionActions(): QuickAction[] {
 function adminActions(role: 'admin' | 'super_admin'): QuickAction[] {
   const base: QuickAction[] = [
     { href: '/admin', label: 'Dashboard', desc: 'Operational KPIs and admin overview.', icon: LayoutDashboard },
-    { href: '/admin/crm', label: 'CRM queue', desc: 'Review follow-ups and daily contact priorities.', icon: MessageSquare },
+    { href: '/kiosk', label: 'Create member', desc: 'Open the front-desk member creation flow.', icon: IdCard },
+    { href: '/expenses', label: 'Expenses', desc: 'Open expenses and categories.', icon: Receipt },
+    { href: '/admin/outstanding-dues', label: 'Outstanding dues', desc: 'Focus on unpaid balances.', icon: Wallet },
     { href: '/scan', label: 'Scan', desc: 'QR check-in and validation flow.', icon: ScanLine },
     { href: '/members', label: 'Members', desc: 'Open the members workspace.', icon: Users },
-    { href: '/admin/payments', label: 'Payments', desc: 'Track subscription payments.', icon: CreditCard },
-    { href: '/admin/cash-report', label: 'Cash report', desc: 'Review daily payment summaries.', icon: Wallet },
-    { href: '/expenses', label: 'Expenses', desc: 'Open expenses and categories.', icon: Receipt },
     { href: '/admin/personal-funds', label: 'Personal funds', desc: 'Review advances, reimbursements and proof.', icon: Wallet },
+    { href: '/admin/payments', label: 'Payments', desc: 'Track subscription payments.', icon: CreditCard },
+    { href: '/admin/crm', label: 'CRM queue', desc: 'Review follow-ups and daily contact priorities.', icon: MessageSquare },
+    { href: '/admin/cash-report', label: 'Cash report', desc: 'Review daily payment summaries.', icon: Wallet },
     { href: '/admin/health-monitor', label: 'Health Monitor', desc: 'Open the latest health status and reports.', icon: ShieldCheck },
-    { href: '/admin/outstanding-dues', label: 'Outstanding dues', desc: 'Focus on unpaid balances.', icon: Wallet },
     { href: '/admin/expiring-soon', label: 'Expiring soon', desc: 'Review urgent renewals.', icon: Bell },
   ]
 
@@ -956,7 +957,7 @@ export default async function HomePage() {
             <QuickActions
               title="Quick actions"
               subtitle="Keep the next step simple."
-              items={memberActions().slice(0, 3)}
+              items={memberActions().slice(0, 5)}
             />
           </>
         ) : null}
@@ -974,7 +975,7 @@ export default async function HomePage() {
               <QuickActions
                 title="Coach shortcuts"
                 subtitle="The most useful staff actions first."
-                items={coachActions().slice(0, 3)}
+                items={coachActions().slice(0, 5)}
               />
             </div>
 

@@ -1,6 +1,8 @@
 // src/app/api/members/stats/route.ts
 import { NextResponse } from 'next/server'
 import { createSupabaseRSC } from '@/lib/supabaseServer'
+import { cairoTodayDateOnly } from '@/lib/cairoTime'
+import { MEMBER_LIKE_ROLES, hasLifetimeGymAccess, normalizeRole } from '@/lib/rbac'
 
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
@@ -36,7 +38,7 @@ function isFrozenNow(sub: {
 export async function GET() {
   try {
     const supabase = createSupabaseRSC()
-    const today = new Date().toISOString().slice(0, 10) // 'YYYY-MM-DD'
+    const today = cairoTodayDateOnly()
 
     //
     // 1) Total de membres : table "profiles"
@@ -44,7 +46,7 @@ export async function GET() {
     const { data: profiles, error: profilesError } = await supabase
       .from('profiles') // members profiles
       .select('user_id, role')
-      .in('role', ['member', 'champion', 'vip'])
+      .in('role', [...MEMBER_LIKE_ROLES])
 
     if (profilesError) {
       console.error('Error fetching profiles:', profilesError)
@@ -65,8 +67,8 @@ export async function GET() {
     const memberIds = new Set<string>((profiles ?? []).map((p: any) => p.user_id as string).filter(Boolean))
     const activeMemberIds = new Set<string>()
     for (const profile of profiles ?? []) {
-      const role = String((profile as any)?.role ?? '')
-      if (role === 'champion' || role === 'vip') {
+      const role = normalizeRole((profile as any)?.role)
+      if (hasLifetimeGymAccess(role)) {
         const id = (profile as any)?.user_id as string | undefined
         if (id) activeMemberIds.add(id)
       }

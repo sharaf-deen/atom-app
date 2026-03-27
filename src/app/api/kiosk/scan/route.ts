@@ -6,6 +6,8 @@ export const revalidate = 0
 import { NextResponse } from 'next/server'
 import { createSupabaseServerActionClient } from '@/lib/supabaseServer'
 import { createSupabaseAdminClient } from '@/lib/supabaseAdmin'
+import { cairoTodayDateOnly } from '@/lib/cairoTime'
+import { hasLifetimeGymAccess, normalizeRole } from '@/lib/rbac'
 
 type ScanBody = { code?: string }
 
@@ -37,7 +39,6 @@ type AttendanceWrite = {
   source?: string
 }
 
-const LIFETIME_ACCESS_ROLES = ['assistant_coach', 'coach', 'head_coach', 'champion', 'vip'] as const
 
 function json(status: number, body: ScanResponse) {
   const res = NextResponse.json(body, { status })
@@ -57,20 +58,6 @@ function parseMemberIdFromCode(code: string): string | null {
   return null
 }
 
-const CAIRO_TZ = 'Africa/Cairo'
-
-function todayDateOnlyCairo() {
-  const parts = new Intl.DateTimeFormat('en-CA', {
-    timeZone: CAIRO_TZ,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).formatToParts(new Date())
-  const y = parts.find((p) => p.type === 'year')?.value ?? '1970'
-  const m = parts.find((p) => p.type === 'month')?.value ?? '01'
-  const d = parts.find((p) => p.type === 'day')?.value ?? '01'
-  return `${y}-${m}-${d}`
-}
 
 function daysBetweenUTC(fromDateOnly: string, toDateOnly: string) {
   const from = new Date(`${fromDateOnly}T00:00:00Z`).getTime()
@@ -148,7 +135,7 @@ export async function POST(req: Request) {
     return json(400, { ok: false, message: 'Invalid QR code' })
   }
 
-  const today = todayDateOnlyCairo()
+  const today = cairoTodayDateOnly()
   const deviceTag = (req.headers.get('x-device-tag') || '').slice(0, 64) || null
 
   try {
@@ -178,8 +165,8 @@ export async function POST(req: Request) {
       return json(500, { ok: false, message: memberProfileErr.message })
     }
 
-    const memberRole = (memberProfile?.role ?? 'member').trim()
-    if ((LIFETIME_ACCESS_ROLES as readonly string[]).includes(memberRole)) {
+    const memberRole = normalizeRole(memberProfile?.role ?? 'member')
+    if (hasLifetimeGymAccess(memberRole)) {
       await persistAttendance(admin, existingId, {
         member_id: memberId,
         date: today,

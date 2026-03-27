@@ -405,12 +405,12 @@ export default async function AttendanceDashboard({
                 Range: <b>{from}</b> → <b>{to}</b>
               </div>
             </div>
-            <Table columns={seriesCols} rows={seriesRows} keyField="id" />
+            <Table columns={seriesCols} rows={seriesRows} keyField="id" stickyTopClassName="top-0" />
           </div>
 
           <div className="space-y-3">
             <h2 className="text-sm font-semibold tracking-wide text-[hsl(var(--muted))]">Top attendees (valid)</h2>
-            <Table columns={topCols} rows={topTableRows} keyField="id" />
+            <Table columns={topCols} rows={topTableRows} keyField="id" stickyTopClassName="top-0" />
           </div>
         </div>
 
