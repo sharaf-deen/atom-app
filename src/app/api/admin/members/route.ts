@@ -5,21 +5,31 @@ export const revalidate = 0
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { requireUser } from '@/lib/apiAuth'
+import { canAccessMembersList, isRole } from '@/lib/rbac'
 
-type Role = 'member' | 'assistant_coach' | 'coach' | 'reception' | 'admin' | 'super_admin'
-const OPS: Role[] = ['reception', 'admin', 'super_admin']
+function noStore(res: NextResponse) {
+  res.headers.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate')
+  return res
+}
+
+function sanitizeSearch(value: unknown) {
+  return typeof value === 'string'
+    ? value.replace(/[%,_]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 80)
+    : ''
+}
 
 export async function POST(req: NextRequest) {
   const gate = await requireUser()
-  if (!gate.ok) return gate.res
+  if (!gate.ok) return noStore(gate.res)
 
-  if (!OPS.includes(gate.user.role as Role)) {
-    return NextResponse.json({ ok: false, error: 'FORBIDDEN' }, { status: 403 })
+  if (!canAccessMembersList(gate.user.role)) {
+    return noStore(NextResponse.json({ ok: false, error: 'FORBIDDEN' }, { status: 403 }))
   }
 
   const body = await req.json().catch(() => ({} as any))
-  const q = typeof body.q === 'string' ? body.q : ''
-  const role = typeof body.role === 'string' ? body.role : null
+  const q = sanitizeSearch(body.q)
+  const roleRaw = typeof body.role === 'string' ? body.role.trim() : ''
+  const role = isRole(roleRaw) ? roleRaw : null
 
   const limitRaw = Number(body.limit ?? 50)
   const limit = Number.isFinite(limitRaw) ? Math.min(200, Math.max(1, Math.floor(limitRaw))) : 50
@@ -27,10 +37,7 @@ export async function POST(req: NextRequest) {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL
   const service = process.env.SUPABASE_SERVICE_ROLE_KEY
   if (!url || !service) {
-    return NextResponse.json(
-      { ok: false, error: 'Server env missing' },
-      { status: 500, headers: { 'Cache-Control': 'no-store' } }
-    )
+    return noStore(NextResponse.json({ ok: false, error: 'Server env missing' }, { status: 500 }))
   }
 
   const admin = createClient(url, service, {
@@ -45,23 +52,17 @@ export async function POST(req: NextRequest) {
 
   if (role) query = query.eq('role', role)
 
-  if (q.trim()) {
-    const like = `%${q.trim()}%`
+  if (q) {
+    const like = `%${q}%`
     query = query.or(
-      `email.ilike.${like},first_name.ilike.${like},last_name.ilike.${like},phone.ilike.${like}`
+      `email.ilike.${like},first_name.ilike.${like},last_name.ilike.${like},phone.ilike.${like},member_id.ilike.${like}`
     )
   }
 
   const { data, error } = await query
   if (error) {
-    return NextResponse.json(
-      { ok: false, error: error.message },
-      { status: 400, headers: { 'Cache-Control': 'no-store' } }
-    )
+    return noStore(NextResponse.json({ ok: false, error: error.message }, { status: 400 }))
   }
 
-  return NextResponse.json(
-    { ok: true, members: data ?? [] },
-    { headers: { 'Cache-Control': 'no-store' } }
-  )
+  return noStore(NextResponse.json({ ok: true, members: data ?? [] }))
 }

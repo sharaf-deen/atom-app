@@ -14,9 +14,10 @@ import { Table } from '@/components/ui/Table'
 
 import InactiveNotifyClient from './inactive-notify-client'
 
-import { getSessionUser } from '@/lib/session'
-import { createSupabaseAdminClient } from '@/lib/supabaseAdmin'
-import { addDaysDateOnly, CAIRO_TZ, cairoTodayDateOnly, isISODateOnly } from '@/lib/cairoTime'
+import { getSessionUserCached, getSupabaseAdminClientCached } from '@/lib/requestCache'
+import { addDaysDateOnly, cairoTodayDateOnly } from '@/lib/cairoTime'
+
+const CAIRO_TZ = 'Africa/Cairo'
 
 type AttendanceRow = {
   member_id: string
@@ -33,10 +34,13 @@ type ProfileRow = {
   member_id: string | null
 }
 
-
 function clampInt(v: number, min: number, max: number) {
   if (!Number.isFinite(v)) return min
   return Math.max(min, Math.min(max, Math.trunc(v)))
+}
+
+function isISODateOnly(s?: string | null) {
+  return !!s && /^\d{4}-\d{2}-\d{2}$/.test(s)
 }
 
 function fmtPct(n: number, d: number) {
@@ -56,7 +60,7 @@ export default async function AttendanceDashboard({
 }: {
   searchParams?: { period?: string; from?: string; to?: string; inactiveDays?: string }
 }) {
-  const user = await getSessionUser()
+  const user = await getSessionUserCached()
   const nextPath = '/admin/attendance'
 
   if (!user || (user.role !== 'admin' && user.role !== 'super_admin')) {
@@ -112,7 +116,7 @@ export default async function AttendanceDashboard({
   const profiles = new Map<string, ProfileRow>()
 
   try {
-    const admin = createSupabaseAdminClient()
+    const admin = getSupabaseAdminClientCached()
 
     // Attendance rows in range (for series + totals + top)
     const { data: att, error: attErr } = await admin
@@ -225,11 +229,20 @@ export default async function AttendanceDashboard({
   }
 
   // Stats
+  let valid = 0
+  const uniqueMembers = new Set<string>()
+  const uniqueValidMembers = new Set<string>()
+  for (const row of rows) {
+    if (row.member_id) uniqueMembers.add(row.member_id)
+    if (row.valid) {
+      valid += 1
+      if (row.member_id) uniqueValidMembers.add(row.member_id)
+    }
+  }
   const total = rows.length
-  const valid = rows.filter((r) => r.valid).length
   const invalid = total - valid
-  const unique = new Set(rows.map((r) => r.member_id).filter(Boolean)).size
-  const uniqueValid = new Set(rows.filter((r) => r.valid).map((r) => r.member_id).filter(Boolean)).size
+  const unique = uniqueMembers.size
+  const uniqueValid = uniqueValidMembers.size
 
   const exportHref = `/api/admin/export/attendance?from=${from}&to=${to}`
 

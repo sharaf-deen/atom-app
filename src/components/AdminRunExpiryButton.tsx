@@ -1,4 +1,3 @@
-// src/components/AdminRunExpiryButton.tsx
 'use client'
 
 import { useState } from 'react'
@@ -8,11 +7,17 @@ export default function AdminRunExpiryButton() {
   const [msg, setMsg] = useState<string>('')
 
   async function run() {
+    if (busy) return
     setBusy(true)
     setMsg('')
     try {
-      const r = await fetch('/api/admin/expire', { method: 'POST' })
-      const j = await r.json().catch(() => ({}))
+      const r = await fetch('/api/admin/expire', {
+        method: 'POST',
+        cache: 'no-store',
+        credentials: 'same-origin',
+        headers: { 'cache-control': 'no-store' },
+      })
+      const j = await r.json().catch(() => ({} as any))
       if (!r.ok || j?.ok === false) {
         setMsg(`Error: ${j?.error || 'failed'}${j?.details ? ` – ${j.details}` : ''}`)
       } else {

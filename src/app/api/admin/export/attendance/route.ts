@@ -76,6 +76,8 @@ export async function GET(req: Request) {
     for (const r of rows ?? []) {
       const prof = profilesMap.get(r.member_id) ?? { email: null, first_name: null, last_name: null }
       lines.push([
+        r.id,
+        r.member_id,
         prof.email,
         prof.first_name,
         prof.last_name,

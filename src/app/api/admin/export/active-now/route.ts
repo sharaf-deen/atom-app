@@ -4,7 +4,8 @@ export const revalidate = 0
 
 import { NextResponse } from 'next/server'
 import { createSupabaseServerActionClient } from '@/lib/supabaseServer'
-import { cairoToday } from '@/lib/cairoDate'
+import { cairoTodayDateOnly } from '@/lib/cairoTime'
+
 
 function json(status: number, body: any) {
   const res = NextResponse.json(body, { status })
@@ -35,7 +36,7 @@ export async function GET() {
       return json(403, { ok: false, error: 'FORBIDDEN' })
     }
 
-    const today = cairoToday()
+    const today = cairoTodayDateOnly()
     const selectFields =
       'id, member_id, plan, subscription_type, status, start_date, end_date, amount, paid_at, sessions_total, sessions_used'
 
@@ -114,6 +115,8 @@ export async function GET() {
           : ''
       lines.push(
         [
+          r.id,
+          r.member_id,
           prof.email,
           prof.first_name,
           prof.last_name,

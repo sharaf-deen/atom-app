@@ -6,6 +6,7 @@ import { NextResponse } from 'next/server'
 import { createSupabaseServerActionClient } from '@/lib/supabaseServer'
 import { cairoRangeBoundsUTC } from '@/lib/cairoTime'
 
+
 function json(status: number, body: any) {
   const res = NextResponse.json(body, { status })
   res.headers.set('Cache-Control', 'no-store')
@@ -46,7 +47,7 @@ export async function GET(req: Request) {
       return json(400, { ok: false, error: 'INVALID_RANGE', hint: 'Use ?from=YYYY-MM-DD&to=YYYY-MM-DD with from ≤ to' })
     }
 
-    // Filter by paid_at in Cairo calendar range [from, to]
+    // Filter by paid_at in Cairo inclusive date range
     const { startISO, endISO } = cairoRangeBoundsUTC(from, to)
 
     const { data: subs, error: qErr } = await supa
@@ -82,6 +83,8 @@ export async function GET(req: Request) {
     for (const r of subs ?? []) {
       const prof = profilesMap.get(r.member_id) ?? { email: null, first_name: null, last_name: null }
       lines.push([
+        r.id,
+        r.member_id,
         prof.email,
         prof.first_name,
         prof.last_name,
