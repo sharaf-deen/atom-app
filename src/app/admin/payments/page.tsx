@@ -9,7 +9,7 @@ import Badge from '@/components/ui/Badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card'
 import { Table } from '@/components/ui/Table'
 import EditPaymentDateButton from '@/components/EditPaymentDateButton'
-import { addDaysDateOnly, cairoDayBoundsUTC, cairoMonthBoundsDateOnly, cairoTodayDateOnly, isISODateOnly } from '@/lib/cairoTime'
+import { addDaysDateOnly, cairoDayBoundsUTC, cairoTodayDateOnly, isISODateOnly } from '@/lib/cairoTime'
 import { canAccessPayments } from '@/lib/rbac'
 import { getSessionUserCached, getSupabaseAdminClientCached } from '@/lib/requestCache'
 
@@ -99,6 +99,16 @@ function parsePreset(v?: string | null): RangePreset {
   return v === 'today' || v === '7d' || v === 'month' || v === 'custom' ? v : 'today'
 }
 
+function startOfMonthDateOnly(isoDate: string) {
+  return `${isoDate.slice(0, 7)}-01`
+}
+
+function endOfMonthDateOnly(isoDate: string) {
+  const [year, month] = isoDate.split('-').map((x) => Number(x))
+  const dt = new Date(Date.UTC(year, month, 0))
+  return dt.toISOString().slice(0, 10)
+}
+
 function buildQS(params: Record<string, string>) {
   const sp = new URLSearchParams()
   for (const [k, v] of Object.entries(params)) {
@@ -147,7 +157,8 @@ export default async function AdminPaymentsPage({
   }
 
   const todayCairo = cairoTodayDateOnly()
-  const { from: monthFrom, to: monthTo } = cairoMonthBoundsDateOnly(todayCairo)
+  const monthFrom = startOfMonthDateOnly(todayCairo)
+  const monthTo = endOfMonthDateOnly(todayCairo)
 
   const presetRaw = sp1(searchParams, 'preset')
   const fromRaw = sp1(searchParams, 'from')
@@ -197,7 +208,7 @@ export default async function AdminPaymentsPage({
     if (!memberIds.length) memberIds = []
   }
 
-  let query = admin
+  let rowsQuery = admin
     .from('subscription_payments')
     .select(
       'id, subscription_id, member_id, amount, payment_method, note, paid_at, created_at, member:profiles!subscription_payments_member_id_fkey(user_id,member_id,email,first_name,last_name,phone), actor:profiles!subscription_payments_created_by_fkey(user_id,email,first_name,last_name)',
@@ -207,13 +218,32 @@ export default async function AdminPaymentsPage({
     .lt('paid_at', endISO)
     .order('paid_at', { ascending: false })
 
-  query = applyPaymentMethodFilter(query as any, payment_method) as any
+  rowsQuery = applyPaymentMethodFilter(rowsQuery as any, payment_method) as any
   if (memberIds) {
-    if (!memberIds.length) query = query.in('member_id', [IMPOSSIBLE_MEMBER_ID])
-    else query = query.in('member_id', memberIds)
+    if (!memberIds.length) rowsQuery = rowsQuery.in('member_id', [IMPOSSIBLE_MEMBER_ID])
+    else rowsQuery = rowsQuery.in('member_id', memberIds)
   }
 
-  const { data: rowsRaw, error: err, count } = await query.range(fromIdx, toIdx)
+  let totalsQuery = admin
+    .from('subscription_payments')
+    .select('amount, payment_method, member_id')
+    .gte('paid_at', startISO)
+    .lt('paid_at', endISO)
+    .limit(10000)
+
+  totalsQuery = applyPaymentMethodFilter(totalsQuery as any, payment_method) as any
+  if (memberIds) {
+    if (!memberIds.length) totalsQuery = totalsQuery.in('member_id', [IMPOSSIBLE_MEMBER_ID])
+    else totalsQuery = totalsQuery.in('member_id', memberIds)
+  }
+
+  const [rowsResult, totalsResult] = await Promise.allSettled([
+    rowsQuery.range(fromIdx, toIdx),
+    totalsQuery,
+  ])
+
+  const rowsValue = rowsResult.status === 'fulfilled' ? rowsResult.value : { data: null, error: new Error('Failed to load payments'), count: 0 }
+  const { data: rowsRaw, error: err, count } = rowsValue
 
   const rows: PaymentRow[] = ((rowsRaw ?? []) as any[]).map((r) => ({
     id: String(r.id),
@@ -230,22 +260,8 @@ export default async function AdminPaymentsPage({
 
   let totals = { all: 0, cash: 0, instapay: 0, card: 0, bank_transfer: 0 }
 
-  try {
-    let totalsQuery = admin
-      .from('subscription_payments')
-      .select('amount, payment_method, member_id')
-      .gte('paid_at', startISO)
-      .lt('paid_at', endISO)
-      .limit(10000)
-
-    totalsQuery = applyPaymentMethodFilter(totalsQuery as any, payment_method) as any
-    if (memberIds) {
-      if (!memberIds.length) totalsQuery = totalsQuery.in('member_id', [IMPOSSIBLE_MEMBER_ID])
-      else totalsQuery = totalsQuery.in('member_id', memberIds)
-    }
-
-    const { data: allRows } = await totalsQuery
-    for (const r of (allRows ?? []) as any[]) {
+  if (totalsResult.status === 'fulfilled') {
+    for (const r of ((totalsResult.value as any)?.data ?? []) as any[]) {
       const amt = Number(r.amount ?? 0)
       if (!Number.isFinite(amt)) continue
       totals.all += amt
@@ -255,8 +271,6 @@ export default async function AdminPaymentsPage({
       else if (pm === 'card' || pm === 'visa') totals.card += amt
       else if (pm === 'bank_transfer') totals.bank_transfer += amt
     }
-  } catch {
-    // ignore totals failure
   }
 
   const totalPages = Math.max(1, Math.ceil(Number(count ?? 0) / PAGE_SIZE))

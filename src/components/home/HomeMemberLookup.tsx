@@ -169,7 +169,7 @@ export default function HomeMemberLookup({
     setHasSearched(true)
 
     try {
-      const r = await fetch(`/api/members/search?q=${encodeURIComponent(query)}&limit=5&ts=${Date.now()}`, {
+      const r = await fetch(`/api/members/search?q=${encodeURIComponent(query)}&limit=5`, {
         headers: { Accept: 'application/json' },
         cache: 'no-store',
         signal: controller.signal,

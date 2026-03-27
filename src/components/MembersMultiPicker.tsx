@@ -31,6 +31,8 @@ export default function MembersMultiPicker({
   const [selected, setSelected] = useState<Set<string>>(new Set(initialSelected))
 
   const debTimer = useRef<number | null>(null)
+  const abortRef = useRef<AbortController | null>(null)
+  const requestSeqRef = useRef(0)
   const query = useMemo(() => q.trim(), [q])
 
   // notify parent on selection change
@@ -41,6 +43,10 @@ export default function MembersMultiPicker({
   // first load
   useEffect(() => {
     runSearch(query)
+    return () => {
+      abortRef.current?.abort()
+      if (debTimer.current) window.clearTimeout(debTimer.current)
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -56,13 +62,21 @@ export default function MembersMultiPicker({
 
   async function runSearch(qs: string) {
     if (disabled) return
+
+    abortRef.current?.abort()
+    const controller = new AbortController()
+    abortRef.current = controller
+    const requestSeq = requestSeqRef.current + 1
+    requestSeqRef.current = requestSeq
+
     setLoading(true)
     setErr('')
     try {
       const url = new URL('/api/members/search', window.location.origin)
       if (qs) url.searchParams.set('q', qs)
-      const r = await fetch(url.toString(), { cache: 'no-store' })
+      const r = await fetch(url.toString(), { cache: 'no-store', signal: controller.signal })
       const j = await r.json().catch(() => ({}))
+      if (controller.signal.aborted || requestSeq !== requestSeqRef.current) return
       if (!r.ok || !j?.ok) {
         setErr(j?.error || 'Failed to load members')
         setItems([])
@@ -70,10 +84,14 @@ export default function MembersMultiPicker({
       }
       setItems(Array.isArray(j.items) ? j.items : [])
     } catch (e: any) {
+      if (controller.signal.aborted || requestSeq !== requestSeqRef.current) return
       setErr(String(e?.message || e))
       setItems([])
     } finally {
-      setLoading(false)
+      if (requestSeq === requestSeqRef.current) {
+        setLoading(false)
+        if (abortRef.current === controller) abortRef.current = null
+      }
     }
   }
 
