@@ -109,21 +109,39 @@ export default async function AdminMembersPage({
     )
   }
 
-  // Load role labels (from public.roles) for nicer UI + validation.
+  const from = (page - 1) * pageSize
+  const to = from + pageSize - 1
+
+  let membersQuery = admin
+    .from('profiles')
+    .select('user_id,member_id,email,first_name,last_name,phone,role,created_at', { count: 'exact' })
+    .order('created_at', { ascending: false })
+    .range(from, to)
+
+  if (role) membersQuery = membersQuery.eq('role', role)
+
+  if (q) {
+    const like = `%${q}%`
+    membersQuery = membersQuery.or(
+      `email.ilike.${like},first_name.ilike.${like},last_name.ilike.${like},phone.ilike.${like}`
+    )
+  }
+
+  const [membersResult, rolesResult] = await Promise.all([
+    membersQuery,
+    admin.from('roles').select('id,label').order('label', { ascending: true }),
+  ])
+
   let roleOptions: RoleOption[] = FALLBACK_ROLE_OPTIONS
-  try {
-    const { data: rdata, error: rerr } = await admin.from('roles').select('id,label').order('label', { ascending: true })
-    if (!rerr && Array.isArray(rdata)) {
-      const opts: RoleOption[] = []
-      for (const r of rdata as any[]) {
-        const id = normalizeRole((r as any)?.id)
-        const label = String((r as any)?.label ?? '').trim()
-        if (id) opts.push({ id, label: label || id })
-      }
-      if (opts.length) roleOptions = opts
+  const { data: rdata, error: rerr } = rolesResult
+  if (!rerr && Array.isArray(rdata)) {
+    const opts: RoleOption[] = []
+    for (const r of rdata as any[]) {
+      const id = normalizeRole((r as any)?.id)
+      const label = String((r as any)?.label ?? '').trim()
+      if (id) opts.push({ id, label: label || id })
     }
-  } catch {
-    // ignore
+    if (opts.length) roleOptions = opts
   }
 
   const labelForRole = (r?: Role | null) => {
@@ -131,25 +149,7 @@ export default async function AdminMembersPage({
     return roleOptions.find((x) => x.id === id)?.label ?? id
   }
 
-  const from = (page - 1) * pageSize
-  const to = from + pageSize - 1
-
-  let query = admin
-    .from('profiles')
-    .select('user_id,member_id,email,first_name,last_name,phone,role,created_at', { count: 'exact' })
-    .order('created_at', { ascending: false })
-    .range(from, to)
-
-  if (role) query = query.eq('role', role)
-
-  if (q) {
-    const like = `%${q}%`
-    query = query.or(
-      `email.ilike.${like},first_name.ilike.${like},last_name.ilike.${like},phone.ilike.${like}`
-    )
-  }
-
-  const { data, error, count } = await query
+  const { data, error, count } = membersResult
 
   const rows: Member[] = (data ?? []) as any
   const total = Number(count ?? 0)

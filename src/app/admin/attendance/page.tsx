@@ -162,14 +162,25 @@ export default async function AttendanceDashboard({
       .sort((a, b) => b.count - a.count)
       .slice(0, 20)
 
-    // Active members list (for inactivity)
-    const { data: subs, error: subErr } = await admin
-      .from('subscriptions')
-      .select('member_id, subscription_type, status, start_date, end_date')
-      .eq('status', 'active')
-      .limit(100000)
+    // Active members list + attendance last N days (run in parallel)
+    const fromInact = addDaysDateOnly(today, -(inactiveDays - 1))
+    const [{ data: subs, error: subErr }, { data: recent, error: recErr }] = await Promise.all([
+      admin
+        .from('subscriptions')
+        .select('member_id, subscription_type, status, start_date, end_date')
+        .eq('status', 'active')
+        .limit(100000),
+      admin
+        .from('attendance')
+        .select('member_id,date,valid')
+        .gte('date', fromInact)
+        .lte('date', today)
+        .eq('valid', true)
+        .limit(100000),
+    ])
 
     if (subErr) throw new Error(subErr.message)
+    if (recErr) throw new Error(recErr.message)
 
     const activeMembers = new Set<string>()
     for (const s of subs ?? []) {
@@ -186,18 +197,6 @@ export default async function AttendanceDashboard({
         activeMembers.add(mid)
       }
     }
-
-    // Attendance last N days (valid only) for active members
-    const fromInact = addDaysDateOnly(today, -(inactiveDays - 1))
-    const { data: recent, error: recErr } = await admin
-      .from('attendance')
-      .select('member_id,date,valid')
-      .gte('date', fromInact)
-      .lte('date', today)
-      .eq('valid', true)
-      .limit(100000)
-
-    if (recErr) throw new Error(recErr.message)
 
     const lastValid = new Map<string, string>() // member_id -> last date
     for (const r of recent ?? []) {
