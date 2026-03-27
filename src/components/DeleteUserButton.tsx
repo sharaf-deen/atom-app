@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 
@@ -16,6 +16,7 @@ export default function DeleteUserButton({ userId, email, memberId, className }:
   const [confirming, setConfirming] = useState(false)
   const [busy, setBusy] = useState(false)
   const [typed, setTyped] = useState('')
+  const inputRef = useRef<HTMLInputElement | null>(null)
 
   const label = useMemo(() => {
     const safeEmail = String(email ?? '').trim()
@@ -26,6 +27,12 @@ export default function DeleteUserButton({ userId, email, memberId, className }:
   }, [email, memberId])
 
   const canDelete = typed.trim().toUpperCase() === 'DELETE'
+
+  useEffect(() => {
+    if (!confirming) return
+    const id = window.setTimeout(() => inputRef.current?.focus(), 0)
+    return () => window.clearTimeout(id)
+  }, [confirming])
 
   async function onDelete() {
     if (busy || !canDelete) return
@@ -87,17 +94,30 @@ export default function DeleteUserButton({ userId, email, memberId, className }:
         This permanently deletes the auth account and profile for <strong>{label}</strong>. This action cannot be undone.
       </p>
 
-      <div className="mt-3 space-y-2">
+      <div className="mt-3 space-y-2" aria-live="polite">
         <label className="block text-[11px] font-medium uppercase tracking-wide text-red-700">
           Type DELETE to confirm
         </label>
         <input
+          ref={inputRef}
           value={typed}
           onChange={(e) => setTyped(e.target.value)}
           placeholder="DELETE"
           autoComplete="off"
+          onKeyDown={(e) => {
+            if (e.key === 'Escape' && !busy) {
+              e.preventDefault()
+              setConfirming(false)
+              setTyped('')
+            }
+            if (e.key === 'Enter' && canDelete) {
+              e.preventDefault()
+              onDelete()
+            }
+          }}
           className="w-full rounded-xl border border-red-300 bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-red-300"
         />
+        <p className="text-[11px] text-red-700">Press Enter to confirm, or Esc to cancel.</p>
       </div>
 
       <div className="mt-3 flex flex-wrap items-center justify-end gap-2">

@@ -1,13 +1,12 @@
 // src/components/MembersSearch.tsx
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
 import SubscribeDialog, { type Plan } from '@/components/SubscribeDialog'
 import Button from '@/components/ui/Button'
 import Input from '@/components/ui/Input'
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card'
-import { cairoToday } from '@/lib/cairoDate'
 
 type Role =
   | 'member'
@@ -64,8 +63,8 @@ function ageYears(dob?: string | null) {
   const born = new Date(Date.UTC(y, m - 1, d))
   if (isNaN(born.getTime())) return null
 
-  const [ty, tm, td] = cairoToday().split('-').map(Number)
-  const today = new Date(Date.UTC(ty, tm - 1, td))
+  const now = new Date()
+  const today = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()))
   let age = today.getUTCFullYear() - born.getUTCFullYear()
   const mm = today.getUTCMonth() - born.getUTCMonth()
   if (mm < 0 || (mm === 0 && today.getUTCDate() < born.getUTCDate())) age--
@@ -163,6 +162,10 @@ export default function MembersSearch({ isStaff = false }: { isStaff?: boolean }
   const [page, setPage] = useState(1)
   const [totalResults, setTotalResults] = useState<number | null>(null)
 
+  const listAbortRef = useRef<AbortController | null>(null)
+  const listRequestSeqRef = useRef(0)
+  const statsAbortRef = useRef<AbortController | null>(null)
+
   const hasData = rows.length > 0
 
   const totalPages = useMemo(() => {
@@ -180,6 +183,10 @@ export default function MembersSearch({ isStaff = false }: { isStaff?: boolean }
   }, [hasSearched, mode, page, rows.length, totalResults])
 
   async function loadStats() {
+    statsAbortRef.current?.abort()
+    const controller = new AbortController()
+    statsAbortRef.current = controller
+
     try {
       setStatsLoading(true)
       setStatsErr(null)
@@ -187,6 +194,7 @@ export default function MembersSearch({ isStaff = false }: { isStaff?: boolean }
       const r = await fetch(`/api/members/stats?ts=${Date.now()}`, {
         headers: { Accept: 'application/json' },
         cache: 'no-store',
+        signal: controller.signal,
       })
       const j = await r.json().catch(() => ({} as any))
 
@@ -202,9 +210,11 @@ export default function MembersSearch({ isStaff = false }: { isStaff?: boolean }
         inactive: j.inactive ?? 0,
       })
     } catch (e: any) {
+      if (controller.signal.aborted) return
       setStatsErr(String(e?.message || e))
       setStats(null)
     } finally {
+      if (statsAbortRef.current === controller) statsAbortRef.current = null
       setStatsLoading(false)
     }
   }
@@ -224,6 +234,13 @@ export default function MembersSearch({ isStaff = false }: { isStaff?: boolean }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mode, listKind, page, q])
 
+  useEffect(() => {
+    return () => {
+      listAbortRef.current?.abort()
+      statsAbortRef.current?.abort()
+    }
+  }, [])
+
   async function runSearch(targetPage = 1) {
     const query = q.trim()
 
@@ -232,13 +249,21 @@ export default function MembersSearch({ isStaff = false }: { isStaff?: boolean }
       return
     }
 
+    listAbortRef.current?.abort()
+    const controller = new AbortController()
+    listAbortRef.current = controller
+    const requestSeq = listRequestSeqRef.current + 1
+    listRequestSeqRef.current = requestSeq
+
     setLoading(true)
     setErr('')
 
     try {
       const url = `/api/members/search?q=${encodeURIComponent(query)}&page=${targetPage}&limit=${PAGE_SIZE}&ts=${Date.now()}`
-      const r = await fetch(url, { headers: { Accept: 'application/json' }, cache: 'no-store' })
+      const r = await fetch(url, { headers: { Accept: 'application/json' }, cache: 'no-store', signal: controller.signal })
       const j = await r.json().catch(() => ({} as any))
+
+      if (requestSeq !== listRequestSeqRef.current) return
 
       if (!r.ok || !j?.ok) {
         setErr(j?.error || 'Search failed')
@@ -257,6 +282,7 @@ export default function MembersSearch({ isStaff = false }: { isStaff?: boolean }
       setMode('search')
       setHasSearched(true)
     } catch (e: any) {
+      if (controller.signal.aborted || requestSeq !== listRequestSeqRef.current) return
       setErr(String(e?.message || e))
       setRows([])
       setTotalResults(0)
@@ -264,11 +290,20 @@ export default function MembersSearch({ isStaff = false }: { isStaff?: boolean }
       setMode('search')
       setHasSearched(true)
     } finally {
-      setLoading(false)
+      if (listRequestSeqRef.current === requestSeq) {
+        setLoading(false)
+        if (listAbortRef.current === controller) listAbortRef.current = null
+      }
     }
   }
 
   async function loadList(kind: ListKind, targetPage = 1) {
+    listAbortRef.current?.abort()
+    const controller = new AbortController()
+    listAbortRef.current = controller
+    const requestSeq = listRequestSeqRef.current + 1
+    listRequestSeqRef.current = requestSeq
+
     setLoading(true)
     setErr('')
 
@@ -277,8 +312,11 @@ export default function MembersSearch({ isStaff = false }: { isStaff?: boolean }
       const r = await fetch(url, {
         headers: { Accept: 'application/json' },
         cache: 'no-store',
+        signal: controller.signal,
       })
       const j = await r.json().catch(() => ({} as any))
+
+      if (requestSeq !== listRequestSeqRef.current) return
 
       if (!r.ok || !j?.ok) {
         setErr(j?.error || `Failed to load ${kind} members`)
@@ -299,6 +337,7 @@ export default function MembersSearch({ isStaff = false }: { isStaff?: boolean }
       setListKind(kind)
       setHasSearched(true)
     } catch (e: any) {
+      if (controller.signal.aborted || requestSeq !== listRequestSeqRef.current) return
       setErr(String(e?.message || e))
       setRows([])
       setTotalResults(0)
@@ -307,7 +346,10 @@ export default function MembersSearch({ isStaff = false }: { isStaff?: boolean }
       setListKind(kind)
       setHasSearched(true)
     } finally {
-      setLoading(false)
+      if (listRequestSeqRef.current === requestSeq) {
+        setLoading(false)
+        if (listAbortRef.current === controller) listAbortRef.current = null
+      }
     }
   }
 
@@ -325,6 +367,10 @@ export default function MembersSearch({ isStaff = false }: { isStaff?: boolean }
   }
 
   function handleReset() {
+    listAbortRef.current?.abort()
+    listAbortRef.current = null
+    listRequestSeqRef.current += 1
+    setLoading(false)
     setQ('')
     setRows([])
     setErr('')
@@ -367,12 +413,12 @@ export default function MembersSearch({ isStaff = false }: { isStaff?: boolean }
           </div>
 
           <div className="flex flex-wrap gap-2">
-            <Button onClick={() => runSearch(1)} disabled={loading}>
-              {loading && mode === 'search' ? 'Searching…' : 'Search'}
+            <Button onClick={() => runSearch(1)} disabled={loading || !q.trim()} loading={loading && mode === 'search'} loadingText="Searching…">
+              Search
             </Button>
 
-            <Button variant="outline" onClick={handleReset} disabled={loading}>
-              Reset
+            <Button variant="outline" onClick={handleReset} disabled={!loading && !hasSearched && !q && !rows.length}>
+              {loading ? 'Stop / Reset' : 'Reset'}
             </Button>
           </div>
         </div>
@@ -397,7 +443,8 @@ export default function MembersSearch({ isStaff = false }: { isStaff?: boolean }
                 <button
                   type="button"
                   onClick={() => loadList('all', 1)}
-                  className="group flex flex-col justify-between rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] px-4 py-3 text-left shadow-soft transition hover:-translate-y-0.5 hover:shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black/60"
+                  disabled={loading}
+                  className={`group flex flex-col justify-between rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] px-4 py-3 text-left shadow-soft transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black/60 ${loading ? "opacity-60" : "hover:-translate-y-0.5 hover:shadow-lg"}`}
                 >
                   <div className="text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">
                     Total members
@@ -409,7 +456,8 @@ export default function MembersSearch({ isStaff = false }: { isStaff?: boolean }
                 <button
                   type="button"
                   onClick={() => loadList('active', 1)}
-                  className="group flex flex-col justify-between rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] px-4 py-3 text-left shadow-soft transition hover:-translate-y-0.5 hover:shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black/60"
+                  disabled={loading}
+                  className={`group flex flex-col justify-between rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] px-4 py-3 text-left shadow-soft transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black/60 ${loading ? "opacity-60" : "hover:-translate-y-0.5 hover:shadow-lg"}`}
                 >
                   <div className="text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">
                     Active
@@ -423,7 +471,8 @@ export default function MembersSearch({ isStaff = false }: { isStaff?: boolean }
                 <button
                   type="button"
                   onClick={() => loadList('inactive', 1)}
-                  className="group flex flex-col justify-between rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] px-4 py-3 text-left shadow-soft transition hover:-translate-y-0.5 hover:shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black/60"
+                  disabled={loading}
+                  className={`group flex flex-col justify-between rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] px-4 py-3 text-left shadow-soft transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black/60 ${loading ? "opacity-60" : "hover:-translate-y-0.5 hover:shadow-lg"}`}
                 >
                   <div className="text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">
                     Inactive
@@ -443,6 +492,12 @@ export default function MembersSearch({ isStaff = false }: { isStaff?: boolean }
         </div>
 
         {/* Error */}
+        {loading && hasSearched && (
+          <div className="mt-3 rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] px-3 py-2 text-sm text-[hsl(var(--muted))]">
+            Loading results…
+          </div>
+        )}
+
         {err && (
           <div className="mt-3 rounded-2xl border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-700">
             {err}
