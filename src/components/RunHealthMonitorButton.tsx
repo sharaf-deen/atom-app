@@ -83,8 +83,13 @@ export default function RunHealthMonitorButton({ sendEmail = false }: Props) {
   }
 
   return (
-    <Button onClick={run} disabled={loading} variant={sendEmail ? 'outline' : 'solid'}>
-      {label}
-    </Button>
+    <div className="flex items-center gap-2">
+      <Button type="button" onClick={run} disabled={loading} variant={sendEmail ? 'outline' : 'solid'} loading={loading} loadingText={label}>
+        {sendEmail ? 'Run + email' : 'Run now'}
+      </Button>
+      <span className="sr-only" role="status" aria-live="polite">
+        {loading ? label : ''}
+      </span>
+    </div>
   )
 }
