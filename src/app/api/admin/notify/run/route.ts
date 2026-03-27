@@ -6,22 +6,13 @@ export const revalidate = 0
 import { NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { createSupabaseServerActionClient } from '@/lib/supabaseServer'
-
+import { addDays, cairoToday } from '@/lib/cairoDate'
 
 type Plan = '1m' | '3m' | '6m' | '12m' | 'sessions'
 
 function noStore(res: NextResponse) {
   res.headers.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate')
   return res
-}
-function todayUTC() {
-  return new Date().toISOString().slice(0, 10)
-}
-function addDays(dateOnly: string, days: number) {
-  const [y, m, d] = dateOnly.split('-').map(Number)
-  const dt = new Date(Date.UTC(y, m - 1, d))
-  dt.setUTCDate(dt.getUTCDate() + days)
-  return dt.toISOString().slice(0, 10)
 }
 function fullName(p?: { first_name: string | null; last_name: string | null }) {
   const n = [p?.first_name ?? '', p?.last_name ?? ''].join(' ').trim()
@@ -72,7 +63,7 @@ export async function POST(req: Request) {
     const sp = new URL(req.url).searchParams
     const dry = sp.get('dry') === '1'
     const mark = sp.get('mark') === '1' // option test : marquer comme envoyé même sans provider
-    const today = todayUTC()
+    const today = cairoToday()
 
     // --- 1) Expire J+7 (plage [J+7 ; J+8[ pour gérer date ou timestamptz)
     const target = addDays(today, 7)

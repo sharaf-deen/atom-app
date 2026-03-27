@@ -11,6 +11,7 @@ import AthleteProfileSection from '@/components/member-detail/AthleteProfileSect
 import type { Plan } from '@/components/SubscribeDialog'
 import { createSupabaseRSC } from '@/lib/supabaseServer'
 import { getSessionUser, type Role } from '@/lib/session'
+import { cairoToday, diffDays } from '@/lib/cairoDate'
 
 type ProfileRow = {
   user_id: string
@@ -63,8 +64,8 @@ function ageYears(dob?: string | null) {
   const born = new Date(Date.UTC(y, m - 1, d))
   if (isNaN(born.getTime())) return null
 
-  const now = new Date()
-  const today = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()))
+  const [ty, tm, td] = cairoToday().split('-').map(Number)
+  const today = new Date(Date.UTC(ty, tm - 1, td))
   let age = today.getUTCFullYear() - born.getUTCFullYear()
   const mm = today.getUTCMonth() - born.getUTCMonth()
   if (mm < 0 || (mm === 0 && today.getUTCDate() < born.getUTCDate())) age--
@@ -78,10 +79,6 @@ function ageGroup(dob?: string | null) {
   return age < 17 ? 'Kid' : 'Adult'
 }
 
-function todayDateOnlyUTC() {
-  return new Date().toISOString().slice(0, 10) // YYYY-MM-DD (UTC)
-}
-
 function fmtDate(dateStr?: string | null) {
   if (!dateStr) return '—'
   const dt = new Date(dateStr.length === 10 ? `${dateStr}T00:00:00Z` : dateStr)
@@ -91,9 +88,7 @@ function fmtDate(dateStr?: string | null) {
 
 function daysLeft(endDate?: string | null) {
   if (!endDate) return null
-  const t = todayDateOnlyUTC()
-  const ms = new Date(`${endDate}T00:00:00Z`).getTime() - new Date(`${t}T00:00:00Z`).getTime()
-  return Math.floor(ms / 86400000)
+  return diffDays(cairoToday(), endDate)
 }
 
 function shouldShowAthleteProfileOnSelfProfile(role?: Role | null) {

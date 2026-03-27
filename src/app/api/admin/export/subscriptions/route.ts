@@ -4,18 +4,12 @@ export const revalidate = 0
 
 import { NextResponse } from 'next/server'
 import { createSupabaseServerActionClient } from '@/lib/supabaseServer'
-
+import { cairoRangeBoundsUTC } from '@/lib/cairoTime'
 
 function json(status: number, body: any) {
   const res = NextResponse.json(body, { status })
   res.headers.set('Cache-Control', 'no-store')
   return res
-}
-function addDays(dateOnlyStr: string, days: number) {
-  const [y, m, d] = dateOnlyStr.split('-').map(Number)
-  const dt = new Date(Date.UTC(y, m - 1, d))
-  dt.setUTCDate(dt.getUTCDate() + days)
-  return dt.toISOString().slice(0, 10)
 }
 function isISODateOnly(s?: string | null) {
   return !!s && /^\d{4}-\d{2}-\d{2}$/.test(s)
@@ -52,14 +46,14 @@ export async function GET(req: Request) {
       return json(400, { ok: false, error: 'INVALID_RANGE', hint: 'Use ?from=YYYY-MM-DD&to=YYYY-MM-DD with from ≤ to' })
     }
 
-    // Filter by paid_at in [from, to+1d)
-    const toNext = addDays(to, 1)
+    // Filter by paid_at in Cairo calendar range [from, to]
+    const { startISO, endISO } = cairoRangeBoundsUTC(from, to)
 
     const { data: subs, error: qErr } = await supa
       .from('subscriptions')
       .select('id, member_id, plan, subscription_type, status, start_date, end_date, amount, paid_at, sessions_total, sessions_used')
-      .gte('paid_at', `${from}T00:00:00Z`)
-      .lt('paid_at', `${toNext}T00:00:00Z`)
+      .gte('paid_at', startISO)
+      .lt('paid_at', endISO)
       .order('paid_at', { ascending: false })
       .limit(100000)
     if (qErr) return json(500, { ok: false, error: 'QUERY_FAILED', details: qErr.message })

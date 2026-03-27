@@ -4,16 +4,12 @@ export const revalidate = 0
 
 import { NextResponse } from 'next/server'
 import { createSupabaseServerActionClient } from '@/lib/supabaseServer'
-
+import { cairoToday } from '@/lib/cairoDate'
 
 function json(status: number, body: any) {
   const res = NextResponse.json(body, { status })
   res.headers.set('Cache-Control', 'no-store')
   return res
-}
-function todayDateOnly() {
-  // UTC date-only; cohérent avec Postgres current_date (UTC sur Supabase)
-  return new Date().toISOString().slice(0, 10)
 }
 function csvCell(v: any) {
   const s = v === null || v === undefined ? '' : String(v)
@@ -39,7 +35,7 @@ export async function GET() {
       return json(403, { ok: false, error: 'FORBIDDEN' })
     }
 
-    const today = todayDateOnly()
+    const today = cairoToday()
     const selectFields =
       'id, member_id, plan, subscription_type, status, start_date, end_date, amount, paid_at, sessions_total, sessions_used'
 

@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { getSessionUserCached, getSupabaseAdminClientCached } from '@/lib/requestCache'
 import { formatScanAuditMember, formatScanAuditScanner, getScanAuditData } from '@/lib/scanAudit'
+import { cairoTodayDateOnly } from '@/lib/cairoTime'
 
 function csvEscape(v: unknown): string {
   const s = (v ?? '').toString()
@@ -85,7 +86,7 @@ export async function GET(req: Request) {
     }
 
     const csv = lines.join('\n')
-    const stamp = new Date().toISOString().slice(0, 10)
+    const stamp = cairoTodayDateOnly()
     const filename = `scan-audit-${stamp}.csv`
 
     return new NextResponse(csv, {
