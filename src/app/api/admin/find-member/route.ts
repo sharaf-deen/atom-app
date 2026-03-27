@@ -3,14 +3,10 @@ export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
-import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { requireAdmin } from '@/lib/apiAuth'
-
-function noStore(res: NextResponse) {
-  res.headers.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate')
-  return res
-}
+import { jsonWithApiRuntime, logApiError, startApiRuntime } from '@/lib/apiRuntime'
 
 function normalizeEmail(value: unknown) {
   return typeof value === 'string' ? value.trim().toLowerCase().slice(0, 320) : ''
@@ -23,21 +19,23 @@ function normalizeEmail(value: unknown) {
  * Uses SERVICE_ROLE to bypass RLS on protected admin lookup.
  */
 export async function POST(req: NextRequest) {
+  const meta = startApiRuntime('/api/admin/find-member')
   const gate = await requireAdmin()
-  if (!gate.ok) return noStore(gate.res)
+  if (!gate.ok) return gate.res
 
   try {
     const body = await req.json().catch(() => ({} as any))
     const email = normalizeEmail(body?.email)
 
     if (!email || !email.includes('@')) {
-      return noStore(NextResponse.json({ ok: false, error: 'Missing email' }, { status: 400 }))
+      return jsonWithApiRuntime(meta, 400, { ok: false, error: 'Missing email' })
     }
 
     const url = process.env.NEXT_PUBLIC_SUPABASE_URL
     const service = process.env.SUPABASE_SERVICE_ROLE_KEY
     if (!url || !service) {
-      return noStore(NextResponse.json({ ok: false, error: 'Server env missing' }, { status: 500 }))
+      logApiError(meta, 'env', 'SUPABASE env missing')
+      return jsonWithApiRuntime(meta, 500, { ok: false, error: 'Server env missing' })
     }
 
     const admin = createClient(url, service, {
@@ -50,8 +48,11 @@ export async function POST(req: NextRequest) {
       .eq('email', email)
       .maybeSingle()
 
-    if (pErr) return noStore(NextResponse.json({ ok: false, error: pErr.message }, { status: 400 }))
-    if (!profile) return noStore(NextResponse.json({ ok: false, error: 'Member not found' }, { status: 404 }))
+    if (pErr) {
+      logApiError(meta, 'profile_lookup', pErr, { email })
+      return jsonWithApiRuntime(meta, 400, { ok: false, error: pErr.message })
+    }
+    if (!profile) return jsonWithApiRuntime(meta, 404, { ok: false, error: 'Member not found' })
 
     const { data: subs, error: sErr } = await admin
       .from('subscriptions')
@@ -60,13 +61,17 @@ export async function POST(req: NextRequest) {
       .order('start_date', { ascending: false })
       .limit(1)
 
-    if (sErr) return noStore(NextResponse.json({ ok: false, error: sErr.message }, { status: 400 }))
+    if (sErr) {
+      logApiError(meta, 'subscription_lookup', sErr, { member_id: profile.user_id })
+      return jsonWithApiRuntime(meta, 400, { ok: false, error: sErr.message })
+    }
 
     const last_subscription = subs?.[0] ?? null
 
-    return noStore(NextResponse.json({ ok: true, profile, last_subscription }))
+    return jsonWithApiRuntime(meta, 200, { ok: true, profile, last_subscription })
   } catch (e: any) {
-    return noStore(NextResponse.json({ ok: false, error: e?.message ?? 'Server error' }, { status: 500 }))
+    logApiError(meta, 'unexpected', e)
+    return jsonWithApiRuntime(meta, 500, { ok: false, error: e?.message ?? 'Server error' })
   }
 }
 
@@ -75,7 +80,8 @@ export async function POST(req: NextRequest) {
  * Small hint endpoint, protected like POST to avoid leaking admin route shape.
  */
 export async function GET() {
+  const meta = startApiRuntime('/api/admin/find-member')
   const gate = await requireAdmin()
-  if (!gate.ok) return noStore(gate.res)
-  return noStore(NextResponse.json({ ok: true, hint: 'POST { email }' }))
+  if (!gate.ok) return gate.res
+  return jsonWithApiRuntime(meta, 200, { ok: true, hint: 'POST { email }' })
 }

@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 
 type HealthOk = {
   ok: true
+  request_id?: string
   role: string
   email: string | null
   user_id: string
@@ -15,6 +16,7 @@ type HealthErr = {
   ok: false
   reason: string
   role?: string | null
+  request_id?: string
 }
 
 type Health = HealthOk | HealthErr
@@ -46,6 +48,7 @@ export default function KioskHealthBadge({
   const [health, setHealth] = useState<Health | null>(null)
   const [loading, setLoading] = useState(false)
   const [lastOkAt, setLastOkAt] = useState<string | null>(null)
+  const [lastRef, setLastRef] = useState<string | null>(null)
   const timerRef = useRef<number | null>(null)
   const mountedRef = useRef(true)
   const loadingRef = useRef(false)
@@ -73,11 +76,14 @@ export default function KioskHealthBadge({
         signal: controller.signal,
       })
       const j = (await r.json().catch(() => null)) as Health | null
+      const requestId = String((j as any)?.request_id || r.headers.get('x-request-id') || '').trim() || null
       if (!mountedRef.current || controller.signal.aborted) return
       if (!j) {
         setHealth({ ok: false, reason: 'bad_response' })
+        setLastRef(requestId)
         return
       }
+      setLastRef(requestId)
       setHealth(j)
       if (j.ok) setLastOkAt(new Date().toISOString())
     } catch (err) {
@@ -145,8 +151,12 @@ export default function KioskHealthBadge({
           ? `Expires in ${fmtCountdown(expiresIn)}`
           : health.email ?? ''
       : lastOkAt
-        ? 'Tap refresh'
-        : ''
+        ? lastRef
+          ? `Tap refresh · Ref ${lastRef}`
+          : 'Tap refresh'
+        : lastRef
+          ? `Ref ${lastRef}`
+          : ''
 
   return (
     <div
