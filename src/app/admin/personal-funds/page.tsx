@@ -13,6 +13,7 @@ import Input from '@/components/ui/Input'
 import Select from '@/components/ui/Select'
 import InlineAlert from '@/components/ui/InlineAlert'
 import { getSessionUserCached, getSupabaseAdminClientCached } from '@/lib/requestCache'
+import { addDaysDateOnly, cairoTodayDateOnly, isISODateOnly } from '@/lib/cairoTime'
 import { canAccessPersonalFunds } from '@/lib/rbac'
 
 type EntryKind = 'advance_to_gym' | 'expense_paid_personally' | 'reimbursement_from_gym'
@@ -69,23 +70,6 @@ function parsePreset(v: unknown): RangePreset {
 
 function parseKind(v: unknown): EntryKind | 'all' {
   return v === 'advance_to_gym' || v === 'expense_paid_personally' || v === 'reimbursement_from_gym' ? v : 'all'
-}
-
-function toISODate(d: Date) {
-  const year = d.getFullYear()
-  const month = String(d.getMonth() + 1).padStart(2, '0')
-  const day = String(d.getDate()).padStart(2, '0')
-  return `${year}-${month}-${day}`
-}
-
-function addDays(d: Date, days: number) {
-  const x = new Date(d)
-  x.setDate(x.getDate() + days)
-  return x
-}
-
-function startOfYear(d: Date) {
-  return new Date(d.getFullYear(), 0, 1)
 }
 
 function sanitizeSearch(v: string) {
@@ -376,7 +360,8 @@ async function addEntryAction(formData: FormData) {
   if (!canAccessPersonalFunds(me.role)) redirect('/admin/personal-funds?error=Access%20denied')
 
   const returnQS = safeStr(formData.get('return_qs'))
-  const entry_date = safeStr(formData.get('entry_date')).trim() || toISODate(new Date())
+  const entry_dateRaw = safeStr(formData.get('entry_date')).trim()
+  const entry_date = isISODateOnly(entry_dateRaw) ? entry_dateRaw : cairoTodayDateOnly()
   const person_id = safeStr(formData.get('person_id')).trim()
   const kind = safeStr(formData.get('kind')).trim() as EntryKind
   const amountRaw = safeStr(formData.get('amount')).trim()
@@ -455,7 +440,8 @@ async function updateEntryAction(formData: FormData) {
 
   const returnQS = safeStr(formData.get('return_qs'))
   const id = safeStr(formData.get('id')).trim()
-  const entry_date = safeStr(formData.get('entry_date')).trim() || toISODate(new Date())
+  const entry_dateRaw = safeStr(formData.get('entry_date')).trim()
+  const entry_date = isISODateOnly(entry_dateRaw) ? entry_dateRaw : cairoTodayDateOnly()
   const person_id = safeStr(formData.get('person_id')).trim()
   const kind = safeStr(formData.get('kind')).trim() as EntryKind
   const amountRaw = safeStr(formData.get('amount')).trim()
@@ -608,8 +594,7 @@ export default async function PersonalFundsPage({
   }
 
   const admin = getSupabaseAdminClientCached()
-  const now = new Date()
-  const today = toISODate(now)
+  const today = cairoTodayDateOnly()
   const preset = parsePreset(typeof searchParams.preset === 'string' ? searchParams.preset : '90d')
 
   let from = safeStr(searchParams.from)
@@ -617,18 +602,18 @@ export default async function PersonalFundsPage({
 
   if (preset === '30d') {
     to = today
-    from = toISODate(addDays(now, -29))
+    from = addDaysDateOnly(today, -29)
   } else if (preset === '90d') {
     to = today
-    from = toISODate(addDays(now, -89))
+    from = addDaysDateOnly(today, -89)
   } else if (preset === 'year') {
-    from = toISODate(startOfYear(now))
+    from = `${today.slice(0, 4)}-01-01`
     to = today
   } else if (preset === 'all') {
     from = ''
     to = ''
   } else {
-    if (!from) from = toISODate(addDays(now, -89))
+    if (!from) from = addDaysDateOnly(today, -89)
     if (!to) to = today
   }
 

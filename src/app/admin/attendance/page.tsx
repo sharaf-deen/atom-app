@@ -16,8 +16,7 @@ import InactiveNotifyClient from './inactive-notify-client'
 
 import { getSessionUser } from '@/lib/session'
 import { createSupabaseAdminClient } from '@/lib/supabaseAdmin'
-
-const CAIRO_TZ = 'Africa/Cairo'
+import { addDaysDateOnly, CAIRO_TZ, cairoTodayDateOnly, isISODateOnly } from '@/lib/cairoTime'
 
 type AttendanceRow = {
   member_id: string
@@ -34,32 +33,10 @@ type ProfileRow = {
   member_id: string | null
 }
 
-function cairoToday() {
-  const parts = new Intl.DateTimeFormat('en-CA', {
-    timeZone: CAIRO_TZ,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).formatToParts(new Date())
-  const y = parts.find((p) => p.type === 'year')?.value ?? '1970'
-  const m = parts.find((p) => p.type === 'month')?.value ?? '01'
-  const d = parts.find((p) => p.type === 'day')?.value ?? '01'
-  return `${y}-${m}-${d}`
-}
-
-function shiftDays(dateOnly: string, deltaDays: number) {
-  const d = new Date(`${dateOnly}T00:00:00Z`)
-  d.setUTCDate(d.getUTCDate() + deltaDays)
-  return d.toISOString().slice(0, 10)
-}
 
 function clampInt(v: number, min: number, max: number) {
   if (!Number.isFinite(v)) return min
   return Math.max(min, Math.min(max, Math.trunc(v)))
-}
-
-function isISODateOnly(s?: string | null) {
-  return !!s && /^\d{4}-\d{2}-\d{2}$/.test(s)
 }
 
 function fmtPct(n: number, d: number) {
@@ -95,7 +72,7 @@ export default async function AttendanceDashboard({
     )
   }
 
-  const today = cairoToday()
+  const today = cairoTodayDateOnly()
   const period = (searchParams?.period ?? 'last14').trim()
   const inactiveDays = clampInt(Number(searchParams?.inactiveDays ?? 14), 7, 60)
 
@@ -106,10 +83,10 @@ export default async function AttendanceDashboard({
     from = today
     to = today
   } else if (period === 'last7') {
-    from = shiftDays(today, -6)
+    from = addDaysDateOnly(today, -6)
     to = today
   } else if (period === 'last30') {
-    from = shiftDays(today, -29)
+    from = addDaysDateOnly(today, -29)
     to = today
   } else if (period === 'custom') {
     const f = (searchParams?.from ?? '').trim()
@@ -118,12 +95,12 @@ export default async function AttendanceDashboard({
       from = f
       to = t
     } else {
-      from = shiftDays(today, -13)
+      from = addDaysDateOnly(today, -13)
       to = today
     }
   } else {
     // default last14
-    from = shiftDays(today, -13)
+    from = addDaysDateOnly(today, -13)
     to = today
   }
 
@@ -160,7 +137,7 @@ export default async function AttendanceDashboard({
     }
 
     const dates: string[] = []
-    for (let d = from; d <= to; d = shiftDays(d, 1)) dates.push(d)
+    for (let d = from; d <= to; d = addDaysDateOnly(d, 1)) dates.push(d)
 
     daySeries = dates.map((d) => {
       const v = byDay.get(d) ?? { total: 0, valid: 0 }
@@ -207,7 +184,7 @@ export default async function AttendanceDashboard({
     }
 
     // Attendance last N days (valid only) for active members
-    const fromInact = shiftDays(today, -(inactiveDays - 1))
+    const fromInact = addDaysDateOnly(today, -(inactiveDays - 1))
     const { data: recent, error: recErr } = await admin
       .from('attendance')
       .select('member_id,date,valid')

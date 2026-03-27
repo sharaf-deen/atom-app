@@ -2,27 +2,11 @@
 'use client'
 
 import { useMemo, useState } from 'react'
-
-function todayLocal() {
-  const d = new Date()
-  const y = d.getFullYear()
-  const m = String(d.getMonth() + 1).padStart(2, '0')
-  const day = String(d.getDate()).padStart(2, '0')
-  return `${y}-${m}-${day}` // YYYY-MM-DD
-}
-function addDays(dateOnly: string, days: number) {
-  const [y, m, d] = dateOnly.split('-').map(Number)
-  const dt = new Date(y, m - 1, d)
-  dt.setDate(dt.getDate() + days)
-  const yy = dt.getFullYear()
-  const mm = String(dt.getMonth() + 1).padStart(2, '0')
-  const dd = String(dt.getDate()).padStart(2, '0')
-  return `${yy}-${mm}-${dd}`
-}
+import { addDaysDateOnly, cairoTodayDateOnly } from '@/lib/cairoTime'
 
 export default function AdminExports() {
-  const [from, setFrom] = useState<string>(addDays(todayLocal(), -30))
-  const [to, setTo] = useState<string>(todayLocal())
+  const [from, setFrom] = useState<string>(() => addDaysDateOnly(cairoTodayDateOnly(), -30))
+  const [to, setTo] = useState<string>(() => cairoTodayDateOnly())
 
   const valid = useMemo(() => {
     return /^\d{4}-\d{2}-\d{2}$/.test(from) && /^\d{4}-\d{2}-\d{2}$/.test(to) && from <= to
