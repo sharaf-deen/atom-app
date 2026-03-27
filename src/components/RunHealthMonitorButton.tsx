@@ -25,9 +25,11 @@ export default function RunHealthMonitorButton({ sendEmail = false }: Props) {
       const path = `/api/admin/health-monitor/run${sendEmail ? '?send_email=1' : ''}`
       const res = await fetch(path, {
         method: 'GET',
+        cache: 'no-store',
+        credentials: 'same-origin',
         headers: { 'cache-control': 'no-store' },
       })
-      const json = await res.json().catch(() => null)
+      const json = await res.json().catch(() => ({}))
 
       if (!res.ok) {
         const msg = json?.details || json?.error || 'Failed'
