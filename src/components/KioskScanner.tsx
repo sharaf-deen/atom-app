@@ -65,6 +65,22 @@ type ScanResponse = {
 
 type Detected = { rawValue: string }
 
+type Status = 'idle' | 'checking' | 'ok' | 'invalid' | 'error'
+type FacingMode = 'environment' | 'user'
+
+type KioskScannerProps = {
+  size?: 'sm' | 'md' | 'lg'
+  ratio?: '4:3' | '1:1'
+  className?: string
+}
+
+type WakeLockSentinelLike = {
+  released?: boolean
+  release?: () => Promise<void>
+  addEventListener?: (type: string, listener: () => void) => void
+  removeEventListener?: (type: string, listener: () => void) => void
+}
+
 function parseMemberText(text: string): string | null {
   const t = (text || '').trim()
   if (!t) return null
@@ -86,6 +102,34 @@ function errToString(err: unknown) {
   return 'Camera error'
 }
 
+function classifyCameraError(err: unknown) {
+  const raw = errToString(err)
+  const normalized = raw.toLowerCase()
+
+  if (normalized.includes('notallowederror') || normalized.includes('permission denied')) {
+    return 'Camera permission denied — allow camera access, then tap Retry.'
+  }
+  if (normalized.includes('notfounderror') || normalized.includes('requested device not found')) {
+    return 'No camera found on this device.'
+  }
+  if (normalized.includes('notreadableerror') || normalized.includes('could not start video source')) {
+    return 'Camera busy or unavailable — close other camera apps, then tap Retry.'
+  }
+  if (normalized.includes('overconstrainederror')) {
+    return 'Selected camera is not available — try Flip camera or Retry.'
+  }
+  if (normalized.includes('securityerror')) {
+    return 'Camera blocked by browser security settings.'
+  }
+  if (normalized.includes('aborterror')) {
+    return 'Camera start was interrupted — tap Retry.'
+  }
+  if (normalized.includes('load camera scanner')) {
+    return 'Failed to load camera scanner'
+  }
+  return raw || 'Camera error'
+}
+
 function buildResultParams(j: ScanResponse, kioskMode: boolean) {
   const sp = new URLSearchParams()
   if (kioskMode) sp.set('kiosk', '1')
@@ -103,16 +147,6 @@ function buildResultParams(j: ScanResponse, kioskMode: boolean) {
   if (j.message) sp.set('message', String(j.message).slice(0, 180))
   return sp
 }
-
-type Status = 'idle' | 'checking' | 'ok' | 'invalid' | 'error'
-
-type KioskScannerProps = {
-  size?: 'sm' | 'md' | 'lg'
-  ratio?: '4:3' | '1:1'
-  className?: string
-}
-
-type FacingMode = 'environment' | 'user'
 
 function StatusPill({ status }: { status: Status }) {
   switch (status) {
@@ -146,13 +180,7 @@ function statusToneClass(status: Status) {
   return 'border-[hsl(var(--border))] bg-[hsl(var(--bg))] text-[hsl(var(--muted))]'
 }
 
-function ActionChip({
-  icon,
-  label,
-}: {
-  icon: ReactNode
-  label: string
-}) {
+function ActionChip({ icon, label }: { icon: ReactNode; label: string }) {
   return (
     <div className="flex items-center gap-2 rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] px-3 py-2 text-sm">
       <span className="inline-flex h-8 w-8 items-center justify-center rounded-xl border border-[hsl(var(--border))] bg-white text-black">
@@ -169,7 +197,96 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className }: 
   const kioskRequested = searchParams?.get('kiosk') === '1'
 
   const [kioskMode, setKioskMode] = useState(false)
-  const wakeLockRef = useRef<any>(null)
+  const [ScannerComponent, setScannerComponent] = useState<ComponentType<any> | null>(null)
+  const [paused, setPaused] = useState(false)
+  const [status, setStatus] = useState<Status>('idle')
+  const [msg, setMsg] = useState<string>('Ready')
+  const [online, setOnline] = useState(true)
+  const [facingMode, setFacingMode] = useState<FacingMode>('environment')
+  const [fullScreen, setFullScreen] = useState(false)
+
+  const wakeLockRef = useRef<WakeLockSentinelLike | null>(null)
+  const wakeLockListenerRef = useRef<(() => void) | null>(null)
+  const mountedRef = useRef(true)
+  const resumeTimerRef = useRef<number | null>(null)
+  const requestAbortRef = useRef<AbortController | null>(null)
+  const requestSeqRef = useRef(0)
+  const deviceTagRef = useRef<string>('web-kiosk')
+  const lastScanRef = useRef<{ scanKey: string; at: number; params: string } | null>(null)
+  const wasOfflineRef = useRef(false)
+  const repeatCooldownMs = kioskMode ? 8000 : 5000
+
+  const clearResumeTimer = useCallback(() => {
+    if (resumeTimerRef.current) {
+      window.clearTimeout(resumeTimerRef.current)
+      resumeTimerRef.current = null
+    }
+  }, [])
+
+  const abortActiveRequest = useCallback(() => {
+    requestSeqRef.current += 1
+    if (requestAbortRef.current) {
+      requestAbortRef.current.abort()
+      requestAbortRef.current = null
+    }
+  }, [])
+
+  const releaseWakeLock = useCallback(async () => {
+    const listener = wakeLockListenerRef.current
+    const current = wakeLockRef.current
+    if (listener && current?.removeEventListener) {
+      try {
+        current.removeEventListener('release', listener)
+      } catch {}
+    }
+    wakeLockListenerRef.current = null
+    wakeLockRef.current = null
+    if (current?.release) {
+      try {
+        await current.release()
+      } catch {}
+    }
+  }, [])
+
+  const requestWakeLock = useCallback(async () => {
+    if (wakeLockRef.current) return
+    if (!kioskMode) return
+    try {
+      const wl = await (navigator as any).wakeLock?.request?.('screen')
+      if (!wl) return
+
+      const onRelease = () => {
+        wakeLockRef.current = null
+      }
+      wakeLockListenerRef.current = onRelease
+      if (wl.addEventListener) {
+        try {
+          wl.addEventListener('release', onRelease)
+        } catch {}
+      }
+      wakeLockRef.current = wl
+    } catch {
+      // ignore
+    }
+  }, [kioskMode])
+
+  const manualRescan = useCallback(() => {
+    abortActiveRequest()
+    clearResumeTimer()
+    setPaused(false)
+    setStatus('idle')
+    setMsg(kioskMode ? 'Ready for next member' : 'Ready')
+  }, [abortActiveRequest, clearResumeTimer, kioskMode])
+
+  useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+      abortActiveRequest()
+      clearResumeTimer()
+      releaseWakeLock().catch(() => {})
+    }
+  }, [abortActiveRequest, clearResumeTimer, releaseWakeLock])
 
   useEffect(() => {
     try {
@@ -192,62 +309,27 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className }: 
   useEffect(() => {
     if (!kioskMode) {
       document.body.classList.remove('kiosk-mode')
-      if (wakeLockRef.current?.release) {
-        wakeLockRef.current.release().catch(() => {})
-      }
-      wakeLockRef.current = null
+      releaseWakeLock().catch(() => {})
       return
     }
 
     document.body.classList.add('kiosk-mode')
+    requestWakeLock().catch(() => {})
 
-    const requestWake = async () => {
-      try {
-        const wl = await (navigator as any).wakeLock?.request?.('screen')
-        if (wl) wakeLockRef.current = wl
-      } catch {
-        // ignore
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        requestWakeLock().catch(() => {})
       }
     }
 
-    requestWake()
+    document.addEventListener('visibilitychange', onVisibilityChange)
 
     return () => {
       document.body.classList.remove('kiosk-mode')
-      if (wakeLockRef.current?.release) {
-        wakeLockRef.current.release().catch(() => {})
-      }
-      wakeLockRef.current = null
+      document.removeEventListener('visibilitychange', onVisibilityChange)
+      releaseWakeLock().catch(() => {})
     }
-  }, [kioskMode])
-
-  function enterKioskMode() {
-    try {
-      window.localStorage.setItem('atom:kiosk', '1')
-    } catch {}
-    setKioskMode(true)
-    router.replace('/scan')
-  }
-
-  function exitKioskMode() {
-    try {
-      window.localStorage.setItem('atom:kiosk', '0')
-    } catch {}
-    setKioskMode(false)
-    setFullScreen(false)
-    router.replace('/scan')
-  }
-
-  const [ScannerComponent, setScannerComponent] = useState<ComponentType<any> | null>(null)
-  const [paused, setPaused] = useState(false)
-  const [status, setStatus] = useState<Status>('idle')
-  const [msg, setMsg] = useState<string>('Ready')
-  const resumeTimerRef = useRef<number | null>(null)
-  const lastScanRef = useRef<{ scanKey: string; at: number; params: string } | null>(null)
-  const repeatCooldownMs = kioskMode ? 8000 : 5000
-
-  const [online, setOnline] = useState(true)
-  const wasOfflineRef = useRef(false)
+  }, [kioskMode, releaseWakeLock, requestWakeLock])
 
   useEffect(() => {
     const update = () => setOnline(typeof navigator !== 'undefined' ? navigator.onLine : true)
@@ -263,6 +345,8 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className }: 
   useEffect(() => {
     if (!online) {
       wasOfflineRef.current = true
+      abortActiveRequest()
+      clearResumeTimer()
       setPaused(true)
       setStatus('error')
       setMsg('Offline — reconnect to the internet, then tap Retry.')
@@ -273,11 +357,7 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className }: 
       wasOfflineRef.current = false
       manualRescan()
     }
-  }, [online])
-
-  const [facingMode, setFacingMode] = useState<FacingMode>('environment')
-  const [fullScreen, setFullScreen] = useState(false)
-  const deviceTagRef = useRef<string>('web-kiosk')
+  }, [abortActiveRequest, clearResumeTimer, manualRescan, online])
 
   useEffect(() => {
     deviceTagRef.current = buildDeviceTag()
@@ -307,11 +387,11 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className }: 
         const mod: any = await import('@yudiel/react-qr-scanner')
         const Comp = mod?.Scanner
         if (!Comp) throw new Error('Scanner export not found in @yudiel/react-qr-scanner')
-        if (!cancelled) setScannerComponent(() => Comp)
+        if (!cancelled && mountedRef.current) setScannerComponent(() => Comp)
       } catch (e) {
-        if (cancelled) return
+        if (cancelled || !mountedRef.current) return
         setStatus('error')
-        setMsg('Failed to load camera scanner')
+        setMsg(classifyCameraError(e))
         console.error(e)
       }
     })()
@@ -321,11 +401,23 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className }: 
     }
   }, [])
 
-  useEffect(() => {
-    return () => {
-      if (resumeTimerRef.current) window.clearTimeout(resumeTimerRef.current)
-    }
-  }, [])
+  function enterKioskMode() {
+    try {
+      window.localStorage.setItem('atom:kiosk', '1')
+    } catch {}
+    setKioskMode(true)
+    router.replace('/scan')
+  }
+
+  function exitKioskMode() {
+    abortActiveRequest()
+    try {
+      window.localStorage.setItem('atom:kiosk', '0')
+    } catch {}
+    setKioskMode(false)
+    setFullScreen(false)
+    router.replace('/scan')
+  }
 
   const handleScan = useCallback(
     async (codes: Detected[]) => {
@@ -334,16 +426,17 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className }: 
       if (!raw) return
 
       let didNavigate = false
+      let reqId = requestSeqRef.current
+      let controller: AbortController | null = null
+      const maybeId = parseMemberText(raw)
+      const scanKey = maybeId ? `atom:${maybeId}` : raw.trim()
+      const payload = { code: maybeId ? `atom:${maybeId}` : raw }
 
       setPaused(true)
       setStatus('checking')
       setMsg('Checking…')
 
       try {
-        const maybeId = parseMemberText(raw)
-        const scanKey = maybeId ? `atom:${maybeId}` : raw.trim()
-        const payload = { code: maybeId ? `atom:${maybeId}` : raw }
-
         if (!online) {
           setStatus('error')
           setMsg('Offline — reconnect to the internet, then tap Retry.')
@@ -364,41 +457,79 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className }: 
           return
         }
 
-        const r = await fetch('/api/kiosk/scan', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'x-device-tag': deviceTagRef.current || 'web-kiosk',
-          },
-          body: JSON.stringify(payload),
-        })
+        abortActiveRequest()
+        controller = new AbortController()
+        const activeController = controller
+        requestAbortRef.current = activeController
+        reqId = requestSeqRef.current + 1
+        requestSeqRef.current = reqId
+        const timeout = window.setTimeout(() => activeController.abort(), 12000)
+
+        let r: Response
+        try {
+          r = await fetch('/api/kiosk/scan', {
+            method: 'POST',
+            cache: 'no-store',
+            headers: {
+              'Content-Type': 'application/json',
+              'x-device-tag': deviceTagRef.current || 'web-kiosk',
+            },
+            body: JSON.stringify(payload),
+            signal: activeController.signal,
+          })
+        } finally {
+          window.clearTimeout(timeout)
+        }
+
+        if (requestSeqRef.current !== reqId || activeController.signal.aborted) {
+          return
+        }
+
         const j: ScanResponse = await r.json().catch(() => ({ ok: false, message: 'Invalid response' }))
 
         if (!r.ok || !j.ok) {
-          setStatus('error')
+          setStatus(j.valid === false ? 'invalid' : 'error')
           setMsg(j?.message || 'Scan failed')
-        } else {
-          const sp = buildResultParams(j, kioskMode)
-          lastScanRef.current = {
-            scanKey,
-            at: Date.now(),
-            params: sp.toString(),
-          }
-
-          router.push(`/scan/result?${sp.toString()}`)
-          didNavigate = true
           return
         }
+
+        const sp = buildResultParams(j, kioskMode)
+        lastScanRef.current = {
+          scanKey,
+          at: Date.now(),
+          params: sp.toString(),
+        }
+
+        setStatus(j.valid ? 'ok' : 'invalid')
+        setMsg(j?.message || (j.valid ? 'Access granted' : 'Access denied'))
+        router.push(`/scan/result?${sp.toString()}`)
+        didNavigate = true
       } catch (e) {
+        const aborted = e instanceof DOMException && e.name === 'AbortError'
+        if (aborted) {
+          if (requestSeqRef.current !== reqId || !mountedRef.current) return
+          if (!online || (typeof navigator !== 'undefined' && !navigator.onLine)) {
+            setStatus('error')
+            setMsg('Offline — reconnect to the internet, then tap Retry.')
+          } else {
+            setStatus('error')
+            setMsg('Scanner request timed out — tap Retry.')
+          }
+          return
+        }
+
         setStatus('error')
         setMsg(
           !online || (typeof navigator !== 'undefined' && !navigator.onLine)
             ? 'Offline — reconnect to the internet, then tap Retry.'
-            : errToString(e)
+            : classifyCameraError(e)
         )
       } finally {
+        if (requestAbortRef.current === controller) {
+          requestAbortRef.current = null
+        }
         if (didNavigate || !online) return
-        if (resumeTimerRef.current) window.clearTimeout(resumeTimerRef.current)
+        clearResumeTimer()
         resumeTimerRef.current = window.setTimeout(() => {
           setPaused(false)
           setStatus('idle')
@@ -406,19 +537,14 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className }: 
         }, 1500)
       }
     },
-    [paused, router, kioskMode, online, repeatCooldownMs]
+    [abortActiveRequest, clearResumeTimer, kioskMode, online, paused, repeatCooldownMs, router]
   )
-
-  function manualRescan() {
-    if (resumeTimerRef.current) window.clearTimeout(resumeTimerRef.current)
-    setPaused(false)
-    setStatus('idle')
-    setMsg(kioskMode ? 'Ready for next member' : 'Ready')
-  }
 
   function retryNow() {
     const nowOnline = typeof navigator !== 'undefined' ? navigator.onLine : online
     if (!nowOnline) {
+      abortActiveRequest()
+      clearResumeTimer()
       setPaused(true)
       setStatus('error')
       setMsg('Offline — reconnect to the internet, then tap Retry.')
@@ -443,7 +569,7 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className }: 
       onScan={handleScan}
       onError={(err: unknown) => {
         setStatus('error')
-        setMsg(errToString(err))
+        setMsg(classifyCameraError(err))
       }}
       components={{ finder: false }}
       paused={paused}
@@ -656,10 +782,10 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className }: 
                     (status === 'ok'
                       ? 'text-emerald-700'
                       : status === 'invalid'
-                      ? 'text-amber-800'
-                      : status === 'error'
-                      ? 'text-rose-700'
-                      : 'text-[hsl(var(--muted))]')
+                        ? 'text-amber-800'
+                        : status === 'error'
+                          ? 'text-rose-700'
+                          : 'text-[hsl(var(--muted))]')
                   }
                 >
                   {msg}
