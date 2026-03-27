@@ -216,8 +216,8 @@ function ageYears(dob?: string | null) {
   const born = new Date(Date.UTC(y, m - 1, d))
   if (Number.isNaN(born.getTime())) return null
 
-  const now = new Date()
-  const today = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()))
+  const [ty, tm, td] = cairoToday().split('-').map(Number)
+  const today = new Date(Date.UTC(ty, tm - 1, td))
   let age = today.getUTCFullYear() - born.getUTCFullYear()
   const mm = today.getUTCMonth() - born.getUTCMonth()
   if (mm < 0 || (mm === 0 && today.getUTCDate() < born.getUTCDate())) age--
