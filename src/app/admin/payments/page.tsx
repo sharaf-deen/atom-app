@@ -9,7 +9,7 @@ import Badge from '@/components/ui/Badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card'
 import { Table } from '@/components/ui/Table'
 import EditPaymentDateButton from '@/components/EditPaymentDateButton'
-import { addDaysDateOnly, cairoDayBoundsUTC, cairoTodayDateOnly, isISODateOnly } from '@/lib/cairoTime'
+import { addDaysDateOnly, cairoDayBoundsUTC, cairoMonthBoundsDateOnly, cairoTodayDateOnly, isISODateOnly } from '@/lib/cairoTime'
 import { canAccessPayments } from '@/lib/rbac'
 import { getSessionUserCached, getSupabaseAdminClientCached } from '@/lib/requestCache'
 
@@ -99,16 +99,6 @@ function parsePreset(v?: string | null): RangePreset {
   return v === 'today' || v === '7d' || v === 'month' || v === 'custom' ? v : 'today'
 }
 
-function startOfMonthDateOnly(isoDate: string) {
-  return `${isoDate.slice(0, 7)}-01`
-}
-
-function endOfMonthDateOnly(isoDate: string) {
-  const [year, month] = isoDate.split('-').map((x) => Number(x))
-  const dt = new Date(Date.UTC(year, month, 0))
-  return dt.toISOString().slice(0, 10)
-}
-
 function buildQS(params: Record<string, string>) {
   const sp = new URLSearchParams()
   for (const [k, v] of Object.entries(params)) {
@@ -157,8 +147,7 @@ export default async function AdminPaymentsPage({
   }
 
   const todayCairo = cairoTodayDateOnly()
-  const monthFrom = startOfMonthDateOnly(todayCairo)
-  const monthTo = endOfMonthDateOnly(todayCairo)
+  const { from: monthFrom, to: monthTo } = cairoMonthBoundsDateOnly(todayCairo)
 
   const presetRaw = sp1(searchParams, 'preset')
   const fromRaw = sp1(searchParams, 'from')

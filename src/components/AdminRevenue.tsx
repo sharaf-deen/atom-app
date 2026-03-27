@@ -2,6 +2,7 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
+import { addDaysDateOnly, cairoTodayDateOnly } from '@/lib/cairoTime'
 
 type Plan = '1m' | '3m' | '6m' | '12m' | 'sessions'
 type RevenueResp =
@@ -17,22 +18,6 @@ type RevenueResp =
       details?: string
     }
 
-function todayLocal() {
-  const d = new Date()
-  const y = d.getFullYear()
-  const m = String(d.getMonth() + 1).padStart(2, '0')
-  const day = String(d.getDate()).padStart(2, '0')
-  return `${y}-${m}-${day}`
-}
-function addDays(dateOnly: string, days: number) {
-  const [y, m, d] = dateOnly.split('-').map(Number)
-  const dt = new Date(y, m - 1, d)
-  dt.setDate(dt.getDate() + days)
-  const yy = dt.getFullYear()
-  const mm = String(dt.getMonth() + 1).padStart(2, '0')
-  const dd = String(dt.getDate()).padStart(2, '0')
-  return `${yy}-${mm}-${dd}`
-}
 function fmtCurrency(n: number) {
   try {
     return new Intl.NumberFormat('en-EG', { style: 'currency', currency: 'EGP' }).format(n)
@@ -45,8 +30,8 @@ function classCard() {
 }
 
 export default function AdminRevenue() {
-  const [from, setFrom] = useState(addDays(todayLocal(), -29))
-  const [to, setTo] = useState(todayLocal())
+  const [from, setFrom] = useState(() => addDaysDateOnly(cairoTodayDateOnly(), -29))
+  const [to, setTo] = useState(() => cairoTodayDateOnly())
   const [data, setData] = useState<RevenueResp | null>(null)
   const [loading, setLoading] = useState(false)
 
