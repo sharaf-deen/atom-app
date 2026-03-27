@@ -6,7 +6,7 @@ export default function Select({ label, hint, className = '', children, ...props
     <label className="block">
       {label && <span className="mb-1 block text-sm font-medium">{label}</span>}
       <select
-        className={`w-full rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-[hsl(var(--bg))] ${className}`}
+        className={`min-h-[42px] w-full rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-[hsl(var(--bg))] ${className}`}
         {...props}
       >
         {children}
