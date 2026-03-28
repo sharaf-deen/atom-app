@@ -9,6 +9,9 @@ import { getSessionUser } from '@/lib/session'
 import { canAccessCashReport } from '@/lib/rbac'
 import AccessDeniedCard from '@/components/AccessDeniedCard'
 import Badge from '@/components/ui/Badge'
+import Button from '@/components/ui/Button'
+import Input from '@/components/ui/Input'
+import Select from '@/components/ui/Select'
 import { Card } from '@/components/ui/Card'
 import { Table } from '@/components/ui/Table'
 import {
@@ -482,6 +485,8 @@ export default async function AdminCashReportPage({
     `PF off-cash: ${personalOffCashExpenses.length}`,
   ]
 
+  const exportNote = 'Uses current filters'
+
   const statCards = [
     { label: 'Income', value: formatEGP(totalIncome), tone: 'text-[hsl(var(--fg))]', sub: 'subscriptions + other income + PF cash in' },
     { label: 'Expenses', value: formatEGP(totalExpenses), tone: 'text-[hsl(var(--fg))]', sub: 'business expenses + PF cash out' },
@@ -521,95 +526,86 @@ export default async function AdminCashReportPage({
         </div>
       </div>
 
-      <Card className="p-4 sm:p-5 space-y-4">
-        <form method="get" className="grid gap-3 md:grid-cols-[minmax(0,180px)_minmax(0,180px)_minmax(0,180px)_auto] xl:grid-cols-[minmax(0,180px)_minmax(0,180px)_minmax(0,180px)_auto_auto] xl:items-end">
-          <label className="block">
-            <span className="mb-1 block text-sm font-medium">Period</span>
-            <select
-              name="mode"
-              defaultValue={mode}
-              className="w-full rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            >
-              <option value="day">Day</option>
-              <option value="week">Week (Mon–Sun)</option>
-              <option value="month">Month</option>
-              <option value="range">Custom range</option>
-            </select>
-          </label>
-
-          {mode === 'range' ? (
-            <>
-              <label className="block">
-                <span className="mb-1 block text-sm font-medium">From (Egypt)</span>
-                <input
-                  type="date"
-                  name="from"
-                  defaultValue={safeFrom}
-                  className="w-full rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                />
-              </label>
-              <label className="block">
-                <span className="mb-1 block text-sm font-medium">To (Egypt)</span>
-                <input
-                  type="date"
-                  name="to"
-                  defaultValue={safeTo}
-                  className="w-full rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                />
-              </label>
-            </>
-          ) : (
-            <label className="block md:col-span-2">
-              <span className="mb-1 block text-sm font-medium">Anchor date (Egypt)</span>
-              <input
-                type="date"
-                name="date"
-                defaultValue={anchorDate}
-                className="w-full rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              />
-            </label>
-          )}
-
-          <div className="flex flex-wrap gap-2 xl:justify-end">
-            <button className="rounded-xl bg-black text-white px-4 py-2 text-sm font-medium">Load report</button>
-            <Link
-              prefetch={false}
-              href="/admin/cash-report"
-              className="rounded-xl border px-4 py-2 text-sm font-medium hover:bg-gray-50"
-            >
-              Reset
-            </Link>
+      <Card className="p-4 sm:p-5">
+        <div className="space-y-5">
+          <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h2 className="text-lg font-semibold">Filters</h2>
+              <p className="text-sm text-[hsl(var(--muted))]">Choose a period, then export exactly this report.</p>
+            </div>
+            <div className="text-xs font-medium uppercase tracking-[0.18em] text-[hsl(var(--muted))]">Egypt time · Africa/Cairo</div>
           </div>
-        </form>
 
-        <div className="flex flex-wrap gap-2">
-          <Link prefetch={false} href={`/admin/cash-report?mode=day&date=${today}`} className="border px-3 py-2 rounded-lg text-sm hover:bg-gray-50">Today</Link>
-          <Link prefetch={false} href={`/admin/cash-report?mode=day&date=${yesterday}`} className="border px-3 py-2 rounded-lg text-sm hover:bg-gray-50">Yesterday</Link>
-          <Link prefetch={false} href={`/admin/cash-report?mode=week&date=${today}`} className="border px-3 py-2 rounded-lg text-sm hover:bg-gray-50">This week</Link>
-          <Link prefetch={false} href={`/admin/cash-report?mode=month&date=${today}`} className="border px-3 py-2 rounded-lg text-sm hover:bg-gray-50">This month</Link>
-          <Link prefetch={false} href={`/admin/cash-report?mode=range&from=${last7From}&to=${today}`} className="border px-3 py-2 rounded-lg text-sm hover:bg-gray-50">Last 7 days</Link>
-        </div>
+          <div className="space-y-2">
+            <div className="text-xs font-semibold uppercase tracking-[0.18em] text-[hsl(var(--muted))]">Quick period</div>
+            <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-5">
+              <Button asChild variant="outline" className={`w-full ${mode === 'day' && anchorDate === today ? 'border-black bg-black text-white hover:bg-black hover:text-white' : ''}`} href={`/admin/cash-report?mode=day&date=${today}`}>Today</Button>
+              <Button asChild variant="outline" className={`w-full ${mode === 'day' && anchorDate === yesterday ? 'border-black bg-black text-white hover:bg-black hover:text-white' : ''}`} href={`/admin/cash-report?mode=day&date=${yesterday}`}>Yesterday</Button>
+              <Button asChild variant="outline" className={`w-full ${mode === 'week' ? 'border-black bg-black text-white hover:bg-black hover:text-white' : ''}`} href={`/admin/cash-report?mode=week&date=${today}`}>This week</Button>
+              <Button asChild variant="outline" className={`w-full ${mode === 'month' ? 'border-black bg-black text-white hover:bg-black hover:text-white' : ''}`} href={`/admin/cash-report?mode=month&date=${today}`}>This month</Button>
+              <Button asChild variant="outline" className={`w-full ${mode === 'range' && safeFrom === last7From && safeTo === today ? 'border-black bg-black text-white hover:bg-black hover:text-white' : ''}`} href={`/admin/cash-report?mode=range&from=${last7From}&to=${today}`}>Last 7 days</Button>
+            </div>
+          </div>
 
-        <div className="flex flex-wrap items-center gap-2">
-          {activeChips.map((chip) => (
-            <span
-              key={chip}
-              className="inline-flex items-center rounded-full border border-[hsl(var(--border))] bg-[hsl(var(--bg))] px-3 py-1 text-xs font-medium text-[hsl(var(--muted))]"
-            >
-              {chip}
-            </span>
-          ))}
-        </div>
+          <form method="get" className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px] xl:items-start">
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-2 2xl:grid-cols-4">
+              <Select name="mode" defaultValue={mode} label="Period">
+                <option value="day">Day</option>
+                <option value="week">Week (Mon–Sun)</option>
+                <option value="month">Month</option>
+                <option value="range">Custom range</option>
+              </Select>
 
-        <div className="flex flex-wrap gap-2">
-          <Link prefetch={false} href={`/api/admin/cash-report/export?${exportQuery.toString()}`} className="rounded-xl border px-4 py-2 text-sm font-medium hover:bg-gray-50">
-            Export filtered CSV
-          </Link>
-          <Link prefetch={false} href={`/api/admin/cash-report/export-pdf?${exportQuery.toString()}`} className="rounded-xl border px-4 py-2 text-sm font-medium hover:bg-gray-50">
-            Export filtered PDF
-          </Link>
-          <div className="self-center text-xs text-[hsl(var(--muted))]">
-            Exports and shortcuts follow the same selected period and include other income plus Personal Funds cash in/out. Off-cash personal expenses stay contextual only.
+              {mode === 'range' ? (
+                <>
+                  <Input type="date" name="from" defaultValue={safeFrom} label="From" />
+                  <Input type="date" name="to" defaultValue={safeTo} label="To" />
+                </>
+              ) : (
+                <div className="sm:col-span-2 2xl:col-span-2">
+                  <Input type="date" name="date" defaultValue={anchorDate} label="Anchor date" hint="Used to build the selected day, week, or month." />
+                </div>
+              )}
+
+              <div className="sm:col-span-2 2xl:col-span-4 flex flex-wrap gap-2 pt-1">
+                <Button>Load report</Button>
+                <Button asChild variant="outline" href="/admin/cash-report">
+                  Reset filters
+                </Button>
+              </div>
+            </div>
+
+            <div className="space-y-3 rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))]/55 p-4">
+              <div>
+                <div className="text-sm font-semibold">Export</div>
+                <div className="text-xs text-[hsl(var(--muted))]">{exportNote}</div>
+              </div>
+              <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-1">
+                <Link prefetch={false} href={`/api/admin/cash-report/export?${exportQuery.toString()}`} className="inline-flex min-h-[42px] w-full items-center justify-center rounded-2xl border border-[hsl(var(--border))] bg-white px-4 py-2 text-sm font-medium shadow-soft transition hover:bg-[hsl(var(--bg))]/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-[hsl(var(--bg))]">
+                  Export CSV
+                </Link>
+                <Link prefetch={false} href={`/api/admin/cash-report/export-pdf?${exportQuery.toString()}`} className="inline-flex min-h-[42px] w-full items-center justify-center rounded-2xl border border-[hsl(var(--border))] bg-white px-4 py-2 text-sm font-medium shadow-soft transition hover:bg-[hsl(var(--bg))]/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-[hsl(var(--bg))]">
+                  Export PDF
+                </Link>
+              </div>
+              <div className="rounded-xl border border-dashed border-[hsl(var(--border))] bg-white/80 px-3 py-2 text-xs text-[hsl(var(--muted))]">
+                Includes subscription income, other income, expenses, and Personal Funds cash in / cash out for the selected period.
+              </div>
+            </div>
+          </form>
+
+          <div className="space-y-2">
+            <div className="text-xs font-semibold uppercase tracking-[0.18em] text-[hsl(var(--muted))]">Current view</div>
+            <div className="flex flex-wrap items-center gap-2">
+              {activeChips.map((chip) => (
+                <span
+                  key={chip}
+                  className="inline-flex items-center rounded-full border border-[hsl(var(--border))] bg-[hsl(var(--bg))] px-3 py-1 text-xs font-medium text-[hsl(var(--muted))]"
+                >
+                  {chip}
+                </span>
+              ))}
+            </div>
           </div>
         </div>
       </Card>
