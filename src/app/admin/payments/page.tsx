@@ -304,6 +304,8 @@ export default async function AdminPaymentsPage({
     q ? `Search: ${q}` : '',
   ].filter(Boolean)
 
+  const exportNote = 'Uses current filters'
+
   const tableColumns = [
     { key: 'paid_when', header: 'Paid at (EG)' },
     { key: 'recorded_when', header: 'Recorded at', hideOnMobile: true },
@@ -381,63 +383,84 @@ export default async function AdminPaymentsPage({
       </div>
 
       <Card>
-        <CardHeader>
-          <CardTitle>Quick filters</CardTitle>
-          <div className="text-sm text-[hsl(var(--muted))]">Egypt time (Africa/Cairo)</div>
+        <CardHeader className="flex-col items-start gap-1 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <CardTitle>Filters</CardTitle>
+            <div className="text-sm text-[hsl(var(--muted))]">Refine the view, then export exactly this selection.</div>
+          </div>
+          <div className="text-xs font-medium uppercase tracking-[0.18em] text-[hsl(var(--muted))]">Egypt time · Africa/Cairo</div>
         </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-5">
-            <Button asChild variant="outline" className="w-full" href={quickLinks.today}>Today</Button>
-            <Button asChild variant="outline" className="w-full" href={quickLinks.seven}>Last 7 days</Button>
-            <Button asChild variant="outline" className="w-full" href={quickLinks.month}>This month</Button>
-            <Button asChild variant="outline" className="w-full" href={quickLinks.custom}>Custom</Button>
-            <Button asChild variant="outline" className="w-full" href={quickLinks.reset}>Reset all</Button>
+        <CardContent className="space-y-5">
+          <div className="space-y-2">
+            <div className="text-xs font-semibold uppercase tracking-[0.18em] text-[hsl(var(--muted))]">Quick range</div>
+            <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-5">
+              <Button asChild variant="outline" className={`w-full ${preset === 'today' ? 'border-black bg-black text-white hover:bg-black hover:text-white' : ''}`} href={quickLinks.today}>Today</Button>
+              <Button asChild variant="outline" className={`w-full ${preset === '7d' ? 'border-black bg-black text-white hover:bg-black hover:text-white' : ''}`} href={quickLinks.seven}>Last 7 days</Button>
+              <Button asChild variant="outline" className={`w-full ${preset === 'month' ? 'border-black bg-black text-white hover:bg-black hover:text-white' : ''}`} href={quickLinks.month}>This month</Button>
+              <Button asChild variant="outline" className={`w-full ${preset === 'custom' ? 'border-black bg-black text-white hover:bg-black hover:text-white' : ''}`} href={quickLinks.custom}>Custom</Button>
+              <Button asChild variant="outline" className="w-full" href={quickLinks.reset}>Reset filters</Button>
+            </div>
           </div>
 
-          <form method="get" className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
-            <Select name="preset" defaultValue={preset} label="Preset">
-              <option value="today">Today</option>
-              <option value="7d">Last 7 days</option>
-              <option value="month">This month</option>
-              <option value="custom">Custom</option>
-            </Select>
+          <form method="get" className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px] xl:items-start">
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-2 2xl:grid-cols-5">
+              <Select name="preset" defaultValue={preset} label="Preset">
+                <option value="today">Today</option>
+                <option value="7d">Last 7 days</option>
+                <option value="month">This month</option>
+                <option value="custom">Custom</option>
+              </Select>
 
-            <Input type="date" name="from" defaultValue={from} label="From" />
+              <Input type="date" name="from" defaultValue={from} label="From" />
 
-            <Input type="date" name="to" defaultValue={to} label="To" />
+              <Input type="date" name="to" defaultValue={to} label="To" />
 
-            <Select name="payment_method" defaultValue={payment_method} label="Method">
-              <option value="all">All</option>
-              <option value="cash">Cash</option>
-              <option value="instapay">Instapay</option>
-              <option value="card">Card</option>
-              <option value="bank_transfer">Bank transfer</option>
-            </Select>
+              <Select name="payment_method" defaultValue={payment_method} label="Method">
+                <option value="all">All</option>
+                <option value="cash">Cash</option>
+                <option value="instapay">Instapay</option>
+                <option value="card">Card</option>
+                <option value="bank_transfer">Bank transfer</option>
+              </Select>
 
-            <div className="sm:col-span-2 xl:col-span-2">
-              <Input
-                name="q"
-                defaultValue={q}
-                label="Search member"
-                placeholder="name / email / phone / ATOM-000123"
-              />
+              <div className="sm:col-span-2 2xl:col-span-1">
+                <Input
+                  name="q"
+                  defaultValue={q}
+                  label="Search member"
+                  placeholder="name / email / phone / ATOM-000123"
+                />
+              </div>
+
+              <div className="sm:col-span-2 2xl:col-span-5 flex flex-wrap gap-2 pt-1">
+                <Button>Apply filters</Button>
+                <Button asChild variant="outline" href="/admin/payments">
+                  Reset filters
+                </Button>
+              </div>
             </div>
 
-            <div className="sm:col-span-2 xl:col-span-6 grid gap-2 pt-1 sm:grid-cols-2 xl:grid-cols-4">
-              <Button className="w-full">Apply filters</Button>
-              <a href={`/api/admin/payments/export?${exportQS}`} className="inline-flex min-h-[42px] w-full items-center justify-center rounded-2xl border border-[hsl(var(--border))] bg-white px-4 py-2 text-sm font-medium shadow-soft transition hover:bg-[hsl(var(--bg))]/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-[hsl(var(--bg))]">
-                Export filtered CSV
-              </a>
-              <a href={`/api/admin/payments/export-pdf?${exportQS}`} className="inline-flex min-h-[42px] w-full items-center justify-center rounded-2xl border border-[hsl(var(--border))] bg-white px-4 py-2 text-sm font-medium shadow-soft transition hover:bg-[hsl(var(--bg))]/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-[hsl(var(--bg))]">
-                Export filtered PDF
-              </a>
-              <Button asChild variant="outline" className="w-full" href="/admin/payments">
-                Reset
-              </Button>
+            <div className="space-y-3 rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))]/55 p-4">
+              <div>
+                <div className="text-sm font-semibold">Export</div>
+                <div className="text-xs text-[hsl(var(--muted))]">{exportNote}</div>
+              </div>
+              <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-1">
+                <a href={`/api/admin/payments/export?${exportQS}`} className="inline-flex min-h-[42px] w-full items-center justify-center rounded-2xl border border-[hsl(var(--border))] bg-white px-4 py-2 text-sm font-medium shadow-soft transition hover:bg-[hsl(var(--bg))]/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-[hsl(var(--bg))]">
+                  Export CSV
+                </a>
+                <a href={`/api/admin/payments/export-pdf?${exportQS}`} className="inline-flex min-h-[42px] w-full items-center justify-center rounded-2xl border border-[hsl(var(--border))] bg-white px-4 py-2 text-sm font-medium shadow-soft transition hover:bg-[hsl(var(--bg))]/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-[hsl(var(--bg))]">
+                  Export PDF
+                </a>
+              </div>
+              <div className="rounded-xl border border-dashed border-[hsl(var(--border))] bg-white/80 px-3 py-2 text-xs text-[hsl(var(--muted))]">
+                Includes the current date range, payment method, and member search.
+              </div>
             </div>
           </form>
 
-          {activeFilters.length ? (
+          <div className="space-y-2">
+            <div className="text-xs font-semibold uppercase tracking-[0.18em] text-[hsl(var(--muted))]">Current view</div>
             <div className="flex flex-wrap gap-2">
               {activeFilters.map((label) => (
                 <span
@@ -448,7 +471,7 @@ export default async function AdminPaymentsPage({
                 </span>
               ))}
             </div>
-          ) : null}
+          </div>
         </CardContent>
       </Card>
 
@@ -459,7 +482,7 @@ export default async function AdminPaymentsPage({
             Use <strong>Edit date</strong> for historical imports already entered with today&apos;s date.
           </div>
           <div className="text-xs text-[hsl(var(--muted))]">
-            Filtered CSV/PDF exports and the Cash Report shortcut always follow the current filtered result, not only the visible page.
+            Cash Report and exports always follow the same current filters.
           </div>
         </CardContent>
       </Card>
