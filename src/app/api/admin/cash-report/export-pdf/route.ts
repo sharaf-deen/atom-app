@@ -35,6 +35,18 @@ type PersonalEntry = {
   created_at: string
 }
 
+type ExternalIncomeSource = 'bar' | 'store' | 'other'
+type ExternalIncomeEntry = {
+  id: string
+  entry_date: string
+  source_key: ExternalIncomeSource
+  title: string
+  amount: number
+  payment_method: string | null
+  note: string | null
+  created_at: string
+}
+
 function json(status: number, body: any) {
   const res = NextResponse.json(body, { status })
   res.headers.set('Cache-Control', 'no-store')
@@ -62,6 +74,12 @@ function labelMethod(m: Method) {
   if (m === 'instapay') return 'Instapay'
   if (m === 'card') return 'Card'
   return 'Bank transfer'
+}
+
+function externalSourceLabel(source: ExternalIncomeSource) {
+  if (source === 'bar') return 'Bar'
+  if (source === 'store') return 'Store'
+  return 'Other'
 }
 
 function personalKindLabel(kind: PersonalKind) {
@@ -214,7 +232,21 @@ export async function GET(req: Request) {
       : { data: [] as Array<{ id: string; label: string }> }
     const personById = new Map(((pfPeople ?? []) as Array<{ id: string; label: string }>).map((row) => [row.id, row.label]))
 
+    const { data: rawExternalIncome, error: extErr } = await admin
+      .from('external_income_entries')
+      .select('id, entry_date, source_key, title, amount, payment_method, note, created_at')
+      .gte('entry_date', range.from)
+      .lte('entry_date', range.to)
+      .order('entry_date', { ascending: false })
+      .order('created_at', { ascending: false })
+      .limit(10000)
+
+    const externalIncomeEntries = ((rawExternalIncome ?? []) as any[]).filter(
+      (row) => row.source_key === 'bar' || row.source_key === 'store' || row.source_key === 'other'
+    ) as ExternalIncomeEntry[]
+
     const subscriptionIncomeBy: Record<Method, number> = { cash: 0, instapay: 0, card: 0, bank_transfer: 0 }
+    const externalIncomeBy: Record<Method, number> = { cash: 0, instapay: 0, card: 0, bank_transfer: 0 }
     const businessExpenseBy: Record<Method, number> = { cash: 0, instapay: 0, card: 0, bank_transfer: 0 }
     const personalCashInBy: Record<Method, number> = { cash: 0, instapay: 0, card: 0, bank_transfer: 0 }
     const personalCashOutBy: Record<Method, number> = { cash: 0, instapay: 0, card: 0, bank_transfer: 0 }
@@ -223,6 +255,12 @@ export async function GET(req: Request) {
       const amt = Number(r.amount ?? 0)
       if (!Number.isFinite(amt)) continue
       subscriptionIncomeBy[normMethod(r.payment_method)] += amt
+    }
+
+    for (const row of externalIncomeEntries) {
+      const amt = Number(row.amount ?? 0)
+      if (!Number.isFinite(amt)) continue
+      externalIncomeBy[normMethod(row.payment_method)] += amt
     }
 
     for (const r of (exps ?? []) as any[]) {
@@ -242,11 +280,12 @@ export async function GET(req: Request) {
     const incomeBy: Record<Method, number> = { cash: 0, instapay: 0, card: 0, bank_transfer: 0 }
     const expenseBy: Record<Method, number> = { cash: 0, instapay: 0, card: 0, bank_transfer: 0 }
     for (const method of METHODS) {
-      incomeBy[method] = subscriptionIncomeBy[method] + personalCashInBy[method]
+      incomeBy[method] = subscriptionIncomeBy[method] + externalIncomeBy[method] + personalCashInBy[method]
       expenseBy[method] = businessExpenseBy[method] + personalCashOutBy[method]
     }
 
     const totalSubscriptionIncome = METHODS.reduce((sum, method) => sum + subscriptionIncomeBy[method], 0)
+    const totalExternalIncome = METHODS.reduce((sum, method) => sum + externalIncomeBy[method], 0)
     const totalPersonalCashIn = METHODS.reduce((sum, method) => sum + personalCashInBy[method], 0)
     const totalIncome = METHODS.reduce((sum, method) => sum + incomeBy[method], 0)
     const totalBusinessExpenses = METHODS.reduce((sum, method) => sum + businessExpenseBy[method], 0)
@@ -255,6 +294,7 @@ export async function GET(req: Request) {
     const net = totalIncome - totalExpenses
 
     const recentPays = ((pays ?? []) as any[]).slice(0, 10)
+    const latestExternalIncome = externalIncomeEntries.slice(0, 10)
     const topExpenses = (exps ?? [])
       .slice()
       .sort((a: any, b: any) => Number(b.amount ?? 0) - Number(a.amount ?? 0))
@@ -305,7 +345,7 @@ export async function GET(req: Request) {
       y -= 14
       page.drawText(`Timezone: ${CAIRO_TZ}`, { x: marginX, y, size: 9, font, color: rgb(0.35, 0.35, 0.35) })
       y -= 12
-      page.drawText('Includes Personal Funds cash in/out. Personal expenses paid personally remain off-cash context until reimbursement.', {
+      page.drawText('Includes subscription income, other income, and Personal Funds cash in/out. Personal expenses paid personally remain off-cash context until reimbursement.', {
         x: marginX,
         y,
         size: 8.5,
@@ -315,6 +355,16 @@ export async function GET(req: Request) {
       y -= 14
       if (pfErr) {
         page.drawText(`Personal Funds status: unavailable fallback (${truncate(pfErr.message, 70)})`, {
+          x: marginX,
+          y,
+          size: 8.5,
+          font,
+          color: rgb(0.7, 0.45, 0.05),
+        })
+        y -= 14
+      }
+      if (extErr) {
+        page.drawText(`Other income status: unavailable fallback (${truncate(extErr.message, 70)})`, {
           x: marginX,
           y,
           size: 8.5,
@@ -338,7 +388,7 @@ export async function GET(req: Request) {
         color: net < 0 ? rgb(0.8, 0.1, 0.1) : rgb(0.05, 0.5, 0.2),
       })
       y -= 18
-      page.drawText(`Subscription income: ${fmtMoneyEGP(totalSubscriptionIncome)}   Personal Funds cash in: ${fmtMoneyEGP(totalPersonalCashIn)}`, {
+      page.drawText(`Subscription income: ${fmtMoneyEGP(totalSubscriptionIncome)}   Other income: ${fmtMoneyEGP(totalExternalIncome)}   Personal Funds cash in: ${fmtMoneyEGP(totalPersonalCashIn)}`, {
         x: marginX,
         y,
         size: 9,
@@ -361,7 +411,7 @@ export async function GET(req: Request) {
       })
       y -= 14
       page.drawText(
-        `Filtered payments: ${(pays ?? []).length}   Filtered business expense lines: ${(exps ?? []).length}   PF cash movements: ${personalEntries.filter((row) => row.kind !== 'expense_paid_personally').length}   PF off-cash: ${personalEntries.filter((row) => row.kind === 'expense_paid_personally').length}`,
+        `Filtered payments: ${(pays ?? []).length}   Other income lines: ${externalIncomeEntries.length}   Filtered business expense lines: ${(exps ?? []).length}   PF cash movements: ${personalEntries.filter((row) => row.kind !== 'expense_paid_personally').length}   PF off-cash: ${personalEntries.filter((row) => row.kind === 'expense_paid_personally').length}`,
         {
           x: marginX,
           y,
@@ -406,6 +456,7 @@ export async function GET(req: Request) {
         })
         y -= 11
         const parts = []
+        if (externalIncomeBy[m] > 0) parts.push(`Other ${fmtMoneyEGP(externalIncomeBy[m])}`)
         if (personalCashInBy[m] > 0) parts.push(`PF in ${fmtMoneyEGP(personalCashInBy[m])}`)
         if (personalCashOutBy[m] > 0) parts.push(`PF out ${fmtMoneyEGP(personalCashOutBy[m])}`)
         if (parts.length) {
@@ -449,6 +500,50 @@ export async function GET(req: Request) {
 
       if (!recentPays.length) {
         page.drawText('No subscription payments in this period.', { x: marginX, y, size: 9, font, color: rgb(0.35, 0.35, 0.35) })
+        y -= rowH
+      }
+
+      y -= 6
+      drawHLine(y)
+      y -= 18
+    }
+
+    const drawExternalIncomeTable = () => {
+      ensureSpace(180)
+      page.drawText('Other income (latest 10)', { x: marginX, y, size: 12, font: fontBold })
+      y -= 16
+
+      const colDate = marginX
+      const colSource = marginX + 80
+      const colTitle = marginX + 145
+      const colMethod = marginX + 335
+      const colAmount = marginX + 430
+
+      page.drawText('Date', { x: colDate, y, size: 10, font: fontBold })
+      page.drawText('Source', { x: colSource, y, size: 10, font: fontBold })
+      page.drawText('Title', { x: colTitle, y, size: 10, font: fontBold })
+      page.drawText('Method', { x: colMethod, y, size: 10, font: fontBold })
+      page.drawText('Amount', { x: colAmount, y, size: 10, font: fontBold })
+      y -= 10
+      drawHLine(y)
+      y -= 12
+
+      for (const row of latestExternalIncome) {
+        ensureSpace(34)
+        page.drawText(fmtDate(row.entry_date), { x: colDate, y, size: 9, font })
+        page.drawText(externalSourceLabel(row.source_key), { x: colSource, y, size: 9, font })
+        page.drawText(truncate(row.title, 28), { x: colTitle, y, size: 9, font })
+        page.drawText(labelMethod(normMethod(row.payment_method)), { x: colMethod, y, size: 9, font })
+        page.drawText(fmtMoneyEGP(Number(row.amount ?? 0)), { x: colAmount, y, size: 9, font: fontBold })
+        y -= 11
+        if (row.note) {
+          page.drawText(truncate(row.note, 58), { x: colTitle, y, size: 8, font, color: rgb(0.35, 0.35, 0.35) })
+          y -= 11
+        }
+      }
+
+      if (!latestExternalIncome.length) {
+        page.drawText('No other income lines in this period.', { x: marginX, y, size: 9, font, color: rgb(0.35, 0.35, 0.35) })
         y -= rowH
       }
 
@@ -581,6 +676,7 @@ export async function GET(req: Request) {
     drawSummary()
     drawBreakdown()
     drawPaymentsTable()
+    drawExternalIncomeTable()
     drawExpensesTable()
     drawPersonalCashTable()
     drawPersonalOffCashTable()

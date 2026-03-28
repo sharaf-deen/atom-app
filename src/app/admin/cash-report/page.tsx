@@ -35,6 +35,18 @@ type PersonalEntry = {
   created_at: string
 }
 
+type ExternalIncomeSource = 'bar' | 'store' | 'other'
+type ExternalIncomeEntry = {
+  id: string
+  entry_date: string
+  source_key: ExternalIncomeSource
+  title: string
+  amount: number
+  payment_method: string | null
+  note: string | null
+  created_at: string
+}
+
 function formatEGP(n: number) {
   const v = Number(n ?? 0)
   try {
@@ -91,6 +103,21 @@ function personalKindLabel(kind: PersonalKind) {
   if (kind === 'advance_to_gym') return 'Advance to gym'
   if (kind === 'reimbursement_from_gym') return 'Reimbursement from gym'
   return 'Expense paid personally'
+}
+
+function externalSourceLabel(source: ExternalIncomeSource) {
+  if (source === 'bar') return 'Bar'
+  if (source === 'store') return 'Store'
+  return 'Other'
+}
+
+function externalSourceBadge(source: ExternalIncomeSource) {
+  const cls = source === 'bar'
+    ? 'border-amber-200 bg-amber-50 text-amber-900'
+    : source === 'store'
+      ? 'border-sky-200 bg-sky-50 text-sky-800'
+      : 'border-slate-200 bg-slate-50 text-slate-700'
+  return <span className={`inline-flex rounded-full border px-2 py-0.5 text-xs font-medium ${cls}`}>{externalSourceLabel(source)}</span>
 }
 
 function personalTypeBadge(kind: PersonalKind) {
@@ -226,6 +253,25 @@ export default async function AdminCashReportPage({
     : { data: [] as Array<{ id: string; label: string }> }
   const personById = new Map(((pfPeople ?? []) as Array<{ id: string; label: string }>).map((row) => [row.id, row.label]))
 
+  const { data: rawExternalIncome, error: extErr } = await admin
+    .from('external_income_entries')
+    .select('id, entry_date, source_key, title, amount, payment_method, note, created_at')
+    .gte('entry_date', safeFrom)
+    .lte('entry_date', safeTo)
+    .order('entry_date', { ascending: false })
+    .order('created_at', { ascending: false })
+    .limit(10000)
+
+  const externalIncomeEntries = ((rawExternalIncome ?? []) as any[]).filter(
+    (row) => row.source_key === 'bar' || row.source_key === 'store' || row.source_key === 'other'
+  ) as ExternalIncomeEntry[]
+
+  const externalIncomeBy: Record<Method, number> = { cash: 0, instapay: 0, card: 0, bank_transfer: 0 }
+  for (const row of externalIncomeEntries) {
+    const amt = Number(row.amount ?? 0)
+    if (!Number.isFinite(amt)) continue
+    externalIncomeBy[normMethod(row.payment_method)] += amt
+  }
   const personalCashInBy: Record<Method, number> = { cash: 0, instapay: 0, card: 0, bank_transfer: 0 }
   const personalCashOutBy: Record<Method, number> = { cash: 0, instapay: 0, card: 0, bank_transfer: 0 }
   const personalCashMovements = personalEntries.filter((row) => row.kind !== 'expense_paid_personally')
@@ -242,7 +288,7 @@ export default async function AdminCashReportPage({
   const incomeBy: Record<Method, number> = { cash: 0, instapay: 0, card: 0, bank_transfer: 0 }
   const expenseBy: Record<Method, number> = { cash: 0, instapay: 0, card: 0, bank_transfer: 0 }
   for (const method of METHODS) {
-    incomeBy[method] = subscriptionIncomeBy[method] + personalCashInBy[method]
+    incomeBy[method] = subscriptionIncomeBy[method] + externalIncomeBy[method] + personalCashInBy[method]
     expenseBy[method] = businessExpenseBy[method] + personalCashOutBy[method]
   }
 
@@ -250,7 +296,9 @@ export default async function AdminCashReportPage({
   const totalExpenses = METHODS.reduce((s, m) => s + expenseBy[m], 0)
   const net = totalIncome - totalExpenses
   const paymentsCount = (pays ?? []).length
+  const externalIncomeCount = externalIncomeEntries.length
   const expensesCount = (exps ?? []).length
+  const totalExternalIncome = METHODS.reduce((s, m) => s + externalIncomeBy[m], 0)
   const personalCashInTotal = METHODS.reduce((s, m) => s + personalCashInBy[m], 0)
   const personalCashOutTotal = METHODS.reduce((s, m) => s + personalCashOutBy[m], 0)
   const personalOffCashTotal = personalOffCashExpenses.reduce((s, row) => s + Number(row.amount ?? 0), 0)
@@ -269,6 +317,7 @@ export default async function AdminCashReportPage({
     .slice()
     .sort((a: any, b: any) => Number(b.amount ?? 0) - Number(a.amount ?? 0))
     .slice(0, 10)
+  const latestExternalIncome = externalIncomeEntries.slice(0, 10)
 
   const latestPersonalCash = personalCashMovements.slice(0, 10)
   const latestOffCash = personalOffCashExpenses.slice(0, 10)
@@ -292,6 +341,7 @@ export default async function AdminCashReportPage({
     income: (
       <div className="space-y-0.5">
         <div className="font-semibold">{formatEGP(incomeBy[m])}</div>
+        {externalIncomeBy[m] > 0 ? <div className="text-xs text-[hsl(var(--muted))]">includes other income {formatEGP(externalIncomeBy[m])}</div> : null}
         {personalCashInBy[m] > 0 ? <div className="text-xs text-[hsl(var(--muted))]">includes PF cash in {formatEGP(personalCashInBy[m])}</div> : null}
       </div>
     ),
@@ -352,6 +402,28 @@ export default async function AdminCashReportPage({
     }
   })
 
+  const externalColumns = [
+    { key: 'date', header: 'Date' },
+    { key: 'source', header: 'Source' },
+    { key: 'title', header: 'Title' },
+    { key: 'amount', header: 'Amount' },
+    { key: 'method', header: 'Method' },
+    { key: 'note', header: 'Note' },
+  ]
+
+  const externalRows = latestExternalIncome.map((row) => {
+    const m = normMethod(row.payment_method)
+    return {
+      id: row.id,
+      date: <span className="text-sm text-[hsl(var(--muted))]">{formatShortDate(row.entry_date)}</span>,
+      source: externalSourceBadge(row.source_key),
+      title: <span className="font-medium">{row.title}</span>,
+      amount: <span className="font-semibold">{formatEGP(Number(row.amount ?? 0))}</span>,
+      method: <Badge className={badgeClassForMethod(m)}>{labelMethod(m)}</Badge>,
+      note: <span className="text-sm text-[hsl(var(--muted))]">{row.note || '—'}</span>,
+    }
+  })
+
   const personalCashColumns = [
     { key: 'date', header: 'Date' },
     { key: 'person', header: 'Person' },
@@ -398,21 +470,24 @@ export default async function AdminCashReportPage({
 
   const paymentsHref = `/admin/payments?${new URLSearchParams({ preset: 'custom', from: safeFrom, to: safeTo }).toString()}`
   const personalFundsHref = `/admin/personal-funds?${new URLSearchParams({ preset: 'custom', from: safeFrom, to: safeTo }).toString()}`
+  const externalIncomeHref = `/admin/external-income?${new URLSearchParams({ preset: 'custom', from: safeFrom, to: safeTo }).toString()}`
 
   const activeChips = [
     rangeLabel,
     'Timezone: Africa/Cairo',
     `Payments: ${paymentsCount}`,
+    `Other income: ${externalIncomeCount}`,
     `Expenses: ${expensesCount}`,
     `PF cash movements: ${personalCashMovements.length}`,
     `PF off-cash: ${personalOffCashExpenses.length}`,
   ]
 
   const statCards = [
-    { label: 'Income', value: formatEGP(totalIncome), tone: 'text-[hsl(var(--fg))]', sub: 'includes subscription income + PF cash in' },
-    { label: 'Expenses', value: formatEGP(totalExpenses), tone: 'text-[hsl(var(--fg))]', sub: 'includes business expenses + PF cash out' },
+    { label: 'Income', value: formatEGP(totalIncome), tone: 'text-[hsl(var(--fg))]', sub: 'subscriptions + other income + PF cash in' },
+    { label: 'Expenses', value: formatEGP(totalExpenses), tone: 'text-[hsl(var(--fg))]', sub: 'business expenses + PF cash out' },
     { label: 'Net cash', value: formatEGP(net), tone: net < 0 ? 'text-rose-700' : 'text-emerald-700', sub: 'selected period' },
-    { label: 'Payments', value: String(paymentsCount), tone: 'text-[hsl(var(--fg))]', sub: 'subscription payment lines' },
+    { label: 'Subscription income', value: formatEGP(METHODS.reduce((s, m) => s + subscriptionIncomeBy[m], 0)), tone: 'text-[hsl(var(--fg))]', sub: `${paymentsCount} payment lines` },
+    { label: 'Other income', value: formatEGP(totalExternalIncome), tone: 'text-amber-700', sub: `${externalIncomeCount} external income lines` },
     { label: 'Expense lines', value: String(expensesCount), tone: 'text-[hsl(var(--fg))]', sub: 'business expense lines' },
     { label: 'PF cash in', value: formatEGP(personalCashInTotal), tone: 'text-sky-700', sub: 'advances to gym' },
     { label: 'PF cash out', value: formatEGP(personalCashOutTotal), tone: 'text-rose-700', sub: 'reimbursements from gym' },
@@ -426,7 +501,7 @@ export default async function AdminCashReportPage({
           <h1 className="text-2xl font-bold">Admin · Cash Report</h1>
           <p className="text-sm text-[hsl(var(--muted))]">
             {rangeLabel}. Uses <span className="font-medium">Egypt time (Africa/Cairo)</span> for day boundaries and now includes
-            <span className="font-medium"> cash-affecting Personal Funds movements</span>.
+            <span className="font-medium"> subscription income, other income, and cash-affecting Personal Funds movements</span>.
           </p>
         </div>
 
@@ -439,6 +514,9 @@ export default async function AdminCashReportPage({
           </Link>
           <Link prefetch={false} href={personalFundsHref} className="border px-4 py-2 rounded-lg hover:bg-gray-50">
             Personal Funds
+          </Link>
+          <Link prefetch={false} href={externalIncomeHref} className="border px-4 py-2 rounded-lg hover:bg-gray-50">
+            Other Income
           </Link>
         </div>
       </div>
@@ -531,7 +609,7 @@ export default async function AdminCashReportPage({
             Export filtered PDF
           </Link>
           <div className="self-center text-xs text-[hsl(var(--muted))]">
-            Exports and shortcuts follow the same selected period and include Personal Funds cash in/out. Off-cash personal expenses stay contextual only.
+            Exports and shortcuts follow the same selected period and include other income plus Personal Funds cash in/out. Off-cash personal expenses stay contextual only.
           </div>
         </div>
       </Card>
@@ -548,12 +626,13 @@ export default async function AdminCashReportPage({
 
       <Card className="p-4 sm:p-5 space-y-2">
         <div className="text-sm font-medium">Cash logic</div>
-        <div className="text-sm text-[hsl(var(--muted))]">Advance to gym is counted as cash in. Reimbursement from gym is counted as cash out. Expense paid personally is shown below for context but does not reduce cash until the reimbursement actually happens.</div>
+        <div className="text-sm text-[hsl(var(--muted))]">Subscription payments and other income entries are counted as cash in by payment method. Advance to gym is counted as cash in. Reimbursement from gym is counted as cash out. Expense paid personally is shown below for context but does not reduce cash until the reimbursement actually happens.</div>
       </Card>
 
       {payErr ? <p className="text-sm text-rose-700">❌ Income error: {payErr.message}</p> : null}
       {expErr ? <p className="text-sm text-rose-700">❌ Expenses error: {expErr.message}</p> : null}
-      {pfErr ? <p className="text-sm text-amber-700">⚠️ Personal Funds cash movements could not be loaded. Cash totals below currently include Payments and Expenses only.</p> : null}
+      {pfErr ? <p className="text-sm text-amber-700">⚠️ Personal Funds cash movements could not be loaded. Cash totals below currently exclude PF cash in/out.</p> : null}
+      {extErr ? <p className="text-sm text-amber-700">⚠️ Other income entries could not be loaded. Cash totals below currently exclude external income.</p> : null}
 
       <div className="space-y-3">
         <div className="flex items-center justify-between gap-3 flex-wrap">
@@ -583,6 +662,19 @@ export default async function AdminCashReportPage({
           </div>
           <Table columns={expColumns} rows={expRows as any} keyField="id" stickyTopClassName="top-0" />
         </div>
+      </div>
+
+      <div className="space-y-3">
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          <h2 className="text-lg font-semibold">Other income (latest 10)</h2>
+          <div className="flex items-center gap-3 flex-wrap">
+            <p className="text-xs text-[hsl(var(--muted))]">Bar, store, and other external money entries counted in income.</p>
+            <Link prefetch={false} href={externalIncomeHref} className="text-xs font-medium underline underline-offset-4">
+              Open Other Income
+            </Link>
+          </div>
+        </div>
+        <Table columns={externalColumns} rows={externalRows as any} keyField="id" stickyTopClassName="top-0" />
       </div>
 
       <div className="grid gap-6 lg:grid-cols-2">
