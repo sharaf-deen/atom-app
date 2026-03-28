@@ -41,6 +41,25 @@ function buildHref(base: string, current: SearchParams, patch: Record<string, st
   return s ? `${base}?${s}` : base
 }
 
+function buildCurrentViewLabel(params: {
+  q: string
+  status: string
+  device: string
+  scannedByRole: string
+  start: string
+  end: string
+  sort: string
+}) {
+  const bits: string[] = []
+  if (params.start || params.end) bits.push(`Period: ${params.start || '…'} → ${params.end || '…'}`)
+  if (params.status) bits.push(`Status: ${params.status}`)
+  if (params.scannedByRole) bits.push(`Role: ${params.scannedByRole}`)
+  if (params.device) bits.push(`Device: ${params.device}`)
+  if (params.q) bits.push(`Search: ${params.q}`)
+  bits.push(`Sort: ${params.sort === 'recent' ? 'Most recent' : params.sort === 'device_asc' ? 'Device A → Z' : 'Device Z → A'}`)
+  return bits.join(' · ')
+}
+
 const PER_PAGE = 50
 
 export default async function ScanAuditPage({ searchParams }: { searchParams: SearchParams }) {
@@ -99,6 +118,7 @@ export default async function ScanAuditPage({ searchParams }: { searchParams: Se
   const hasPrev = page > 1
   const hasNext = page < totalPages
   const exportHref = buildHref('/api/admin/scan-audit/export', searchParams, { page: '' })
+  const currentViewLabel = buildCurrentViewLabel({ q, status, device, scannedByRole, start, end, sort })
 
   return (
     <main className="min-h-[calc(100vh-3rem)] bg-white text-black">
@@ -107,7 +127,7 @@ export default async function ScanAuditPage({ searchParams }: { searchParams: Se
           <div>
             <h1 className="text-2xl font-semibold tracking-tight">Scan Audit</h1>
             <p className="mt-1 text-sm text-[hsl(var(--muted))]">
-              Kiosk scan history (attendance) with staff + device context. Time shown in Egypt time.
+              Kiosk scan history with staff and device context. Time shown in Egypt time.
             </p>
             {truncated ? (
               <p className="mt-1 text-xs text-amber-700">
@@ -115,109 +135,153 @@ export default async function ScanAuditPage({ searchParams }: { searchParams: Se
               </p>
             ) : null}
           </div>
-
-          <div className="flex items-center gap-2">
-            <a
-              href={exportHref}
-              className="rounded-xl border px-3 py-2 text-sm font-semibold hover:bg-black/[0.03] dark:hover:bg-white/[0.06]"
-              title="Download CSV"
-            >
-              Export CSV
-            </a>
-          </div>
         </div>
 
-        <form
-          className="grid gap-3 rounded-2xl border border-[hsl(var(--border))] bg-white p-4 shadow-soft sm:grid-cols-2 lg:grid-cols-6"
-          action="/admin/scan-audit"
-          method="get"
-        >
-          <input
-            className="w-full rounded-xl border border-black/10 bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-black/50 lg:col-span-2"
-            name="q"
-            defaultValue={q}
-            placeholder="Search member / staff / device…"
-          />
+        <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_18rem]">
+          <div className="rounded-2xl border border-[hsl(var(--border))] bg-white p-4 shadow-soft">
+            <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <h2 className="text-base font-semibold tracking-tight">Filters</h2>
+                <p className="mt-1 text-sm text-[hsl(var(--muted))]">
+                  Refine the audit, then review exactly this scan history.
+                </p>
+              </div>
+              <div className="rounded-xl bg-[hsl(var(--bg))] px-3 py-2 text-xs text-[hsl(var(--muted))]">
+                Egypt time
+              </div>
+            </div>
 
-          <select
-            name="status"
-            defaultValue={status}
-            className="w-full rounded-xl border border-black/10 bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-black/50"
-          >
-            <option value="">All statuses</option>
-            <option value="ok">ok</option>
-            <option value="invalid">invalid</option>
-            <option value="expired">expired</option>
-            <option value="frozen">frozen</option>
-            <option value="error">error</option>
-          </select>
+            <form className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3" action="/admin/scan-audit" method="get">
+              <label className="block xl:col-span-2">
+                <span className="mb-1 block text-sm font-medium">Search</span>
+                <input
+                  className="w-full rounded-xl border border-black/10 bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-black/50"
+                  name="q"
+                  defaultValue={q}
+                  placeholder="Member, staff or device"
+                />
+              </label>
 
-          <select
-            name="scanned_by_role"
-            defaultValue={scannedByRole}
-            className="w-full rounded-xl border border-black/10 bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-black/50"
-          >
-            <option value="">Scanned by (any)</option>
-            <option value="reception">reception</option>
-            <option value="admin">admin</option>
-            <option value="super_admin">super_admin</option>
-          </select>
+              <label className="block">
+                <span className="mb-1 block text-sm font-medium">Status</span>
+                <select
+                  name="status"
+                  defaultValue={status}
+                  className="w-full rounded-xl border border-black/10 bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-black/50"
+                >
+                  <option value="">All statuses</option>
+                  <option value="ok">ok</option>
+                  <option value="invalid">invalid</option>
+                  <option value="expired">expired</option>
+                  <option value="frozen">frozen</option>
+                  <option value="error">error</option>
+                </select>
+              </label>
 
-          <select
-            name="sort"
-            defaultValue={sort}
-            className="w-full rounded-xl border border-black/10 bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-black/50"
-          >
-            <option value="recent">Most recent</option>
-            <option value="device_asc">Device A → Z</option>
-            <option value="device_desc">Device Z → A</option>
-          </select>
+              <label className="block">
+                <span className="mb-1 block text-sm font-medium">Scanner role</span>
+                <select
+                  name="scanned_by_role"
+                  defaultValue={scannedByRole}
+                  className="w-full rounded-xl border border-black/10 bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-black/50"
+                >
+                  <option value="">Any role</option>
+                  <option value="reception">reception</option>
+                  <option value="admin">admin</option>
+                  <option value="super_admin">super_admin</option>
+                </select>
+              </label>
 
-          <input
-            className="w-full rounded-xl border border-black/10 bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-black/50"
-            name="device"
-            defaultValue={device}
-            placeholder="Device tag"
-          />
+              <label className="block">
+                <span className="mb-1 block text-sm font-medium">Sort</span>
+                <select
+                  name="sort"
+                  defaultValue={sort}
+                  className="w-full rounded-xl border border-black/10 bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-black/50"
+                >
+                  <option value="recent">Most recent</option>
+                  <option value="device_asc">Device A → Z</option>
+                  <option value="device_desc">Device Z → A</option>
+                </select>
+              </label>
 
-          <input
-            className="w-full rounded-xl border border-black/10 bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-black/50"
-            type="date"
-            name="start"
-            defaultValue={start}
-            title="Start date"
-          />
+              <label className="block">
+                <span className="mb-1 block text-sm font-medium">Device</span>
+                <input
+                  className="w-full rounded-xl border border-black/10 bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-black/50"
+                  name="device"
+                  defaultValue={device}
+                  placeholder="Device tag"
+                />
+              </label>
 
-          <input
-            className="w-full rounded-xl border border-black/10 bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-black/50"
-            type="date"
-            name="end"
-            defaultValue={end}
-            title="End date"
-          />
+              <label className="block">
+                <span className="mb-1 block text-sm font-medium">Start date</span>
+                <input
+                  className="w-full rounded-xl border border-black/10 bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-black/50"
+                  type="date"
+                  name="start"
+                  defaultValue={start}
+                  title="Start date"
+                />
+              </label>
 
-          <div className="flex items-center gap-2 lg:col-span-6">
-            <button type="submit" className="rounded-xl bg-black px-4 py-2 text-sm font-semibold text-white hover:opacity-90">
-              Apply
-            </button>
+              <label className="block">
+                <span className="mb-1 block text-sm font-medium">End date</span>
+                <input
+                  className="w-full rounded-xl border border-black/10 bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-black/50"
+                  type="date"
+                  name="end"
+                  defaultValue={end}
+                  title="End date"
+                />
+              </label>
 
-            <Link
-              href="/admin/scan-audit"
-              className="rounded-xl border px-4 py-2 text-sm font-semibold hover:bg-black/[0.03]"
-              title="Reset filters"
-            >
-              Reset
-            </Link>
+              <div className="flex flex-wrap items-center gap-2 sm:col-span-2 xl:col-span-3">
+                <button type="submit" className="rounded-xl bg-black px-4 py-2 text-sm font-semibold text-white hover:opacity-90">
+                  Apply filters
+                </button>
 
-            {errorMessage ? (
-              <span className="ml-auto text-sm text-red-700">{errorMessage}</span>
-            ) : (
-              <span className="ml-auto text-sm text-[hsl(var(--muted))]">
-                {total} scan{total === 1 ? '' : 's'}
-              </span>
-            )}
+                <Link
+                  href="/admin/scan-audit"
+                  className="rounded-xl border px-4 py-2 text-sm font-semibold hover:bg-black/[0.03]"
+                  title="Reset filters"
+                >
+                  Reset filters
+                </Link>
+
+                <div className="ml-auto rounded-xl bg-[hsl(var(--bg))] px-3 py-2 text-xs text-[hsl(var(--muted))]">
+                  <span className="font-medium text-black">Current view:</span> {currentViewLabel}
+                </div>
+              </div>
+            </form>
           </div>
-        </form>
+
+          <div className="rounded-2xl border border-[hsl(var(--border))] bg-white p-4 shadow-soft">
+            <div>
+              <h2 className="text-base font-semibold tracking-tight">Export</h2>
+              <p className="mt-1 text-sm text-[hsl(var(--muted))]">Download exactly this audit view.</p>
+            </div>
+
+            <div className="mt-4 space-y-3">
+              <a
+                href={exportHref}
+                className="inline-flex w-full items-center justify-center rounded-xl border bg-black px-4 py-2 text-sm font-semibold text-white hover:opacity-90"
+                title="Download CSV"
+              >
+                Export CSV
+              </a>
+              <p className="text-xs text-[hsl(var(--muted))]">Uses current filters</p>
+              {errorMessage ? (
+                <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{errorMessage}</div>
+              ) : (
+                <div className="rounded-xl bg-[hsl(var(--bg))] px-3 py-2 text-sm text-[hsl(var(--muted))]">
+                  {total} scan{total === 1 ? '' : 's'}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
 
         <div className="rounded-2xl border border-[hsl(var(--border))] bg-white shadow-soft">
           {rows.length === 0 ? (
