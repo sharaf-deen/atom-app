@@ -74,6 +74,14 @@ function fmtName(p: ProfileRow | undefined | null) {
   return name || p.email || p.member_id || 'Member'
 }
 
+function formatPeriodLabel(period: string, from: string, to: string) {
+  if (period === 'today') return 'Today'
+  if (period === 'last7') return 'Last 7 days'
+  if (period === 'last14') return 'Last 14 days'
+  if (period === 'last30') return 'Last 30 days'
+  return `${from} → ${to}`
+}
+
 export default async function AttendanceDashboard({
   searchParams,
 }: {
@@ -255,38 +263,80 @@ export default async function AttendanceDashboard({
   const uniqueValid = new Set(rows.filter((r) => r.valid).map((r) => r.member_id).filter(Boolean)).size
 
   const exportHref = `/api/admin/export/attendance?from=${from}&to=${to}`
+  const currentViewLabel = `${formatPeriodLabel(period, from, to)} · Inactive threshold: ${inactiveDays} days`
 
   const filters = (
-    <form className="grid gap-3 lg:grid-cols-[220px_180px_180px_220px_auto] lg:items-end" action={nextPath} method="get">
-      <Select name="period" defaultValue={period} label="Period">
-        <option value="today">Today</option>
-        <option value="last7">Last 7 days</option>
-        <option value="last14">Last 14 days</option>
-        <option value="last30">Last 30 days</option>
-        <option value="custom">Custom</option>
-      </Select>
+    <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_18rem]">
+      <div className="rounded-2xl border bg-white p-4 shadow-soft">
+        <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h2 className="text-base font-semibold tracking-tight">Filters</h2>
+            <p className="mt-1 text-sm text-[hsl(var(--muted))]">
+              Focus the dashboard before reviewing attendance and inactivity.
+            </p>
+          </div>
+          <div className="rounded-xl bg-[hsl(var(--bg))] px-3 py-2 text-xs text-[hsl(var(--muted))]">
+            Cairo time
+          </div>
+        </div>
 
-      <Input label="From" name="from" type="date" defaultValue={from} disabled={period !== 'custom'} />
+        <form className="grid gap-3 md:grid-cols-2 xl:grid-cols-4" action={nextPath} method="get">
+          <div>
+            <Select name="period" defaultValue={period} label="Period">
+              <option value="today">Today</option>
+              <option value="last7">Last 7 days</option>
+              <option value="last14">Last 14 days</option>
+              <option value="last30">Last 30 days</option>
+              <option value="custom">Custom</option>
+            </Select>
+          </div>
 
-      <Input label="To" name="to" type="date" defaultValue={to} disabled={period !== 'custom'} />
+          <div>
+            <Input label="From" name="from" type="date" defaultValue={from} disabled={period !== 'custom'} />
+          </div>
 
-      <Input
-        label="Inactive threshold"
-        name="inactiveDays"
-        type="number"
-        min={7}
-        max={60}
-        defaultValue={String(inactiveDays)}
-        hint="days (valid check-ins)"
-      />
+          <div>
+            <Input label="To" name="to" type="date" defaultValue={to} disabled={period !== 'custom'} />
+          </div>
 
-      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-1">
-        <Button type="submit" className="w-full">Apply</Button>
-        <Button asChild variant="outline" className="w-full" href={nextPath}>
-          Reset
-        </Button>
+          <div>
+            <Input
+              label="Inactive threshold"
+              hint="Days without valid check-ins"
+              name="inactiveDays"
+              type="number"
+              min={7}
+              max={60}
+              defaultValue={String(inactiveDays)}
+            />
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2 md:col-span-2 xl:col-span-4">
+            <Button type="submit">Apply filters</Button>
+            <Button asChild href={nextPath} variant="outline">
+              Reset filters
+            </Button>
+            <div className="ml-auto rounded-xl bg-[hsl(var(--bg))] px-3 py-2 text-xs text-[hsl(var(--muted))]">
+              <span className="font-medium text-black">Current view:</span> {currentViewLabel}
+            </div>
+          </div>
+        </form>
       </div>
-    </form>
+
+      <div className="rounded-2xl border bg-white p-4 shadow-soft">
+        <div>
+          <h2 className="text-base font-semibold tracking-tight">Export</h2>
+          <p className="mt-1 text-sm text-[hsl(var(--muted))]">Export exactly this attendance view.</p>
+        </div>
+
+        <div className="mt-4 space-y-3">
+          <Button asChild href={exportHref} className="w-full">
+            Export CSV
+          </Button>
+          <p className="text-xs text-[hsl(var(--muted))]">Uses current filters</p>
+        </div>
+      </div>
+    </div>
   )
 
   const statCards = (
@@ -365,20 +415,11 @@ export default async function AttendanceDashboard({
     }
   })
 
-  const headerRight = (
-    <div className="flex items-center gap-2">
-      <Button asChild variant="outline" size="sm" className="w-full sm:w-auto" href={exportHref}>
-        Export CSV
-      </Button>
-    </div>
-  )
-
   return (
     <main>
       <PageHeader
         title="Attendance"
         subtitle={`Attendance dashboard — date filters are shown in Cairo time (${CAIRO_TZ}).`}
-        right={headerRight}
       />
       <Section className="space-y-5">
         {loadError ? (
