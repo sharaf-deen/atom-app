@@ -13,7 +13,6 @@ import Input from '@/components/ui/Input'
 import Select from '@/components/ui/Select'
 import InlineAlert from '@/components/ui/InlineAlert'
 import { getSessionUserCached, getSupabaseAdminClientCached } from '@/lib/requestCache'
-import { addDaysDateOnly, cairoTodayDateOnly, isISODateOnly } from '@/lib/cairoTime'
 import { canAccessPersonalFunds } from '@/lib/rbac'
 
 type EntryKind = 'advance_to_gym' | 'expense_paid_personally' | 'reimbursement_from_gym'
@@ -70,6 +69,23 @@ function parsePreset(v: unknown): RangePreset {
 
 function parseKind(v: unknown): EntryKind | 'all' {
   return v === 'advance_to_gym' || v === 'expense_paid_personally' || v === 'reimbursement_from_gym' ? v : 'all'
+}
+
+function toISODate(d: Date) {
+  const year = d.getFullYear()
+  const month = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
+function addDays(d: Date, days: number) {
+  const x = new Date(d)
+  x.setDate(x.getDate() + days)
+  return x
+}
+
+function startOfYear(d: Date) {
+  return new Date(d.getFullYear(), 0, 1)
 }
 
 function sanitizeSearch(v: string) {
@@ -360,8 +376,7 @@ async function addEntryAction(formData: FormData) {
   if (!canAccessPersonalFunds(me.role)) redirect('/admin/personal-funds?error=Access%20denied')
 
   const returnQS = safeStr(formData.get('return_qs'))
-  const entry_dateRaw = safeStr(formData.get('entry_date')).trim()
-  const entry_date = isISODateOnly(entry_dateRaw) ? entry_dateRaw : cairoTodayDateOnly()
+  const entry_date = safeStr(formData.get('entry_date')).trim() || toISODate(new Date())
   const person_id = safeStr(formData.get('person_id')).trim()
   const kind = safeStr(formData.get('kind')).trim() as EntryKind
   const amountRaw = safeStr(formData.get('amount')).trim()
@@ -440,8 +455,7 @@ async function updateEntryAction(formData: FormData) {
 
   const returnQS = safeStr(formData.get('return_qs'))
   const id = safeStr(formData.get('id')).trim()
-  const entry_dateRaw = safeStr(formData.get('entry_date')).trim()
-  const entry_date = isISODateOnly(entry_dateRaw) ? entry_dateRaw : cairoTodayDateOnly()
+  const entry_date = safeStr(formData.get('entry_date')).trim() || toISODate(new Date())
   const person_id = safeStr(formData.get('person_id')).trim()
   const kind = safeStr(formData.get('kind')).trim() as EntryKind
   const amountRaw = safeStr(formData.get('amount')).trim()
@@ -594,7 +608,8 @@ export default async function PersonalFundsPage({
   }
 
   const admin = getSupabaseAdminClientCached()
-  const today = cairoTodayDateOnly()
+  const now = new Date()
+  const today = toISODate(now)
   const preset = parsePreset(typeof searchParams.preset === 'string' ? searchParams.preset : '90d')
 
   let from = safeStr(searchParams.from)
@@ -602,18 +617,18 @@ export default async function PersonalFundsPage({
 
   if (preset === '30d') {
     to = today
-    from = addDaysDateOnly(today, -29)
+    from = toISODate(addDays(now, -29))
   } else if (preset === '90d') {
     to = today
-    from = addDaysDateOnly(today, -89)
+    from = toISODate(addDays(now, -89))
   } else if (preset === 'year') {
-    from = `${today.slice(0, 4)}-01-01`
+    from = toISODate(startOfYear(now))
     to = today
   } else if (preset === 'all') {
     from = ''
     to = ''
   } else {
-    if (!from) from = addDaysDateOnly(today, -89)
+    if (!from) from = toISODate(addDays(now, -89))
     if (!to) to = today
   }
 
@@ -1133,22 +1148,26 @@ export default async function PersonalFundsPage({
         <Card>
           <CardHeader>
             <CardTitle>Filters</CardTitle>
+            <div className="text-sm text-[hsl(var(--muted))]">Focus the view before reviewing personal balances and proof.</div>
           </CardHeader>
-          <CardContent>
+          <CardContent className="space-y-4">
             <form method="get" className="space-y-4">
-              <div className="flex flex-wrap gap-2">
-                <Link prefetch={false} href="/admin/personal-funds?preset=30d" className={`rounded-full border px-3 py-1.5 text-sm ${preset === '30d' ? 'bg-black text-white border-black' : 'bg-white hover:bg-gray-50'}`}>
-                  Last 30 days
-                </Link>
-                <Link prefetch={false} href="/admin/personal-funds?preset=90d" className={`rounded-full border px-3 py-1.5 text-sm ${preset === '90d' ? 'bg-black text-white border-black' : 'bg-white hover:bg-gray-50'}`}>
-                  Last 90 days
-                </Link>
-                <Link prefetch={false} href="/admin/personal-funds?preset=year" className={`rounded-full border px-3 py-1.5 text-sm ${preset === 'year' ? 'bg-black text-white border-black' : 'bg-white hover:bg-gray-50'}`}>
-                  This year
-                </Link>
-                <Link prefetch={false} href="/admin/personal-funds?preset=all" className={`rounded-full border px-3 py-1.5 text-sm ${preset === 'all' ? 'bg-black text-white border-black' : 'bg-white hover:bg-gray-50'}`}>
-                  All time
-                </Link>
+              <div className="space-y-2">
+                <div className="text-sm font-medium">Quick range</div>
+                <div className="flex flex-wrap gap-2">
+                  <Link prefetch={false} href="/admin/personal-funds?preset=30d" className={`rounded-full border px-3 py-1.5 text-sm ${preset === '30d' ? 'bg-black text-white border-black' : 'bg-white hover:bg-gray-50'}`}>
+                    Last 30 days
+                  </Link>
+                  <Link prefetch={false} href="/admin/personal-funds?preset=90d" className={`rounded-full border px-3 py-1.5 text-sm ${preset === '90d' ? 'bg-black text-white border-black' : 'bg-white hover:bg-gray-50'}`}>
+                    Last 90 days
+                  </Link>
+                  <Link prefetch={false} href="/admin/personal-funds?preset=year" className={`rounded-full border px-3 py-1.5 text-sm ${preset === 'year' ? 'bg-black text-white border-black' : 'bg-white hover:bg-gray-50'}`}>
+                    This year
+                  </Link>
+                  <Link prefetch={false} href="/admin/personal-funds?preset=all" className={`rounded-full border px-3 py-1.5 text-sm ${preset === 'all' ? 'bg-black text-white border-black' : 'bg-white hover:bg-gray-50'}`}>
+                    All time
+                  </Link>
+                </div>
               </div>
 
               <input type="hidden" name="preset" value="custom" />
@@ -1171,15 +1190,26 @@ export default async function PersonalFundsPage({
               </div>
 
               <div className="flex flex-wrap items-center gap-2">
-                <Button type="submit" variant="outline">Apply filters</Button>
+                <Button type="submit">Apply filters</Button>
                 <Button asChild variant="outline" href="/admin/personal-funds?preset=90d">
-                  Reset
+                  Reset filters
                 </Button>
                 <div className="text-xs text-[hsl(var(--muted))]">Top totals stay all time.</div>
               </div>
 
+              <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] px-4 py-3">
+                <div className="text-xs font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Current view</div>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {activeFilters.length > 0 ? activeFilters.map((item) => (
+                    <span key={item} className="inline-flex rounded-full border border-[hsl(var(--border))] bg-white px-3 py-1 text-xs text-[hsl(var(--muted))]">
+                      {item}
+                    </span>
+                  )) : <span className="text-sm text-[hsl(var(--muted))]">Last 90 days / All people / All types</span>}
+                </div>
+              </div>
+
               {activeFilters.length > 0 ? (
-                <div className="flex flex-wrap gap-2">
+                <div className="hidden flex-wrap gap-2">
                   {activeFilters.map((item) => (
                     <span key={item} className="inline-flex rounded-full border border-[hsl(var(--border))] bg-[hsl(var(--bg))] px-3 py-1 text-xs text-[hsl(var(--muted))]">
                       {item}

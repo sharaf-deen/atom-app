@@ -660,15 +660,19 @@ export default async function ExternalIncomePage({
         <Card>
           <CardHeader>
             <CardTitle>Filters</CardTitle>
+            <div className="text-sm text-[hsl(var(--muted))]">Refine the list before reviewing extra revenue entries.</div>
           </CardHeader>
-          <CardContent>
+          <CardContent className="space-y-4">
             <form action="/admin/external-income" className="space-y-4">
-              <div className="flex flex-wrap gap-2">
-                {(['30d', '90d', 'year', 'all'] as const).map((p) => (
-                  <Link key={p} prefetch={false} href={`/admin/external-income?preset=${p}`} className={`rounded-full border px-3 py-1.5 text-sm ${preset === p ? 'border-black bg-black text-white' : 'bg-white hover:bg-gray-50'}`}>
-                    {p === '30d' ? '30 days' : p === '90d' ? '90 days' : p === 'year' ? 'This year' : 'All'}
-                  </Link>
-                ))}
+              <div className="space-y-2">
+                <div className="text-sm font-medium">Quick range</div>
+                <div className="flex flex-wrap gap-2">
+                  {(['30d', '90d', 'year', 'all'] as const).map((p) => (
+                    <Link key={p} prefetch={false} href={`/admin/external-income?preset=${p}`} className={`rounded-full border px-3 py-1.5 text-sm ${preset === p ? 'border-black bg-black text-white' : 'bg-white hover:bg-gray-50'}`}>
+                      {p === '30d' ? '30 days' : p === '90d' ? '90 days' : p === 'year' ? 'This year' : 'All'}
+                    </Link>
+                  ))}
+                </div>
               </div>
               <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
                 <Input type="date" name="from" label="From" defaultValue={from} />
@@ -683,8 +687,21 @@ export default async function ExternalIncomePage({
               </div>
               <input type="hidden" name="preset" value="custom" />
               <div className="flex flex-wrap gap-2">
-                <Button type="submit" variant="outline">Apply filters</Button>
-                <Button asChild variant="ghost" href="/admin/external-income?preset=90d">Clear</Button>
+                <Button type="submit">Apply filters</Button>
+                <Button asChild variant="outline" href="/admin/external-income?preset=90d">Reset filters</Button>
+              </div>
+
+              <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] px-4 py-3">
+                <div className="text-xs font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Current view</div>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {( [
+                    preset === 'all' ? 'All dates' : from && to ? `${from} - ${to}` : '',
+                    source !== 'all' ? sourceLabel(source) : 'All sources',
+                    q ? `Search: ${q}` : '',
+                  ].filter(Boolean) ).map((item) => (
+                    <span key={item} className="inline-flex rounded-full border border-[hsl(var(--border))] bg-white px-3 py-1 text-xs text-[hsl(var(--muted))]">{item}</span>
+                  ))}
+                </div>
               </div>
             </form>
           </CardContent>
