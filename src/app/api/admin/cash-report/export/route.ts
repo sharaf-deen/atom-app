@@ -32,6 +32,18 @@ type PersonalEntry = {
   created_at: string
 }
 
+type ExternalIncomeSource = 'bar' | 'store' | 'other'
+type ExternalIncomeEntry = {
+  id: string
+  entry_date: string
+  source_key: ExternalIncomeSource
+  title: string
+  amount: number
+  payment_method: string | null
+  note: string | null
+  created_at: string
+}
+
 function json(status: number, body: any) {
   const res = NextResponse.json(body, { status })
   res.headers.set('Cache-Control', 'no-store')
@@ -64,6 +76,12 @@ function labelMethod(m: Method) {
   if (m === 'instapay') return 'Instapay'
   if (m === 'card') return 'Card'
   return 'Bank transfer'
+}
+
+function externalSourceLabel(source: ExternalIncomeSource) {
+  if (source === 'bar') return 'Bar'
+  if (source === 'store') return 'Store'
+  return 'Other'
 }
 
 function personalKindLabel(kind: PersonalKind) {
@@ -196,7 +214,21 @@ export async function GET(req: Request) {
       : { data: [] as Array<{ id: string; label: string }> }
     const personById = new Map(((pfPeople ?? []) as Array<{ id: string; label: string }>).map((row) => [row.id, row.label]))
 
+    const { data: rawExternalIncome, error: extErr } = await admin
+      .from('external_income_entries')
+      .select('id, entry_date, source_key, title, amount, payment_method, note, created_at')
+      .gte('entry_date', range.from)
+      .lte('entry_date', range.to)
+      .order('entry_date', { ascending: false })
+      .order('created_at', { ascending: false })
+      .limit(100000)
+
+    const externalIncomeEntries = ((rawExternalIncome ?? []) as any[]).filter(
+      (row) => row.source_key === 'bar' || row.source_key === 'store' || row.source_key === 'other'
+    ) as ExternalIncomeEntry[]
+
     const subscriptionIncomeBy: Record<Method, number> = { cash: 0, instapay: 0, card: 0, bank_transfer: 0 }
+    const externalIncomeBy: Record<Method, number> = { cash: 0, instapay: 0, card: 0, bank_transfer: 0 }
     const businessExpenseBy: Record<Method, number> = { cash: 0, instapay: 0, card: 0, bank_transfer: 0 }
     const personalCashInBy: Record<Method, number> = { cash: 0, instapay: 0, card: 0, bank_transfer: 0 }
     const personalCashOutBy: Record<Method, number> = { cash: 0, instapay: 0, card: 0, bank_transfer: 0 }
@@ -205,6 +237,12 @@ export async function GET(req: Request) {
       const amt = Number(r.amount ?? 0)
       if (!Number.isFinite(amt)) continue
       subscriptionIncomeBy[normMethod(r.payment_method)] += amt
+    }
+
+    for (const row of externalIncomeEntries) {
+      const amt = Number(row.amount ?? 0)
+      if (!Number.isFinite(amt)) continue
+      externalIncomeBy[normMethod(row.payment_method)] += amt
     }
 
     for (const r of (exps ?? []) as any[]) {
@@ -224,11 +262,12 @@ export async function GET(req: Request) {
     const incomeBy: Record<Method, number> = { cash: 0, instapay: 0, card: 0, bank_transfer: 0 }
     const expenseBy: Record<Method, number> = { cash: 0, instapay: 0, card: 0, bank_transfer: 0 }
     for (const method of METHODS) {
-      incomeBy[method] = subscriptionIncomeBy[method] + personalCashInBy[method]
+      incomeBy[method] = subscriptionIncomeBy[method] + externalIncomeBy[method] + personalCashInBy[method]
       expenseBy[method] = businessExpenseBy[method] + personalCashOutBy[method]
     }
 
     const totalSubscriptionIncome = METHODS.reduce((sum, method) => sum + subscriptionIncomeBy[method], 0)
+    const totalExternalIncome = METHODS.reduce((sum, method) => sum + externalIncomeBy[method], 0)
     const totalPersonalCashIn = METHODS.reduce((sum, method) => sum + personalCashInBy[method], 0)
     const totalIncome = METHODS.reduce((sum, method) => sum + incomeBy[method], 0)
     const totalBusinessExpenses = METHODS.reduce((sum, method) => sum + businessExpenseBy[method], 0)
@@ -245,15 +284,18 @@ export async function GET(req: Request) {
     lines.push(['From', range.from, 'To', range.to].map(csvCell).join(','))
     lines.push([
       'Filtered payments count', (pays ?? []).length,
+      'Filtered external income lines count', externalIncomeEntries.length,
       'Filtered business expense lines count', (exps ?? []).length,
       'Filtered personal fund cash movement lines count', personalCashMovements.length,
       'Filtered personal off-cash lines count', personalOffCash.length,
     ].map(csvCell).join(','))
     if (pfErr) lines.push(['Personal funds status', `Unavailable in export fallback: ${pfErr.message}`].map(csvCell).join(','))
+    if (extErr) lines.push(['Other income status', `Unavailable in export fallback: ${extErr.message}`].map(csvCell).join(','))
     lines.push('')
 
     lines.push(['Summary', 'Amount'].map(csvCell).join(','))
     lines.push(['Subscription income', totalSubscriptionIncome.toFixed(2)].map(csvCell).join(','))
+    lines.push(['Other income', totalExternalIncome.toFixed(2)].map(csvCell).join(','))
     lines.push(['Personal Funds cash in', totalPersonalCashIn.toFixed(2)].map(csvCell).join(','))
     lines.push(['Total income', totalIncome.toFixed(2)].map(csvCell).join(','))
     lines.push(['Business expenses', totalBusinessExpenses.toFixed(2)].map(csvCell).join(','))
@@ -264,11 +306,12 @@ export async function GET(req: Request) {
     lines.push('')
 
     lines.push(['Breakdown by payment method'].map(csvCell).join(','))
-    lines.push(['payment_method', 'subscription_income', 'personal_funds_cash_in', 'total_income', 'business_expenses', 'personal_funds_cash_out', 'total_expenses', 'net_cash'].map(csvCell).join(','))
+    lines.push(['payment_method', 'subscription_income', 'external_income', 'personal_funds_cash_in', 'total_income', 'business_expenses', 'personal_funds_cash_out', 'total_expenses', 'net_cash'].map(csvCell).join(','))
     for (const method of METHODS) {
       lines.push([
         labelMethod(method),
         subscriptionIncomeBy[method].toFixed(2),
+        externalIncomeBy[method].toFixed(2),
         personalCashInBy[method].toFixed(2),
         incomeBy[method].toFixed(2),
         businessExpenseBy[method].toFixed(2),
@@ -302,6 +345,22 @@ export async function GET(req: Request) {
           .map(csvCell)
           .join(',')
       )
+    }
+    lines.push('')
+
+    lines.push(['Filtered other income'].map(csvCell).join(','))
+    lines.push(['entry_date_egypt', 'source', 'title', 'amount', 'payment_method', 'note', 'recorded_at_egypt'].map(csvCell).join(','))
+    for (const row of externalIncomeEntries) {
+      const amount = Number(row.amount ?? 0)
+      lines.push([
+        row.entry_date ?? '',
+        externalSourceLabel(row.source_key),
+        row.title ?? '',
+        Number.isFinite(amount) ? amount.toFixed(2) : '',
+        labelMethod(normMethod(row.payment_method)),
+        row.note ?? '',
+        formatCairoDateTime(row.created_at),
+      ].map(csvCell).join(','))
     }
     lines.push('')
 
