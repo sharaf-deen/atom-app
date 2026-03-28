@@ -81,6 +81,45 @@ function addMonthsSafe(dateOnlyStr: string, months: number) {
   return out.toISOString().slice(0, 10)
 }
 
+
+function formatSubscriptionInsertError(err: any) {
+  const message = err?.message ?? String(err ?? '')
+  const lower = message.toLowerCase()
+  const code = err?.code ? String(err.code) : ''
+
+  if (lower.includes('subscriptions_amount_due_le_amount')) {
+    return {
+      status: 409,
+      body: {
+        ok: false,
+        error: 'OUTDATED_DUE_CONSTRAINT',
+        details: 'The database still blocks a remaining due amount when it is higher than the amount paid now.',
+        hint: 'Apply the migration that removes subscriptions_amount_due_le_amount, then try again.',
+      },
+    }
+  }
+
+  if (code == '23514') {
+    return {
+      status: 400,
+      body: {
+        ok: false,
+        error: 'SUBSCRIPTION_CHECK_FAILED',
+        details: message,
+      },
+    }
+  }
+
+  return {
+    status: 500,
+    body: {
+      ok: false,
+      error: 'INSERT_FAILED',
+      details: message,
+    },
+  }
+}
+
 function normQR(v: unknown): string | null {
   if (typeof v !== 'string') return null
   const raw = v.trim()
@@ -402,7 +441,8 @@ export async function POST(req: Request) {
       .maybeSingle()
 
     if (insErr) {
-      return json(500, { ok: false, error: 'INSERT_FAILED', details: insErr.message })
+      const formatted = formatSubscriptionInsertError(insErr)
+      return json(formatted.status, formatted.body)
     }
 
 // 5.5) Insert initial payment history (best-effort)
