@@ -187,6 +187,15 @@ export default function SubscribeDialog({
     (isTimePlan ? dateOk : sessionsOk)
 
   function explainServerError(j: any) {
+    const raw = `${j?.details || ''} ${j?.error || ''} ${j?.hint || ''}`.toLowerCase()
+
+    if (
+      j?.error === 'OUTDATED_DUE_CONSTRAINT' ||
+      raw.includes('subscriptions_amount_due_le_amount')
+    ) {
+      return 'This database still uses an old due rule. Apply the latest subscription due migration, then try again.'
+    }
+
     const base = j?.details || j?.error || 'Failed to save subscription'
     const hint = j?.hint ? ` (${String(j.hint)})` : ''
     return String(base) + hint
