@@ -293,6 +293,9 @@ export default async function AdminPage() {
           <Button asChild variant="outline" href="/admin/personal-funds">
             Personal Funds
           </Button>
+          <Button asChild variant="outline" href="/admin/external-income">
+            Other Income
+          </Button>
           {me.role === 'super_admin' ? (
             <Button asChild variant="outline" href="/admin/permissions-audit">
               Permissions Audit

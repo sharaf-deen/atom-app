@@ -121,6 +121,7 @@ const APP_NAV_BY_ROLE: MenuByRole = {
     { label: 'Membership Activity', href: '/admin/membership-activity', icon: 'file-text' },
     { label: 'Expiring Soon', href: '/admin/expiring-soon', icon: 'bell' },
     { label: 'Expenses', href: '/expenses', icon: 'wallet' },
+    { label: 'Other Income', href: '/admin/external-income', icon: 'wallet' },
   ],
   super_admin: [
     { label: 'Home', href: '/', icon: 'home' },
@@ -148,6 +149,7 @@ const APP_NAV_BY_ROLE: MenuByRole = {
     { label: 'Membership Activity', href: '/admin/membership-activity', icon: 'file-text' },
     { label: 'Expiring Soon', href: '/admin/expiring-soon', icon: 'bell' },
     { label: 'Expenses', href: '/expenses', icon: 'wallet' },
+    { label: 'Other Income', href: '/admin/external-income', icon: 'wallet' },
   ],
 }
 
@@ -271,6 +273,10 @@ export function canAccessExpenses(role: Role | null | undefined) {
 }
 
 export function canAccessPersonalFunds(role: Role | null | undefined) {
+  return hasAnyRole(role, ADMIN_ROLES)
+}
+
+export function canAccessExternalIncome(role: Role | null | undefined) {
   return hasAnyRole(role, ADMIN_ROLES)
 }
 
@@ -426,6 +432,14 @@ const CAPABILITY_BLUEPRINTS: CapabilityBlueprint[] = [
     description: 'Track advances, reimbursements, and personal-fund proofs.',
     href: '/admin/personal-funds',
     check: (role) => canAccessPersonalFunds(role),
+  },
+  {
+    key: 'external_income',
+    category: 'Finance',
+    label: 'Other Income',
+    description: 'Track money entries outside subscriptions such as bar or store sales.',
+    href: '/admin/external-income',
+    check: (role) => canAccessExternalIncome(role),
   },
   {
     key: 'scan_audit',
