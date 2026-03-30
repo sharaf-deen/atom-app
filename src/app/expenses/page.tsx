@@ -392,15 +392,13 @@ export default async function ExpensesPage({
           <CardTitle>Filters</CardTitle>
           <div className="text-sm text-[hsl(var(--muted))]">Refine the view, then export exactly this selection.</div>
         </CardHeader>
-        <CardContent className="space-y-5">
-          <div className="space-y-2">
-            <div className="text-sm font-medium">Quick range</div>
-            <div className="flex flex-wrap gap-2">
-              <a href={quickLinks.today} className="inline-flex items-center justify-center rounded-2xl shadow-soft border border-[hsl(var(--border))] bg-white px-4 py-2 text-sm font-medium hover:bg-[hsl(var(--bg))]/80">Today</a>
-              <a href={quickLinks.seven} className="inline-flex items-center justify-center rounded-2xl shadow-soft border border-[hsl(var(--border))] bg-white px-4 py-2 text-sm font-medium hover:bg-[hsl(var(--bg))]/80">Last 7 days</a>
-              <a href={quickLinks.month} className="inline-flex items-center justify-center rounded-2xl shadow-soft border border-[hsl(var(--border))] bg-white px-4 py-2 text-sm font-medium hover:bg-[hsl(var(--bg))]/80">This month</a>
-              <a href={quickLinks.custom} className="inline-flex items-center justify-center rounded-2xl shadow-soft border border-[hsl(var(--border))] bg-white px-4 py-2 text-sm font-medium hover:bg-[hsl(var(--bg))]/80">Custom</a>
-            </div>
+        <CardContent className="space-y-4">
+          <div className="flex flex-wrap gap-2">
+            <a href={quickLinks.today} className="inline-flex items-center justify-center rounded-2xl shadow-soft border border-[hsl(var(--border))] bg-white px-4 py-2 text-sm font-medium hover:bg-[hsl(var(--bg))]/80">Today</a>
+            <a href={quickLinks.seven} className="inline-flex items-center justify-center rounded-2xl shadow-soft border border-[hsl(var(--border))] bg-white px-4 py-2 text-sm font-medium hover:bg-[hsl(var(--bg))]/80">Last 7 days</a>
+            <a href={quickLinks.month} className="inline-flex items-center justify-center rounded-2xl shadow-soft border border-[hsl(var(--border))] bg-white px-4 py-2 text-sm font-medium hover:bg-[hsl(var(--bg))]/80">This month</a>
+            <a href={quickLinks.custom} className="inline-flex items-center justify-center rounded-2xl shadow-soft border border-[hsl(var(--border))] bg-white px-4 py-2 text-sm font-medium hover:bg-[hsl(var(--bg))]/80">Custom</a>
+            <a href="/expenses" className="inline-flex items-center justify-center rounded-2xl shadow-soft border border-[hsl(var(--border))] bg-white px-4 py-2 text-sm font-medium hover:bg-[hsl(var(--bg))]/80">Reset filters</a>
           </div>
 
           <form method="get" className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
@@ -473,45 +471,26 @@ export default async function ExpensesPage({
               <button type="submit" className="inline-flex items-center justify-center rounded-2xl shadow-soft bg-black text-white px-4 py-2 text-sm font-medium hover:opacity-95">
                 Apply filters
               </button>
-              <a href="/expenses" className="inline-flex items-center justify-center rounded-2xl shadow-soft border border-[hsl(var(--border))] bg-white px-4 py-2 text-sm font-medium hover:bg-[hsl(var(--bg))]/80">
-                Reset filters
+              <a href={`/api/expenses/export?${exportQS}`} className="inline-flex items-center justify-center rounded-2xl shadow-soft border border-[hsl(var(--border))] bg-white px-4 py-2 text-sm font-medium hover:bg-[hsl(var(--bg))]/80">
+                Export CSV
               </a>
+              <a href={`/api/expenses/export-pdf?${exportQS}`} className="inline-flex items-center justify-center rounded-2xl shadow-soft border border-[hsl(var(--border))] bg-white px-4 py-2 text-sm font-medium hover:bg-[hsl(var(--bg))]/80">
+                Export PDF
+              </a>
+              <span className="text-xs text-[hsl(var(--muted))]">Uses current filters</span>
             </div>
           </form>
 
-          <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-start">
-            <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] px-4 py-3">
-              <div className="text-xs font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Current view</div>
-              <div className="mt-2 flex flex-wrap gap-2">
-                {(activeFilters.length ? activeFilters : ['Range: This month']).map((label) => (
-                  <span key={label} className="inline-flex items-center rounded-full border border-[hsl(var(--border))] bg-white px-3 py-1 text-xs font-medium text-[hsl(var(--muted))]">
-                    {label}
-                  </span>
-                ))}
-              </div>
-            </div>
-
-            <div className="rounded-2xl border border-[hsl(var(--border))] bg-white p-4 shadow-soft lg:min-w-[220px]">
-              <div className="text-sm font-semibold">Export</div>
-              <div className="mt-1 text-xs text-[hsl(var(--muted))]">Uses current filters</div>
-              <div className="mt-3 flex flex-wrap gap-2 lg:flex-col">
-                <a href={`/api/expenses/export?${exportQS}`} className="inline-flex items-center justify-center rounded-2xl shadow-soft border border-[hsl(var(--border))] bg-white px-4 py-2 text-sm font-medium hover:bg-[hsl(var(--bg))]/80">
-                  Export CSV
-                </a>
-                <a href={`/api/expenses/export-pdf?${exportQS}`} className="inline-flex items-center justify-center rounded-2xl shadow-soft border border-[hsl(var(--border))] bg-white px-4 py-2 text-sm font-medium hover:bg-[hsl(var(--bg))]/80">
-                  Export PDF
-                </a>
-              </div>
-            </div>
-          </div>
-
           {activeFilters.length ? (
-            <div className="hidden flex-wrap gap-2">
+            <div className="space-y-2">
+              <div className="text-xs font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Current view</div>
+              <div className="flex flex-wrap gap-2">
               {activeFilters.map((label) => (
                 <span key={label} className="inline-flex items-center rounded-full border border-[hsl(var(--border))] bg-[hsl(var(--bg))] px-3 py-1 text-xs font-medium text-[hsl(var(--muted))]">
                   {label}
                 </span>
               ))}
+              </div>
             </div>
           ) : null}
         </CardContent>
