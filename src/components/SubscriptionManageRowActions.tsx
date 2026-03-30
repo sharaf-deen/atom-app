@@ -68,6 +68,9 @@ export default function SubscriptionManageRowActions({
         ? 'sessions'
         : 'time'
   const isTime = stype === 'time'
+  const currentPlanForFreeze = String(sub.plan ?? '')
+  const freezeTokensAllowed = currentPlanForFreeze === '3m' ? 1 : currentPlanForFreeze === '6m' ? 2 : currentPlanForFreeze === '12m' ? 3 : 0
+  const canFreezePlan = isTime && freezeTokensAllowed > 0
 
   const [openEdit, setOpenEdit] = useState(false)
   const [openFreeze, setOpenFreeze] = useState(false)
@@ -156,7 +159,7 @@ export default function SubscriptionManageRowActions({
     return addMonthsSafe(startDate, months)
   }, [isTime, startDate, plan, sub.end_date])
 
-  const hasFreeze = isTime && isISODateOnly(sub.frozen_until)
+  const hasFreeze = canFreezePlan && isISODateOnly(sub.frozen_until)
 
   const freezeDurationDays = useMemo(() => {
     if (!isISODateOnly(freezeFrom) || !isISODateOnly(freezeTo)) return null
@@ -247,8 +250,8 @@ export default function SubscriptionManageRowActions({
     setStatus({ kind: 'info', msg: 'Saving freeze…' })
 
     try {
-      if (!isTime) {
-        setStatus({ kind: 'error', msg: 'Freeze is only available for time subscriptions.' })
+      if (!canFreezePlan) {
+        setStatus({ kind: 'error', msg: 'Freeze is only available for 3, 6, or 12 month subscriptions.' })
         toast.error('Freeze failed')
         return
       }
@@ -261,6 +264,12 @@ export default function SubscriptionManageRowActions({
 
       if (freezeFrom > freezeTo) {
         setStatus({ kind: 'error', msg: 'Freeze end date must be after start date.' })
+        toast.error('Freeze failed')
+        return
+      }
+
+      if (typeof freezeDurationDays === 'number' && freezeDurationDays > 30) {
+        setStatus({ kind: 'error', msg: 'Each freeze is limited to 30 days maximum.' })
         toast.error('Freeze failed')
         return
       }
@@ -382,7 +391,7 @@ export default function SubscriptionManageRowActions({
         />
       ) : null}
 
-      {isTime ? (
+      {canFreezePlan ? (
         <Button size="sm" variant="outline" onClick={() => setOpenFreeze(true)} disabled={!canEdit}>
           {hasFreeze ? 'Edit freeze' : 'Freeze'}
         </Button>
@@ -508,7 +517,7 @@ export default function SubscriptionManageRowActions({
       )}
 
       {/* Freeze modal (time subscriptions only) */}
-      {openFreeze && isTime && (
+      {openFreeze && canFreezePlan && (
         <div className="fixed inset-0 z-[999] flex items-center justify-center bg-black/40 p-4">
           <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-soft">
             <div className="flex items-center justify-between">
@@ -523,7 +532,14 @@ export default function SubscriptionManageRowActions({
             <div className="mt-4 space-y-4">
               <div className="text-sm text-[hsl(var(--muted))]">
                 During the freeze period, the member will be marked inactive. The subscription end date will be adjusted by the
-                freeze duration.
+                freeze duration. Each freeze is limited to 30 days maximum.
+              </div>
+
+              <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))]/50 p-3 text-sm">
+                <div className="font-medium text-[hsl(var(--fg))]">Freeze tokens</div>
+                <div className="mt-1 text-[hsl(var(--muted))]">
+                  {currentPlanForFreeze === '3m' ? '3 months: 1 freeze token' : currentPlanForFreeze === '6m' ? '6 months: 2 freeze tokens' : '12 months: 3 freeze tokens'}
+                </div>
               </div>
 
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -538,7 +554,7 @@ export default function SubscriptionManageRowActions({
               </div>
 
               {typeof freezeDurationDays === 'number' ? (
-                <div className="text-xs text-[hsl(var(--muted))]">Duration: {freezeDurationDays} day(s)</div>
+                <div className="text-xs text-[hsl(var(--muted))]">Duration: {freezeDurationDays} day(s){freezeDurationDays > 30 ? ' · Max 30 days' : ''}</div>
               ) : (
                 <div className="text-xs text-rose-700">Please choose a valid range.</div>
               )}
