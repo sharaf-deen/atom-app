@@ -58,6 +58,8 @@ function roleLabel(role: Role) {
       return 'Coach'
     case 'assistant_coach':
       return 'Assistant coach'
+    case 'head_coach':
+      return 'Head coach'
     case 'admin':
       return 'Admin preview'
     case 'super_admin':
@@ -80,6 +82,15 @@ function coachLinks(role: Role): QuickLink[] {
       href: '/members',
       label: 'Member lookup',
       desc: 'Open limited read-only member access when you need to help quickly.',
+      icon: UserRoundSearch,
+    })
+  }
+
+  if (role === 'head_coach') {
+    base.splice(1, 0, {
+      href: '/head-coach/athletes',
+      label: 'Athletes',
+      desc: 'Program, belt, attendance, competition, and promotion tracking.',
       icon: UserRoundSearch,
     })
   }

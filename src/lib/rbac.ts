@@ -81,6 +81,7 @@ const APP_NAV_BY_ROLE: MenuByRole = {
   ],
   head_coach: [
     { label: 'Training Useful', href: '/training-useful', icon: 'dashboard' },
+    { label: 'Athletes', href: '/head-coach/athletes', icon: 'users' },
     { label: 'Notifications', href: '/notifications', icon: 'bell' },
     { label: 'Schedule', href: '/schedule', icon: 'calendar' },
     { label: 'My Profile', href: '/profile', icon: 'id' },
@@ -115,6 +116,7 @@ const APP_NAV_BY_ROLE: MenuByRole = {
     { label: 'CRM', href: '/admin/crm', icon: 'users' },
     { label: 'Visitors', href: '/admin/visitors', icon: 'users' },
     { label: 'Coaches', href: '/coaches', icon: 'user-cog' },
+    { label: 'Athletes', href: '/head-coach/athletes', icon: 'users' },
     { label: 'Store', href: '/store', icon: 'bag' },
     { label: 'Invoices', href: '/invoices', icon: 'file-text' },
     { label: 'Payments', href: '/admin/payments', icon: 'file-text' },
@@ -293,6 +295,10 @@ export function canAccessCoaches(role: Role | null | undefined) {
 
 export function canAccessTrainingUseful(role: Role | null | undefined) {
   return hasAnyRole(role, ['coach', 'assistant_coach', 'head_coach', 'admin', 'super_admin'])
+}
+
+export function canAccessHeadCoachAthletes(role: Role | null | undefined) {
+  return hasAnyRole(role, ['head_coach', 'super_admin'])
 }
 
 export function canManageCoaches(role: Role | null | undefined) {
@@ -495,6 +501,14 @@ const CAPABILITY_BLUEPRINTS: CapabilityBlueprint[] = [
     description: 'Open the coach-facing hub with QR, schedule, staff updates and member lookup shortcuts.',
     href: '/training-useful',
     check: (role) => canAccessTrainingUseful(role),
+  },
+  {
+    key: 'head_coach_athletes',
+    category: 'Core',
+    label: 'Head coach athletes',
+    description: 'Open the athlete dashboard for program, belt, attendance, competition, and promotion tracking.',
+    href: '/head-coach/athletes',
+    check: (role) => canAccessHeadCoachAthletes(role),
   },
   {
     key: 'roles_manage',
