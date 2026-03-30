@@ -216,8 +216,8 @@ function ageYears(dob?: string | null) {
   const born = new Date(Date.UTC(y, m - 1, d))
   if (Number.isNaN(born.getTime())) return null
 
-  const [ty, tm, td] = cairoToday().split('-').map(Number)
-  const today = new Date(Date.UTC(ty, tm - 1, td))
+  const now = new Date()
+  const today = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()))
   let age = today.getUTCFullYear() - born.getUTCFullYear()
   const mm = today.getUTCMonth() - born.getUTCMonth()
   if (mm < 0 || (mm === 0 && today.getUTCDate() < born.getUTCDate())) age--
@@ -909,36 +909,41 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
   return (state.remaining ?? 0) > 0
 })
 
+  const latestSubscriptionForAlerts = [...subs].sort((a, b) => {
+    const aKey = a.paid_at ?? a.start_date ?? a.end_date ?? ''
+    const bKey = b.paid_at ?? b.start_date ?? b.end_date ?? ''
+    return bKey.localeCompare(aKey)
+  })[0] ?? null
+
   const alerts: Array<{ kind: SummaryTone; text: string }> = []
-  for (const s of subs) {
+  if (latestSubscriptionForAlerts) {
+    const s = latestSubscriptionForAlerts
     const rawStatus = String(s.status ?? '').toLowerCase()
-    if (rawStatus !== 'active') continue
 
-    const state = getSubscriptionDisplayState(s, today)
+    if (rawStatus === 'active') {
+      const state = getSubscriptionDisplayState(s, today)
 
-    if (state.type === 'time') {
-      if (state.frozen) {
-        alerts.push({ kind: 'warning', text: `${humanPlan(s.plan)} is frozen until ${fmtDate(s.frozen_until)}` })
-        continue
+      if (state.type === 'time') {
+        if (state.frozen) {
+          alerts.push({ kind: 'warning', text: `${humanPlan(s.plan)} is frozen until ${fmtDate(s.frozen_until)}` })
+        } else {
+          if (state.left !== null && state.left <= 7 && state.left >= 0) {
+            alerts.push({ kind: 'warning', text: `${humanPlan(s.plan)} expires in ${state.left} day(s)` })
+          }
+
+          if (state.expired && !hasAnyCurrentPlanNow) {
+            alerts.push({ kind: 'danger', text: `${humanPlan(s.plan)} is expired.` })
+          }
+        }
+      } else {
+        const remaining = state.remaining ?? 0
+        if (remaining <= 2) {
+          alerts.push({
+            kind: remaining === 0 ? 'danger' : 'warning',
+            text: `Sessions plan has ${remaining} session(s) left.`,
+          })
+        }
       }
-
-      if (state.left !== null && state.left <= 7 && state.left >= 0) {
-        alerts.push({ kind: 'warning', text: `${humanPlan(s.plan)} expires in ${state.left} day(s)` })
-      }
-
-      if (state.expired && !hasAnyCurrentPlanNow) {
-        alerts.push({ kind: 'danger', text: `${humanPlan(s.plan)} is expired.` })
-      }
-
-      continue
-    }
-
-    const remaining = state.remaining ?? 0
-    if (remaining <= 2) {
-      alerts.push({
-        kind: remaining === 0 ? 'danger' : 'warning',
-        text: `Sessions plan has ${remaining} session(s) left.`,
-      })
     }
   }
 
