@@ -94,6 +94,7 @@ const APP_NAV_BY_ROLE: MenuByRole = {
     { label: 'Scan', href: '/scan', icon: 'scan' },
     { label: 'Members', href: '/members', icon: 'users' },
     { label: 'CRM', href: '/admin/crm', icon: 'users' },
+    { label: 'Visitors', href: '/admin/visitors', icon: 'users' },
     { label: 'Packages & Promos', href: '/packages-and-promos', icon: 'gift' },
     { label: 'Store', href: '/store', icon: 'bag' },
   ],
@@ -112,6 +113,7 @@ const APP_NAV_BY_ROLE: MenuByRole = {
     { label: 'Scan', href: '/scan', icon: 'scan' },
     { label: 'Members', href: '/members', icon: 'users' },
     { label: 'CRM', href: '/admin/crm', icon: 'users' },
+    { label: 'Visitors', href: '/admin/visitors', icon: 'users' },
     { label: 'Coaches', href: '/coaches', icon: 'user-cog' },
     { label: 'Store', href: '/store', icon: 'bag' },
     { label: 'Invoices', href: '/invoices', icon: 'file-text' },
@@ -139,6 +141,7 @@ const APP_NAV_BY_ROLE: MenuByRole = {
     { label: 'Scan', href: '/scan', icon: 'scan' },
     { label: 'Members', href: '/members', icon: 'users' },
     { label: 'CRM', href: '/admin/crm', icon: 'users' },
+    { label: 'Visitors', href: '/admin/visitors', icon: 'users' },
     { label: 'Coaches', href: '/coaches', icon: 'user-cog' },
     { label: 'Store', href: '/store', icon: 'bag' },
     { label: 'Store Admin', href: '/admin/store', icon: 'bag' },
@@ -280,6 +283,10 @@ export function canAccessExternalIncome(role: Role | null | undefined) {
   return hasAnyRole(role, ADMIN_ROLES)
 }
 
+export function canAccessVisitorTrials(role: Role | null | undefined) {
+  return hasAnyRole(role, FRONT_DESK_ROLES)
+}
+
 export function canAccessCoaches(role: Role | null | undefined) {
   return hasAnyRole(role, ADMIN_ROLES)
 }
@@ -352,6 +359,14 @@ const CAPABILITY_BLUEPRINTS: CapabilityBlueprint[] = [
     description: 'Review who should be contacted today and open desk follow-up actions.',
     href: '/admin/crm',
     check: (role) => canAccessCrm(role),
+  },
+  {
+    key: 'visitor_trials',
+    category: 'Front desk',
+    label: 'Visitor trials',
+    description: 'Track free trial visitors, follow-up due cases, and member conversions.',
+    href: '/admin/visitors',
+    check: (role) => canAccessVisitorTrials(role),
   },
   {
     key: 'other_member_profile',
