@@ -1,7 +1,7 @@
 // src/components/CreateMemberForm.tsx
 'use client'
 
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 
@@ -17,6 +17,7 @@ type NewMemberPayload = {
   phone?: string
   // YYYY-MM-DD
   date_of_birth?: string
+  visitor_trial_id?: string
 }
 
 type Status = { kind: '' | 'info' | 'success' | 'warning' | 'error'; msg: string }
@@ -34,6 +35,27 @@ type ExistingMemberRef = {
   first_name?: string | null
   last_name?: string | null
   phone?: string | null
+}
+
+
+function dobPartsFromIso(dob?: string) {
+  if (!dob || !/^\d{4}-\d{2}-\d{2}$/.test(dob)) {
+    return { day: '', month: '', year: '' }
+  }
+
+  const [year, month, day] = dob.split('-')
+  return { day, month, year }
+}
+
+function buildInitialForm(initialValues?: Partial<NewMemberPayload>): NewMemberPayload {
+  return {
+    email: (initialValues?.email || '').trim(),
+    first_name: (initialValues?.first_name || '').trim() || undefined,
+    last_name: (initialValues?.last_name || '').trim() || undefined,
+    phone: (initialValues?.phone || '').trim() || undefined,
+    date_of_birth: (initialValues?.date_of_birth || '').trim(),
+    visitor_trial_id: (initialValues?.visitor_trial_id || '').trim() || undefined,
+  }
 }
 
 function ageFromDob(dob?: string) {
@@ -56,17 +78,19 @@ function ageFromDob(dob?: string) {
   return age
 }
 
-export default function CreateMemberForm() {
+export default function CreateMemberForm({
+  initialValues,
+}: {
+  initialValues?: Partial<NewMemberPayload>
+}) {
   const router = useRouter()
   const emailRef = useRef<HTMLInputElement>(null)
 
-  const [form, setForm] = useState<NewMemberPayload>({ email: '', date_of_birth: '' })
+  const initialForm = useMemo(() => buildInitialForm(initialValues), [initialValues])
 
-  const [dobParts, setDobParts] = useState<{ day: string; month: string; year: string }>({
-    day: '',
-    month: '',
-    year: '',
-  })
+  const [form, setForm] = useState<NewMemberPayload>(initialForm)
+
+  const [dobParts, setDobParts] = useState<{ day: string; month: string; year: string }>(() => dobPartsFromIso(initialForm.date_of_birth))
 
   function setDobPart(part: 'day' | 'month' | 'year', value: string) {
     setDobParts((prev) => {
@@ -85,14 +109,25 @@ export default function CreateMemberForm() {
   const [inviteMode, setInviteMode] = useState<InviteMode>('none')
   const [existingMember, setExistingMember] = useState<ExistingMemberRef | null>(null)
 
+  useEffect(() => {
+    setForm(initialForm)
+    setDobParts(dobPartsFromIso(initialForm.date_of_birth))
+    setStatus({ kind: '', msg: '' })
+    setCreatedId(null)
+    setCreatedEmail(null)
+    setCreateOutcome(null)
+    setInviteMode('none')
+    setExistingMember(null)
+  }, [initialForm])
+
   function update<K extends keyof NewMemberPayload>(k: K, v: NewMemberPayload[K]) {
     if (k === 'email') setExistingMember(null)
     setForm((f) => ({ ...f, [k]: v }))
   }
 
   function resetForm() {
-    setForm({ email: '', date_of_birth: '' })
-    setDobParts({ day: '', month: '', year: '' })
+    setForm(initialForm)
+    setDobParts(dobPartsFromIso(initialForm.date_of_birth))
     setStatus({ kind: '', msg: '' })
     setCreatedId(null)
     setCreatedEmail(null)
@@ -125,6 +160,7 @@ export default function CreateMemberForm() {
       last_name: (form.last_name || '').trim() || undefined,
       phone: (form.phone || '').trim() || undefined,
       date_of_birth: (form.date_of_birth || '').trim() || undefined,
+      visitor_trial_id: (form.visitor_trial_id || '').trim() || undefined,
       // aliases camelCase (au cas où on les supporte côté API)
       firstName: (form.first_name || '').trim() || undefined,
       lastName: (form.last_name || '').trim() || undefined,
@@ -196,8 +232,8 @@ export default function CreateMemberForm() {
       }
 
       // Reset the form so you can create another member right away
-      setForm({ email: '', date_of_birth: '' })
-      setDobParts({ day: '', month: '', year: '' })
+      setForm(initialForm)
+      setDobParts(dobPartsFromIso(initialForm.date_of_birth))
       // Refresh server data (lists/stats on the page)
       router.refresh()
 
@@ -218,6 +254,11 @@ export default function CreateMemberForm() {
       <p className="mt-1 text-sm text-[hsl(var(--muted))]">
         If the email is new, an invite email will be sent. Duplicate emails are blocked to protect the existing account.
       </p>
+      {form.visitor_trial_id ? (
+        <div className="mt-3 rounded-2xl border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-sky-900">
+          Visitor trial conversion mode: create the member here and the visitor record will be linked automatically.
+        </div>
+      ) : null}
 
       {status.msg ? (
         <div className="mt-3">
