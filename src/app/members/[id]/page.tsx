@@ -34,7 +34,7 @@ import DeleteUserButton from '@/components/DeleteUserButton'
 import SettleDueDialog from '@/components/SettleDueDialog'
 import AthleteProfileSection from '@/components/member-detail/AthleteProfileSection'
 import MemberNotifyButton from '@/components/member-detail/MemberNotifyButton'
-import { canManageNotifications as canManageMemberNotifications, hasLifetimeGymAccess, isMemberLikeRole } from '@/lib/rbac'
+import { canManageNotifications as canManageMemberNotifications, hasLifetimeGymAccess } from '@/lib/rbac'
 
 type ProfileRow = {
   user_id: string
@@ -806,8 +806,8 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
         title="Member"
         subtitle="Access restricted."
         signedInAs={me.email}
-        message="Only Reception / Admin / Super Admin can view other members freely. Coaches and Head coaches can only open read-only member-like profiles from the home lookup."
-        allowed="coach/head_coach (read-only member-like profiles only), reception, admin, super_admin"
+        message="Only Reception / Admin / Super Admin can view other members freely. Coaches can only open read-only member-like profiles. Head coaches can open read-only athlete profiles for members, champions, VIPs, coaches, and assistant coaches."
+        allowed="coach (member-like only), head_coach (athlete profiles), reception, admin, super_admin"
         nextPath={nextPath}
         showBackHome
         showProfile
@@ -815,14 +815,26 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
     )
   }
 
-  if (isCoachViewingOtherMember && !isMemberLikeRole(profile.role)) {
+  const coachAllowedReadOnlyRoles: Role[] = me.role === 'head_coach'
+    ? ['member', 'champion', 'vip', 'coach', 'assistant_coach']
+    : ['member', 'champion', 'vip']
+
+  if (isCoachViewingOtherMember && !(profile.role && coachAllowedReadOnlyRoles.includes(profile.role))) {
     return (
       <AccessDeniedPage
         title="Member"
         subtitle="Access restricted."
         signedInAs={me.email}
-        message="Coach and Head coach access is limited to read-only member-like profiles only."
-        allowed="member, champion, and VIP profiles only"
+        message={
+          me.role === 'head_coach'
+            ? "Head coach access is limited to read-only athlete profiles for members, champions, VIPs, coaches, and assistant coaches."
+            : "Coach access is limited to read-only member-like profiles only."
+        }
+        allowed={
+          me.role === 'head_coach'
+            ? "member, champion, VIP, coach, and assistant coach profiles"
+            : "member, champion, and VIP profiles only"
+        }
         nextPath={nextPath}
         showBackHome
         showProfile
