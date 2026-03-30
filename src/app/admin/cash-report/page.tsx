@@ -9,9 +9,6 @@ import { getSessionUser } from '@/lib/session'
 import { canAccessCashReport } from '@/lib/rbac'
 import AccessDeniedCard from '@/components/AccessDeniedCard'
 import Badge from '@/components/ui/Badge'
-import Button from '@/components/ui/Button'
-import Input from '@/components/ui/Input'
-import Select from '@/components/ui/Select'
 import { Card } from '@/components/ui/Card'
 import { Table } from '@/components/ui/Table'
 import {
@@ -32,18 +29,6 @@ type PersonalEntry = {
   entry_date: string
   person_id: string
   kind: PersonalKind
-  amount: number
-  payment_method: string | null
-  note: string | null
-  created_at: string
-}
-
-type ExternalIncomeSource = 'bar' | 'store' | 'other'
-type ExternalIncomeEntry = {
-  id: string
-  entry_date: string
-  source_key: ExternalIncomeSource
-  title: string
   amount: number
   payment_method: string | null
   note: string | null
@@ -106,21 +91,6 @@ function personalKindLabel(kind: PersonalKind) {
   if (kind === 'advance_to_gym') return 'Advance to gym'
   if (kind === 'reimbursement_from_gym') return 'Reimbursement from gym'
   return 'Expense paid personally'
-}
-
-function externalSourceLabel(source: ExternalIncomeSource) {
-  if (source === 'bar') return 'Bar'
-  if (source === 'store') return 'Store'
-  return 'Other'
-}
-
-function externalSourceBadge(source: ExternalIncomeSource) {
-  const cls = source === 'bar'
-    ? 'border-amber-200 bg-amber-50 text-amber-900'
-    : source === 'store'
-      ? 'border-sky-200 bg-sky-50 text-sky-800'
-      : 'border-slate-200 bg-slate-50 text-slate-700'
-  return <span className={`inline-flex rounded-full border px-2 py-0.5 text-xs font-medium ${cls}`}>{externalSourceLabel(source)}</span>
 }
 
 function personalTypeBadge(kind: PersonalKind) {
@@ -256,25 +226,6 @@ export default async function AdminCashReportPage({
     : { data: [] as Array<{ id: string; label: string }> }
   const personById = new Map(((pfPeople ?? []) as Array<{ id: string; label: string }>).map((row) => [row.id, row.label]))
 
-  const { data: rawExternalIncome, error: extErr } = await admin
-    .from('external_income_entries')
-    .select('id, entry_date, source_key, title, amount, payment_method, note, created_at')
-    .gte('entry_date', safeFrom)
-    .lte('entry_date', safeTo)
-    .order('entry_date', { ascending: false })
-    .order('created_at', { ascending: false })
-    .limit(10000)
-
-  const externalIncomeEntries = ((rawExternalIncome ?? []) as any[]).filter(
-    (row) => row.source_key === 'bar' || row.source_key === 'store' || row.source_key === 'other'
-  ) as ExternalIncomeEntry[]
-
-  const externalIncomeBy: Record<Method, number> = { cash: 0, instapay: 0, card: 0, bank_transfer: 0 }
-  for (const row of externalIncomeEntries) {
-    const amt = Number(row.amount ?? 0)
-    if (!Number.isFinite(amt)) continue
-    externalIncomeBy[normMethod(row.payment_method)] += amt
-  }
   const personalCashInBy: Record<Method, number> = { cash: 0, instapay: 0, card: 0, bank_transfer: 0 }
   const personalCashOutBy: Record<Method, number> = { cash: 0, instapay: 0, card: 0, bank_transfer: 0 }
   const personalCashMovements = personalEntries.filter((row) => row.kind !== 'expense_paid_personally')
@@ -291,7 +242,7 @@ export default async function AdminCashReportPage({
   const incomeBy: Record<Method, number> = { cash: 0, instapay: 0, card: 0, bank_transfer: 0 }
   const expenseBy: Record<Method, number> = { cash: 0, instapay: 0, card: 0, bank_transfer: 0 }
   for (const method of METHODS) {
-    incomeBy[method] = subscriptionIncomeBy[method] + externalIncomeBy[method] + personalCashInBy[method]
+    incomeBy[method] = subscriptionIncomeBy[method] + personalCashInBy[method]
     expenseBy[method] = businessExpenseBy[method] + personalCashOutBy[method]
   }
 
@@ -299,9 +250,7 @@ export default async function AdminCashReportPage({
   const totalExpenses = METHODS.reduce((s, m) => s + expenseBy[m], 0)
   const net = totalIncome - totalExpenses
   const paymentsCount = (pays ?? []).length
-  const externalIncomeCount = externalIncomeEntries.length
   const expensesCount = (exps ?? []).length
-  const totalExternalIncome = METHODS.reduce((s, m) => s + externalIncomeBy[m], 0)
   const personalCashInTotal = METHODS.reduce((s, m) => s + personalCashInBy[m], 0)
   const personalCashOutTotal = METHODS.reduce((s, m) => s + personalCashOutBy[m], 0)
   const personalOffCashTotal = personalOffCashExpenses.reduce((s, row) => s + Number(row.amount ?? 0), 0)
@@ -320,7 +269,6 @@ export default async function AdminCashReportPage({
     .slice()
     .sort((a: any, b: any) => Number(b.amount ?? 0) - Number(a.amount ?? 0))
     .slice(0, 10)
-  const latestExternalIncome = externalIncomeEntries.slice(0, 10)
 
   const latestPersonalCash = personalCashMovements.slice(0, 10)
   const latestOffCash = personalOffCashExpenses.slice(0, 10)
@@ -344,7 +292,6 @@ export default async function AdminCashReportPage({
     income: (
       <div className="space-y-0.5">
         <div className="font-semibold">{formatEGP(incomeBy[m])}</div>
-        {externalIncomeBy[m] > 0 ? <div className="text-xs text-[hsl(var(--muted))]">includes other income {formatEGP(externalIncomeBy[m])}</div> : null}
         {personalCashInBy[m] > 0 ? <div className="text-xs text-[hsl(var(--muted))]">includes PF cash in {formatEGP(personalCashInBy[m])}</div> : null}
       </div>
     ),
@@ -405,28 +352,6 @@ export default async function AdminCashReportPage({
     }
   })
 
-  const externalColumns = [
-    { key: 'date', header: 'Date' },
-    { key: 'source', header: 'Source' },
-    { key: 'title', header: 'Title' },
-    { key: 'amount', header: 'Amount' },
-    { key: 'method', header: 'Method' },
-    { key: 'note', header: 'Note' },
-  ]
-
-  const externalRows = latestExternalIncome.map((row) => {
-    const m = normMethod(row.payment_method)
-    return {
-      id: row.id,
-      date: <span className="text-sm text-[hsl(var(--muted))]">{formatShortDate(row.entry_date)}</span>,
-      source: externalSourceBadge(row.source_key),
-      title: <span className="font-medium">{row.title}</span>,
-      amount: <span className="font-semibold">{formatEGP(Number(row.amount ?? 0))}</span>,
-      method: <Badge className={badgeClassForMethod(m)}>{labelMethod(m)}</Badge>,
-      note: <span className="text-sm text-[hsl(var(--muted))]">{row.note || '—'}</span>,
-    }
-  })
-
   const personalCashColumns = [
     { key: 'date', header: 'Date' },
     { key: 'person', header: 'Person' },
@@ -473,26 +398,21 @@ export default async function AdminCashReportPage({
 
   const paymentsHref = `/admin/payments?${new URLSearchParams({ preset: 'custom', from: safeFrom, to: safeTo }).toString()}`
   const personalFundsHref = `/admin/personal-funds?${new URLSearchParams({ preset: 'custom', from: safeFrom, to: safeTo }).toString()}`
-  const externalIncomeHref = `/admin/external-income?${new URLSearchParams({ preset: 'custom', from: safeFrom, to: safeTo }).toString()}`
 
   const activeChips = [
     rangeLabel,
     'Timezone: Africa/Cairo',
     `Payments: ${paymentsCount}`,
-    `Other income: ${externalIncomeCount}`,
     `Expenses: ${expensesCount}`,
     `PF cash movements: ${personalCashMovements.length}`,
     `PF off-cash: ${personalOffCashExpenses.length}`,
   ]
 
-  const exportNote = 'Uses current filters'
-
   const statCards = [
-    { label: 'Income', value: formatEGP(totalIncome), tone: 'text-[hsl(var(--fg))]', sub: 'subscriptions + other income + PF cash in' },
-    { label: 'Expenses', value: formatEGP(totalExpenses), tone: 'text-[hsl(var(--fg))]', sub: 'business expenses + PF cash out' },
+    { label: 'Income', value: formatEGP(totalIncome), tone: 'text-[hsl(var(--fg))]', sub: 'includes subscription income + PF cash in' },
+    { label: 'Expenses', value: formatEGP(totalExpenses), tone: 'text-[hsl(var(--fg))]', sub: 'includes business expenses + PF cash out' },
     { label: 'Net cash', value: formatEGP(net), tone: net < 0 ? 'text-rose-700' : 'text-emerald-700', sub: 'selected period' },
-    { label: 'Subscription income', value: formatEGP(METHODS.reduce((s, m) => s + subscriptionIncomeBy[m], 0)), tone: 'text-[hsl(var(--fg))]', sub: `${paymentsCount} payment lines` },
-    { label: 'Other income', value: formatEGP(totalExternalIncome), tone: 'text-amber-700', sub: `${externalIncomeCount} external income lines` },
+    { label: 'Payments', value: String(paymentsCount), tone: 'text-[hsl(var(--fg))]', sub: 'subscription payment lines' },
     { label: 'Expense lines', value: String(expensesCount), tone: 'text-[hsl(var(--fg))]', sub: 'business expense lines' },
     { label: 'PF cash in', value: formatEGP(personalCashInTotal), tone: 'text-sky-700', sub: 'advances to gym' },
     { label: 'PF cash out', value: formatEGP(personalCashOutTotal), tone: 'text-rose-700', sub: 'reimbursements from gym' },
@@ -506,7 +426,7 @@ export default async function AdminCashReportPage({
           <h1 className="text-2xl font-bold">Admin · Cash Report</h1>
           <p className="text-sm text-[hsl(var(--muted))]">
             {rangeLabel}. Uses <span className="font-medium">Egypt time (Africa/Cairo)</span> for day boundaries and now includes
-            <span className="font-medium"> subscription income, other income, and cash-affecting Personal Funds movements</span>.
+            <span className="font-medium"> cash-affecting Personal Funds movements</span>.
           </p>
         </div>
 
@@ -520,92 +440,98 @@ export default async function AdminCashReportPage({
           <Link prefetch={false} href={personalFundsHref} className="border px-4 py-2 rounded-lg hover:bg-gray-50">
             Personal Funds
           </Link>
-          <Link prefetch={false} href={externalIncomeHref} className="border px-4 py-2 rounded-lg hover:bg-gray-50">
-            Other Income
-          </Link>
         </div>
       </div>
 
-      <Card className="p-4 sm:p-5">
-        <div className="space-y-5">
-          <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <h2 className="text-lg font-semibold">Filters</h2>
-              <p className="text-sm text-[hsl(var(--muted))]">Choose a period, then export exactly this report.</p>
-            </div>
-            <div className="text-xs font-medium uppercase tracking-[0.18em] text-[hsl(var(--muted))]">Egypt time · Africa/Cairo</div>
+      <Card className="p-4 sm:p-5 space-y-4">
+        <form method="get" className="grid gap-3 md:grid-cols-[minmax(0,180px)_minmax(0,180px)_minmax(0,180px)_auto] xl:grid-cols-[minmax(0,180px)_minmax(0,180px)_minmax(0,180px)_auto_auto] xl:items-end">
+          <label className="block">
+            <span className="mb-1 block text-sm font-medium">Period</span>
+            <select
+              name="mode"
+              defaultValue={mode}
+              className="w-full rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              <option value="day">Day</option>
+              <option value="week">Week (Mon–Sun)</option>
+              <option value="month">Month</option>
+              <option value="range">Custom range</option>
+            </select>
+          </label>
+
+          {mode === 'range' ? (
+            <>
+              <label className="block">
+                <span className="mb-1 block text-sm font-medium">From (Egypt)</span>
+                <input
+                  type="date"
+                  name="from"
+                  defaultValue={safeFrom}
+                  className="w-full rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                />
+              </label>
+              <label className="block">
+                <span className="mb-1 block text-sm font-medium">To (Egypt)</span>
+                <input
+                  type="date"
+                  name="to"
+                  defaultValue={safeTo}
+                  className="w-full rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                />
+              </label>
+            </>
+          ) : (
+            <label className="block md:col-span-2">
+              <span className="mb-1 block text-sm font-medium">Anchor date (Egypt)</span>
+              <input
+                type="date"
+                name="date"
+                defaultValue={anchorDate}
+                className="w-full rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              />
+            </label>
+          )}
+
+          <div className="flex flex-wrap gap-2 xl:justify-end">
+            <button className="rounded-xl bg-black text-white px-4 py-2 text-sm font-medium">Load report</button>
+            <Link
+              prefetch={false}
+              href="/admin/cash-report"
+              className="rounded-xl border px-4 py-2 text-sm font-medium hover:bg-gray-50"
+            >
+              Reset
+            </Link>
           </div>
+        </form>
 
-          <div className="space-y-2">
-            <div className="text-xs font-semibold uppercase tracking-[0.18em] text-[hsl(var(--muted))]">Quick period</div>
-            <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-5">
-              <Button asChild variant="outline" className={`w-full ${mode === 'day' && anchorDate === today ? 'border-black bg-black text-white hover:bg-black hover:text-white' : ''}`} href={`/admin/cash-report?mode=day&date=${today}`}>Today</Button>
-              <Button asChild variant="outline" className={`w-full ${mode === 'day' && anchorDate === yesterday ? 'border-black bg-black text-white hover:bg-black hover:text-white' : ''}`} href={`/admin/cash-report?mode=day&date=${yesterday}`}>Yesterday</Button>
-              <Button asChild variant="outline" className={`w-full ${mode === 'week' ? 'border-black bg-black text-white hover:bg-black hover:text-white' : ''}`} href={`/admin/cash-report?mode=week&date=${today}`}>This week</Button>
-              <Button asChild variant="outline" className={`w-full ${mode === 'month' ? 'border-black bg-black text-white hover:bg-black hover:text-white' : ''}`} href={`/admin/cash-report?mode=month&date=${today}`}>This month</Button>
-              <Button asChild variant="outline" className={`w-full ${mode === 'range' && safeFrom === last7From && safeTo === today ? 'border-black bg-black text-white hover:bg-black hover:text-white' : ''}`} href={`/admin/cash-report?mode=range&from=${last7From}&to=${today}`}>Last 7 days</Button>
-            </div>
-          </div>
+        <div className="flex flex-wrap gap-2">
+          <Link prefetch={false} href={`/admin/cash-report?mode=day&date=${today}`} className="border px-3 py-2 rounded-lg text-sm hover:bg-gray-50">Today</Link>
+          <Link prefetch={false} href={`/admin/cash-report?mode=day&date=${yesterday}`} className="border px-3 py-2 rounded-lg text-sm hover:bg-gray-50">Yesterday</Link>
+          <Link prefetch={false} href={`/admin/cash-report?mode=week&date=${today}`} className="border px-3 py-2 rounded-lg text-sm hover:bg-gray-50">This week</Link>
+          <Link prefetch={false} href={`/admin/cash-report?mode=month&date=${today}`} className="border px-3 py-2 rounded-lg text-sm hover:bg-gray-50">This month</Link>
+          <Link prefetch={false} href={`/admin/cash-report?mode=range&from=${last7From}&to=${today}`} className="border px-3 py-2 rounded-lg text-sm hover:bg-gray-50">Last 7 days</Link>
+        </div>
 
-          <form method="get" className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px] xl:items-start">
-            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-2 2xl:grid-cols-4">
-              <Select name="mode" defaultValue={mode} label="Period">
-                <option value="day">Day</option>
-                <option value="week">Week (Mon–Sun)</option>
-                <option value="month">Month</option>
-                <option value="range">Custom range</option>
-              </Select>
+        <div className="flex flex-wrap items-center gap-2">
+          {activeChips.map((chip) => (
+            <span
+              key={chip}
+              className="inline-flex items-center rounded-full border border-[hsl(var(--border))] bg-[hsl(var(--bg))] px-3 py-1 text-xs font-medium text-[hsl(var(--muted))]"
+            >
+              {chip}
+            </span>
+          ))}
+        </div>
 
-              {mode === 'range' ? (
-                <>
-                  <Input type="date" name="from" defaultValue={safeFrom} label="From" />
-                  <Input type="date" name="to" defaultValue={safeTo} label="To" />
-                </>
-              ) : (
-                <div className="sm:col-span-2 2xl:col-span-2">
-                  <Input type="date" name="date" defaultValue={anchorDate} label="Anchor date" hint="Used to build the selected day, week, or month." />
-                </div>
-              )}
-
-              <div className="sm:col-span-2 2xl:col-span-4 flex flex-wrap gap-2 pt-1">
-                <Button>Load report</Button>
-                <Button asChild variant="outline" href="/admin/cash-report">
-                  Reset filters
-                </Button>
-              </div>
-            </div>
-
-            <div className="space-y-3 rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))]/55 p-4">
-              <div>
-                <div className="text-sm font-semibold">Export</div>
-                <div className="text-xs text-[hsl(var(--muted))]">{exportNote}</div>
-              </div>
-              <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-1">
-                <Link prefetch={false} href={`/api/admin/cash-report/export?${exportQuery.toString()}`} className="inline-flex min-h-[42px] w-full items-center justify-center rounded-2xl border border-[hsl(var(--border))] bg-white px-4 py-2 text-sm font-medium shadow-soft transition hover:bg-[hsl(var(--bg))]/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-[hsl(var(--bg))]">
-                  Export CSV
-                </Link>
-                <Link prefetch={false} href={`/api/admin/cash-report/export-pdf?${exportQuery.toString()}`} className="inline-flex min-h-[42px] w-full items-center justify-center rounded-2xl border border-[hsl(var(--border))] bg-white px-4 py-2 text-sm font-medium shadow-soft transition hover:bg-[hsl(var(--bg))]/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-[hsl(var(--bg))]">
-                  Export PDF
-                </Link>
-              </div>
-              <div className="rounded-xl border border-dashed border-[hsl(var(--border))] bg-white/80 px-3 py-2 text-xs text-[hsl(var(--muted))]">
-                Includes subscription income, other income, expenses, and Personal Funds cash in / cash out for the selected period.
-              </div>
-            </div>
-          </form>
-
-          <div className="space-y-2">
-            <div className="text-xs font-semibold uppercase tracking-[0.18em] text-[hsl(var(--muted))]">Current view</div>
-            <div className="flex flex-wrap items-center gap-2">
-              {activeChips.map((chip) => (
-                <span
-                  key={chip}
-                  className="inline-flex items-center rounded-full border border-[hsl(var(--border))] bg-[hsl(var(--bg))] px-3 py-1 text-xs font-medium text-[hsl(var(--muted))]"
-                >
-                  {chip}
-                </span>
-              ))}
-            </div>
+        <div className="flex flex-wrap gap-2">
+          <Link prefetch={false} href={`/api/admin/cash-report/export?${exportQuery.toString()}`} className="rounded-xl border px-4 py-2 text-sm font-medium hover:bg-gray-50">
+            Export CSV
+          </Link>
+          <Link prefetch={false} href={`/api/admin/cash-report/export-pdf?${exportQuery.toString()}`} className="rounded-xl border px-4 py-2 text-sm font-medium hover:bg-gray-50">
+            Export PDF
+          </Link>
+          <div className="self-center text-xs text-[hsl(var(--muted))]">
+            Uses current filters
           </div>
         </div>
       </Card>
@@ -622,13 +548,12 @@ export default async function AdminCashReportPage({
 
       <Card className="p-4 sm:p-5 space-y-2">
         <div className="text-sm font-medium">Cash logic</div>
-        <div className="text-sm text-[hsl(var(--muted))]">Subscription payments and other income entries are counted as cash in by payment method. Advance to gym is counted as cash in. Reimbursement from gym is counted as cash out. Expense paid personally is shown below for context but does not reduce cash until the reimbursement actually happens.</div>
+        <div className="text-sm text-[hsl(var(--muted))]">Advance to gym is counted as cash in. Reimbursement from gym is counted as cash out. Expense paid personally is shown below for context but does not reduce cash until the reimbursement actually happens.</div>
       </Card>
 
       {payErr ? <p className="text-sm text-rose-700">❌ Income error: {payErr.message}</p> : null}
       {expErr ? <p className="text-sm text-rose-700">❌ Expenses error: {expErr.message}</p> : null}
-      {pfErr ? <p className="text-sm text-amber-700">⚠️ Personal Funds cash movements could not be loaded. Cash totals below currently exclude PF cash in/out.</p> : null}
-      {extErr ? <p className="text-sm text-amber-700">⚠️ Other income entries could not be loaded. Cash totals below currently exclude external income.</p> : null}
+      {pfErr ? <p className="text-sm text-amber-700">⚠️ Personal Funds cash movements could not be loaded. Cash totals below currently include Payments and Expenses only.</p> : null}
 
       <div className="space-y-3">
         <div className="flex items-center justify-between gap-3 flex-wrap">
@@ -658,19 +583,6 @@ export default async function AdminCashReportPage({
           </div>
           <Table columns={expColumns} rows={expRows as any} keyField="id" stickyTopClassName="top-0" />
         </div>
-      </div>
-
-      <div className="space-y-3">
-        <div className="flex items-center justify-between gap-3 flex-wrap">
-          <h2 className="text-lg font-semibold">Other income (latest 10)</h2>
-          <div className="flex items-center gap-3 flex-wrap">
-            <p className="text-xs text-[hsl(var(--muted))]">Bar, store, and other external money entries counted in income.</p>
-            <Link prefetch={false} href={externalIncomeHref} className="text-xs font-medium underline underline-offset-4">
-              Open Other Income
-            </Link>
-          </div>
-        </div>
-        <Table columns={externalColumns} rows={externalRows as any} keyField="id" stickyTopClassName="top-0" />
       </div>
 
       <div className="grid gap-6 lg:grid-cols-2">
