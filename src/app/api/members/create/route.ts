@@ -21,6 +21,7 @@ type Body =
       date_of_birth?: string
       dateOfBirth?: string
       dob?: string
+      visitor_trial_id?: string
     }
   | Record<string, any>
 
@@ -61,6 +62,10 @@ function isValidDateOnly(dateOnly: string) {
 
 function todayDateOnlyUTC() {
   return new Date().toISOString().slice(0, 10)
+}
+
+function isUuidLike(value: string) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)
 }
 
 function noStore(res: NextResponse) {
@@ -126,6 +131,7 @@ export async function POST(req: Request) {
       (body as any).date_of_birth ?? (body as any).dateOfBirth ?? (body as any).dob ?? '',
     ).trim()
     const date_of_birth = (dobRaw || null) as string | null
+    const visitor_trial_id = String((body as any).visitor_trial_id ?? '').trim() || null
 
     if (date_of_birth) {
       if (!isValidDateOnly(date_of_birth)) {
@@ -144,6 +150,12 @@ export async function POST(req: Request) {
     if (!email) {
       return noStore(
         NextResponse.json({ ok: false, error: 'MISSING_EMAIL' }, { status: 400 }),
+      )
+    }
+
+    if (visitor_trial_id && !isUuidLike(visitor_trial_id)) {
+      return noStore(
+        NextResponse.json({ ok: false, error: 'INVALID_VISITOR_TRIAL_ID' }, { status: 400 }),
       )
     }
 
@@ -440,11 +452,33 @@ export async function POST(req: Request) {
       }
     }
 
+    if (visitor_trial_id) {
+      const { error: visitorLinkError } = await admin
+        .from('visitor_trials')
+        .update({
+          linked_member_id: userId,
+          updated_by: actor.id,
+        })
+        .eq('id', visitor_trial_id)
+
+      if (visitorLinkError) {
+        return noStore(
+          NextResponse.json(
+            { ok: false, error: `VISITOR_TRIAL_LINK_FAILED: ${visitorLinkError.message}` },
+            { status: 500 },
+          ),
+        )
+      }
+    }
+
     try {
       revalidateTag('members')
     } catch {}
     try {
       revalidatePath('/members')
+    } catch {}
+    try {
+      revalidatePath('/admin/visitors')
     } catch {}
 
     return noStore(
@@ -459,6 +493,7 @@ export async function POST(req: Request) {
         next_action: inviteSent ? 'none' : 'open_profile',
         user_id: userId,
         user: { id: userId, email, first_name, last_name, phone, date_of_birth },
+        visitor_trial_id,
         message:
           outcome === 'invited_new_user'
             ? inviteMode === 'custom_qr'
