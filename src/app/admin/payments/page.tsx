@@ -6,9 +6,6 @@ import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import AccessDeniedCard from '@/components/AccessDeniedCard'
 import Badge from '@/components/ui/Badge'
-import Button from '@/components/ui/Button'
-import Input from '@/components/ui/Input'
-import Select from '@/components/ui/Select'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card'
 import { Table } from '@/components/ui/Table'
 import EditPaymentDateButton from '@/components/EditPaymentDateButton'
@@ -304,8 +301,6 @@ export default async function AdminPaymentsPage({
     q ? `Search: ${q}` : '',
   ].filter(Boolean)
 
-  const exportNote = 'Uses current filters'
-
   const tableColumns = [
     { key: 'paid_when', header: 'Paid at (EG)' },
     { key: 'recorded_when', header: 'Recorded at', hideOnMobile: true },
@@ -372,96 +367,125 @@ export default async function AdminPaymentsPage({
           </p>
         </div>
 
-        <div className="grid w-full gap-2 sm:w-auto sm:grid-cols-2">
-          <Button asChild variant="outline" className="w-full" href="/admin">
+        <div className="flex gap-2">
+          <Link prefetch={false} href="/admin" className="border px-4 py-2 rounded-lg hover:bg-gray-50">
             ← Admin
-          </Button>
-          <Button asChild variant="outline" className="w-full" href={cashReportHref}>
+          </Link>
+          <Link prefetch={false} href={cashReportHref} className="border px-4 py-2 rounded-lg hover:bg-gray-50">
             Filtered Cash Report
-          </Button>
+          </Link>
         </div>
       </div>
 
       <Card>
-        <CardHeader className="flex-col items-start gap-1 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <CardTitle>Filters</CardTitle>
-            <div className="text-sm text-[hsl(var(--muted))]">Refine the view, then export exactly this selection.</div>
-          </div>
-          <div className="text-xs font-medium uppercase tracking-[0.18em] text-[hsl(var(--muted))]">Egypt time · Africa/Cairo</div>
+        <CardHeader>
+          <CardTitle>Filters</CardTitle>
+          <div className="text-sm text-[hsl(var(--muted))]">Refine the view, then export exactly this selection.</div>
         </CardHeader>
-        <CardContent className="space-y-5">
-          <div className="space-y-2">
-            <div className="text-xs font-semibold uppercase tracking-[0.18em] text-[hsl(var(--muted))]">Quick range</div>
-            <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-5">
-              <Button asChild variant="outline" className={`w-full ${preset === 'today' ? 'border-black bg-black text-white hover:bg-black hover:text-white' : ''}`} href={quickLinks.today}>Today</Button>
-              <Button asChild variant="outline" className={`w-full ${preset === '7d' ? 'border-black bg-black text-white hover:bg-black hover:text-white' : ''}`} href={quickLinks.seven}>Last 7 days</Button>
-              <Button asChild variant="outline" className={`w-full ${preset === 'month' ? 'border-black bg-black text-white hover:bg-black hover:text-white' : ''}`} href={quickLinks.month}>This month</Button>
-              <Button asChild variant="outline" className={`w-full ${preset === 'custom' ? 'border-black bg-black text-white hover:bg-black hover:text-white' : ''}`} href={quickLinks.custom}>Custom</Button>
-              <Button asChild variant="outline" className="w-full" href={quickLinks.reset}>Reset filters</Button>
-            </div>
+        <CardContent className="space-y-4">
+          <div className="flex flex-wrap gap-2">
+            <Link prefetch={false} href={quickLinks.today} className="inline-flex items-center justify-center rounded-2xl border border-[hsl(var(--border))] bg-white px-4 py-2 text-sm font-medium hover:bg-[hsl(var(--bg))]/80">
+              Today
+            </Link>
+            <Link prefetch={false} href={quickLinks.seven} className="inline-flex items-center justify-center rounded-2xl border border-[hsl(var(--border))] bg-white px-4 py-2 text-sm font-medium hover:bg-[hsl(var(--bg))]/80">
+              Last 7 days
+            </Link>
+            <Link prefetch={false} href={quickLinks.month} className="inline-flex items-center justify-center rounded-2xl border border-[hsl(var(--border))] bg-white px-4 py-2 text-sm font-medium hover:bg-[hsl(var(--bg))]/80">
+              This month
+            </Link>
+            <Link prefetch={false} href={quickLinks.custom} className="inline-flex items-center justify-center rounded-2xl border border-[hsl(var(--border))] bg-white px-4 py-2 text-sm font-medium hover:bg-[hsl(var(--bg))]/80">
+              Custom
+            </Link>
+            <Link prefetch={false} href={quickLinks.reset} className="inline-flex items-center justify-center rounded-2xl border border-[hsl(var(--border))] bg-white px-4 py-2 text-sm font-medium hover:bg-[hsl(var(--bg))]/80">
+              Reset filters
+            </Link>
           </div>
 
-          <form method="get" className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px] xl:items-start">
-            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-2 2xl:grid-cols-5">
-              <Select name="preset" defaultValue={preset} label="Preset">
+          <form method="get" className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
+            <label className="block">
+              <span className="mb-1 block text-sm font-medium">Preset</span>
+              <select
+                name="preset"
+                defaultValue={preset}
+                className="w-full rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
                 <option value="today">Today</option>
                 <option value="7d">Last 7 days</option>
                 <option value="month">This month</option>
                 <option value="custom">Custom</option>
-              </Select>
+              </select>
+            </label>
 
-              <Input type="date" name="from" defaultValue={from} label="From" />
+            <label className="block">
+              <span className="mb-1 block text-sm font-medium">From</span>
+              <input
+                type="date"
+                name="from"
+                defaultValue={from}
+                className="w-full rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              />
+            </label>
 
-              <Input type="date" name="to" defaultValue={to} label="To" />
+            <label className="block">
+              <span className="mb-1 block text-sm font-medium">To</span>
+              <input
+                type="date"
+                name="to"
+                defaultValue={to}
+                className="w-full rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              />
+            </label>
 
-              <Select name="payment_method" defaultValue={payment_method} label="Method">
+            <label className="block">
+              <span className="mb-1 block text-sm font-medium">Method</span>
+              <select
+                name="payment_method"
+                defaultValue={payment_method}
+                className="w-full rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
                 <option value="all">All</option>
                 <option value="cash">Cash</option>
                 <option value="instapay">Instapay</option>
                 <option value="card">Card</option>
                 <option value="bank_transfer">Bank transfer</option>
-              </Select>
+              </select>
+            </label>
 
-              <div className="sm:col-span-2 2xl:col-span-1">
-                <Input
-                  name="q"
-                  defaultValue={q}
-                  label="Search member"
-                  placeholder="name / email / phone / ATOM-000123"
-                />
-              </div>
+            <label className="block sm:col-span-2 xl:col-span-2">
+              <span className="mb-1 block text-sm font-medium">Search member</span>
+              <input
+                name="q"
+                defaultValue={q}
+                placeholder="name / email / phone / ATOM-000123"
+                className="w-full rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              />
+            </label>
 
-              <div className="sm:col-span-2 2xl:col-span-5 flex flex-wrap gap-2 pt-1">
-                <Button>Apply filters</Button>
-                <Button asChild variant="outline" href="/admin/payments">
-                  Reset filters
-                </Button>
-              </div>
-            </div>
-
-            <div className="space-y-3 rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))]/55 p-4">
-              <div>
-                <div className="text-sm font-semibold">Export</div>
-                <div className="text-xs text-[hsl(var(--muted))]">{exportNote}</div>
-              </div>
-              <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-1">
-                <a href={`/api/admin/payments/export?${exportQS}`} className="inline-flex min-h-[42px] w-full items-center justify-center rounded-2xl border border-[hsl(var(--border))] bg-white px-4 py-2 text-sm font-medium shadow-soft transition hover:bg-[hsl(var(--bg))]/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-[hsl(var(--bg))]">
-                  Export CSV
-                </a>
-                <a href={`/api/admin/payments/export-pdf?${exportQS}`} className="inline-flex min-h-[42px] w-full items-center justify-center rounded-2xl border border-[hsl(var(--border))] bg-white px-4 py-2 text-sm font-medium shadow-soft transition hover:bg-[hsl(var(--bg))]/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-[hsl(var(--bg))]">
-                  Export PDF
-                </a>
-              </div>
-              <div className="rounded-xl border border-dashed border-[hsl(var(--border))] bg-white/80 px-3 py-2 text-xs text-[hsl(var(--muted))]">
-                Includes the current date range, payment method, and member search.
-              </div>
+            <div className="sm:col-span-2 xl:col-span-6 flex flex-wrap items-center gap-2 pt-1">
+              <button className="inline-flex items-center justify-center rounded-2xl bg-black text-white px-4 py-2 text-sm font-medium hover:opacity-95">
+                Apply filters
+              </button>
+              <a href={`/api/admin/payments/export?${exportQS}`} className="inline-flex items-center justify-center rounded-2xl shadow-soft border border-[hsl(var(--border))] bg-white px-4 py-2 text-sm font-medium hover:bg-[hsl(var(--bg))]/80">
+                Export CSV
+              </a>
+              <a href={`/api/admin/payments/export-pdf?${exportQS}`} className="inline-flex items-center justify-center rounded-2xl shadow-soft border border-[hsl(var(--border))] bg-white px-4 py-2 text-sm font-medium hover:bg-[hsl(var(--bg))]/80">
+                Export PDF
+              </a>
+              <span className="text-xs text-[hsl(var(--muted))]">Uses current filters</span>
+              <Link
+                prefetch={false}
+                href="/admin/payments"
+                className="inline-flex items-center justify-center rounded-2xl border border-[hsl(var(--border))] bg-white px-4 py-2 text-sm font-medium hover:bg-[hsl(var(--bg))]/80"
+              >
+                Reset
+              </Link>
             </div>
           </form>
 
-          <div className="space-y-2">
-            <div className="text-xs font-semibold uppercase tracking-[0.18em] text-[hsl(var(--muted))]">Current view</div>
-            <div className="flex flex-wrap gap-2">
+          {activeFilters.length ? (
+            <div className="space-y-2">
+              <div className="text-xs font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Current view</div>
+              <div className="flex flex-wrap gap-2">
               {activeFilters.map((label) => (
                 <span
                   key={label}
@@ -470,8 +494,9 @@ export default async function AdminPaymentsPage({
                   {label}
                 </span>
               ))}
+              </div>
             </div>
-          </div>
+          ) : null}
         </CardContent>
       </Card>
 
@@ -482,7 +507,7 @@ export default async function AdminPaymentsPage({
             Use <strong>Edit date</strong> for historical imports already entered with today&apos;s date.
           </div>
           <div className="text-xs text-[hsl(var(--muted))]">
-            Cash Report and exports always follow the same current filters.
+            Filtered CSV/PDF exports and the Cash Report shortcut always follow the current filtered result, not only the visible page.
           </div>
         </CardContent>
       </Card>
@@ -545,27 +570,27 @@ export default async function AdminPaymentsPage({
           <Table columns={tableColumns} rows={tableRows as any} keyField="id" stickyTopClassName="top-0" />
 
           {totalPages > 1 ? (
-            <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="mt-4 flex items-center justify-between gap-3">
               <div className="text-sm text-[hsl(var(--muted))]">
                 Page {page} / {totalPages}
               </div>
-              <div className="grid w-full grid-cols-2 gap-2 sm:w-auto">
-                <Button
-                  asChild
-                  variant="outline"
-                  className={`w-full ${page <= 1 ? 'pointer-events-none opacity-50' : ''}`}
+              <div className="flex items-center gap-2">
+                <Link
+                  prefetch={false}
                   href={navLink(Math.max(1, page - 1))}
+                  aria-disabled={page <= 1}
+                  className={`rounded-xl border px-3 py-2 text-sm font-semibold ${page <= 1 ? 'pointer-events-none opacity-50' : 'hover:bg-black/[0.03]'}`}
                 >
                   Prev
-                </Button>
-                <Button
-                  asChild
-                  variant="outline"
-                  className={`w-full ${page >= totalPages ? 'pointer-events-none opacity-50' : ''}`}
+                </Link>
+                <Link
+                  prefetch={false}
                   href={navLink(Math.min(totalPages, page + 1))}
+                  aria-disabled={page >= totalPages}
+                  className={`rounded-xl border px-3 py-2 text-sm font-semibold ${page >= totalPages ? 'pointer-events-none opacity-50' : 'hover:bg-black/[0.03]'}`}
                 >
                   Next
-                </Button>
+                </Link>
               </div>
             </div>
           ) : null}
