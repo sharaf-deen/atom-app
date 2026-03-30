@@ -5,10 +5,14 @@ import { Award, Dumbbell, FileText, Medal, Save, ShieldCheck, Trash2, Trophy, Up
 import { createSupabaseAdminClient } from '@/lib/supabaseAdmin'
 import { createSupabaseRSC } from '@/lib/supabaseServer'
 import { getSessionUser, type Role } from '@/lib/session'
+import { ATHLETE_SPECIALTY_OPTIONS, type AthleteSpecialty, specialtyLabel } from '@/lib/athleteProgress'
 
 type TrainingProfileRow = {
   member_user_id: string
   program_level: ProgramLevel | null
+  stripes: number | null
+  specialty: AthleteSpecialty | null
+  reference_coach_user_id: string | null
   notes: string | null
   updated_at: string | null
   updated_by: string | null
@@ -48,6 +52,14 @@ type CompetitionResultRow = {
 }
 
 type ProgramLevel = 'beginner' | 'intermediate' | 'advanced' | 'competitor'
+
+type CoachOption = {
+  user_id: string
+  first_name: string | null
+  last_name: string | null
+  member_id: string | null
+  role: Role | null
+}
 
 type Props = {
   memberUserId: string
@@ -141,6 +153,21 @@ function isCompetitionResult(value: string): value is CompetitionResult {
   return (RESULT_OPTIONS as readonly string[]).includes(value)
 }
 
+function isAthleteSpecialty(value: string): value is AthleteSpecialty {
+  return (ATHLETE_SPECIALTY_OPTIONS as readonly string[]).includes(value)
+}
+
+function isUuid(value: string) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)
+}
+
+function coachOptionLabel(option: CoachOption) {
+  const name = `${option.first_name ?? ''} ${option.last_name ?? ''}`.trim() || 'Unnamed coach'
+  const suffix = option.member_id ? ` · ${option.member_id}` : ''
+  const role = option.role === 'assistant_coach' ? 'Assistant coach' : option.role === 'head_coach' ? 'Head coach' : 'Coach'
+  return `${name} (${role})${suffix}`
+}
+
 function canEditAthleteProfile(viewerRole: Role | null | undefined, targetRole: Role | null | undefined) {
   if (viewerRole !== 'head_coach' && viewerRole !== 'super_admin') return false
   return isEditableAthleteTargetRole(targetRole)
@@ -213,8 +240,16 @@ async function saveTrainingProfileAction(formData: FormData) {
   const memberUserId = String(formData.get('memberUserId') || '')
   const targetRoleRaw = String(formData.get('targetRole') || '')
   const programLevelRaw = String(formData.get('program_level') || '').trim().toLowerCase()
+  const stripesRaw = String(formData.get('stripes') || '0').trim()
+  const specialtyRaw = String(formData.get('specialty') || '').trim().toLowerCase()
+  const referenceCoachUserIdRaw = String(formData.get('reference_coach_user_id') || '').trim()
+  const notes = String(formData.get('notes') || '').trim() || null
 
-  if (!me || !memberUserId || !targetRoleRaw || !isProgramLevel(programLevelRaw)) {
+  const stripes = Number.parseInt(stripesRaw || '0', 10)
+  const specialty = specialtyRaw ? specialtyRaw : null
+  const referenceCoachUserId = referenceCoachUserIdRaw && isUuid(referenceCoachUserIdRaw) ? referenceCoachUserIdRaw : null
+
+  if (!me || !memberUserId || !targetRoleRaw || !isProgramLevel(programLevelRaw) || !Number.isInteger(stripes) || stripes < 0 || stripes > 4 || (specialty && !isAthleteSpecialty(specialty))) {
     redirect(nextPath)
   }
 
@@ -230,6 +265,10 @@ async function saveTrainingProfileAction(formData: FormData) {
       {
         member_user_id: memberUserId,
         program_level: programLevelRaw,
+        stripes,
+        specialty,
+        reference_coach_user_id: referenceCoachUserId,
+        notes,
         updated_by: me.id,
       },
       { onConflict: 'member_user_id' },
@@ -585,11 +624,12 @@ export default async function AthleteProfileSection({ memberUserId, targetRole, 
   const sessionDb = createSupabaseRSC()
   const canReadViaAdmin = !isSelf && (viewerRole === 'head_coach' || viewerRole === 'super_admin')
   const db = canReadViaAdmin ? adminDb : sessionDb
+  const canEdit = allowEdit && canEditAthleteProfile(viewerRole, targetRole)
 
-  const [{ data: training }, { data: belts }, { data: competitions }] = await Promise.all([
+  const [{ data: training }, { data: belts }, { data: competitions }, coachOptionsRes] = await Promise.all([
     db
       .from('member_training_profiles')
-      .select('member_user_id, program_level, notes, updated_at, updated_by')
+      .select('member_user_id, program_level, stripes, specialty, reference_coach_user_id, notes, updated_at, updated_by')
       .eq('member_user_id', memberUserId)
       .maybeSingle<TrainingProfileRow>(),
     db
@@ -606,10 +646,20 @@ export default async function AthleteProfileSection({ memberUserId, targetRole, 
       .order('competition_date', { ascending: false })
       .order('created_at', { ascending: false })
       .returns<CompetitionResultRow[]>(),
+    canEdit
+      ? adminDb
+          .from('profiles')
+          .select('user_id, first_name, last_name, member_id, role')
+          .in('role', ['coach', 'assistant_coach', 'head_coach'])
+          .order('first_name', { ascending: true })
+          .returns<CoachOption[]>()
+      : Promise.resolve({ data: [] as CoachOption[] }),
   ])
 
   const beltRows = belts ?? []
   const competitionRows = competitions ?? []
+  const coachOptions = (coachOptionsRes as { data?: CoachOption[] } | null)?.data ?? []
+  const referenceCoach = coachOptions.find((option) => option.user_id === (training?.reference_coach_user_id ?? null)) ?? null
   const currentBelt = beltRows[0]?.belt_code ?? null
   const currentYear = new Date().getUTCFullYear()
   const podiumsThisYear = competitionRows.filter((row) => {
@@ -626,8 +676,7 @@ export default async function AthleteProfileSection({ memberUserId, targetRole, 
   )
   const certificateUrlById = new Map<string, string | null>(certificateUrls)
 
-  const canEdit = allowEdit && canEditAthleteProfile(viewerRole, targetRole)
-  const beltChoices = age !== null ? (age < 16 ? KID_BELTS : ADULT_BELTS) : ALL_BELTS
+  const beltChoices = age !== null ? (age < 17 ? KID_BELTS : ADULT_BELTS) : ALL_BELTS
 
   return (
     <section className="rounded-3xl border border-[hsl(var(--border))] bg-white p-4 shadow-soft sm:p-5">
@@ -643,6 +692,8 @@ export default async function AthleteProfileSection({ memberUserId, targetRole, 
         </div>
         <div className="flex flex-wrap gap-2">
           <TinyBadge>{training?.program_level ? titleCase(training.program_level) : 'Program pending'}</TinyBadge>
+          <TinyBadge>{`Stripes ${Math.max(0, Number(training?.stripes ?? 0))}`}</TinyBadge>
+          <TinyBadge>{specialtyLabel(training?.specialty ?? null)}</TinyBadge>
           <TinyBadge tone={currentBelt ? 'success' : 'neutral'}>{currentBelt ? `${beltLabel(currentBelt)} belt` : 'No belt yet'}</TinyBadge>
           <TinyBadge tone={podiumsThisYear >= 3 ? 'success' : podiumsThisYear > 0 ? 'warning' : 'neutral'}>
             {podiumsThisYear} podium(s) in {currentYear}
@@ -658,7 +709,7 @@ export default async function AthleteProfileSection({ memberUserId, targetRole, 
           </div>
           <div className="mt-3 text-lg font-semibold tracking-tight">{training?.program_level ? titleCase(training.program_level) : 'Not set yet'}</div>
           <div className="mt-1 text-sm text-[hsl(var(--muted))]">
-            {training?.updated_at ? `Last updated ${fmtDate(training.updated_at)}` : 'No program level saved yet.'}
+            {training ? `${specialtyLabel(training.specialty)} · ${Math.max(0, Number(training.stripes ?? 0))} stripe(s)` : 'No program level saved yet.'}
           </div>
         </div>
 
@@ -682,7 +733,7 @@ export default async function AthleteProfileSection({ memberUserId, targetRole, 
           <div className="mt-1 text-sm text-[hsl(var(--muted))]">
             {competitionRows.length > 0
               ? canEdit
-                ? 'Editable by coaches and super admin.'
+                ? 'Editable by head coach and super admin.'
                 : 'Competition record available.'
               : 'No competition result added yet.'}
           </div>
@@ -691,11 +742,11 @@ export default async function AthleteProfileSection({ memberUserId, targetRole, 
         <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] p-4">
           <div className="flex items-center gap-2 text-sm font-medium text-black">
             <FileText size={16} />
-            Renewal benefit
+            Reference coach
           </div>
-          <div className="mt-3 text-lg font-semibold tracking-tight">{podiumsThisYear >= 3 ? 'Eligible now' : 'Track podiums'}</div>
+          <div className="mt-3 text-lg font-semibold tracking-tight">{referenceCoach ? coachOptionLabel(referenceCoach) : 'Not set yet'}</div>
           <div className="mt-1 text-sm text-[hsl(var(--muted))]">
-            3 podiums in one calendar year can unlock a 50% discount on any membership renewal.
+            {training?.updated_at ? `Athlete profile updated ${fmtDate(training.updated_at)}` : 'Assign a reference coach to support progression reviews.'}
           </div>
         </div>
       </div>
@@ -706,7 +757,7 @@ export default async function AthleteProfileSection({ memberUserId, targetRole, 
             <div className="flex items-center justify-between gap-3">
               <div>
                 <h3 className="text-sm font-semibold tracking-tight">Program tools</h3>
-                <p className="mt-1 text-xs text-[hsl(var(--muted))]">Coach, head coach, assistant coach, or super admin.</p>
+                <p className="mt-1 text-xs text-[hsl(var(--muted))]">Head coach or super admin only.</p>
               </div>
               <TinyBadge tone="warning">Editable</TinyBadge>
             </div>
@@ -715,18 +766,74 @@ export default async function AthleteProfileSection({ memberUserId, targetRole, 
                 <input type="hidden" name="memberUserId" value={memberUserId} />
                 <input type="hidden" name="targetRole" value={targetRole ?? 'member'} />
                 <input type="hidden" name="nextPath" value={nextPath} />
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <label className="block text-sm">
+                    <span className="mb-2 block text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Program level</span>
+                    <select
+                      name="program_level"
+                      defaultValue={training?.program_level ?? 'beginner'}
+                      className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none transition focus:border-black"
+                    >
+                      {PROGRAM_OPTIONS.map((option) => (
+                        <option key={option} value={option}>{titleCase(option)}</option>
+                      ))}
+                    </select>
+                  </label>
+
+                  <label className="block text-sm">
+                    <span className="mb-2 block text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Stripes</span>
+                    <input
+                      type="number"
+                      name="stripes"
+                      min={0}
+                      max={4}
+                      defaultValue={Math.max(0, Number(training?.stripes ?? 0))}
+                      className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none transition focus:border-black"
+                    />
+                  </label>
+                </div>
+
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <label className="block text-sm">
+                    <span className="mb-2 block text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Specialty</span>
+                    <select
+                      name="specialty"
+                      defaultValue={training?.specialty ?? ''}
+                      className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none transition focus:border-black"
+                    >
+                      <option value="">Not set</option>
+                      {ATHLETE_SPECIALTY_OPTIONS.map((option) => (
+                        <option key={option} value={option}>{specialtyLabel(option)}</option>
+                      ))}
+                    </select>
+                  </label>
+
+                  <label className="block text-sm">
+                    <span className="mb-2 block text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Reference coach</span>
+                    <select
+                      name="reference_coach_user_id"
+                      defaultValue={training?.reference_coach_user_id ?? ''}
+                      className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none transition focus:border-black"
+                    >
+                      <option value="">Not set</option>
+                      {coachOptions.map((option) => (
+                        <option key={option.user_id} value={option.user_id}>{coachOptionLabel(option)}</option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+
                 <label className="block text-sm">
-                  <span className="mb-2 block text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Program level</span>
-                  <select
-                    name="program_level"
-                    defaultValue={training?.program_level ?? 'beginner'}
+                  <span className="mb-2 block text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Coach note</span>
+                  <textarea
+                    name="notes"
+                    rows={3}
+                    defaultValue={training?.notes ?? ''}
+                    placeholder="Optional progression note"
                     className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none transition focus:border-black"
-                  >
-                    {PROGRAM_OPTIONS.map((option) => (
-                      <option key={option} value={option}>{titleCase(option)}</option>
-                    ))}
-                  </select>
+                  />
                 </label>
+
                 <div className="flex flex-wrap gap-2">
                   <button
                     type="submit"
