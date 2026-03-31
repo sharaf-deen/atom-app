@@ -17,10 +17,13 @@ import {
   fullName,
   isKimonoEligible,
   promotionRadar,
+  reviewQueueState,
   titleCase,
   type AthleteAgeGroup,
   type AthleteSpecialty,
   type ProgramLevel,
+  type ReviewActionStatus,
+  type ReviewLane,
 } from '@/lib/headCoachAthletes'
 
 export const dynamic = 'force-dynamic'
@@ -92,6 +95,19 @@ type CoachOption = {
   role: Role | null
 }
 
+
+type ReviewActionRow = {
+  id: string
+  member_user_id: string
+  review_lane: ReviewLane
+  recommendation_status: 'due' | 'review' | 'watch' | 'blocked'
+  action_status: ReviewActionStatus
+  action_date: string
+  snoozed_until: string | null
+  notes: string | null
+  created_at: string | null
+}
+
 type EnrichedAthlete = HeadCoachRosterRow & {
   name: string
   age: number | null
@@ -99,6 +115,8 @@ type EnrichedAthlete = HeadCoachRosterRow & {
   attendance_band: ReturnType<typeof attendanceBand>
   kimono_eligible: boolean
   promotion: ReturnType<typeof promotionRadar>
+  latest_review_action: ReviewActionRow | null
+  review_queue: ReturnType<typeof reviewQueueState>
 }
 
 const TARGET_ROLES: Role[] = ['member', 'coach', 'assistant_coach', 'vip', 'champion']
@@ -144,6 +162,20 @@ function normalizeCompetitionResult(value?: string | null): CompetitionResult | 
 
 function sanitizeNote(value: FormDataEntryValue | null) {
   return String(value ?? '').trim().slice(0, 2000) || null
+}
+
+
+function normalizeReviewActionStatus(value?: string | null): ReviewActionStatus {
+  const lowered = String(value ?? '').trim().toLowerCase()
+  if (lowered === 'reviewed' || lowered === 'deferred' || lowered === 'approved' || lowered === 'hold') return lowered
+  return 'pending'
+}
+
+function queueTone(key: ReturnType<typeof reviewQueueState>['key']): 'neutral' | 'success' | 'warning' | 'danger' {
+  if (key === 'action_now') return 'warning'
+  if (key === 'deferred') return 'neutral'
+  if (key === 'logged') return 'success'
+  return 'neutral'
 }
 
 function toStripes(value: FormDataEntryValue | null) {
@@ -411,6 +443,39 @@ async function promoteBeltAction(formData: FormData) {
   redirect(nextPath)
 }
 
+
+async function saveReviewActionAction(formData: FormData) {
+  'use server'
+
+  const nextPath = String(formData.get('nextPath') || '/head-coach/athletes')
+  const memberUserId = String(formData.get('memberUserId') || '').trim()
+  const reviewLane = String(formData.get('review_lane') || '').trim() as ReviewLane
+  const recommendationStatus = String(formData.get('recommendation_status') || '').trim() as 'due' | 'review' | 'watch' | 'blocked'
+  const actionStatus = normalizeReviewActionStatus(String(formData.get('action_status') || 'pending'))
+  const actionDate = String(formData.get('action_date') || '').trim() || new Date().toISOString().slice(0, 10)
+  const snoozedUntil = String(formData.get('snoozed_until') || '').trim() || null
+  const notes = sanitizeNote(formData.get('notes'))
+  if (!memberUserId || !reviewLane) redirect(nextPath)
+
+  const me = await requireHeadCoachAccess(nextPath)
+  const admin = getSupabaseAdminClientCached()
+  const insert = await admin.from('member_athlete_review_actions').insert({
+    id: crypto.randomUUID(),
+    member_user_id: memberUserId,
+    review_lane: reviewLane,
+    recommendation_status: recommendationStatus,
+    action_status: actionStatus,
+    action_date: actionDate,
+    snoozed_until: actionStatus === 'deferred' ? snoozedUntil : null,
+    notes,
+    created_by: me.id,
+  })
+  if (insert.error) throw new Error(insert.error.message)
+
+  revalidatePath('/head-coach/athletes')
+  redirect(nextPath)
+}
+
 async function saveCompetitionResultAction(formData: FormData) {
   'use server'
 
@@ -505,13 +570,23 @@ function statTone(status: ReturnType<typeof promotionRadar>['status']): 'neutral
   return 'neutral'
 }
 
-function buildEnrichedRoster(rows: HeadCoachRosterRow[]) {
+function buildEnrichedRoster(rows: HeadCoachRosterRow[], latestReviewByMember: Map<string, ReviewActionRow>) {
   return rows.map<EnrichedAthlete>((row) => {
     const age = ageYears(row.date_of_birth)
     const ageGroup = ageGroupFromDate(row.date_of_birth)
     const band = attendanceBand(Number(row.attendance_90d ?? 0))
     const kimonoEligible = isKimonoEligible(row.specialty, ageGroup)
     const baselineDate = row.current_belt_promoted_at ?? row.profile_created_at
+    const promotion = promotionRadar({
+      program: row.program_level,
+      currentBelt: row.current_belt,
+      stripes: row.stripes,
+      specialty: row.specialty,
+      ageGroup,
+      baselineDate,
+      attendance90d: Number(row.attendance_90d ?? 0),
+    })
+    const latestReviewAction = latestReviewByMember.get(row.user_id) ?? null
     return {
       ...row,
       name: fullName(row.first_name, row.last_name, row.email),
@@ -519,15 +594,9 @@ function buildEnrichedRoster(rows: HeadCoachRosterRow[]) {
       age_group: ageGroup,
       attendance_band: band,
       kimono_eligible: kimonoEligible,
-      promotion: promotionRadar({
-        program: row.program_level,
-        currentBelt: row.current_belt,
-        stripes: row.stripes,
-        specialty: row.specialty,
-        ageGroup,
-        baselineDate,
-        attendance90d: Number(row.attendance_90d ?? 0),
-      }),
+      promotion,
+      latest_review_action: latestReviewAction,
+      review_queue: reviewQueueState({ promotion, latestAction: latestReviewAction }),
     }
   })
 }
@@ -540,6 +609,8 @@ function matchesFilter(row: EnrichedAthlete, filters: {
   specialty: string
   promotion: string
   attendance: string
+  lane: string
+  queue: string
 }) {
   const q = filters.q.trim().toLowerCase()
   if (q) {
@@ -552,6 +623,8 @@ function matchesFilter(row: EnrichedAthlete, filters: {
   if (filters.specialty && (row.specialty ?? '') !== filters.specialty) return false
   if (filters.promotion && row.promotion.status !== filters.promotion) return false
   if (filters.attendance && row.attendance_band.key !== filters.attendance) return false
+  if (filters.lane && row.promotion.lane !== filters.lane) return false
+  if (filters.queue && row.review_queue.key !== filters.queue) return false
   return true
 }
 
@@ -580,12 +653,14 @@ export default async function HeadCoachAthletesPage({ searchParams }: { searchPa
     specialty: pick(searchParams?.specialty) ?? '',
     promotion: pick(searchParams?.promotion) ?? '',
     attendance: pick(searchParams?.attendance) ?? '',
+    lane: pick(searchParams?.lane) ?? '',
+    queue: pick(searchParams?.queue) ?? '',
     focus: pick(searchParams?.focus) ?? '',
   }
 
   const nextPath = buildPath(searchParams ?? {})
   const admin = getSupabaseAdminClientCached()
-  const [rosterRes, coachesRes] = await Promise.all([
+  const [rosterRes, coachesRes, latestReviewRes] = await Promise.all([
     admin.from('head_coach_athlete_roster').select('*').returns<HeadCoachRosterRow[]>(),
     admin
       .from('profiles')
@@ -593,19 +668,28 @@ export default async function HeadCoachAthletesPage({ searchParams }: { searchPa
       .in('role', REFERENCE_COACH_ROLES)
       .order('first_name', { ascending: true })
       .returns<CoachOption[]>(),
+    admin
+      .from('head_coach_latest_review_action')
+      .select('member_user_id, review_lane, recommendation_status, action_status, action_date, snoozed_until, notes, created_at')
+      .returns<Omit<ReviewActionRow, 'id'>[]>(),
   ])
 
   if (rosterRes.error) throw new Error(rosterRes.error.message)
   if (coachesRes.error) throw new Error(coachesRes.error.message)
+  if (latestReviewRes.error) throw new Error(latestReviewRes.error.message)
 
-  const roster = buildEnrichedRoster(rosterRes.data ?? [])
+  const latestReviewByMember = new Map<string, ReviewActionRow>(
+    (latestReviewRes.data ?? []).map((row) => [row.member_user_id, { id: `${row.member_user_id}-${row.action_date}`, ...row }])
+  )
+
+  const roster = buildEnrichedRoster(rosterRes.data ?? [], latestReviewByMember)
   const filtered = roster
     .filter((row) => matchesFilter(row, filters))
     .sort((a, b) => a.name.localeCompare(b.name))
 
   const focusAthlete = roster.find((row) => row.user_id === filters.focus) ?? filtered[0] ?? null
 
-  const [focusCompetitionsRes, progressRes] = focusAthlete
+  const [focusCompetitionsRes, progressRes, reviewHistoryRes] = focusAthlete
     ? await Promise.all([
         admin
           .from('member_competition_results')
@@ -623,17 +707,31 @@ export default async function HeadCoachAthletesPage({ searchParams }: { searchPa
           .order('created_at', { ascending: false })
           .limit(12)
           .returns<ProgressEventRow[]>(),
+        admin
+          .from('member_athlete_review_actions')
+          .select('id, member_user_id, review_lane, recommendation_status, action_status, action_date, snoozed_until, notes, created_at')
+          .eq('member_user_id', focusAthlete.user_id)
+          .order('action_date', { ascending: false })
+          .order('created_at', { ascending: false })
+          .limit(8)
+          .returns<ReviewActionRow[]>(),
       ])
-    : [{ data: [], error: null as any }, { data: [], error: null as any }]
+    : [{ data: [], error: null as any }, { data: [], error: null as any }, { data: [], error: null as any }]
 
   if (focusCompetitionsRes.error) throw new Error(focusCompetitionsRes.error.message)
   if (progressRes.error) throw new Error(progressRes.error.message)
+  if (reviewHistoryRes.error) throw new Error(reviewHistoryRes.error.message)
 
   const totalAthletes = roster.length
   const dueCount = roster.filter((row) => row.promotion.status === 'due').length
   const reviewCount = roster.filter((row) => row.promotion.status === 'review').length
   const blockedCount = roster.filter((row) => row.promotion.status === 'blocked').length
   const competitorCount = roster.filter((row) => row.program_level === 'competitor').length
+  const actionNowCount = roster.filter((row) => row.review_queue.key === 'action_now').length
+  const deferredCount = roster.filter((row) => row.review_queue.key === 'deferred').length
+  const loggedCount = roster.filter((row) => row.review_queue.key === 'logged').length
+  const beginnerCycleDue = roster.filter((row) => row.promotion.lane === 'beginner_cycle' && (row.promotion.status === 'due' || row.promotion.status === 'review')).length
+  const intermediateBeltDue = roster.filter((row) => row.promotion.lane === 'intermediate_belt' && row.promotion.status === 'due').length
 
   return (
     <main className="mx-auto flex w-full max-w-7xl flex-col gap-4 px-4 py-4 sm:px-6 lg:px-8">
@@ -643,30 +741,33 @@ export default async function HeadCoachAthletesPage({ searchParams }: { searchPa
         right={
           <div className="flex flex-wrap gap-2">
             <TinyBadge>{totalAthletes} athletes</TinyBadge>
-            <TinyBadge tone="success">{dueCount} due</TinyBadge>
-            <TinyBadge tone="warning">{reviewCount} review</TinyBadge>
-            <TinyBadge tone="danger">{blockedCount} blocked</TinyBadge>
+            <TinyBadge tone="warning">{actionNowCount} action now</TinyBadge>
+            <TinyBadge tone="success">{loggedCount} logged</TinyBadge>
+            <TinyBadge>{deferredCount} deferred</TinyBadge>
           </div>
         }
       />
 
-      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
         <div className="rounded-3xl border border-[hsl(var(--border))] bg-white p-4 shadow-soft"><div className="text-xs font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Total athletes</div><div className="mt-2 text-2xl font-semibold tracking-tight">{totalAthletes}</div></div>
-        <div className="rounded-3xl border border-[hsl(var(--border))] bg-white p-4 shadow-soft"><div className="text-xs font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Promotion due</div><div className="mt-2 text-2xl font-semibold tracking-tight">{dueCount}</div></div>
-        <div className="rounded-3xl border border-[hsl(var(--border))] bg-white p-4 shadow-soft"><div className="text-xs font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Review due</div><div className="mt-2 text-2xl font-semibold tracking-tight">{reviewCount}</div></div>
-        <div className="rounded-3xl border border-[hsl(var(--border))] bg-white p-4 shadow-soft"><div className="text-xs font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Promotion blocked</div><div className="mt-2 text-2xl font-semibold tracking-tight">{blockedCount}</div></div>
+        <div className="rounded-3xl border border-[hsl(var(--border))] bg-white p-4 shadow-soft"><div className="text-xs font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Action now</div><div className="mt-2 text-2xl font-semibold tracking-tight">{actionNowCount}</div></div>
+        <div className="rounded-3xl border border-[hsl(var(--border))] bg-white p-4 shadow-soft"><div className="text-xs font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Deferred</div><div className="mt-2 text-2xl font-semibold tracking-tight">{deferredCount}</div></div>
+        <div className="rounded-3xl border border-[hsl(var(--border))] bg-white p-4 shadow-soft"><div className="text-xs font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Beginner cycle due</div><div className="mt-2 text-2xl font-semibold tracking-tight">{beginnerCycleDue}</div></div>
+        <div className="rounded-3xl border border-[hsl(var(--border))] bg-white p-4 shadow-soft"><div className="text-xs font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Intermediate belt due</div><div className="mt-2 text-2xl font-semibold tracking-tight">{intermediateBeltDue}</div></div>
         <div className="rounded-3xl border border-[hsl(var(--border))] bg-white p-4 shadow-soft"><div className="text-xs font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Competitors</div><div className="mt-2 text-2xl font-semibold tracking-tight">{competitorCount}</div></div>
       </section>
 
       <section className="rounded-3xl border border-[hsl(var(--border))] bg-white p-4 shadow-soft">
-        <form className="grid gap-3 lg:grid-cols-7">
+        <form className="grid gap-3 lg:grid-cols-9">
           <input type="text" name="q" defaultValue={filters.q} placeholder="Search name, member ID, email" className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none transition focus:border-black lg:col-span-2" />
           <select name="role" defaultValue={filters.role} className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none transition focus:border-black"><option value="">All roles</option>{TARGET_ROLES.map((role) => <option key={role} value={role}>{titleCase(role)}</option>)}</select>
           <select name="program" defaultValue={filters.program} className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none transition focus:border-black"><option value="">All programs</option>{PROGRAM_OPTIONS.map((program) => <option key={program} value={program}>{titleCase(program)}</option>)}</select>
           <select name="specialty" defaultValue={filters.specialty} className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none transition focus:border-black"><option value="">All specialties</option>{SPECIALTY_OPTIONS.map((specialty) => <option key={specialty} value={specialty}>{titleCase(specialty)}</option>)}</select>
           <select name="promotion" defaultValue={filters.promotion} className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none transition focus:border-black"><option value="">All promotion states</option><option value="due">Due</option><option value="review">Review</option><option value="watch">Watch</option><option value="blocked">Blocked</option></select>
           <select name="attendance" defaultValue={filters.attendance} className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none transition focus:border-black"><option value="">All attendance bands</option><option value="high">High</option><option value="steady">Steady</option><option value="low">Low</option></select>
-          <div className="flex gap-2 lg:col-span-7">
+          <select name="lane" defaultValue={filters.lane} className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none transition focus:border-black"><option value="">All review lanes</option><option value="beginner_cycle">Beginner cycle</option><option value="intermediate_stripe">Intermediate stripe</option><option value="intermediate_belt">Intermediate belt</option><option value="advanced_review">Advanced review</option><option value="competitor_review">Competitor review</option><option value="kimono_blocked">Kimono blocked</option></select>
+          <select name="queue" defaultValue={filters.queue} className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none transition focus:border-black"><option value="">All queue states</option><option value="action_now">Action now</option><option value="deferred">Deferred</option><option value="logged">Logged</option><option value="watch">Watch</option></select>
+          <div className="flex gap-2 lg:col-span-9">
             <button type="submit" className="inline-flex items-center justify-center rounded-2xl border border-black bg-black px-4 py-2 text-sm font-medium text-white transition hover:opacity-90">Apply filters</button>
             <Link href="/head-coach/athletes" className="inline-flex items-center justify-center rounded-2xl border border-[hsl(var(--border))] bg-white px-4 py-2 text-sm font-medium text-black transition hover:bg-[hsl(var(--bg))]">Reset</Link>
           </div>
@@ -718,6 +819,10 @@ export default async function HeadCoachAthletesPage({ searchParams }: { searchPa
                     </td>
                     <td className="px-4 py-3">
                       <TinyBadge tone={statTone(row.promotion.status)}>{row.promotion.label}</TinyBadge>
+                      <div className="mt-1 flex flex-wrap gap-1">
+                        <TinyBadge>{titleCase(row.promotion.lane)}</TinyBadge>
+                        <TinyBadge tone={queueTone(row.review_queue.key)}>{row.review_queue.label}</TinyBadge>
+                      </div>
                       <div className="mt-1 text-xs text-[hsl(var(--muted))]">{row.promotion.reason}</div>
                     </td>
                     <td className="px-4 py-3">
@@ -807,6 +912,46 @@ export default async function HeadCoachAthletesPage({ searchParams }: { searchPa
               </div>
 
               <div className="grid gap-4 xl:grid-cols-2">
+                <div className="rounded-2xl border border-[hsl(var(--border))] p-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <h3 className="text-sm font-semibold tracking-tight">Review control</h3>
+                      <p className="mt-1 text-xs text-[hsl(var(--muted))]">Log review decisions, approve now, or defer the next check-in.</p>
+                    </div>
+                    <TinyBadge tone={queueTone(focusAthlete.review_queue.key)}>{focusAthlete.review_queue.label}</TinyBadge>
+                  </div>
+
+                  <form action={saveReviewActionAction} className="mt-4 grid gap-3 rounded-2xl border border-[hsl(var(--border))] p-4">
+                    <input type="hidden" name="memberUserId" value={focusAthlete.user_id} />
+                    <input type="hidden" name="nextPath" value={nextPath} />
+                    <input type="hidden" name="review_lane" value={focusAthlete.promotion.lane} />
+                    <input type="hidden" name="recommendation_status" value={focusAthlete.promotion.status} />
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <label className="block text-sm"><span className="mb-2 block text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Action</span><select name="action_status" defaultValue={focusAthlete.review_queue.key === 'deferred' ? 'deferred' : 'reviewed'} className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none transition focus:border-black"><option value="reviewed">Reviewed</option><option value="approved">Approved now</option><option value="hold">Hold</option><option value="deferred">Deferred</option><option value="pending">Pending</option></select></label>
+                      <label className="block text-sm"><span className="mb-2 block text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Action date</span><input type="date" name="action_date" defaultValue={new Date().toISOString().slice(0, 10)} className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none transition focus:border-black" /></label>
+                    </div>
+                    <label className="block text-sm"><span className="mb-2 block text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Snooze until</span><input type="date" name="snoozed_until" defaultValue={focusAthlete.latest_review_action?.snoozed_until ?? focusAthlete.promotion.dueDate ?? ''} className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none transition focus:border-black" /></label>
+                    <label className="block text-sm"><span className="mb-2 block text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Review note</span><textarea name="notes" rows={3} placeholder="Why now, why deferred, or what was decided." className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none transition focus:border-black" /></label>
+                    <button type="submit" className="inline-flex items-center justify-center rounded-2xl border border-black bg-black px-4 py-2 text-sm font-medium text-white transition hover:opacity-90">Save review action</button>
+                  </form>
+
+                  <div className="mt-4 grid gap-3">
+                    {(reviewHistoryRes.data ?? []).length === 0 ? (
+                      <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] px-4 py-3 text-sm text-[hsl(var(--muted))]">No review action recorded yet.</div>
+                    ) : (reviewHistoryRes.data ?? []).map((row) => (
+                      <div key={row.id} className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] p-4">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <TinyBadge>{titleCase(row.review_lane)}</TinyBadge>
+                          <TinyBadge tone={queueTone(reviewQueueState({ promotion: focusAthlete.promotion, latestAction: row }).key)}>{titleCase(row.action_status)}</TinyBadge>
+                          <TinyBadge>{fmtDate(row.action_date)}</TinyBadge>
+                          {row.snoozed_until ? <TinyBadge>Until {fmtDate(row.snoozed_until)}</TinyBadge> : null}
+                        </div>
+                        <p className="mt-2 text-sm text-[hsl(var(--muted))]">{row.notes || 'No note recorded.'}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
                 <div className="rounded-2xl border border-[hsl(var(--border))] p-4">
                   <div className="flex items-center justify-between gap-3">
                     <div>
