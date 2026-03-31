@@ -3,18 +3,48 @@ export type AthleteSpecialty = 'kimono_only' | 'nogi_only' | 'both'
 export type AthleteAgeGroup = 'kids' | 'adults' | 'unknown'
 export type AttendanceBandKey = 'high' | 'steady' | 'low'
 export type PromotionRadarStatus = 'blocked' | 'watch' | 'review' | 'due'
+export type ReviewLane =
+  | 'beginner_cycle'
+  | 'intermediate_stripe'
+  | 'intermediate_belt'
+  | 'advanced_review'
+  | 'competitor_review'
+  | 'kimono_blocked'
+  | 'profile_incomplete'
+
+export type ReviewActionStatus = 'pending' | 'reviewed' | 'deferred' | 'approved' | 'hold'
+export type ReviewQueueKey = 'action_now' | 'deferred' | 'logged' | 'watch'
 
 export const PROGRAM_OPTIONS: ProgramLevel[] = ['beginner', 'intermediate', 'advanced', 'competitor']
 export const SPECIALTY_OPTIONS: AthleteSpecialty[] = ['kimono_only', 'nogi_only', 'both']
+export const REVIEW_LANES: ReviewLane[] = [
+  'beginner_cycle',
+  'intermediate_stripe',
+  'intermediate_belt',
+  'advanced_review',
+  'competitor_review',
+  'kimono_blocked',
+  'profile_incomplete',
+]
+export const REVIEW_ACTION_STATUSES: ReviewActionStatus[] = ['pending', 'reviewed', 'deferred', 'approved', 'hold']
 export const KIDS_BELTS = ['white', 'grey', 'yellow', 'orange', 'green'] as const
 export const ADULT_BELTS = ['white', 'blue', 'purple', 'brown', 'black'] as const
 export const ALL_BELTS = Array.from(new Set([...KIDS_BELTS, ...ADULT_BELTS]))
 
 export type PromotionRadar = {
   status: PromotionRadarStatus
+  lane: ReviewLane
   label: string
   reason: string
   nextAction: string
+  dueDate: string | null
+  monthsInCycle: number | null
+}
+
+export type ReviewQueueState = {
+  key: ReviewQueueKey
+  label: string
+  reason: string
 }
 
 export function titleCase(value: string | null | undefined) {
@@ -43,6 +73,33 @@ export function fmtDate(value?: string | null) {
   const dt = parseDateOnly(value)
   if (!dt) return '—'
   return new Intl.DateTimeFormat('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }).format(dt)
+}
+
+export function isoDateOnly(value?: string | null) {
+  const dt = parseDateOnly(value)
+  if (!dt) return null
+  return dt.toISOString().slice(0, 10)
+}
+
+export function addMonthsDateOnly(value: string | null | undefined, monthsToAdd: number) {
+  const dt = parseDateOnly(value)
+  if (!dt) return null
+  const year = dt.getUTCFullYear()
+  const month = dt.getUTCMonth()
+  const day = dt.getUTCDate()
+  const shifted = new Date(Date.UTC(year, month + monthsToAdd + 1, 0))
+  const safeDay = Math.min(day, shifted.getUTCDate())
+  return new Date(Date.UTC(year, month + monthsToAdd, safeDay)).toISOString().slice(0, 10)
+}
+
+export function todayDateOnly() {
+  return new Date().toISOString().slice(0, 10)
+}
+
+export function isFutureDateOnly(value?: string | null) {
+  const date = isoDateOnly(value)
+  if (!date) return false
+  return date > todayDateOnly()
 }
 
 export function ageYears(dateOfBirth?: string | null) {
@@ -118,87 +175,165 @@ export function promotionRadar(args: {
   if (!kimonoEligible) {
     return {
       status: 'blocked',
+      lane: 'kimono_blocked',
       label: 'Promotion blocked',
       reason: 'No belt or stripe promotion without kimono training.',
       nextAction: 'Switch specialty to Kimono only or Both.',
+      dueDate: null,
+      monthsInCycle: months,
     }
   }
 
   if ((args.program ?? null) === 'beginner') {
+    const dueDate = addMonthsDateOnly(args.baselineDate ?? null, 6)
     if ((months ?? 0) >= 6) {
       if ((args.currentBelt ?? 'white') === 'white' && stripes < 2) {
         return {
           status: 'due',
+          lane: 'beginner_cycle',
           label: 'White 2 stripes due',
           reason: 'Beginner athlete reached the 6-month review window.',
           nextAction: 'Review readiness, then award stripes up to white 2.',
+          dueDate,
+          monthsInCycle: months,
         }
       }
       return {
         status: 'review',
+        lane: 'beginner_cycle',
         label: 'Intermediate review due',
         reason: 'Beginner athlete reached the 6-month review window.',
         nextAction: 'Discuss with the reference coach and evaluate move to Intermediate.',
+        dueDate,
+        monthsInCycle: months,
       }
     }
 
     return {
       status: 'watch',
+      lane: 'beginner_cycle',
       label: 'Tracking beginner cycle',
       reason: 'Still inside the first 6-month beginner window.',
       nextAction: 'Keep attendance and kimono consistency on track.',
+      dueDate,
+      monthsInCycle: months,
     }
   }
 
   if ((args.program ?? null) === 'intermediate') {
     const targetMonths = Math.max(1, stripes + 1) * 6
+    const dueDate = addMonthsDateOnly(args.baselineDate ?? null, targetMonths)
     if ((months ?? 0) >= targetMonths) {
       if (stripes >= 4) {
         return {
           status: 'due',
+          lane: 'intermediate_belt',
           label: nextBelt ? `${titleCase(nextBelt)} belt review` : 'Belt review due',
           reason: 'Intermediate athlete completed the stripe cycle.',
           nextAction: nextBelt ? `Review promotion to ${titleCase(nextBelt)} belt.` : 'Review next belt promotion.',
+          dueDate,
+          monthsInCycle: months,
         }
       }
       return {
         status: 'due',
+        lane: 'intermediate_stripe',
         label: `Stripe ${stripes + 1} due`,
         reason: 'Intermediate athlete reached the next 6-month stripe checkpoint.',
         nextAction: 'Review attendance, kimono work, and technical progress.',
+        dueDate,
+        monthsInCycle: months,
       }
     }
 
     return {
       status: 'watch',
+      lane: stripes >= 4 ? 'intermediate_belt' : 'intermediate_stripe',
       label: 'Intermediate cycle active',
       reason: 'Next stripe checkpoint has not been reached yet.',
       nextAction: 'Keep attendance and technical consistency high.',
+      dueDate,
+      monthsInCycle: months,
     }
   }
 
-  if ((args.program ?? null) === 'advanced' || (args.program ?? null) === 'competitor') {
-    if (args.attendance90d < 8) {
-      return {
-        status: 'watch',
-        label: 'Low attendance watch',
-        reason: 'Advanced and competitor athletes need attendance consistency.',
-        nextAction: 'Increase mat time before the next promotion review.',
-      }
-    }
-
+  if ((args.program ?? null) === 'advanced') {
     return {
-      status: 'review',
-      label: 'Coach review lane',
-      reason: 'Promotion remains coach-led in Advanced / Competitor tracks.',
-      nextAction: 'Use competition results, attendance, and coach notes for the next review.',
+      status: args.attendance90d < 8 ? 'watch' : 'review',
+      lane: 'advanced_review',
+      label: args.attendance90d < 8 ? 'Low attendance watch' : 'Coach review lane',
+      reason: args.attendance90d < 8
+        ? 'Advanced athletes need attendance consistency before the next review.'
+        : 'Promotion remains coach-led in the Advanced track.',
+      nextAction: args.attendance90d < 8
+        ? 'Increase mat time before the next promotion review.'
+        : 'Use attendance, notes, and competition results for the next review.',
+      dueDate: null,
+      monthsInCycle: months,
+    }
+  }
+
+  if ((args.program ?? null) === 'competitor') {
+    return {
+      status: args.attendance90d < 8 ? 'watch' : 'review',
+      lane: 'competitor_review',
+      label: args.attendance90d < 8 ? 'Attendance watch' : 'Competitor review lane',
+      reason: args.attendance90d < 8
+        ? 'Competitor athletes need strong attendance consistency.'
+        : 'Competitor promotions remain head-coach led.',
+      nextAction: args.attendance90d < 8
+        ? 'Increase mat time before the next competitor review.'
+        : 'Use results, attendance, and coach notes for the next review.',
+      dueDate: null,
+      monthsInCycle: months,
     }
   }
 
   return {
     status: 'watch',
+    lane: 'profile_incomplete',
     label: 'Profile incomplete',
     reason: 'Program or belt data is still incomplete.',
     nextAction: 'Complete the athlete profile first.',
+    dueDate: null,
+    monthsInCycle: months,
+  }
+}
+
+export function reviewQueueState(args: {
+  promotion: PromotionRadar
+  latestAction?: { action_status: ReviewActionStatus | null; action_date?: string | null; snoozed_until?: string | null } | null
+}): ReviewQueueState {
+  const actionStatus = args.latestAction?.action_status ?? null
+  const snoozedUntil = isoDateOnly(args.latestAction?.snoozed_until ?? null)
+
+  if (actionStatus === 'deferred' && isFutureDateOnly(snoozedUntil)) {
+    return {
+      key: 'deferred',
+      label: 'Deferred',
+      reason: snoozedUntil ? `Deferred until ${fmtDate(snoozedUntil)}.` : 'Deferred review is still active.',
+    }
+  }
+
+  if (actionStatus === 'reviewed' || actionStatus === 'approved' || actionStatus === 'hold') {
+    return {
+      key: 'logged',
+      label: titleCase(actionStatus),
+      reason: 'Latest manual review decision is already logged.',
+    }
+  }
+
+  if (args.promotion.status === 'due' || args.promotion.status === 'review' || args.promotion.status === 'blocked') {
+    return {
+      key: 'action_now',
+      label: 'Action now',
+      reason: args.promotion.nextAction,
+    }
+  }
+
+  return {
+    key: 'watch',
+    label: 'Watch',
+    reason: 'No immediate review action needed.',
   }
 }
