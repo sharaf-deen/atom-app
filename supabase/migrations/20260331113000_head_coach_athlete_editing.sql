@@ -39,7 +39,9 @@ on public.member_athlete_progress_events
 for select
 using (auth.uid() = member_user_id);
 
-create or replace view public.head_coach_athlete_roster as
+drop view if exists public.head_coach_athlete_roster;
+
+create view public.head_coach_athlete_roster as
 with athlete_base as (
   select
     p.user_id,
@@ -127,5 +129,8 @@ left join attendance_rollup ar on ar.user_id = ab.user_id
 left join latest_belt lb on lb.user_id = ab.user_id
 left join competition_rollup cr on cr.user_id = ab.user_id
 left join latest_competition lc on lc.user_id = ab.user_id;
+
+revoke all on table public.head_coach_athlete_roster from anon, authenticated;
+grant select on table public.head_coach_athlete_roster to service_role;
 
 commit;
