@@ -35,6 +35,10 @@ type DashboardFilters = {
   specialty: string
   promotion: string
   attendance: string
+  age_group: string
+  kimono: string
+  checklist: string
+  sort: string
   focus: string
   page: string
 }
@@ -111,6 +115,12 @@ type EnrichedAthlete = HeadCoachRosterRow & {
   attendance_band: ReturnType<typeof attendanceBand>
   kimono_eligible: boolean
   promotion: ReturnType<typeof promotionRadar>
+  due_soon: boolean
+  priority_score: number
+  profile_checklist: {
+    items: string[]
+    label: string
+  }
 }
 
 const TARGET_ROLES: Role[] = ['member', 'coach', 'assistant_coach', 'vip', 'champion']
@@ -521,6 +531,47 @@ function statTone(status: ReturnType<typeof promotionRadar>['status']): 'neutral
   return 'neutral'
 }
 
+function isDueSoon(dueDate?: string | null) {
+  if (!dueDate) return false
+  const due = new Date(`${dueDate}T00:00:00Z`)
+  const now = new Date()
+  if (Number.isNaN(due.getTime())) return false
+  const days = Math.floor((due.getTime() - now.getTime()) / 86400000)
+  return days >= 0 && days <= 30
+}
+
+function profileChecklist(row: HeadCoachRosterRow, ageGroup: AthleteAgeGroup) {
+  const items: string[] = []
+  if (!row.program_level) items.push('Program missing')
+  if (!row.current_belt) items.push('Belt missing')
+  if (!row.specialty) items.push('Specialty missing')
+  if (!row.reference_coach_user_id) items.push('Reference coach missing')
+  if (ageGroup === 'unknown') items.push('Age group unknown')
+  return {
+    items,
+    label: items.length === 0 ? 'Ready' : `${items.length} setup item${items.length > 1 ? 's' : ''}`,
+  }
+}
+
+function athletePriorityScore(args: {
+  promotion: ReturnType<typeof promotionRadar>
+  checklist: { items: string[] }
+  referenceCoachUserId: string | null
+  attendanceBand: ReturnType<typeof attendanceBand>
+  dueSoon: boolean
+}) {
+  let score = 0
+  if (args.promotion.status === 'due') score += 120
+  else if (args.promotion.status === 'blocked') score += 90
+  else if (args.promotion.status === 'review') score += 70
+  else score += 30
+  if (args.dueSoon) score += 15
+  if (args.checklist.items.length) score += 20 + args.checklist.items.length * 4
+  if (!args.referenceCoachUserId) score += 10
+  if (args.attendanceBand.key === 'low') score += 6
+  return score
+}
+
 function buildEnrichedRoster(rows: HeadCoachRosterRow[]) {
   return rows.map<EnrichedAthlete>((row) => {
     const age = ageYears(row.date_of_birth)
@@ -528,6 +579,17 @@ function buildEnrichedRoster(rows: HeadCoachRosterRow[]) {
     const band = attendanceBand(Number(row.attendance_90d ?? 0))
     const kimonoEligible = isKimonoEligible(row.specialty, ageGroup)
     const baselineDate = row.current_belt_promoted_at ?? row.profile_created_at
+    const promotion = promotionRadar({
+      program: row.program_level,
+      currentBelt: row.current_belt,
+      stripes: row.stripes,
+      specialty: row.specialty,
+      ageGroup,
+      baselineDate,
+      attendance90d: Number(row.attendance_90d ?? 0),
+    })
+    const checklist = profileChecklist(row, ageGroup)
+    const dueSoon = isDueSoon(promotion.dueDate)
     return {
       ...row,
       name: fullName(row.first_name, row.last_name, row.email),
@@ -535,14 +597,15 @@ function buildEnrichedRoster(rows: HeadCoachRosterRow[]) {
       age_group: ageGroup,
       attendance_band: band,
       kimono_eligible: kimonoEligible,
-      promotion: promotionRadar({
-        program: row.program_level,
-        currentBelt: row.current_belt,
-        stripes: row.stripes,
-        specialty: row.specialty,
-        ageGroup,
-        baselineDate,
-        attendance90d: Number(row.attendance_90d ?? 0),
+      promotion,
+      due_soon: dueSoon,
+      profile_checklist: checklist,
+      priority_score: athletePriorityScore({
+        promotion,
+        checklist,
+        referenceCoachUserId: row.reference_coach_user_id,
+        attendanceBand: band,
+        dueSoon,
       }),
     }
   })
@@ -556,6 +619,9 @@ function matchesFilter(row: EnrichedAthlete, filters: {
   specialty: string
   promotion: string
   attendance: string
+  age_group: string
+  kimono: string
+  checklist: string
 }) {
   const q = filters.q.trim().toLowerCase()
   if (q) {
@@ -568,6 +634,15 @@ function matchesFilter(row: EnrichedAthlete, filters: {
   if (filters.specialty && (row.specialty ?? '') !== filters.specialty) return false
   if (filters.promotion && row.promotion.status !== filters.promotion) return false
   if (filters.attendance && row.attendance_band.key !== filters.attendance) return false
+  if (filters.age_group && row.age_group !== filters.age_group) return false
+  if (filters.kimono === 'eligible' && !row.kimono_eligible) return false
+  if (filters.kimono === 'blocked' && row.kimono_eligible) return false
+  if (filters.checklist === 'incomplete' && row.profile_checklist.items.length === 0) return false
+  if (filters.checklist === 'ready' && row.profile_checklist.items.length > 0) return false
+  if (filters.checklist === 'missing_reference_coach' && row.reference_coach_user_id) return false
+  if (filters.checklist === 'missing_program' && row.program_level) return false
+  if (filters.checklist === 'missing_specialty' && row.specialty) return false
+  if (filters.checklist === 'missing_belt' && row.current_belt) return false
   return true
 }
 
@@ -596,6 +671,10 @@ export default async function HeadCoachAthletesPage({ searchParams }: { searchPa
     specialty: pick(searchParams?.specialty) ?? '',
     promotion: pick(searchParams?.promotion) ?? '',
     attendance: pick(searchParams?.attendance) ?? '',
+    age_group: pick(searchParams?.age_group) ?? '',
+    kimono: pick(searchParams?.kimono) ?? '',
+    checklist: pick(searchParams?.checklist) ?? '',
+    sort: pick(searchParams?.sort) ?? 'priority',
     focus: pick(searchParams?.focus) ?? '',
     page: pick(searchParams?.page) ?? '',
   }
@@ -616,7 +695,16 @@ export default async function HeadCoachAthletesPage({ searchParams }: { searchPa
   const roster = buildEnrichedRoster(rosterRes.data ?? [])
   const filtered = roster
     .filter((row) => matchesFilter(row, filters))
-    .sort((a, b) => a.name.localeCompare(b.name))
+    .sort((a, b) => {
+      if (filters.sort === 'name') return a.name.localeCompare(b.name)
+      if (filters.sort === 'attendance') return Number(b.attendance_90d ?? 0) - Number(a.attendance_90d ?? 0)
+      if (filters.sort === 'due_date') {
+        const left = a.promotion.dueDate ?? '9999-12-31'
+        const right = b.promotion.dueDate ?? '9999-12-31'
+        return left.localeCompare(right) || a.name.localeCompare(b.name)
+      }
+      return b.priority_score - a.priority_score || a.name.localeCompare(b.name)
+    })
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / ATHLETES_PER_PAGE))
   const currentPage = Math.min(parsePage(filters.page), totalPages)
@@ -653,9 +741,11 @@ export default async function HeadCoachAthletesPage({ searchParams }: { searchPa
 
   const totalAthletes = roster.length
   const dueCount = roster.filter((row) => row.promotion.status === 'due').length
+  const dueSoonCount = roster.filter((row) => row.due_soon).length
   const reviewCount = roster.filter((row) => row.promotion.status === 'review').length
   const blockedCount = roster.filter((row) => row.promotion.status === 'blocked').length
-  const competitorCount = roster.filter((row) => row.program_level === 'competitor').length
+  const incompleteCount = roster.filter((row) => row.profile_checklist.items.length > 0).length
+  const noCoachCount = roster.filter((row) => !row.reference_coach_user_id).length
 
   return (
     <main className="mx-auto flex w-full max-w-7xl flex-col gap-4 px-4 py-4 sm:px-6 lg:px-8">
@@ -668,27 +758,33 @@ export default async function HeadCoachAthletesPage({ searchParams }: { searchPa
             <TinyBadge tone="success">{dueCount} due</TinyBadge>
             <TinyBadge tone="warning">{reviewCount} review</TinyBadge>
             <TinyBadge tone="danger">{blockedCount} blocked</TinyBadge>
+            <TinyBadge>{incompleteCount} incomplete</TinyBadge>
           </div>
         }
       />
 
-      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
         <div className="rounded-3xl border border-[hsl(var(--border))] bg-white p-4 shadow-soft"><div className="text-xs font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Total athletes</div><div className="mt-2 text-2xl font-semibold tracking-tight">{totalAthletes}</div></div>
-        <div className="rounded-3xl border border-[hsl(var(--border))] bg-white p-4 shadow-soft"><div className="text-xs font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Promotion due</div><div className="mt-2 text-2xl font-semibold tracking-tight">{dueCount}</div></div>
+        <div className="rounded-3xl border border-[hsl(var(--border))] bg-white p-4 shadow-soft"><div className="text-xs font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Action now</div><div className="mt-2 text-2xl font-semibold tracking-tight">{dueCount}</div><div className="mt-1 text-xs text-[hsl(var(--muted))]">Due now</div></div>
+        <div className="rounded-3xl border border-[hsl(var(--border))] bg-white p-4 shadow-soft"><div className="text-xs font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Due soon</div><div className="mt-2 text-2xl font-semibold tracking-tight">{dueSoonCount}</div><div className="mt-1 text-xs text-[hsl(var(--muted))]">Next 30 days</div></div>
         <div className="rounded-3xl border border-[hsl(var(--border))] bg-white p-4 shadow-soft"><div className="text-xs font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Review due</div><div className="mt-2 text-2xl font-semibold tracking-tight">{reviewCount}</div></div>
-        <div className="rounded-3xl border border-[hsl(var(--border))] bg-white p-4 shadow-soft"><div className="text-xs font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Promotion blocked</div><div className="mt-2 text-2xl font-semibold tracking-tight">{blockedCount}</div></div>
-        <div className="rounded-3xl border border-[hsl(var(--border))] bg-white p-4 shadow-soft"><div className="text-xs font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Competitors</div><div className="mt-2 text-2xl font-semibold tracking-tight">{competitorCount}</div></div>
+        <div className="rounded-3xl border border-[hsl(var(--border))] bg-white p-4 shadow-soft"><div className="text-xs font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Incomplete</div><div className="mt-2 text-2xl font-semibold tracking-tight">{incompleteCount}</div><div className="mt-1 text-xs text-[hsl(var(--muted))]">Needs setup</div></div>
+        <div className="rounded-3xl border border-[hsl(var(--border))] bg-white p-4 shadow-soft"><div className="text-xs font-medium uppercase tracking-wide text-[hsl(var(--muted))]">No reference coach</div><div className="mt-2 text-2xl font-semibold tracking-tight">{noCoachCount}</div></div>
       </section>
 
       <section className="rounded-3xl border border-[hsl(var(--border))] bg-white p-4 shadow-soft">
-        <form className="grid gap-3 lg:grid-cols-7">
+        <form className="grid gap-3 lg:grid-cols-8">
           <input type="text" name="q" defaultValue={filters.q} placeholder="Search name, member ID, email" className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none transition focus:border-black lg:col-span-2" />
           <select name="role" defaultValue={filters.role} className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none transition focus:border-black"><option value="">All roles</option>{TARGET_ROLES.map((role) => <option key={role} value={role}>{titleCase(role)}</option>)}</select>
           <select name="program" defaultValue={filters.program} className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none transition focus:border-black"><option value="">All programs</option>{PROGRAM_OPTIONS.map((program) => <option key={program} value={program}>{titleCase(program)}</option>)}</select>
           <select name="specialty" defaultValue={filters.specialty} className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none transition focus:border-black"><option value="">All specialties</option>{SPECIALTY_OPTIONS.map((specialty) => <option key={specialty} value={specialty}>{titleCase(specialty)}</option>)}</select>
           <select name="promotion" defaultValue={filters.promotion} className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none transition focus:border-black"><option value="">All promotion states</option><option value="due">Due</option><option value="review">Review</option><option value="watch">Watch</option><option value="blocked">Blocked</option></select>
           <select name="attendance" defaultValue={filters.attendance} className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none transition focus:border-black"><option value="">All attendance bands</option><option value="high">High</option><option value="steady">Steady</option><option value="low">Low</option></select>
-          <div className="flex gap-2 lg:col-span-7">
+          <select name="age_group" defaultValue={filters.age_group} className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none transition focus:border-black"><option value="">All age groups</option><option value="kids">Kids</option><option value="adults">Adults</option><option value="unknown">Unknown</option></select>
+          <select name="kimono" defaultValue={filters.kimono} className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none transition focus:border-black"><option value="">All kimono states</option><option value="eligible">Kimono eligible</option><option value="blocked">Kimono blocked</option></select>
+          <select name="checklist" defaultValue={filters.checklist} className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none transition focus:border-black"><option value="">All setup states</option><option value="incomplete">Needs setup</option><option value="ready">Ready</option><option value="missing_reference_coach">Missing reference coach</option><option value="missing_program">Missing program</option><option value="missing_specialty">Missing specialty</option><option value="missing_belt">Missing belt</option></select>
+          <select name="sort" defaultValue={filters.sort} className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none transition focus:border-black"><option value="priority">Priority first</option><option value="name">Name A-Z</option><option value="attendance">Attendance 90d</option><option value="due_date">Due date</option></select>
+          <div className="flex flex-wrap gap-2 lg:col-span-8">
             <button type="submit" className="inline-flex items-center justify-center rounded-2xl border border-black bg-black px-4 py-2 text-sm font-medium text-white transition hover:opacity-90">Apply filters</button>
             <Link href="/head-coach/athletes" className="inline-flex items-center justify-center rounded-2xl border border-[hsl(var(--border))] bg-white px-4 py-2 text-sm font-medium text-black transition hover:bg-[hsl(var(--bg))]">Reset</Link>
           </div>
@@ -755,7 +851,14 @@ export default async function HeadCoachAthletesPage({ searchParams }: { searchPa
 
                       <div className="mt-3 text-xs text-[hsl(var(--muted))]">
                         <div>{row.specialty ? titleCase(row.specialty) : 'Specialty pending'}</div>
+                        <div className="mt-1">Due {fmtDate(row.promotion.dueDate)}{row.due_soon ? ' · Due soon' : ''}</div>
                         <div className="mt-1">{row.promotion.reason}</div>
+                      </div>
+
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        <TinyBadge>{row.profile_checklist.label}</TinyBadge>
+                        {!row.reference_coach_user_id ? <TinyBadge tone="warning">Missing coach</TinyBadge> : null}
+                        {!row.kimono_eligible ? <TinyBadge tone="danger">Kimono blocked</TinyBadge> : null}
                       </div>
 
                       <div className="mt-4 flex flex-col gap-2 sm:flex-row">
@@ -803,6 +906,7 @@ export default async function HeadCoachAthletesPage({ searchParams }: { searchPa
                             <td className="px-4 py-4">
                               <div className="text-sm text-black">{row.program_level ? titleCase(row.program_level) : '—'}</div>
                               <div className="mt-1 text-xs text-[hsl(var(--muted))]">{row.specialty ? titleCase(row.specialty) : 'Specialty pending'}</div>
+                              <div className="mt-1 text-xs text-[hsl(var(--muted))]">{row.profile_checklist.label}</div>
                             </td>
                             <td className="px-4 py-4">
                               <div className="text-sm text-black">{row.current_belt ? titleCase(row.current_belt) : '—'}</div>
@@ -815,7 +919,8 @@ export default async function HeadCoachAthletesPage({ searchParams }: { searchPa
                             </td>
                             <td className="px-4 py-4">
                               <TinyBadge tone={statTone(row.promotion.status)}>{row.promotion.label}</TinyBadge>
-                              <div className="mt-2 text-xs leading-5 text-[hsl(var(--muted))]">{row.promotion.reason}</div>
+                              <div className="mt-2 text-xs leading-5 text-[hsl(var(--muted))]">Due {fmtDate(row.promotion.dueDate)}{row.due_soon ? ' · soon' : ''}</div>
+                              <div className="mt-1 text-xs leading-5 text-[hsl(var(--muted))]">{row.promotion.reason}</div>
                             </td>
                             <td className="px-4 py-4">
                               <div className="flex flex-col gap-2">
@@ -836,12 +941,12 @@ export default async function HeadCoachAthletesPage({ searchParams }: { searchPa
               <div className="text-xs text-[hsl(var(--muted))]">Page {currentPage} of {totalPages}</div>
               <div className="flex flex-wrap gap-2">
                 {currentPage > 1 ? (
-                  <Link href={buildAthletesHref(filters, { page: currentPage - 1, focus: null })} className="inline-flex items-center justify-center rounded-2xl border border-[hsl(var(--border))] bg-white px-4 py-2 text-sm font-medium text-black transition hover:bg-[hsl(var(--bg))]">Previous</Link>
+                  <Link href={buildAthletesHref(filters, { page: currentPage - 1, focus: null })} scroll={false} className="inline-flex items-center justify-center rounded-2xl border border-[hsl(var(--border))] bg-white px-4 py-2 text-sm font-medium text-black transition hover:bg-[hsl(var(--bg))]">Previous</Link>
                 ) : (
                   <span className="inline-flex items-center justify-center rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] px-4 py-2 text-sm font-medium text-[hsl(var(--muted))]">Previous</span>
                 )}
                 {currentPage < totalPages ? (
-                  <Link href={buildAthletesHref(filters, { page: currentPage + 1, focus: null })} className="inline-flex items-center justify-center rounded-2xl border border-black bg-black px-4 py-2 text-sm font-medium text-white transition hover:opacity-90">Next</Link>
+                  <Link href={buildAthletesHref(filters, { page: currentPage + 1, focus: null })} scroll={false} className="inline-flex items-center justify-center rounded-2xl border border-black bg-black px-4 py-2 text-sm font-medium text-white transition hover:opacity-90">Next</Link>
                 ) : (
                   <span className="inline-flex items-center justify-center rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] px-4 py-2 text-sm font-medium text-[hsl(var(--muted))]">Next</span>
                 )}
@@ -865,11 +970,17 @@ export default async function HeadCoachAthletesPage({ searchParams }: { searchPa
                   <TinyBadge tone={statTone(focusAthlete.promotion.status)}>{focusAthlete.promotion.label}</TinyBadge>
                 </div>
                 <p className="mt-3 text-sm text-[hsl(var(--muted))]">{focusAthlete.promotion.reason} {focusAthlete.promotion.nextAction}</p>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {focusAthlete.due_soon ? <TinyBadge tone="warning">Due within 30 days</TinyBadge> : null}
+                  <TinyBadge>{focusAthlete.profile_checklist.label}</TinyBadge>
+                  <TinyBadge tone={focusAthlete.kimono_eligible ? 'success' : 'danger'}>{focusAthlete.kimono_eligible ? 'Kimono eligible' : 'Kimono blocked'}</TinyBadge>
+                </div>
               </div>
 
-              <div className="grid gap-3 sm:grid-cols-2">
+              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
                 <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] p-4"><div className="text-xs font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Current belt</div><div className="mt-2 text-lg font-semibold tracking-tight">{focusAthlete.current_belt ? titleCase(focusAthlete.current_belt) : 'Not set'}</div><div className="mt-1 text-xs text-[hsl(var(--muted))]">Promoted {fmtDate(focusAthlete.current_belt_promoted_at)}</div></div>
                 <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] p-4"><div className="text-xs font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Attendance</div><div className="mt-2 text-lg font-semibold tracking-tight">{Number(focusAthlete.attendance_30d ?? 0)} / {Number(focusAthlete.attendance_90d ?? 0)} / {Number(focusAthlete.attendance_180d ?? 0)}</div><div className="mt-1 text-xs text-[hsl(var(--muted))]">30d / 90d / 180d · Last attended {fmtDate(focusAthlete.last_attended_at)}</div></div>
+                <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] p-4"><div className="text-xs font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Readiness checklist</div><div className="mt-2 text-sm font-semibold tracking-tight">{focusAthlete.profile_checklist.label}</div><div className="mt-2 flex flex-wrap gap-2">{focusAthlete.profile_checklist.items.length === 0 ? <TinyBadge tone="success">Setup complete</TinyBadge> : focusAthlete.profile_checklist.items.map((item) => <TinyBadge key={item} tone="warning">{item}</TinyBadge>)}</div><div className="mt-2 text-xs text-[hsl(var(--muted))]">Due date {fmtDate(focusAthlete.promotion.dueDate)}</div></div>
               </div>
 
               <form action={saveAthleteProfileAction} className="grid gap-3 rounded-2xl border border-[hsl(var(--border))] p-4">
