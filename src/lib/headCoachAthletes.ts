@@ -14,6 +14,8 @@ export type ReviewLane =
 
 export type ReviewActionStatus = 'pending' | 'reviewed' | 'deferred' | 'approved' | 'hold'
 export type ReviewQueueKey = 'action_now' | 'deferred' | 'logged' | 'watch'
+export type RefinementStatus = 'ready_now' | 'competition_push' | 'build_more' | 'setup_missing' | 'watch'
+export type CompetitionTier = 'inactive' | 'active' | 'podium'
 
 export const PROGRAM_OPTIONS: ProgramLevel[] = ['beginner', 'intermediate', 'advanced', 'competitor']
 export const SPECIALTY_OPTIONS: AthleteSpecialty[] = ['kimono_only', 'nogi_only', 'both']
@@ -27,6 +29,7 @@ export const REVIEW_LANES: ReviewLane[] = [
   'profile_incomplete',
 ]
 export const REVIEW_ACTION_STATUSES: ReviewActionStatus[] = ['pending', 'reviewed', 'deferred', 'approved', 'hold']
+export const REFINEMENT_STATUSES: RefinementStatus[] = ['ready_now', 'competition_push', 'build_more', 'setup_missing', 'watch']
 export const KIDS_BELTS = ['white', 'grey', 'yellow', 'orange', 'green'] as const
 export const ADULT_BELTS = ['white', 'blue', 'purple', 'brown', 'black'] as const
 export const ALL_BELTS = Array.from(new Set([...KIDS_BELTS, ...ADULT_BELTS]))
@@ -45,6 +48,16 @@ export type ReviewQueueState = {
   key: ReviewQueueKey
   label: string
   reason: string
+}
+
+export type RefinementRadar = {
+  status: RefinementStatus
+  label: string
+  reason: string
+  nextAction: string
+  dueDate: string | null
+  competitionTier: CompetitionTier
+  isPriority: boolean
 }
 
 export function titleCase(value: string | null | undefined) {
@@ -297,6 +310,128 @@ export function promotionRadar(args: {
     nextAction: 'Complete the athlete profile first.',
     dueDate: null,
     monthsInCycle: months,
+  }
+}
+
+export function refinementRadar(args: {
+  program: ProgramLevel | null | undefined
+  attendance90d: number
+  competitionCount: number
+  podiumCount: number
+  latestCompetitionDate: string | null | undefined
+  hasReferenceCoach: boolean
+  hasCoachNote: boolean
+  baselineDate: string | null | undefined
+}): RefinementRadar {
+  const program = args.program ?? null
+  const competitionTier: CompetitionTier = args.podiumCount > 0 ? 'podium' : args.competitionCount > 0 ? 'active' : 'inactive'
+
+  if (program !== 'advanced' && program !== 'competitor') {
+    return {
+      status: 'watch',
+      label: 'Standard lane',
+      reason: 'Advanced / Competitor refinement applies only to upper-track athletes.',
+      nextAction: 'Use the standard review lane for this athlete.',
+      dueDate: null,
+      competitionTier,
+      isPriority: false,
+    }
+  }
+
+  const dueDate = addMonthsDateOnly(args.latestCompetitionDate ?? args.baselineDate ?? null, program === 'competitor' ? 4 : 6)
+
+  if (!args.hasReferenceCoach || !args.hasCoachNote) {
+    return {
+      status: 'setup_missing',
+      label: 'Setup missing',
+      reason: !args.hasReferenceCoach && !args.hasCoachNote
+        ? 'Upper-track athletes need both a reference coach and an active coach note.'
+        : !args.hasReferenceCoach
+          ? 'Assign a reference coach before the next upper-track review.'
+          : 'Add a fresh coach note before the next upper-track review.',
+      nextAction: !args.hasReferenceCoach ? 'Assign the reference coach first.' : 'Log a current coach note.',
+      dueDate,
+      competitionTier,
+      isPriority: true,
+    }
+  }
+
+  if (program === 'advanced') {
+    if (args.attendance90d >= 14 && (args.competitionCount > 0 || ((monthsSince(args.baselineDate) ?? 0) >= 6))) {
+      return {
+        status: 'ready_now',
+        label: 'Advanced ready',
+        reason: args.competitionCount > 0
+          ? 'Advanced athlete combines good attendance with recent competition data.'
+          : 'Advanced athlete completed a solid review cycle with strong attendance.',
+        nextAction: 'Run a full advanced-track review with technique, maturity, and leadership criteria.',
+        dueDate,
+        competitionTier,
+        isPriority: true,
+      }
+    }
+
+    if (args.attendance90d >= 10 || args.competitionCount > 0) {
+      return {
+        status: 'competition_push',
+        label: 'Advanced building',
+        reason: 'This advanced athlete is moving in the right direction but is not fully review-ready yet.',
+        nextAction: args.competitionCount > 0
+          ? 'Consolidate the last competition cycle with stronger attendance.'
+          : 'Keep mat time high and collect more coach evidence before the next review.',
+        dueDate,
+        competitionTier,
+        isPriority: false,
+      }
+    }
+
+    return {
+      status: 'build_more',
+      label: 'Attendance build-up',
+      reason: 'Advanced athletes need stronger attendance before a serious review.',
+      nextAction: 'Raise consistency over the next 4 to 6 weeks.',
+      dueDate,
+      competitionTier,
+      isPriority: false,
+    }
+  }
+
+  if (args.attendance90d >= 16 && (args.podiumCount > 0 || args.competitionCount >= 2)) {
+    return {
+      status: 'ready_now',
+      label: 'Competitor ready',
+      reason: args.podiumCount > 0
+        ? 'Competitor athlete has podium results and strong mat consistency.'
+        : 'Competitor athlete has enough recent competition volume and attendance for a high-level review.',
+      nextAction: 'Run a competitor review using performance, activity, and leadership signals.',
+      dueDate,
+      competitionTier,
+      isPriority: true,
+    }
+  }
+
+  if (args.attendance90d >= 12 && args.competitionCount > 0) {
+    return {
+      status: 'competition_push',
+      label: 'Competition push',
+      reason: 'Competitor athlete is active but still building toward the next full review.',
+      nextAction: 'Keep attendance high and convert the next competition cycle into stronger evidence.',
+      dueDate,
+      competitionTier,
+      isPriority: false,
+    }
+  }
+
+  return {
+    status: 'build_more',
+    label: 'Competitor build-up',
+    reason: 'Competitor lane needs both stronger attendance and more competition evidence.',
+    nextAction: args.competitionCount === 0
+      ? 'Enter or log more competition activity before the next review.'
+      : 'Raise training consistency before the next competitor review.',
+    dueDate,
+    competitionTier,
+    isPriority: false,
   }
 }
 
