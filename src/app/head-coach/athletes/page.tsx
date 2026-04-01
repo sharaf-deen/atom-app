@@ -759,7 +759,7 @@ export default async function HeadCoachAthletesPage({ searchParams }: { searchPa
                       </div>
 
                       <div className="mt-4 flex flex-col gap-2 sm:flex-row">
-                        <Link href={buildAthletesHref(filters, { page: currentPage, focus: row.user_id })} className="inline-flex items-center justify-center rounded-2xl border border-black bg-black px-3 py-2 text-sm font-medium text-white transition hover:opacity-90">Manage</Link>
+                        <Link href={buildAthletesHref(filters, { page: currentPage, focus: row.user_id })} scroll={false} className="inline-flex items-center justify-center rounded-2xl border border-black bg-black px-3 py-2 text-sm font-medium text-white transition hover:opacity-90">Manage</Link>
                         <Link href={`/members/${row.user_id}`} className="inline-flex items-center justify-center rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm font-medium text-black transition hover:bg-[hsl(var(--bg))]">Open member file</Link>
                       </div>
                     </div>
@@ -819,7 +819,7 @@ export default async function HeadCoachAthletesPage({ searchParams }: { searchPa
                             </td>
                             <td className="px-4 py-4">
                               <div className="flex flex-col gap-2">
-                                <Link href={buildAthletesHref(filters, { page: currentPage, focus: row.user_id })} className="inline-flex items-center justify-center rounded-2xl border border-black bg-black px-3 py-2 text-xs font-medium text-white transition hover:opacity-90">Manage</Link>
+                                <Link href={buildAthletesHref(filters, { page: currentPage, focus: row.user_id })} scroll={false} className="inline-flex items-center justify-center rounded-2xl border border-black bg-black px-3 py-2 text-xs font-medium text-white transition hover:opacity-90">Manage</Link>
                                 <Link href={`/members/${row.user_id}`} className="inline-flex items-center justify-center rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-xs font-medium text-black transition hover:bg-[hsl(var(--bg))]">Open file</Link>
                               </div>
                             </td>
@@ -850,7 +850,7 @@ export default async function HeadCoachAthletesPage({ searchParams }: { searchPa
           </div>
         </div>
 
-        <div className="rounded-3xl border border-[hsl(var(--border))] bg-white p-4 shadow-soft xl:sticky xl:top-4 xl:self-start">
+        <div id="athlete-manager" className="rounded-3xl border border-[hsl(var(--border))] bg-white p-4 shadow-soft xl:sticky xl:top-4 xl:self-start">
           {!focusAthlete ? (
 
             <div className="rounded-2xl border border-dashed border-[hsl(var(--border))] px-4 py-10 text-center text-sm text-[hsl(var(--muted))]">Select an athlete to manage the profile, promotions, and competition history.</div>
