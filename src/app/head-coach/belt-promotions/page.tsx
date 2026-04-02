@@ -7,8 +7,10 @@ import PageHeader from '@/components/PageHeader'
 import { getSessionUserCached, getSupabaseAdminClientCached } from '@/lib/requestCache'
 import {
   BELT_PROMOTION_AUDIENCES,
+  BELT_PROMOTION_ATTENDANCE_STATUSES,
   BELT_PROMOTION_DECISIONS,
   BELT_PROMOTION_EVENT_STATUSES,
+  BELT_PROMOTION_FINAL_DECISIONS,
   BELT_PROMOTION_PAYMENT_STATUSES,
   BELT_PROMOTION_PREPARATION_STATUSES,
   BELT_PROMOTION_TARGET_ROLES,
@@ -16,17 +18,25 @@ import {
   decisionLabel,
   eventAudienceLabel,
   eventSummary,
+  finalDecisionTone,
   fullName,
   includesAudience,
+  liveState,
+  liveStateLabel,
+  liveStateTone,
+  normalizeAttendanceStatus,
   normalizeAudience,
   normalizeDecision,
   normalizeEventStatus,
+  normalizeFinalDecision,
   normalizePaymentStatus,
   normalizePreparationStatus,
   normalizeStripes,
+  paymentTone,
   preparationTone,
   sanitizeCandidateNote,
   sanitizeEventNote,
+  sortCandidatesForLive,
   type BeltPromotionCandidateRow,
   type BeltPromotionEventRow,
   type BeltPromotionLogAction,
@@ -42,6 +52,7 @@ type SearchParams = Record<string, string | string[] | undefined>
 type DashboardFilters = {
   event: string
   q: string
+  view: 'prep' | 'live'
 }
 
 type CoachOption = {
@@ -49,6 +60,16 @@ type CoachOption = {
   first_name: string | null
   last_name: string | null
   role: string | null
+}
+
+type EnrichedCandidate = BeltPromotionCandidateRow & {
+  athlete_name: string
+  member_id: string | null
+  role: string | null
+  program_level: string | null
+  specialty: string | null
+  reference_coach_name: string | null
+  age_group: 'kids' | 'adults' | 'unknown'
 }
 
 function pick(value: string | string[] | undefined) {
@@ -98,7 +119,6 @@ async function writeLog(args: { eventId: string; action: BeltPromotionLogAction;
 
 async function createEventAction(formData: FormData) {
   'use server'
-
   await requireAccess('/head-coach/belt-promotions')
   const title = String(formData.get('title') || '').trim().slice(0, 120) || 'Belt Promotion Event'
   const eventDate = String(formData.get('event_date') || '').trim() || new Date().toISOString().slice(0, 10)
@@ -121,15 +141,15 @@ async function createEventAction(formData: FormData) {
 
   await writeLog({ eventId, action: 'event_created', details: `${title} · ${eventDate}` })
   revalidatePath('/head-coach/belt-promotions')
-  redirect(buildHref({ event: eventId }))
+  redirect(buildHref({ event: eventId, view: 'prep' }))
 }
 
 async function saveEventAction(formData: FormData) {
   'use server'
-
   const eventId = String(formData.get('eventId') || '').trim()
+  const nextHref = String(formData.get('nextHref') || buildHref({ event: eventId, view: 'prep' }))
   if (!eventId) redirect('/head-coach/belt-promotions')
-  await requireAccess(buildHref({ event: eventId }))
+  await requireAccess(nextHref)
 
   const title = String(formData.get('title') || '').trim().slice(0, 120) || 'Belt Promotion Event'
   const eventDate = String(formData.get('event_date') || '').trim() || new Date().toISOString().slice(0, 10)
@@ -139,24 +159,21 @@ async function saveEventAction(formData: FormData) {
   const notes = sanitizeEventNote(formData.get('notes'))
 
   const admin = getSupabaseAdminClientCached()
-  const update = await admin
-    .from('belt_promotion_events')
-    .update({ title, event_date: eventDate, event_time: eventTime, audience, status, notes })
-    .eq('id', eventId)
+  const update = await admin.from('belt_promotion_events').update({ title, event_date: eventDate, event_time: eventTime, audience, status, notes }).eq('id', eventId)
   if (update.error) throw new Error(update.error.message)
 
   await writeLog({ eventId, action: 'event_updated', details: `${title} · ${status}` })
   revalidatePath('/head-coach/belt-promotions')
-  redirect(buildHref({ event: eventId }))
+  redirect(nextHref)
 }
 
 async function setEventStatusAction(formData: FormData) {
   'use server'
-
   const eventId = String(formData.get('eventId') || '').trim()
   const status = normalizeEventStatus(String(formData.get('status') || ''))
+  const nextHref = String(formData.get('nextHref') || buildHref({ event: eventId, view: 'prep' }))
   if (!eventId || !status) redirect('/head-coach/belt-promotions')
-  await requireAccess(buildHref({ event: eventId }))
+  await requireAccess(nextHref)
 
   const admin = getSupabaseAdminClientCached()
   const update = await admin.from('belt_promotion_events').update({ status }).eq('id', eventId)
@@ -164,27 +181,86 @@ async function setEventStatusAction(formData: FormData) {
 
   await writeLog({ eventId, action: 'event_status_changed', details: status })
   revalidatePath('/head-coach/belt-promotions')
-  redirect(buildHref({ event: eventId }))
+  redirect(nextHref)
+}
+
+async function addSuggestedCandidatesAction(formData: FormData) {
+  'use server'
+  const eventId = String(formData.get('eventId') || '').trim()
+  const nextHref = String(formData.get('nextHref') || buildHref({ event: eventId, view: 'prep' }))
+  if (!eventId) redirect('/head-coach/belt-promotions')
+  await requireAccess(nextHref)
+
+  const admin = getSupabaseAdminClientCached()
+  const [eventRes, existingRes, rosterRes] = await Promise.all([
+    admin.from('belt_promotion_events').select('id, audience').eq('id', eventId).maybeSingle<{ id: string; audience: 'kids' | 'adults' | 'mixed' }>(),
+    admin.from('belt_promotion_event_candidates').select('member_user_id').eq('event_id', eventId).returns<{ member_user_id: string }[]>(),
+    admin.from('head_coach_athlete_roster').select('*').returns<BeltPromotionRosterRow[]>(),
+  ])
+
+  if (eventRes.error) throw new Error(eventRes.error.message)
+  if (existingRes.error) throw new Error(existingRes.error.message)
+  if (rosterRes.error) throw new Error(rosterRes.error.message)
+  if (!eventRes.data) redirect('/head-coach/belt-promotions')
+
+  const existingIds = new Set((existingRes.data ?? []).map((row) => row.member_user_id))
+  const suggestions = (rosterRes.data ?? [])
+    .filter((row) => !!row.role && BELT_PROMOTION_TARGET_ROLES.includes(row.role))
+    .filter((row) => !existingIds.has(row.user_id))
+    .map((row) => ({ row, suggestion: buildSuggestedCandidate(row) }))
+    .filter(({ suggestion }) => includesAudience(eventRes.data!.audience, suggestion.age_group))
+    .filter(({ suggestion }) => suggestion.priority_score >= 60 || suggestion.proposed_decision !== 'none')
+    .sort((a, b) => b.suggestion.priority_score - a.suggestion.priority_score)
+    .slice(0, 24)
+
+  if (suggestions.length > 0) {
+    const insert = await admin.from('belt_promotion_event_candidates').insert(
+      suggestions.map(({ suggestion }, index) => ({
+        id: crypto.randomUUID(),
+        event_id: eventId,
+        member_user_id: suggestion.member_user_id,
+        current_belt: suggestion.current_belt,
+        current_stripes: suggestion.current_stripes,
+        proposed_decision: suggestion.proposed_decision,
+        proposed_belt: suggestion.proposed_belt,
+        proposed_stripes: suggestion.proposed_stripes,
+        preparation_status: suggestion.preparation_status,
+        final_decision: 'pending',
+        attendance_status: 'pending',
+        payment_status: 'pending',
+        reference_coach_user_id: suggestion.reference_coach_user_id,
+        head_coach_note: suggestion.head_coach_note,
+        belt_delivered: false,
+        certificate_delivered: false,
+        sort_order: index + 1,
+      })),
+    )
+    if (insert.error) throw new Error(insert.error.message)
+    await writeLog({ eventId, action: 'suggestions_added', details: `${suggestions.length} suggestions added` })
+  }
+
+  revalidatePath('/head-coach/belt-promotions')
+  redirect(nextHref)
 }
 
 async function addCandidateAction(formData: FormData) {
   'use server'
-
   const eventId = String(formData.get('eventId') || '').trim()
+  const nextHref = String(formData.get('nextHref') || buildHref({ event: eventId, view: 'prep' }))
   const memberUserId = String(formData.get('member_user_id') || '').trim()
   if (!eventId || !memberUserId) redirect('/head-coach/belt-promotions')
-  await requireAccess(buildHref({ event: eventId }))
+  await requireAccess(nextHref)
 
+  const athleteName = String(formData.get('athlete_name') || '').trim() || 'Athlete'
   const currentBelt = String(formData.get('current_belt') || '').trim() || null
   const currentStripes = normalizeStripes(formData.get('current_stripes'))
   const proposedDecision = normalizeDecision(String(formData.get('proposed_decision') || 'none')) ?? 'none'
   const proposedBelt = String(formData.get('proposed_belt') || '').trim() || null
   const proposedStripesRaw = String(formData.get('proposed_stripes') || '').trim()
-  const proposedStripes = proposedStripesRaw ? normalizeStripes(proposedStripesRaw) : null
+  const proposedStripes = proposedDecision === 'stripe' ? normalizeStripes(proposedStripesRaw) : proposedDecision === 'belt' ? 0 : null
   const preparationStatus = normalizePreparationStatus(String(formData.get('preparation_status') || 'suggested')) ?? 'suggested'
   const referenceCoachUserId = String(formData.get('reference_coach_user_id') || '').trim() || null
   const headCoachNote = sanitizeCandidateNote(formData.get('head_coach_note'))
-  const athleteName = String(formData.get('athlete_name') || '').trim() || 'Athlete'
 
   const admin = getSupabaseAdminClientCached()
   const insert = await admin.from('belt_promotion_event_candidates').insert({
@@ -209,78 +285,16 @@ async function addCandidateAction(formData: FormData) {
 
   await writeLog({ eventId, action: 'candidate_added', details: athleteName })
   revalidatePath('/head-coach/belt-promotions')
-  redirect(buildHref({ event: eventId }))
+  redirect(nextHref)
 }
 
-async function addSuggestedCandidatesAction(formData: FormData) {
+async function savePreparationCandidateAction(formData: FormData) {
   'use server'
-
-  const eventId = String(formData.get('eventId') || '').trim()
-  if (!eventId) redirect('/head-coach/belt-promotions')
-  await requireAccess(buildHref({ event: eventId }))
-
-  const admin = getSupabaseAdminClientCached()
-  const [eventRes, existingRes, rosterRes] = await Promise.all([
-    admin.from('belt_promotion_events').select('id, audience').eq('id', eventId).maybeSingle<{ id: string; audience: 'kids' | 'adults' | 'mixed' }>(),
-    admin.from('belt_promotion_event_candidates').select('member_user_id').eq('event_id', eventId).returns<{ member_user_id: string }[]>(),
-    admin.from('head_coach_athlete_roster').select('*').returns<BeltPromotionRosterRow[]>(),
-  ])
-
-  if (eventRes.error) throw new Error(eventRes.error.message)
-  if (existingRes.error) throw new Error(existingRes.error.message)
-  if (rosterRes.error) throw new Error(rosterRes.error.message)
-  if (!eventRes.data) redirect('/head-coach/belt-promotions')
-
-  const existingIds = new Set((existingRes.data ?? []).map((row) => row.member_user_id))
-  const suggestions = (rosterRes.data ?? [])
-    .filter((row) => !!row.role && BELT_PROMOTION_TARGET_ROLES.includes(row.role))
-    .filter((row) => !existingIds.has(row.user_id))
-    .map((row) => ({ row, suggestion: buildSuggestedCandidate(row) }))
-    .filter(({ suggestion }) => includesAudience(eventRes.data!.audience, suggestion.age_group))
-    .filter(({ suggestion }) => suggestion.priority_score >= 60 || suggestion.proposed_decision !== 'none')
-    .sort((a, b) => b.suggestion.priority_score - a.suggestion.priority_score)
-    .slice(0, 24)
-
-  if (suggestions.length === 0) {
-    revalidatePath('/head-coach/belt-promotions')
-    redirect(buildHref({ event: eventId }))
-  }
-
-  const insert = await admin.from('belt_promotion_event_candidates').insert(
-    suggestions.map(({ suggestion }, index) => ({
-      id: crypto.randomUUID(),
-      event_id: eventId,
-      member_user_id: suggestion.member_user_id,
-      current_belt: suggestion.current_belt,
-      current_stripes: suggestion.current_stripes,
-      proposed_decision: suggestion.proposed_decision,
-      proposed_belt: suggestion.proposed_belt,
-      proposed_stripes: suggestion.proposed_stripes,
-      preparation_status: suggestion.preparation_status,
-      final_decision: 'pending',
-      attendance_status: 'pending',
-      payment_status: 'pending',
-      reference_coach_user_id: suggestion.reference_coach_user_id,
-      head_coach_note: suggestion.head_coach_note,
-      belt_delivered: false,
-      certificate_delivered: false,
-      sort_order: index + 1,
-    })),
-  )
-  if (insert.error) throw new Error(insert.error.message)
-
-  await writeLog({ eventId, action: 'suggestions_added', details: `${suggestions.length} suggestions added` })
-  revalidatePath('/head-coach/belt-promotions')
-  redirect(buildHref({ event: eventId }))
-}
-
-async function saveCandidateAction(formData: FormData) {
-  'use server'
-
   const eventId = String(formData.get('eventId') || '').trim()
   const candidateId = String(formData.get('candidateId') || '').trim()
+  const nextHref = String(formData.get('nextHref') || buildHref({ event: eventId, view: 'prep' }))
   if (!eventId || !candidateId) redirect('/head-coach/belt-promotions')
-  await requireAccess(buildHref({ event: eventId }))
+  await requireAccess(nextHref)
 
   const proposedDecision = normalizeDecision(String(formData.get('proposed_decision') || 'none')) ?? 'none'
   const proposedBelt = String(formData.get('proposed_belt') || '').trim() || null
@@ -288,8 +302,8 @@ async function saveCandidateAction(formData: FormData) {
   const proposedStripes = proposedDecision === 'stripe' ? normalizeStripes(proposedStripesRaw) : proposedDecision === 'belt' ? 0 : null
   const preparationStatus = normalizePreparationStatus(String(formData.get('preparation_status') || 'suggested')) ?? 'suggested'
   const paymentStatus = normalizePaymentStatus(String(formData.get('payment_status') || 'pending')) ?? 'pending'
-  const headCoachNote = sanitizeCandidateNote(formData.get('head_coach_note'))
   const referenceCoachUserId = String(formData.get('reference_coach_user_id') || '').trim() || null
+  const headCoachNote = sanitizeCandidateNote(formData.get('head_coach_note'))
 
   const admin = getSupabaseAdminClientCached()
   const update = await admin
@@ -309,16 +323,85 @@ async function saveCandidateAction(formData: FormData) {
 
   await writeLog({ eventId, candidateId, action: 'candidate_updated', details: `${preparationStatus} · ${proposedDecision}` })
   revalidatePath('/head-coach/belt-promotions')
-  redirect(buildHref({ event: eventId }))
+  redirect(nextHref)
+}
+
+async function saveLiveCandidateAction(formData: FormData) {
+  'use server'
+  const eventId = String(formData.get('eventId') || '').trim()
+  const candidateId = String(formData.get('candidateId') || '').trim()
+  const nextHref = String(formData.get('nextHref') || buildHref({ event: eventId, view: 'live' }))
+  if (!eventId || !candidateId) redirect('/head-coach/belt-promotions')
+  await requireAccess(nextHref)
+
+  const attendanceStatus = normalizeAttendanceStatus(String(formData.get('attendance_status') || 'pending')) ?? 'pending'
+  const finalDecision = normalizeFinalDecision(String(formData.get('final_decision') || 'pending')) ?? 'pending'
+  const paymentStatus = normalizePaymentStatus(String(formData.get('payment_status') || 'pending')) ?? 'pending'
+  const beltDelivered = String(formData.get('belt_delivered') || '') === 'on'
+  const certificateDelivered = String(formData.get('certificate_delivered') || '') === 'on'
+  const headCoachNote = sanitizeCandidateNote(formData.get('head_coach_note'))
+
+  const admin = getSupabaseAdminClientCached()
+  const update = await admin
+    .from('belt_promotion_event_candidates')
+    .update({
+      attendance_status: attendanceStatus,
+      final_decision: finalDecision,
+      payment_status: paymentStatus,
+      belt_delivered: beltDelivered,
+      certificate_delivered: certificateDelivered,
+      head_coach_note: headCoachNote,
+    })
+    .eq('id', candidateId)
+    .eq('event_id', eventId)
+  if (update.error) throw new Error(update.error.message)
+
+  await writeLog({ eventId, candidateId, action: 'candidate_updated', details: `live · ${attendanceStatus} · ${finalDecision}` })
+  revalidatePath('/head-coach/belt-promotions')
+  redirect(nextHref)
+}
+
+async function quickLiveAction(formData: FormData) {
+  'use server'
+  const eventId = String(formData.get('eventId') || '').trim()
+  const candidateId = String(formData.get('candidateId') || '').trim()
+  const nextHref = String(formData.get('nextHref') || buildHref({ event: eventId, view: 'live' }))
+  const kind = String(formData.get('kind') || '').trim()
+  if (!eventId || !candidateId || !kind) redirect('/head-coach/belt-promotions')
+  await requireAccess(nextHref)
+
+  const patch: Record<string, unknown> = {}
+  if (kind === 'present') patch.attendance_status = 'present'
+  else if (kind === 'absent') {
+    patch.attendance_status = 'absent'
+    patch.final_decision = 'absent'
+  } else if (kind === 'confirm') {
+    patch.attendance_status = 'present'
+    patch.final_decision = 'confirmed'
+  } else if (kind === 'defer') {
+    patch.attendance_status = 'present'
+    patch.final_decision = 'deferred'
+  } else if (kind === 'paid') patch.payment_status = 'paid'
+  else if (kind === 'waived') patch.payment_status = 'waived'
+  else if (kind === 'belt_delivered') patch.belt_delivered = true
+  else if (kind === 'certificate_delivered') patch.certificate_delivered = true
+
+  const admin = getSupabaseAdminClientCached()
+  const update = await admin.from('belt_promotion_event_candidates').update(patch).eq('id', candidateId).eq('event_id', eventId)
+  if (update.error) throw new Error(update.error.message)
+
+  await writeLog({ eventId, candidateId, action: 'candidate_updated', details: `quick:${kind}` })
+  revalidatePath('/head-coach/belt-promotions')
+  redirect(nextHref)
 }
 
 async function removeCandidateAction(formData: FormData) {
   'use server'
-
   const eventId = String(formData.get('eventId') || '').trim()
   const candidateId = String(formData.get('candidateId') || '').trim()
+  const nextHref = String(formData.get('nextHref') || buildHref({ event: eventId, view: 'prep' }))
   if (!eventId || !candidateId) redirect('/head-coach/belt-promotions')
-  await requireAccess(buildHref({ event: eventId }))
+  await requireAccess(nextHref)
 
   const admin = getSupabaseAdminClientCached()
   const del = await admin.from('belt_promotion_event_candidates').delete().eq('id', candidateId).eq('event_id', eventId)
@@ -326,7 +409,7 @@ async function removeCandidateAction(formData: FormData) {
 
   await writeLog({ eventId, candidateId, action: 'candidate_removed', details: 'Candidate removed from event' })
   revalidatePath('/head-coach/belt-promotions')
-  redirect(buildHref({ event: eventId }))
+  redirect(nextHref)
 }
 
 export default async function BeltPromotionEventsPage({ searchParams }: { searchParams?: SearchParams }) {
@@ -349,10 +432,11 @@ export default async function BeltPromotionEventsPage({ searchParams }: { search
   const filters: DashboardFilters = {
     event: pick(searchParams?.event) ?? '',
     q: pick(searchParams?.q) ?? '',
+    view: pick(searchParams?.view) === 'live' ? 'live' : 'prep',
   }
 
   const admin = getSupabaseAdminClientCached()
-  const [eventsRes, coachesRes] = await Promise.all([
+  const [eventsRes, coachesRes, rosterRes] = await Promise.all([
     admin
       .from('belt_promotion_events')
       .select('id, title, event_date, event_time, audience, status, notes, created_at, updated_at')
@@ -365,47 +449,59 @@ export default async function BeltPromotionEventsPage({ searchParams }: { search
       .in('role', ['assistant_coach', 'coach', 'head_coach'])
       .order('first_name', { ascending: true })
       .returns<CoachOption[]>(),
+    admin.from('head_coach_athlete_roster').select('*').returns<BeltPromotionRosterRow[]>(),
   ])
 
   if (eventsRes.error) throw new Error(eventsRes.error.message)
   if (coachesRes.error) throw new Error(coachesRes.error.message)
+  if (rosterRes.error) throw new Error(rosterRes.error.message)
 
   const events = eventsRes.data ?? []
   const selectedEvent = events.find((row) => row.id === filters.event) ?? events[0] ?? null
-
-  const [candidatesRes, logsRes, rosterRes] = selectedEvent
-    ? await Promise.all([
-        admin
-          .from('belt_promotion_event_candidates')
-          .select('*')
-          .eq('event_id', selectedEvent.id)
-          .order('sort_order', { ascending: true })
-          .order('created_at', { ascending: true })
-          .returns<BeltPromotionCandidateRow[]>(),
-        admin
-          .from('belt_promotion_event_logs')
-          .select('id, event_id, candidate_id, action, details, created_at')
-          .eq('event_id', selectedEvent.id)
-          .order('created_at', { ascending: false })
-          .limit(12)
-          .returns<BeltPromotionLogRow[]>(),
-        admin.from('head_coach_athlete_roster').select('*').returns<BeltPromotionRosterRow[]>(),
-      ])
-    : [
-        { data: [], error: null as { message?: string } | null },
-        { data: [], error: null as { message?: string } | null },
-        { data: [], error: null as { message?: string } | null },
-      ]
-
-  if (candidatesRes.error) throw new Error(candidatesRes.error.message)
-  if (logsRes.error) throw new Error(logsRes.error.message)
-  if (rosterRes.error) throw new Error(rosterRes.error.message)
-
-  const candidates = candidatesRes.data ?? []
-  const summary = eventSummary(candidates)
-  const existingCandidateIds = new Set(candidates.map((row) => row.member_user_id))
   const roster = (rosterRes.data ?? []).filter((row) => !!row.role && BELT_PROMOTION_TARGET_ROLES.includes(row.role))
 
+  let candidates: BeltPromotionCandidateRow[] = []
+  let logs: BeltPromotionLogRow[] = []
+  if (selectedEvent) {
+    const [candidatesRes, logsRes] = await Promise.all([
+      admin
+        .from('belt_promotion_event_candidates')
+        .select('*')
+        .eq('event_id', selectedEvent.id)
+        .order('sort_order', { ascending: true })
+        .order('created_at', { ascending: true })
+        .returns<BeltPromotionCandidateRow[]>(),
+      admin
+        .from('belt_promotion_event_logs')
+        .select('id, event_id, candidate_id, action, details, created_at')
+        .eq('event_id', selectedEvent.id)
+        .order('created_at', { ascending: false })
+        .limit(16)
+        .returns<BeltPromotionLogRow[]>(),
+    ])
+    if (candidatesRes.error) throw new Error(candidatesRes.error.message)
+    if (logsRes.error) throw new Error(logsRes.error.message)
+    candidates = candidatesRes.data ?? []
+    logs = logsRes.data ?? []
+  }
+
+  const rosterMap = new Map(roster.map((row) => [row.user_id, row]))
+  const enrichedCandidates: EnrichedCandidate[] = candidates.map((row) => {
+    const rosterRow = rosterMap.get(row.member_user_id)
+    return {
+      ...row,
+      athlete_name: fullName(rosterRow?.first_name, rosterRow?.last_name, rosterRow?.email),
+      member_id: rosterRow?.member_id ?? null,
+      role: rosterRow?.role ?? null,
+      program_level: rosterRow?.program_level ?? null,
+      specialty: rosterRow?.specialty ?? null,
+      reference_coach_name: rosterRow?.reference_coach_name ?? null,
+      age_group: rosterRow ? ageGroupFromDate(rosterRow.date_of_birth) : 'unknown',
+    }
+  })
+
+  const summary = eventSummary(candidates)
+  const existingCandidateIds = new Set(candidates.map((row) => row.member_user_id))
   const suggestions = selectedEvent
     ? roster
         .filter((row) => !existingCandidateIds.has(row.user_id))
@@ -418,16 +514,21 @@ export default async function BeltPromotionEventsPage({ searchParams }: { search
   const manualResults = suggestions
     .filter((row) => !q || [row.athlete_name, row.member_id ?? '', row.reference_coach_name ?? ''].join(' ').toLowerCase().includes(q))
     .slice(0, 12)
+  const filteredCandidates = enrichedCandidates.filter((row) => !q || [row.athlete_name, row.member_id ?? '', row.reference_coach_name ?? '', row.program_level ?? ''].join(' ').toLowerCase().includes(q))
+  const liveCandidates = sortCandidatesForLive(filteredCandidates)
+  const nextPrepHref = buildHref({ event: selectedEvent?.id ?? '', view: 'prep', q: filters.q })
+  const nextLiveHref = buildHref({ event: selectedEvent?.id ?? '', view: 'live', q: filters.q })
 
   return (
     <main className="mx-auto flex w-full max-w-7xl flex-col gap-4 px-4 py-4 sm:px-6 lg:px-8">
       <PageHeader
         title="Belt Promotion Events"
-        subtitle="Prepare the belt-promotion event before the day itself: create the event, build the candidate list, review suggested promotions, and track internal payment readiness."
+        subtitle="Before: prepare the event and candidate list. During: switch to live mode to manage attendance, decisions, and belt/certificate delivery with fast terrain-friendly actions."
         right={
           <div className="flex flex-wrap gap-2">
             <TinyBadge>{events.length} events</TinyBadge>
             {selectedEvent ? <TinyBadge tone="success">{summary.total} candidates</TinyBadge> : null}
+            {selectedEvent && filters.view === 'live' ? <TinyBadge tone="warning">Live mode</TinyBadge> : null}
           </div>
         }
       />
@@ -437,7 +538,7 @@ export default async function BeltPromotionEventsPage({ searchParams }: { search
           <section className="rounded-3xl border border-[hsl(var(--border))] bg-white p-4 shadow-soft">
             <div>
               <h2 className="text-sm font-semibold tracking-tight">Create new event</h2>
-              <p className="mt-1 text-xs text-[hsl(var(--muted))]">Foundation lot: create the event shell first, then build the candidate list.</p>
+              <p className="mt-1 text-xs text-[hsl(var(--muted))]">Create the shell first, then prepare candidates or switch to live mode on the event day.</p>
             </div>
             <form action={createEventAction} className="mt-4 grid gap-3">
               <label className="block text-sm"><span className="mb-2 block text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Title</span><input type="text" name="title" defaultValue="Belt Promotion" className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none transition focus:border-black" /></label>
@@ -455,7 +556,7 @@ export default async function BeltPromotionEventsPage({ searchParams }: { search
             <div className="flex items-center justify-between gap-3">
               <div>
                 <h2 className="text-sm font-semibold tracking-tight">Events</h2>
-                <p className="mt-1 text-xs text-[hsl(var(--muted))]">Draft, published, live, and closed events.</p>
+                <p className="mt-1 text-xs text-[hsl(var(--muted))]">Open an existing event to prepare it or run it live.</p>
               </div>
               <TinyBadge>{events.length}</TinyBadge>
             </div>
@@ -465,7 +566,7 @@ export default async function BeltPromotionEventsPage({ searchParams }: { search
               ) : events.map((event) => (
                 <Link
                   key={event.id}
-                  href={buildHref({ event: event.id })}
+                  href={buildHref({ event: event.id, view: filters.view })}
                   scroll={false}
                   className={`rounded-2xl border p-4 transition ${selectedEvent?.id === event.id ? 'border-black bg-[hsl(var(--bg))]' : 'border-[hsl(var(--border))] bg-white hover:bg-[hsl(var(--bg))]'}`}
                 >
@@ -474,12 +575,9 @@ export default async function BeltPromotionEventsPage({ searchParams }: { search
                       <div className="font-medium leading-tight text-black">{event.title}</div>
                       <div className="mt-1 text-xs text-[hsl(var(--muted))]">{fmtDate(event.event_date)}{event.event_time ? ` · ${event.event_time}` : ''}</div>
                     </div>
-                    <TinyBadge tone={event.status === 'live' ? 'success' : event.status === 'published' ? 'warning' : event.status === 'closed' ? 'neutral' : 'neutral'}>{titleCase(event.status)}</TinyBadge>
+                    <TinyBadge tone={event.status === 'live' ? 'success' : event.status === 'published' ? 'warning' : 'neutral'}>{titleCase(event.status)}</TinyBadge>
                   </div>
-                  <div className="mt-3 flex flex-wrap gap-2 text-xs text-[hsl(var(--muted))]">
-                    <span>{eventAudienceLabel(event.audience)}</span>
-                    {event.notes ? <span>Notes ready</span> : <span>No notes yet</span>}
-                  </div>
+                  <div className="mt-3 text-xs text-[hsl(var(--muted))]">{eventAudienceLabel(event.audience)}</div>
                 </Link>
               ))}
             </div>
@@ -494,224 +592,325 @@ export default async function BeltPromotionEventsPage({ searchParams }: { search
           ) : (
             <>
               <section className="rounded-3xl border border-[hsl(var(--border))] bg-white p-4 shadow-soft">
-                <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                   <div>
                     <h2 className="text-lg font-semibold tracking-tight">{selectedEvent.title}</h2>
                     <p className="mt-1 text-sm text-[hsl(var(--muted))]">{fmtDate(selectedEvent.event_date)}{selectedEvent.event_time ? ` · ${selectedEvent.event_time}` : ''} · {eventAudienceLabel(selectedEvent.audience)} · {titleCase(selectedEvent.status)}</p>
                     {selectedEvent.notes ? <p className="mt-2 text-sm text-[hsl(var(--muted))]">{selectedEvent.notes}</p> : null}
                   </div>
                   <div className="flex flex-wrap gap-2">
-                    {BELT_PROMOTION_EVENT_STATUSES.map((status) => (
-                      <form key={status} action={setEventStatusAction}>
-                        <input type="hidden" name="eventId" value={selectedEvent.id} />
-                        <input type="hidden" name="status" value={status} />
-                        <button type="submit" className={`inline-flex items-center justify-center rounded-2xl border px-3 py-2 text-xs font-medium transition ${selectedEvent.status === status ? 'border-black bg-black text-white' : 'border-[hsl(var(--border))] bg-white text-black hover:bg-[hsl(var(--bg))]'}`}>
-                          {titleCase(status)}
-                        </button>
-                      </form>
-                    ))}
+                    <Link href={nextPrepHref} scroll={false} className={`inline-flex items-center justify-center rounded-2xl border px-4 py-2 text-sm font-medium transition ${filters.view === 'prep' ? 'border-black bg-black text-white' : 'border-[hsl(var(--border))] bg-white text-black hover:bg-[hsl(var(--bg))]'}`}>Preparation</Link>
+                    <Link href={nextLiveHref} scroll={false} className={`inline-flex items-center justify-center rounded-2xl border px-4 py-2 text-sm font-medium transition ${filters.view === 'live' ? 'border-black bg-black text-white' : 'border-[hsl(var(--border))] bg-white text-black hover:bg-[hsl(var(--bg))]'}`}>Live mode</Link>
                   </div>
+                </div>
+
+                <div className="mt-4 flex flex-wrap gap-2">
+                  {BELT_PROMOTION_EVENT_STATUSES.map((status) => (
+                    <form key={status} action={setEventStatusAction}>
+                      <input type="hidden" name="eventId" value={selectedEvent.id} />
+                      <input type="hidden" name="status" value={status} />
+                      <input type="hidden" name="nextHref" value={filters.view === 'live' ? nextLiveHref : nextPrepHref} />
+                      <button type="submit" className={`inline-flex items-center justify-center rounded-2xl border px-3 py-2 text-xs font-medium transition ${selectedEvent.status === status ? 'border-black bg-black text-white' : 'border-[hsl(var(--border))] bg-white text-black hover:bg-[hsl(var(--bg))]'}`}>
+                        {titleCase(status)}
+                      </button>
+                    </form>
+                  ))}
                 </div>
 
                 <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
                   <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] p-4"><div className="text-xs font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Candidates</div><div className="mt-2 text-2xl font-semibold tracking-tight">{summary.total}</div></div>
-                  <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] p-4"><div className="text-xs font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Approved prep</div><div className="mt-2 text-2xl font-semibold tracking-tight">{summary.approved}</div></div>
-                  <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] p-4"><div className="text-xs font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Paid / pending</div><div className="mt-2 text-2xl font-semibold tracking-tight">{summary.paid} / {summary.pendingPayment}</div></div>
-                  <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] p-4"><div className="text-xs font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Belts / stripes</div><div className="mt-2 text-2xl font-semibold tracking-tight">{summary.belts} / {summary.stripes}</div></div>
+                  <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] p-4"><div className="text-xs font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Present / absent</div><div className="mt-2 text-2xl font-semibold tracking-tight">{summary.present} / {summary.absent}</div></div>
+                  <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] p-4"><div className="text-xs font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Confirmed / deferred</div><div className="mt-2 text-2xl font-semibold tracking-tight">{summary.confirmed} / {summary.deferred}</div></div>
+                  <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] p-4"><div className="text-xs font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Belts / certifs</div><div className="mt-2 text-2xl font-semibold tracking-tight">{summary.deliveredBelts} / {summary.deliveredCertificates}</div></div>
                 </div>
               </section>
 
-              <section className="rounded-3xl border border-[hsl(var(--border))] bg-white p-4 shadow-soft">
-                <div>
-                  <h3 className="text-sm font-semibold tracking-tight">Event setup</h3>
-                  <p className="mt-1 text-xs text-[hsl(var(--muted))]">Still foundation-only: prepare the event and candidate list before live mode and final application.</p>
-                </div>
-                <form action={saveEventAction} className="mt-4 grid gap-3">
-                  <input type="hidden" name="eventId" value={selectedEvent.id} />
-                  <div className="grid gap-3 xl:grid-cols-2">
-                    <label className="block text-sm"><span className="mb-2 block text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Title</span><input type="text" name="title" defaultValue={selectedEvent.title} className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none transition focus:border-black" /></label>
-                    <label className="block text-sm"><span className="mb-2 block text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Status</span><select name="status" defaultValue={selectedEvent.status} className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none transition focus:border-black">{BELT_PROMOTION_EVENT_STATUSES.map((status) => <option key={status} value={status}>{titleCase(status)}</option>)}</select></label>
-                    <label className="block text-sm"><span className="mb-2 block text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Date</span><input type="date" name="event_date" defaultValue={selectedEvent.event_date} className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none transition focus:border-black" /></label>
-                    <label className="block text-sm"><span className="mb-2 block text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Time</span><input type="time" name="event_time" defaultValue={selectedEvent.event_time ?? ''} className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none transition focus:border-black" /></label>
-                    <label className="block text-sm"><span className="mb-2 block text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Audience</span><select name="audience" defaultValue={selectedEvent.audience} className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none transition focus:border-black">{BELT_PROMOTION_AUDIENCES.map((option) => <option key={option} value={option}>{eventAudienceLabel(option)}</option>)}</select></label>
-                  </div>
-                  <label className="block text-sm"><span className="mb-2 block text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Internal notes</span><textarea name="notes" rows={3} defaultValue={selectedEvent.notes ?? ''} className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none transition focus:border-black" /></label>
-                  <div className="flex flex-wrap justify-end gap-2">
-                    <button type="submit" className="inline-flex items-center justify-center rounded-2xl border border-black bg-black px-4 py-2 text-sm font-medium text-white transition hover:opacity-90">Save event</button>
-                  </div>
-                </form>
-              </section>
-
-              <section className="grid gap-4 xl:grid-cols-[minmax(0,1.05fr)_minmax(320px,0.95fr)]">
-                <div className="space-y-4">
+              {filters.view === 'prep' ? (
+                <>
                   <section className="rounded-3xl border border-[hsl(var(--border))] bg-white p-4 shadow-soft">
-                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                      <div>
-                        <h3 className="text-sm font-semibold tracking-tight">Suggested candidates</h3>
-                        <p className="mt-1 text-xs text-[hsl(var(--muted))]">Uses current Head Coach progression signals to prefill the event list.</p>
+                    <div>
+                      <h3 className="text-sm font-semibold tracking-tight">Event setup</h3>
+                      <p className="mt-1 text-xs text-[hsl(var(--muted))]">Keep this stage for preparation only. Live decisions happen in Live mode.</p>
+                    </div>
+                    <form action={saveEventAction} className="mt-4 grid gap-3">
+                      <input type="hidden" name="eventId" value={selectedEvent.id} />
+                      <input type="hidden" name="nextHref" value={nextPrepHref} />
+                      <div className="grid gap-3 xl:grid-cols-2">
+                        <label className="block text-sm"><span className="mb-2 block text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Title</span><input type="text" name="title" defaultValue={selectedEvent.title} className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none transition focus:border-black" /></label>
+                        <label className="block text-sm"><span className="mb-2 block text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Status</span><select name="status" defaultValue={selectedEvent.status} className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none transition focus:border-black">{BELT_PROMOTION_EVENT_STATUSES.map((status) => <option key={status} value={status}>{titleCase(status)}</option>)}</select></label>
+                        <label className="block text-sm"><span className="mb-2 block text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Date</span><input type="date" name="event_date" defaultValue={selectedEvent.event_date} className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none transition focus:border-black" /></label>
+                        <label className="block text-sm"><span className="mb-2 block text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Time</span><input type="time" name="event_time" defaultValue={selectedEvent.event_time ?? ''} className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none transition focus:border-black" /></label>
+                        <label className="block text-sm"><span className="mb-2 block text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Audience</span><select name="audience" defaultValue={selectedEvent.audience} className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none transition focus:border-black">{BELT_PROMOTION_AUDIENCES.map((option) => <option key={option} value={option}>{eventAudienceLabel(option)}</option>)}</select></label>
                       </div>
-                      <form action={addSuggestedCandidatesAction}>
-                        <input type="hidden" name="eventId" value={selectedEvent.id} />
-                        <button type="submit" className="inline-flex items-center justify-center rounded-2xl border border-black bg-black px-4 py-2 text-sm font-medium text-white transition hover:opacity-90">Add top suggestions</button>
-                      </form>
-                    </div>
-                    <div className="mt-4 grid gap-3">
-                      {suggestions.slice(0, 8).map((row) => (
-                        <div key={row.member_user_id} className="rounded-2xl border border-[hsl(var(--border))] p-4">
-                          <div className="flex flex-wrap items-start justify-between gap-3">
-                            <div>
-                              <div className="font-medium leading-tight text-black">{row.athlete_name}</div>
-                              <div className="mt-1 flex flex-wrap gap-2 text-xs text-[hsl(var(--muted))]">
-                                {row.member_id ? <span>{row.member_id}</span> : null}
-                                <span>{row.role ? titleCase(row.role) : 'Athlete'}</span>
-                                <span>{titleCase(row.age_group)}</span>
-                                {row.program_level ? <span>{titleCase(row.program_level)}</span> : null}
-                              </div>
-                            </div>
-                            <TinyBadge tone={row.priority_score >= 100 ? 'success' : row.priority_score >= 70 ? 'warning' : 'neutral'}>Priority {row.priority_score}</TinyBadge>
-                          </div>
-                          <div className="mt-3 grid gap-2 text-sm text-[hsl(var(--muted))]">
-                            <div><span className="font-medium text-black">Signal:</span> {row.promotion_label}</div>
-                            <div><span className="font-medium text-black">Suggestion:</span> {decisionLabel(row.proposed_decision, row.proposed_belt, row.proposed_stripes)}</div>
-                            <div><span className="font-medium text-black">Why:</span> {row.promotion_reason}</div>
-                          </div>
-                          <form action={addCandidateAction} className="mt-4">
-                            <input type="hidden" name="eventId" value={selectedEvent.id} />
-                            <input type="hidden" name="member_user_id" value={row.member_user_id} />
-                            <input type="hidden" name="athlete_name" value={row.athlete_name} />
-                            <input type="hidden" name="current_belt" value={row.current_belt ?? ''} />
-                            <input type="hidden" name="current_stripes" value={row.current_stripes} />
-                            <input type="hidden" name="proposed_decision" value={row.proposed_decision} />
-                            <input type="hidden" name="proposed_belt" value={row.proposed_belt ?? ''} />
-                            <input type="hidden" name="proposed_stripes" value={row.proposed_stripes ?? ''} />
-                            <input type="hidden" name="preparation_status" value={row.preparation_status} />
-                            <input type="hidden" name="reference_coach_user_id" value={row.reference_coach_user_id ?? ''} />
-                            <input type="hidden" name="head_coach_note" value={row.head_coach_note ?? ''} />
-                            <button type="submit" className="inline-flex items-center justify-center rounded-2xl border border-black bg-black px-4 py-2 text-sm font-medium text-white transition hover:opacity-90">Add to event</button>
-                          </form>
-                        </div>
-                      ))}
-                      {suggestions.length === 0 ? <div className="rounded-2xl border border-dashed border-[hsl(var(--border))] px-4 py-8 text-center text-sm text-[hsl(var(--muted))]">No suggestion available for the current audience right now.</div> : null}
-                    </div>
+                      <label className="block text-sm"><span className="mb-2 block text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Internal notes</span><textarea name="notes" rows={3} defaultValue={selectedEvent.notes ?? ''} className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none transition focus:border-black" /></label>
+                      <div className="flex justify-end"><button type="submit" className="inline-flex items-center justify-center rounded-2xl border border-black bg-black px-4 py-2 text-sm font-medium text-white transition hover:opacity-90">Save event</button></div>
+                    </form>
                   </section>
 
-                  <section className="rounded-3xl border border-[hsl(var(--border))] bg-white p-4 shadow-soft">
-                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                      <div>
-                        <h3 className="text-sm font-semibold tracking-tight">Manual add</h3>
-                        <p className="mt-1 text-xs text-[hsl(var(--muted))]">Search the current Head Coach roster and add a candidate manually.</p>
-                      </div>
-                      <form className="w-full sm:w-auto">
-                        <input type="hidden" name="event" value={selectedEvent.id} />
-                        <input type="text" name="q" defaultValue={filters.q} placeholder="Search athlete / member ID / coach" className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none transition focus:border-black sm:w-72" />
-                      </form>
-                    </div>
-                    <div className="mt-4 grid gap-3">
-                      {manualResults.map((row) => (
-                        <div key={row.member_user_id} className="rounded-2xl border border-[hsl(var(--border))] p-4">
-                          <div className="flex flex-wrap items-start justify-between gap-3">
-                            <div>
-                              <div className="font-medium leading-tight text-black">{row.athlete_name}</div>
-                              <div className="mt-1 flex flex-wrap gap-2 text-xs text-[hsl(var(--muted))]">
-                                {row.member_id ? <span>{row.member_id}</span> : null}
-                                <span>{row.role ? titleCase(row.role) : 'Athlete'}</span>
-                                <span>{row.reference_coach_name || 'No reference coach'}</span>
-                              </div>
-                            </div>
-                            <TinyBadge tone={row.proposed_decision === 'belt' ? 'success' : row.proposed_decision === 'stripe' ? 'warning' : 'neutral'}>{decisionLabel(row.proposed_decision, row.proposed_belt, row.proposed_stripes)}</TinyBadge>
+                  <section className="grid gap-4 xl:grid-cols-[minmax(0,1.05fr)_minmax(320px,0.95fr)]">
+                    <div className="space-y-4">
+                      <section className="rounded-3xl border border-[hsl(var(--border))] bg-white p-4 shadow-soft">
+                        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                          <div>
+                            <h3 className="text-sm font-semibold tracking-tight">Suggested candidates</h3>
+                            <p className="mt-1 text-xs text-[hsl(var(--muted))]">Uses current Head Coach progression signals to prefill the event list.</p>
                           </div>
-                          <form action={addCandidateAction} className="mt-4">
+                          <form action={addSuggestedCandidatesAction}>
                             <input type="hidden" name="eventId" value={selectedEvent.id} />
-                            <input type="hidden" name="member_user_id" value={row.member_user_id} />
-                            <input type="hidden" name="athlete_name" value={row.athlete_name} />
-                            <input type="hidden" name="current_belt" value={row.current_belt ?? ''} />
-                            <input type="hidden" name="current_stripes" value={row.current_stripes} />
-                            <input type="hidden" name="proposed_decision" value={row.proposed_decision} />
-                            <input type="hidden" name="proposed_belt" value={row.proposed_belt ?? ''} />
-                            <input type="hidden" name="proposed_stripes" value={row.proposed_stripes ?? ''} />
-                            <input type="hidden" name="preparation_status" value={row.preparation_status} />
-                            <input type="hidden" name="reference_coach_user_id" value={row.reference_coach_user_id ?? ''} />
-                            <input type="hidden" name="head_coach_note" value={row.head_coach_note ?? ''} />
-                            <button type="submit" className="inline-flex items-center justify-center rounded-2xl border border-[hsl(var(--border))] bg-white px-4 py-2 text-sm font-medium text-black transition hover:bg-[hsl(var(--bg))]">Add manually</button>
+                            <input type="hidden" name="nextHref" value={nextPrepHref} />
+                            <button type="submit" className="inline-flex items-center justify-center rounded-2xl border border-black bg-black px-4 py-2 text-sm font-medium text-white transition hover:opacity-90">Add top suggestions</button>
                           </form>
                         </div>
-                      ))}
-                      {manualResults.length === 0 ? <div className="rounded-2xl border border-dashed border-[hsl(var(--border))] px-4 py-8 text-center text-sm text-[hsl(var(--muted))]">No roster match for the current search.</div> : null}
-                    </div>
-                  </section>
-                </div>
+                        <div className="mt-4 grid gap-3">
+                          {suggestions.slice(0, 8).map((row) => (
+                            <div key={row.member_user_id} className="rounded-2xl border border-[hsl(var(--border))] p-4">
+                              <div className="flex items-start justify-between gap-3">
+                                <div>
+                                  <div className="font-medium leading-tight text-black">{row.athlete_name}</div>
+                                  <div className="mt-1 text-xs text-[hsl(var(--muted))]">{row.member_id ?? 'No member ID'} · {titleCase(row.program_level ?? 'pending')} · {titleCase(row.age_group)}</div>
+                                </div>
+                                <TinyBadge tone={preparationTone(row.preparation_status)}>{titleCase(row.preparation_status)}</TinyBadge>
+                              </div>
+                              <div className="mt-3 text-sm text-black">{decisionLabel(row.proposed_decision, row.proposed_belt, row.proposed_stripes)}</div>
+                              <p className="mt-2 text-xs text-[hsl(var(--muted))]">{row.promotion_reason}</p>
+                            </div>
+                          ))}
+                        </div>
+                      </section>
 
-                <div className="space-y-4 xl:sticky xl:top-4 xl:self-start">
-                  <section className="rounded-3xl border border-[hsl(var(--border))] bg-white p-4 shadow-soft">
-                    <div className="flex items-center justify-between gap-3">
-                      <div>
-                        <h3 className="text-sm font-semibold tracking-tight">Candidates</h3>
-                        <p className="mt-1 text-xs text-[hsl(var(--muted))]">Preparation status, internal payment tracking, and proposal review.</p>
-                      </div>
-                      <TinyBadge>{summary.total}</TinyBadge>
-                    </div>
-                    <div className="mt-4 grid gap-3">
-                      {candidates.length === 0 ? <div className="rounded-2xl border border-dashed border-[hsl(var(--border))] px-4 py-8 text-center text-sm text-[hsl(var(--muted))]">No candidate added yet.</div> : candidates.map((candidate) => {
-                        const rosterRow = roster.find((row) => row.user_id === candidate.member_user_id)
-                        const athleteName = rosterRow ? fullName(rosterRow.first_name, rosterRow.last_name, rosterRow.email) : candidate.member_user_id
-                        const ageGroup = ageGroupFromDate(rosterRow?.date_of_birth)
-                        const belts = beltTrackForAgeGroup(ageGroup)
-                        return (
-                          <form key={candidate.id} action={saveCandidateAction} className="grid gap-3 rounded-2xl border border-[hsl(var(--border))] p-4">
-                            <input type="hidden" name="eventId" value={selectedEvent.id} />
-                            <input type="hidden" name="candidateId" value={candidate.id} />
-                            <div className="flex flex-wrap items-start justify-between gap-3">
-                              <div>
-                                <div className="font-medium leading-tight text-black">{athleteName}</div>
-                                <div className="mt-1 flex flex-wrap gap-2 text-xs text-[hsl(var(--muted))]">
-                                  {rosterRow?.member_id ? <span>{rosterRow.member_id}</span> : null}
-                                  {rosterRow?.role ? <span>{titleCase(rosterRow.role)}</span> : null}
-                                  <span>{decisionLabel(candidate.proposed_decision, candidate.proposed_belt, candidate.proposed_stripes)}</span>
+                      <section className="rounded-3xl border border-[hsl(var(--border))] bg-white p-4 shadow-soft">
+                        <div>
+                          <h3 className="text-sm font-semibold tracking-tight">Event candidates</h3>
+                          <p className="mt-1 text-xs text-[hsl(var(--muted))]">Preparation-only editing before the event starts.</p>
+                        </div>
+                        <div className="mt-4 grid gap-3">
+                          {enrichedCandidates.length === 0 ? (
+                            <div className="rounded-2xl border border-dashed border-[hsl(var(--border))] px-4 py-8 text-center text-sm text-[hsl(var(--muted))]">No candidate added yet.</div>
+                          ) : enrichedCandidates.map((row) => (
+                            <form key={row.id} action={savePreparationCandidateAction} className="grid gap-3 rounded-2xl border border-[hsl(var(--border))] p-4">
+                              <input type="hidden" name="eventId" value={selectedEvent.id} />
+                              <input type="hidden" name="candidateId" value={row.id} />
+                              <input type="hidden" name="nextHref" value={nextPrepHref} />
+                              <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                                <div>
+                                  <div className="font-medium leading-tight text-black">{row.athlete_name}</div>
+                                  <div className="mt-1 text-xs text-[hsl(var(--muted))]">{row.member_id ?? 'No member ID'} · {titleCase(row.program_level ?? 'pending')} · {titleCase(row.role ?? 'member')}</div>
+                                </div>
+                                <div className="flex flex-wrap gap-2">
+                                  <TinyBadge tone={preparationTone(row.preparation_status)}>{titleCase(row.preparation_status)}</TinyBadge>
+                                  <TinyBadge tone={paymentTone(row.payment_status)}>{titleCase(row.payment_status)}</TinyBadge>
                                 </div>
                               </div>
-                              <TinyBadge tone={preparationTone(candidate.preparation_status)}>{titleCase(candidate.preparation_status)}</TinyBadge>
+                              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                                <label className="block text-sm"><span className="mb-2 block text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Decision</span><select name="proposed_decision" defaultValue={row.proposed_decision} className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none transition focus:border-black">{BELT_PROMOTION_DECISIONS.map((option) => <option key={option} value={option}>{titleCase(option)}</option>)}</select></label>
+                                <label className="block text-sm"><span className="mb-2 block text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Belt</span><select name="proposed_belt" defaultValue={row.proposed_belt ?? ''} className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none transition focus:border-black"><option value="">No belt change</option>{beltTrackForAgeGroup(row.age_group).map((belt) => <option key={belt} value={belt}>{titleCase(belt)}</option>)}</select></label>
+                                <label className="block text-sm"><span className="mb-2 block text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Stripes</span><input type="number" min={0} max={4} name="proposed_stripes" defaultValue={Number(row.proposed_stripes ?? row.current_stripes ?? 0)} className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none transition focus:border-black" /></label>
+                                <label className="block text-sm"><span className="mb-2 block text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Prep status</span><select name="preparation_status" defaultValue={row.preparation_status} className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none transition focus:border-black">{BELT_PROMOTION_PREPARATION_STATUSES.map((option) => <option key={option} value={option}>{titleCase(option)}</option>)}</select></label>
+                                <label className="block text-sm"><span className="mb-2 block text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Payment</span><select name="payment_status" defaultValue={row.payment_status} className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none transition focus:border-black">{BELT_PROMOTION_PAYMENT_STATUSES.map((option) => <option key={option} value={option}>{titleCase(option)}</option>)}</select></label>
+                                <label className="block text-sm xl:col-span-2"><span className="mb-2 block text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Reference coach</span><select name="reference_coach_user_id" defaultValue={row.reference_coach_user_id ?? ''} className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none transition focus:border-black"><option value="">No reference coach</option>{(coachesRes.data ?? []).map((coach) => <option key={coach.user_id} value={coach.user_id}>{fullName(coach.first_name, coach.last_name, coach.role ? titleCase(coach.role) : 'Coach')}</option>)}</select></label>
+                              </div>
+                              <label className="block text-sm"><span className="mb-2 block text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Head coach note</span><textarea name="head_coach_note" rows={3} defaultValue={row.head_coach_note ?? ''} className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none transition focus:border-black" /></label>
+                              <div className="flex flex-wrap justify-between gap-2">
+                                <button type="submit" className="inline-flex items-center justify-center rounded-2xl border border-black bg-black px-4 py-2 text-sm font-medium text-white transition hover:opacity-90">Save candidate</button>
+                                <button type="submit" formAction={removeCandidateAction} className="inline-flex items-center justify-center rounded-2xl border border-rose-200 bg-rose-50 px-4 py-2 text-sm font-medium text-rose-700 transition hover:bg-rose-100">Remove</button>
+                              </div>
+                            </form>
+                          ))}
+                        </div>
+                      </section>
+                    </div>
+
+                    <div className="space-y-4 xl:sticky xl:top-4 xl:self-start">
+                      <section className="rounded-3xl border border-[hsl(var(--border))] bg-white p-4 shadow-soft">
+                        <div>
+                          <h3 className="text-sm font-semibold tracking-tight">Add candidate manually</h3>
+                          <p className="mt-1 text-xs text-[hsl(var(--muted))]">Search from the Head Coach roster and add one athlete to the event.</p>
+                        </div>
+                        <form className="mt-4 flex gap-2" action={nextPrepHref}>
+                          <input type="hidden" name="event" value={selectedEvent.id} />
+                          <input type="hidden" name="view" value="prep" />
+                          <input type="text" name="q" defaultValue={filters.q} placeholder="Search athlete" className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none transition focus:border-black" />
+                          <button type="submit" className="inline-flex items-center justify-center rounded-2xl border border-black bg-black px-4 py-2 text-sm font-medium text-white transition hover:opacity-90">Search</button>
+                        </form>
+                        <div className="mt-4 grid gap-3">
+                          {manualResults.length === 0 ? (
+                            <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] px-4 py-3 text-sm text-[hsl(var(--muted))]">No athlete found for this search.</div>
+                          ) : manualResults.map((row) => (
+                            <form key={row.member_user_id} action={addCandidateAction} className="grid gap-3 rounded-2xl border border-[hsl(var(--border))] p-4">
+                              <input type="hidden" name="eventId" value={selectedEvent.id} />
+                              <input type="hidden" name="nextHref" value={nextPrepHref} />
+                              <input type="hidden" name="member_user_id" value={row.member_user_id} />
+                              <input type="hidden" name="athlete_name" value={row.athlete_name} />
+                              <input type="hidden" name="current_belt" value={row.current_belt ?? ''} />
+                              <input type="hidden" name="current_stripes" value={row.current_stripes} />
+                              <div className="flex items-start justify-between gap-3">
+                                <div>
+                                  <div className="font-medium leading-tight text-black">{row.athlete_name}</div>
+                                  <div className="mt-1 text-xs text-[hsl(var(--muted))]">{row.member_id ?? 'No member ID'} · {titleCase(row.program_level ?? 'pending')} · {titleCase(row.age_group)}</div>
+                                </div>
+                                <TinyBadge tone={preparationTone(row.preparation_status)}>{titleCase(row.preparation_status)}</TinyBadge>
+                              </div>
+                              <div className="grid gap-3 sm:grid-cols-2">
+                                <label className="block text-sm"><span className="mb-2 block text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Decision</span><select name="proposed_decision" defaultValue={row.proposed_decision} className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none transition focus:border-black">{BELT_PROMOTION_DECISIONS.map((option) => <option key={option} value={option}>{titleCase(option)}</option>)}</select></label>
+                                <label className="block text-sm"><span className="mb-2 block text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Prep status</span><select name="preparation_status" defaultValue={row.preparation_status} className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none transition focus:border-black">{BELT_PROMOTION_PREPARATION_STATUSES.map((option) => <option key={option} value={option}>{titleCase(option)}</option>)}</select></label>
+                                <label className="block text-sm"><span className="mb-2 block text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Belt</span><select name="proposed_belt" defaultValue={row.proposed_belt ?? ''} className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none transition focus:border-black"><option value="">No belt change</option>{beltTrackForAgeGroup(row.age_group).map((belt) => <option key={belt} value={belt}>{titleCase(belt)}</option>)}</select></label>
+                                <label className="block text-sm"><span className="mb-2 block text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Stripes</span><input type="number" min={0} max={4} name="proposed_stripes" defaultValue={Number(row.proposed_stripes ?? row.current_stripes ?? 0)} className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none transition focus:border-black" /></label>
+                              </div>
+                              <input type="hidden" name="reference_coach_user_id" value={row.reference_coach_user_id ?? ''} />
+                              <input type="hidden" name="head_coach_note" value={row.head_coach_note ?? ''} />
+                              <button type="submit" className="inline-flex items-center justify-center rounded-2xl border border-black bg-black px-4 py-2 text-sm font-medium text-white transition hover:opacity-90">Add candidate</button>
+                            </form>
+                          ))}
+                        </div>
+                      </section>
+
+                      <section className="rounded-3xl border border-[hsl(var(--border))] bg-white p-4 shadow-soft">
+                        <div>
+                          <h3 className="text-sm font-semibold tracking-tight">Recent event activity</h3>
+                          <p className="mt-1 text-xs text-[hsl(var(--muted))]">Lightweight log for preparation changes.</p>
+                        </div>
+                        <div className="mt-4 grid gap-3">
+                          {logs.length === 0 ? (
+                            <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] px-4 py-3 text-sm text-[hsl(var(--muted))]">No activity yet.</div>
+                          ) : logs.map((log) => (
+                            <div key={log.id} className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] p-4">
+                              <div className="flex flex-wrap items-center gap-2"><TinyBadge>{titleCase(log.action)}</TinyBadge><TinyBadge>{fmtDate(log.created_at)}</TinyBadge></div>
+                              {log.details ? <p className="mt-2 text-sm text-[hsl(var(--muted))]">{log.details}</p> : null}
                             </div>
-                            <div className="grid gap-3 sm:grid-cols-2">
-                              <label className="block text-sm"><span className="mb-2 block text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Preparation</span><select name="preparation_status" defaultValue={candidate.preparation_status} className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none transition focus:border-black">{BELT_PROMOTION_PREPARATION_STATUSES.map((status) => <option key={status} value={status}>{titleCase(status)}</option>)}</select></label>
-                              <label className="block text-sm"><span className="mb-2 block text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Payment</span><select name="payment_status" defaultValue={candidate.payment_status} className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none transition focus:border-black">{BELT_PROMOTION_PAYMENT_STATUSES.map((status) => <option key={status} value={status}>{titleCase(status)}</option>)}</select></label>
-                              <label className="block text-sm"><span className="mb-2 block text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Proposal</span><select name="proposed_decision" defaultValue={candidate.proposed_decision} className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none transition focus:border-black">{BELT_PROMOTION_DECISIONS.map((decision) => <option key={decision} value={decision}>{titleCase(decision)}</option>)}</select></label>
-                              <label className="block text-sm"><span className="mb-2 block text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Reference coach</span><select name="reference_coach_user_id" defaultValue={candidate.reference_coach_user_id ?? ''} className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none transition focus:border-black"><option value="">No reference coach</option>{(coachesRes.data ?? []).map((coach) => <option key={coach.user_id} value={coach.user_id}>{fullName(coach.first_name, coach.last_name, coach.role ? titleCase(coach.role) : 'Coach')}</option>)}</select></label>
-                              <label className="block text-sm"><span className="mb-2 block text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Proposed belt</span><select name="proposed_belt" defaultValue={candidate.proposed_belt ?? ''} className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none transition focus:border-black"><option value="">No belt change</option>{belts.map((belt) => <option key={belt} value={belt}>{titleCase(belt)}</option>)}</select></label>
-                              <label className="block text-sm"><span className="mb-2 block text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Proposed stripes</span><input type="number" min={0} max={4} name="proposed_stripes" defaultValue={candidate.proposed_stripes ?? ''} className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none transition focus:border-black" /></label>
+                          ))}
+                        </div>
+                      </section>
+                    </div>
+                  </section>
+                </>
+              ) : (
+                <section className="space-y-4">
+                  <section className="rounded-3xl border border-[hsl(var(--border))] bg-white p-4 shadow-soft">
+                    <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                      <div>
+                        <h3 className="text-sm font-semibold tracking-tight">Live event mode</h3>
+                        <p className="mt-1 text-xs text-[hsl(var(--muted))]">Fast terrain-friendly workflow: mark presence, set final decision, track payment, and record belt/certificate delivery.</p>
+                      </div>
+                      <form className="flex gap-2" action={nextLiveHref}>
+                        <input type="hidden" name="event" value={selectedEvent.id} />
+                        <input type="hidden" name="view" value="live" />
+                        <input type="text" name="q" defaultValue={filters.q} placeholder="Search live queue" className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none transition focus:border-black sm:w-64" />
+                        <button type="submit" className="inline-flex items-center justify-center rounded-2xl border border-black bg-black px-4 py-2 text-sm font-medium text-white transition hover:opacity-90">Search</button>
+                      </form>
+                    </div>
+                  </section>
+
+                  <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                    <div className="rounded-2xl border border-[hsl(var(--border))] bg-white p-4 shadow-soft"><div className="text-xs font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Ready</div><div className="mt-2 text-2xl font-semibold tracking-tight">{liveCandidates.filter((row) => liveState(row) === 'ready').length}</div></div>
+                    <div className="rounded-2xl border border-[hsl(var(--border))] bg-white p-4 shadow-soft"><div className="text-xs font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Needs action</div><div className="mt-2 text-2xl font-semibold tracking-tight">{liveCandidates.filter((row) => liveState(row) === 'attention').length}</div></div>
+                    <div className="rounded-2xl border border-[hsl(var(--border))] bg-white p-4 shadow-soft"><div className="text-xs font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Done</div><div className="mt-2 text-2xl font-semibold tracking-tight">{liveCandidates.filter((row) => liveState(row) === 'done').length}</div></div>
+                    <div className="rounded-2xl border border-[hsl(var(--border))] bg-white p-4 shadow-soft"><div className="text-xs font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Absent</div><div className="mt-2 text-2xl font-semibold tracking-tight">{liveCandidates.filter((row) => liveState(row) === 'absent').length}</div></div>
+                  </div>
+
+                  <section className="grid gap-4 lg:grid-cols-[minmax(0,1.2fr)_minmax(320px,0.8fr)]">
+                    <div className="space-y-3">
+                      {liveCandidates.length === 0 ? (
+                        <div className="rounded-3xl border border-dashed border-[hsl(var(--border))] bg-white px-4 py-10 text-center text-sm text-[hsl(var(--muted))] shadow-soft">No candidate matches the current live filters.</div>
+                      ) : liveCandidates.map((row) => {
+                        const state = liveState(row)
+                        return (
+                          <div key={row.id} className="rounded-3xl border border-[hsl(var(--border))] bg-white p-4 shadow-soft">
+                            <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                              <div>
+                                <div className="text-base font-semibold leading-tight text-black">{row.athlete_name}</div>
+                                <div className="mt-1 flex flex-wrap gap-2 text-xs text-[hsl(var(--muted))]">
+                                  <span>{row.member_id ?? 'No member ID'}</span>
+                                  <span>{titleCase(row.program_level ?? 'pending')}</span>
+                                  <span>{titleCase(row.role ?? 'member')}</span>
+                                  <span>{row.reference_coach_name || 'No reference coach'}</span>
+                                </div>
+                              </div>
+                              <div className="flex flex-wrap gap-2">
+                                <TinyBadge tone={liveStateTone(state)}>{liveStateLabel(state)}</TinyBadge>
+                                <TinyBadge tone={paymentTone(row.payment_status)}>{titleCase(row.payment_status)}</TinyBadge>
+                                <TinyBadge tone={finalDecisionTone(row.final_decision)}>{titleCase(row.final_decision)}</TinyBadge>
+                              </div>
                             </div>
-                            <label className="block text-sm"><span className="mb-2 block text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Head coach note</span><textarea name="head_coach_note" rows={3} defaultValue={candidate.head_coach_note ?? ''} className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none transition focus:border-black" /></label>
-                            <div className="flex flex-wrap justify-between gap-2">
-                              <button type="submit" className="inline-flex items-center justify-center rounded-2xl border border-black bg-black px-4 py-2 text-sm font-medium text-white transition hover:opacity-90">Save candidate</button>
-                              <button type="submit" formAction={removeCandidateAction} name="candidateId" value={candidate.id} className="inline-flex items-center justify-center rounded-2xl border border-rose-200 bg-rose-50 px-4 py-2 text-sm font-medium text-rose-700 transition hover:bg-rose-100">Remove</button>
+
+                            <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                              <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] p-3"><div className="text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Planned</div><div className="mt-1 text-sm font-medium text-black">{decisionLabel(row.proposed_decision, row.proposed_belt, row.proposed_stripes)}</div></div>
+                              <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] p-3"><div className="text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Attendance</div><div className="mt-1 text-sm font-medium text-black">{titleCase(row.attendance_status)}</div></div>
+                              <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] p-3"><div className="text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Belt</div><div className="mt-1 text-sm font-medium text-black">{row.belt_delivered ? 'Delivered' : 'Pending'}</div></div>
+                              <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] p-3"><div className="text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Certificate</div><div className="mt-1 text-sm font-medium text-black">{row.certificate_delivered ? 'Delivered' : 'Pending'}</div></div>
                             </div>
-                          </form>
+
+                            <div className="mt-4 flex flex-wrap gap-2">
+                              {['present', 'confirm', 'defer', 'paid', 'waived', 'belt_delivered', 'certificate_delivered', 'absent'].map((kind) => (
+                                <form key={kind} action={quickLiveAction}>
+                                  <input type="hidden" name="eventId" value={selectedEvent.id} />
+                                  <input type="hidden" name="candidateId" value={row.id} />
+                                  <input type="hidden" name="kind" value={kind} />
+                                  <input type="hidden" name="nextHref" value={nextLiveHref} />
+                                  <button type="submit" className={`inline-flex items-center justify-center rounded-2xl border px-3 py-2 text-xs font-medium transition ${kind === 'confirm' || kind === 'paid' ? 'border-black bg-black text-white hover:opacity-90' : 'border-[hsl(var(--border))] bg-white text-black hover:bg-[hsl(var(--bg))]'}`}>
+                                    {kind === 'present' ? 'Mark present' : kind === 'confirm' ? 'Confirm' : kind === 'defer' ? 'Defer' : kind === 'paid' ? 'Paid' : kind === 'waived' ? 'Waived' : kind === 'belt_delivered' ? 'Belt delivered' : kind === 'certificate_delivered' ? 'Certificate delivered' : 'Absent'}
+                                  </button>
+                                </form>
+                              ))}
+                            </div>
+
+                            <details className="mt-4 rounded-2xl border border-[hsl(var(--border))] p-3">
+                              <summary className="cursor-pointer text-sm font-medium text-black">Advanced live edit</summary>
+                              <form action={saveLiveCandidateAction} className="mt-3 grid gap-3">
+                                <input type="hidden" name="eventId" value={selectedEvent.id} />
+                                <input type="hidden" name="candidateId" value={row.id} />
+                                <input type="hidden" name="nextHref" value={nextLiveHref} />
+                                <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                                  <label className="block text-sm"><span className="mb-2 block text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Attendance</span><select name="attendance_status" defaultValue={row.attendance_status} className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none transition focus:border-black">{BELT_PROMOTION_ATTENDANCE_STATUSES.map((option) => <option key={option} value={option}>{titleCase(option)}</option>)}</select></label>
+                                  <label className="block text-sm"><span className="mb-2 block text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Final decision</span><select name="final_decision" defaultValue={row.final_decision} className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none transition focus:border-black">{BELT_PROMOTION_FINAL_DECISIONS.map((option) => <option key={option} value={option}>{titleCase(option)}</option>)}</select></label>
+                                  <label className="block text-sm"><span className="mb-2 block text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Payment</span><select name="payment_status" defaultValue={row.payment_status} className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none transition focus:border-black">{BELT_PROMOTION_PAYMENT_STATUSES.map((option) => <option key={option} value={option}>{titleCase(option)}</option>)}</select></label>
+                                </div>
+                                <label className="block text-sm"><span className="mb-2 block text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Live note</span><textarea name="head_coach_note" rows={3} defaultValue={row.head_coach_note ?? ''} className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none transition focus:border-black" /></label>
+                                <div className="grid gap-3 sm:grid-cols-2">
+                                  <label className="inline-flex items-center gap-2 rounded-2xl border border-[hsl(var(--border))] px-3 py-2 text-sm"><input type="checkbox" name="belt_delivered" defaultChecked={row.belt_delivered} /> Belt delivered</label>
+                                  <label className="inline-flex items-center gap-2 rounded-2xl border border-[hsl(var(--border))] px-3 py-2 text-sm"><input type="checkbox" name="certificate_delivered" defaultChecked={row.certificate_delivered} /> Certificate delivered</label>
+                                </div>
+                                <div className="flex justify-end"><button type="submit" className="inline-flex items-center justify-center rounded-2xl border border-black bg-black px-4 py-2 text-sm font-medium text-white transition hover:opacity-90">Save live state</button></div>
+                              </form>
+                            </details>
+                          </div>
                         )
                       })}
                     </div>
-                  </section>
 
-                  <section className="rounded-3xl border border-[hsl(var(--border))] bg-white p-4 shadow-soft">
-                    <div className="flex items-center justify-between gap-3">
-                      <div>
-                        <h3 className="text-sm font-semibold tracking-tight">Recent event log</h3>
-                        <p className="mt-1 text-xs text-[hsl(var(--muted))]">Creation, status changes, and candidate edits.</p>
-                      </div>
-                      <TinyBadge>{(logsRes.data ?? []).length}</TinyBadge>
-                    </div>
-                    <div className="mt-4 grid gap-3">
-                      {(logsRes.data ?? []).length === 0 ? <div className="rounded-2xl border border-dashed border-[hsl(var(--border))] px-4 py-8 text-center text-sm text-[hsl(var(--muted))]">No event activity yet.</div> : (logsRes.data ?? []).map((row) => (
-                        <div key={row.id} className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] p-4">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <TinyBadge>{titleCase(row.action)}</TinyBadge>
-                            <TinyBadge>{fmtDate(row.created_at)}</TinyBadge>
-                          </div>
-                          {row.details ? <p className="mt-2 text-sm text-[hsl(var(--muted))]">{row.details}</p> : null}
+                    <div className="space-y-4 lg:sticky lg:top-4 lg:self-start">
+                      <section className="rounded-3xl border border-[hsl(var(--border))] bg-white p-4 shadow-soft">
+                        <div>
+                          <h3 className="text-sm font-semibold tracking-tight">Live checklist</h3>
+                          <p className="mt-1 text-xs text-[hsl(var(--muted))]">Use the quick actions first. Open Advanced live edit only when you need a specific correction.</p>
                         </div>
-                      ))}
+                        <div className="mt-4 grid gap-3 text-sm text-[hsl(var(--muted))]">
+                          <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] px-4 py-3"><span className="font-medium text-black">1.</span> Mark present or absent.</div>
+                          <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] px-4 py-3"><span className="font-medium text-black">2.</span> Record final decision: confirm / defer / reject.</div>
+                          <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] px-4 py-3"><span className="font-medium text-black">3.</span> Update internal payment state.</div>
+                          <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] px-4 py-3"><span className="font-medium text-black">4.</span> Mark belt / certificate delivered if applicable.</div>
+                        </div>
+                      </section>
+
+                      <section className="rounded-3xl border border-[hsl(var(--border))] bg-white p-4 shadow-soft">
+                        <div>
+                          <h3 className="text-sm font-semibold tracking-tight">Recent live activity</h3>
+                          <p className="mt-1 text-xs text-[hsl(var(--muted))]">Latest event actions while running the event.</p>
+                        </div>
+                        <div className="mt-4 grid gap-3">
+                          {logs.length === 0 ? (
+                            <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] px-4 py-3 text-sm text-[hsl(var(--muted))]">No activity yet.</div>
+                          ) : logs.map((log) => (
+                            <div key={log.id} className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] p-4">
+                              <div className="flex flex-wrap items-center gap-2"><TinyBadge>{titleCase(log.action)}</TinyBadge><TinyBadge>{fmtDate(log.created_at)}</TinyBadge></div>
+                              {log.details ? <p className="mt-2 text-sm text-[hsl(var(--muted))]">{log.details}</p> : null}
+                            </div>
+                          ))}
+                        </div>
+                      </section>
                     </div>
                   </section>
-                </div>
-              </section>
+                </section>
+              )}
             </>
           )}
         </div>
