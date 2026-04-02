@@ -119,6 +119,8 @@ export type BeltPromotionSuggestedCandidate = {
   head_coach_note: string | null
 }
 
+export type LiveCandidateState = 'ready' | 'attention' | 'done' | 'absent'
+
 export function fullName(firstName?: string | null, lastName?: string | null, fallback?: string | null) {
   const joined = [firstName ?? '', lastName ?? ''].join(' ').trim()
   return joined || fallback || 'Unnamed athlete'
@@ -285,10 +287,62 @@ export function preparationTone(status: BeltPromotionPreparationStatus): 'succes
   return 'neutral'
 }
 
+export function paymentTone(status: BeltPromotionPaymentStatus): 'success' | 'warning' | 'danger' | 'neutral' {
+  if (status === 'paid' || status === 'waived') return 'success'
+  if (status === 'verify') return 'warning'
+  if (status === 'pending') return 'danger'
+  return 'neutral'
+}
+
+export function finalDecisionTone(status: BeltPromotionFinalDecision): 'success' | 'warning' | 'danger' | 'neutral' {
+  if (status === 'confirmed') return 'success'
+  if (status === 'deferred' || status === 'pending') return 'warning'
+  if (status === 'rejected' || status === 'absent') return 'danger'
+  return 'neutral'
+}
+
 export function decisionLabel(decision: BeltPromotionDecision, belt?: string | null, stripes?: number | null) {
   if (decision === 'belt') return belt ? `Belt → ${titleCase(belt)}` : 'Belt promotion'
   if (decision === 'stripe') return `Stripe → ${Number(stripes ?? 0)}`
   return 'No promotion'
+}
+
+export function liveState(candidate: Pick<BeltPromotionCandidateRow, 'attendance_status' | 'final_decision' | 'payment_status' | 'belt_delivered' | 'certificate_delivered'>): LiveCandidateState {
+  if (candidate.attendance_status === 'absent' || candidate.final_decision === 'absent') return 'absent'
+  if (
+    candidate.attendance_status === 'present' &&
+    (candidate.final_decision === 'confirmed' || candidate.final_decision === 'rejected' || candidate.final_decision === 'deferred') &&
+    (candidate.payment_status === 'paid' || candidate.payment_status === 'waived' || candidate.final_decision !== 'confirmed')
+  ) {
+    return 'done'
+  }
+  if (candidate.attendance_status === 'present') return 'attention'
+  return 'ready'
+}
+
+export function liveStateLabel(state: LiveCandidateState) {
+  if (state === 'done') return 'Done'
+  if (state === 'attention') return 'Needs action'
+  if (state === 'absent') return 'Absent'
+  return 'Ready'
+}
+
+export function liveStateTone(state: LiveCandidateState): 'success' | 'warning' | 'danger' | 'neutral' {
+  if (state === 'done') return 'success'
+  if (state === 'attention') return 'warning'
+  if (state === 'absent') return 'danger'
+  return 'neutral'
+}
+
+export function sortCandidatesForLive<T extends BeltPromotionCandidateRow & { athlete_name?: string | null; sort_rank?: number | null }>(rows: T[]) {
+  return [...rows].sort((a, b) => {
+    const stateRank = { attention: 0, ready: 1, done: 2, absent: 3 } as const
+    const diff = stateRank[liveState(a)] - stateRank[liveState(b)]
+    if (diff !== 0) return diff
+    const sortDiff = Number(a.sort_rank ?? a.sort_order ?? 0) - Number(b.sort_rank ?? b.sort_order ?? 0)
+    if (sortDiff !== 0) return sortDiff
+    return String(a.athlete_name ?? '').localeCompare(String(b.athlete_name ?? ''))
+  })
 }
 
 export function eventSummary(candidates: BeltPromotionCandidateRow[]) {
@@ -301,5 +355,12 @@ export function eventSummary(candidates: BeltPromotionCandidateRow[]) {
     pendingPayment: candidates.filter((row) => row.payment_status === 'pending' || row.payment_status === 'verify').length,
     stripes: candidates.filter((row) => row.proposed_decision === 'stripe').length,
     belts: candidates.filter((row) => row.proposed_decision === 'belt').length,
+    present: candidates.filter((row) => row.attendance_status === 'present').length,
+    absent: candidates.filter((row) => row.attendance_status === 'absent').length,
+    confirmed: candidates.filter((row) => row.final_decision === 'confirmed').length,
+    deferred: candidates.filter((row) => row.final_decision === 'deferred').length,
+    rejected: candidates.filter((row) => row.final_decision === 'rejected').length,
+    deliveredBelts: candidates.filter((row) => row.belt_delivered).length,
+    deliveredCertificates: candidates.filter((row) => row.certificate_delivered).length,
   }
 }
