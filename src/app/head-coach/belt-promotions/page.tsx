@@ -37,6 +37,7 @@ import {
   sanitizeCandidateNote,
   sanitizeEventNote,
   sortCandidatesForLive,
+  type BeltPromotionApplyRunRow,
   type BeltPromotionCandidateRow,
   type BeltPromotionEventRow,
   type BeltPromotionLogAction,
@@ -412,6 +413,172 @@ async function removeCandidateAction(formData: FormData) {
   redirect(nextHref)
 }
 
+async function applyConfirmedResultsAction(formData: FormData) {
+  'use server'
+  const eventId = String(formData.get('eventId') || '').trim()
+  const nextHref = String(formData.get('nextHref') || buildHref({ event: eventId, view: 'live' }))
+  const confirmApply = String(formData.get('confirm_apply') || '').trim() === 'yes'
+  const closeEventAfter = String(formData.get('close_event_after') || '').trim() === 'on'
+  if (!eventId || !confirmApply) redirect(nextHref)
+
+  const me = await requireAccess(nextHref)
+  const admin = getSupabaseAdminClientCached()
+  const [eventRes, candidatesRes] = await Promise.all([
+    admin
+      .from('belt_promotion_events')
+      .select('id, title, event_date, status')
+      .eq('id', eventId)
+      .maybeSingle<{ id: string; title: string; event_date: string; status: string }>(),
+    admin
+      .from('belt_promotion_event_candidates')
+      .select('*')
+      .eq('event_id', eventId)
+      .eq('final_decision', 'confirmed')
+      .is('results_applied_at', null)
+      .returns<BeltPromotionCandidateRow[]>(),
+  ])
+
+  if (eventRes.error) throw new Error(eventRes.error.message)
+  if (candidatesRes.error) throw new Error(candidatesRes.error.message)
+  if (!eventRes.data) redirect('/head-coach/belt-promotions')
+
+  const candidates = candidatesRes.data ?? []
+  if (candidates.length === 0) redirect(nextHref)
+
+  const runId = crypto.randomUUID()
+  let stripeCount = 0
+  let beltCount = 0
+  let noteCount = 0
+
+  for (const candidate of candidates) {
+    const trainingRes = await admin
+      .from('member_training_profiles')
+      .select('program_level, stripes, specialty, reference_coach_user_id, notes')
+      .eq('member_user_id', candidate.member_user_id)
+      .maybeSingle<{ program_level: string | null; stripes: number | null; specialty: string | null; reference_coach_user_id: string | null; notes: string | null }>()
+    if (trainingRes.error) throw new Error(trainingRes.error.message)
+
+    const training = trainingRes.data
+    const eventNote = `${eventRes.data.title} · ${eventRes.data.event_date}`
+
+    if (candidate.proposed_decision === 'stripe') {
+      const nextStripes = normalizeStripes(candidate.proposed_stripes ?? candidate.current_stripes ?? 0)
+      const upsert = await admin.from('member_training_profiles').upsert(
+        {
+          member_user_id: candidate.member_user_id,
+          program_level: training?.program_level ?? null,
+          stripes: nextStripes,
+          specialty: training?.specialty ?? null,
+          reference_coach_user_id: candidate.reference_coach_user_id ?? training?.reference_coach_user_id ?? null,
+          notes: training?.notes ?? candidate.head_coach_note ?? null,
+          updated_by: me.id,
+        },
+        { onConflict: 'member_user_id' },
+      )
+      if (upsert.error) throw new Error(upsert.error.message)
+
+      const progress = await admin.from('member_athlete_progress_events').insert({
+        id: crypto.randomUUID(),
+        member_user_id: candidate.member_user_id,
+        event_type: 'stripe_award',
+        effective_date: eventRes.data.event_date,
+        previous_program_level: training?.program_level ?? null,
+        next_program_level: training?.program_level ?? null,
+        previous_stripes: training?.stripes ?? candidate.current_stripes ?? 0,
+        next_stripes: nextStripes,
+        notes: `${eventNote}${candidate.head_coach_note ? ` — ${candidate.head_coach_note}` : ''}`,
+        created_by: me.id,
+      })
+      if (progress.error) throw new Error(progress.error.message)
+      stripeCount += 1
+    } else if (candidate.proposed_decision === 'belt' && candidate.proposed_belt) {
+      const insertBelt = await admin.from('member_belt_promotions').insert({
+        id: crypto.randomUUID(),
+        member_user_id: candidate.member_user_id,
+        belt_code: candidate.proposed_belt,
+        promoted_at: eventRes.data.event_date,
+        notes: `${eventNote}${candidate.head_coach_note ? ` — ${candidate.head_coach_note}` : ''}`,
+        created_by: me.id,
+        updated_by: me.id,
+      })
+      if (insertBelt.error) throw new Error(insertBelt.error.message)
+
+      const upsert = await admin.from('member_training_profiles').upsert(
+        {
+          member_user_id: candidate.member_user_id,
+          program_level: training?.program_level ?? null,
+          stripes: 0,
+          specialty: training?.specialty ?? null,
+          reference_coach_user_id: candidate.reference_coach_user_id ?? training?.reference_coach_user_id ?? null,
+          notes: training?.notes ?? candidate.head_coach_note ?? null,
+          updated_by: me.id,
+        },
+        { onConflict: 'member_user_id' },
+      )
+      if (upsert.error) throw new Error(upsert.error.message)
+
+      const progress = await admin.from('member_athlete_progress_events').insert({
+        id: crypto.randomUUID(),
+        member_user_id: candidate.member_user_id,
+        event_type: 'belt_promotion',
+        effective_date: eventRes.data.event_date,
+        previous_program_level: training?.program_level ?? null,
+        next_program_level: training?.program_level ?? null,
+        previous_belt_code: candidate.current_belt ?? null,
+        next_belt_code: candidate.proposed_belt,
+        previous_stripes: training?.stripes ?? candidate.current_stripes ?? 0,
+        next_stripes: 0,
+        notes: `${eventNote}${candidate.head_coach_note ? ` — ${candidate.head_coach_note}` : ''}`,
+        created_by: me.id,
+      })
+      if (progress.error) throw new Error(progress.error.message)
+      beltCount += 1
+    } else {
+      const noteInsert = await admin.from('member_athlete_progress_events').insert({
+        id: crypto.randomUUID(),
+        member_user_id: candidate.member_user_id,
+        event_type: 'note',
+        effective_date: eventRes.data.event_date,
+        notes: `${eventNote} — confirmed with no promotion${candidate.head_coach_note ? ` — ${candidate.head_coach_note}` : ''}`,
+        created_by: me.id,
+      })
+      if (noteInsert.error) throw new Error(noteInsert.error.message)
+      noteCount += 1
+    }
+
+    const markApplied = await admin
+      .from('belt_promotion_event_candidates')
+      .update({ results_applied_at: new Date().toISOString(), results_applied_by: me.id })
+      .eq('id', candidate.id)
+      .eq('event_id', eventId)
+    if (markApplied.error) throw new Error(markApplied.error.message)
+  }
+
+  const applyRun = await admin.from('belt_promotion_event_apply_runs').insert({
+    id: runId,
+    event_id: eventId,
+    applied_count: candidates.length,
+    stripe_count: stripeCount,
+    belt_count: beltCount,
+    note_count: noteCount,
+    closed_event: closeEventAfter,
+    applied_by: me.id,
+    notes: `${eventRes.data.title} apply run`,
+  })
+  if (applyRun.error) throw new Error(applyRun.error.message)
+
+  if (closeEventAfter) {
+    const closeRes = await admin.from('belt_promotion_events').update({ status: 'closed' }).eq('id', eventId)
+    if (closeRes.error) throw new Error(closeRes.error.message)
+  }
+
+  await writeLog({ eventId, action: 'results_applied', details: `${candidates.length} confirmed results applied` })
+  revalidatePath('/head-coach/belt-promotions')
+  revalidatePath('/head-coach/athletes')
+  revalidatePath('/members/[id]')
+  redirect(nextHref)
+}
+
 export default async function BeltPromotionEventsPage({ searchParams }: { searchParams?: SearchParams }) {
   const me = await getSessionUserCached()
   const signedInAs = me?.full_name || me?.email || null
@@ -462,8 +629,9 @@ export default async function BeltPromotionEventsPage({ searchParams }: { search
 
   let candidates: BeltPromotionCandidateRow[] = []
   let logs: BeltPromotionLogRow[] = []
+  let applyRuns: BeltPromotionApplyRunRow[] = []
   if (selectedEvent) {
-    const [candidatesRes, logsRes] = await Promise.all([
+    const [candidatesRes, logsRes, applyRunsRes] = await Promise.all([
       admin
         .from('belt_promotion_event_candidates')
         .select('*')
@@ -478,11 +646,20 @@ export default async function BeltPromotionEventsPage({ searchParams }: { search
         .order('created_at', { ascending: false })
         .limit(16)
         .returns<BeltPromotionLogRow[]>(),
+      admin
+        .from('belt_promotion_event_apply_runs')
+        .select('id, event_id, applied_count, stripe_count, belt_count, note_count, closed_event, created_at, applied_by, notes')
+        .eq('event_id', selectedEvent.id)
+        .order('created_at', { ascending: false })
+        .limit(8)
+        .returns<BeltPromotionApplyRunRow[]>(),
     ])
     if (candidatesRes.error) throw new Error(candidatesRes.error.message)
     if (logsRes.error) throw new Error(logsRes.error.message)
+    if (applyRunsRes.error) throw new Error(applyRunsRes.error.message)
     candidates = candidatesRes.data ?? []
     logs = logsRes.data ?? []
+    applyRuns = applyRunsRes.data ?? []
   }
 
   const rosterMap = new Map(roster.map((row) => [row.user_id, row]))
@@ -501,6 +678,7 @@ export default async function BeltPromotionEventsPage({ searchParams }: { search
   })
 
   const summary = eventSummary(candidates)
+  const latestApplyRun = applyRuns[0] ?? null
   const existingCandidateIds = new Set(candidates.map((row) => row.member_user_id))
   const suggestions = selectedEvent
     ? roster
@@ -623,6 +801,71 @@ export default async function BeltPromotionEventsPage({ searchParams }: { search
                   <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] p-4"><div className="text-xs font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Confirmed / deferred</div><div className="mt-2 text-2xl font-semibold tracking-tight">{summary.confirmed} / {summary.deferred}</div></div>
                   <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] p-4"><div className="text-xs font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Belts / certifs</div><div className="mt-2 text-2xl font-semibold tracking-tight">{summary.deliveredBelts} / {summary.deliveredCertificates}</div></div>
                 </div>
+              </section>
+
+              <section className="grid gap-4 xl:grid-cols-[minmax(0,1.1fr)_minmax(320px,0.9fr)]">
+                <section className="rounded-3xl border border-[hsl(var(--border))] bg-white p-4 shadow-soft">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                    <div>
+                      <h3 className="text-sm font-semibold tracking-tight">Apply confirmed results</h3>
+                      <p className="mt-1 text-xs text-[hsl(var(--muted))]">Apply all confirmed results globally with one final confirmation. This writes belt promotions, stripes, and athlete progress history.</p>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <TinyBadge tone="success">{summary.applied} applied</TinyBadge>
+                      <TinyBadge tone={summary.pendingApply > 0 ? 'warning' : 'neutral'}>{summary.pendingApply} pending apply</TinyBadge>
+                    </div>
+                  </div>
+
+                  <div className="mt-4 grid gap-3 sm:grid-cols-3">
+                    <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] p-4"><div className="text-xs font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Confirmed waiting</div><div className="mt-2 text-2xl font-semibold tracking-tight">{summary.pendingApply}</div></div>
+                    <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] p-4"><div className="text-xs font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Already applied</div><div className="mt-2 text-2xl font-semibold tracking-tight">{summary.applied}</div></div>
+                    <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] p-4"><div className="text-xs font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Last apply run</div><div className="mt-2 text-lg font-semibold tracking-tight">{latestApplyRun ? fmtDate(latestApplyRun.created_at) : 'None yet'}</div></div>
+                  </div>
+
+                  <form action={applyConfirmedResultsAction} className="mt-4 grid gap-3 rounded-2xl border border-[hsl(var(--border))] p-4">
+                    <input type="hidden" name="eventId" value={selectedEvent.id} />
+                    <input type="hidden" name="nextHref" value={filters.view === 'live' ? nextLiveHref : nextPrepHref} />
+                    <label className="inline-flex items-center gap-2 rounded-2xl border border-[hsl(var(--border))] px-3 py-3 text-sm">
+                      <input type="checkbox" name="confirm_apply" value="yes" />
+                      I confirm that all currently confirmed results should be applied now.
+                    </label>
+                    <label className="inline-flex items-center gap-2 rounded-2xl border border-[hsl(var(--border))] px-3 py-3 text-sm">
+                      <input type="checkbox" name="close_event_after" />
+                      Close the event automatically after applying results.
+                    </label>
+                    <div className="text-xs text-[hsl(var(--muted))]">Confirmed candidates already applied will be skipped automatically.</div>
+                    <div className="flex justify-end">
+                      <button type="submit" disabled={summary.pendingApply === 0} className={`inline-flex items-center justify-center rounded-2xl border px-4 py-2 text-sm font-medium transition ${summary.pendingApply === 0 ? 'border-[hsl(var(--border))] bg-[hsl(var(--bg))] text-[hsl(var(--muted))]' : 'border-black bg-black text-white hover:opacity-90'}`}>
+                        Apply confirmed results
+                      </button>
+                    </div>
+                  </form>
+                </section>
+
+                <section className="rounded-3xl border border-[hsl(var(--border))] bg-white p-4 shadow-soft">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <h3 className="text-sm font-semibold tracking-tight">Apply history</h3>
+                      <p className="mt-1 text-xs text-[hsl(var(--muted))]">Global apply runs for this event.</p>
+                    </div>
+                    <TinyBadge>{applyRuns.length}</TinyBadge>
+                  </div>
+                  <div className="mt-4 grid gap-3">
+                    {applyRuns.length === 0 ? (
+                      <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] px-4 py-3 text-sm text-[hsl(var(--muted))]">No apply run yet.</div>
+                    ) : applyRuns.map((run) => (
+                      <div key={run.id} className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] p-4">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <TinyBadge tone="success">{run.applied_count} applied</TinyBadge>
+                          <TinyBadge>{fmtDate(run.created_at)}</TinyBadge>
+                          {run.closed_event ? <TinyBadge tone="warning">Closed event</TinyBadge> : null}
+                        </div>
+                        <div className="mt-2 text-sm text-black">Stripes {run.stripe_count} · Belts {run.belt_count} · Notes {run.note_count}</div>
+                        {run.notes ? <p className="mt-2 text-sm text-[hsl(var(--muted))]">{run.notes}</p> : null}
+                      </div>
+                    ))}
+                  </div>
+                </section>
               </section>
 
               {filters.view === 'prep' ? (
