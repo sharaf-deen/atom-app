@@ -14,10 +14,14 @@ import {
   BELT_PROMOTION_PAYMENT_STATUSES,
   BELT_PROMOTION_PREPARATION_STATUSES,
   BELT_PROMOTION_TARGET_ROLES,
+  buildApplyRunsCsv,
+  buildConfirmedResultsCsv,
+  buildEventCandidatesCsv,
   buildSuggestedCandidate,
   decisionLabel,
   eventAudienceLabel,
   eventSummary,
+  csvDataHref,
   finalDecisionTone,
   fullName,
   includesAudience,
@@ -54,6 +58,7 @@ type DashboardFilters = {
   event: string
   q: string
   view: 'prep' | 'live'
+  print: string
 }
 
 type CoachOption = {
@@ -87,6 +92,11 @@ function buildHref(filters: Partial<DashboardFilters>) {
   }
   const query = qs.toString()
   return query ? `/head-coach/belt-promotions?${query}` : '/head-coach/belt-promotions'
+}
+
+function duplicateEventTitle(title: string) {
+  const trimmed = title.trim() || 'Belt Promotion'
+  return trimmed.toLowerCase().includes('copy') ? trimmed : `${trimmed} Copy`
 }
 
 function toneClass(tone: 'neutral' | 'success' | 'warning' | 'danger') {
@@ -166,6 +176,78 @@ async function saveEventAction(formData: FormData) {
   await writeLog({ eventId, action: 'event_updated', details: `${title} · ${status}` })
   revalidatePath('/head-coach/belt-promotions')
   redirect(nextHref)
+}
+
+async function duplicateEventAction(formData: FormData) {
+  "use server"
+
+  const eventId = String(formData.get('eventId') || '').trim()
+  const nextHref = String(formData.get('nextHref') || '/head-coach/belt-promotions')
+  if (!eventId) redirect(nextHref)
+
+  const me = await requireAccess(nextHref)
+  const admin = getSupabaseAdminClientCached()
+
+  const [eventRes, candidatesRes] = await Promise.all([
+    admin
+      .from('belt_promotion_events')
+      .select('id, title, event_date, event_time, audience, status, notes')
+      .eq('id', eventId)
+      .maybeSingle<BeltPromotionEventRow>(),
+    admin
+      .from('belt_promotion_event_candidates')
+      .select('*')
+      .eq('event_id', eventId)
+      .order('sort_order', { ascending: true })
+      .returns<BeltPromotionCandidateRow[]>(),
+  ])
+
+  if (eventRes.error) throw new Error(eventRes.error.message)
+  if (candidatesRes.error) throw new Error(candidatesRes.error.message)
+  if (!eventRes.data) redirect(nextHref)
+
+  const newEventId = crypto.randomUUID()
+  const insertEvent = await admin.from('belt_promotion_events').insert({
+    id: newEventId,
+    title: duplicateEventTitle(eventRes.data.title),
+    event_date: new Date().toISOString().slice(0, 10),
+    event_time: eventRes.data.event_time ?? null,
+    audience: eventRes.data.audience,
+    status: 'draft',
+    notes: eventRes.data.notes,
+    created_by: me.id,
+    updated_by: me.id,
+  })
+  if (insertEvent.error) throw new Error(insertEvent.error.message)
+
+  const candidates = candidatesRes.data ?? []
+  if (candidates.length > 0) {
+    const payload = candidates.map((row, index) => ({
+      id: crypto.randomUUID(),
+      event_id: newEventId,
+      member_user_id: row.member_user_id,
+      current_belt: row.current_belt,
+      current_stripes: row.current_stripes,
+      proposed_decision: row.proposed_decision,
+      proposed_belt: row.proposed_belt,
+      proposed_stripes: row.proposed_stripes,
+      preparation_status: row.preparation_status,
+      final_decision: 'pending',
+      attendance_status: 'pending',
+      payment_status: 'pending',
+      reference_coach_user_id: row.reference_coach_user_id,
+      head_coach_note: row.head_coach_note,
+      belt_delivered: false,
+      certificate_delivered: false,
+      sort_order: index + 1,
+    }))
+    const insertCandidates = await admin.from('belt_promotion_event_candidates').insert(payload)
+    if (insertCandidates.error) throw new Error(insertCandidates.error.message)
+  }
+
+  await writeLog({ eventId: newEventId, action: 'event_created', details: `Duplicated from ${eventRes.data.title}` })
+  revalidatePath('/head-coach/belt-promotions')
+  redirect(buildHref({ event: newEventId, view: 'prep' }))
 }
 
 async function setEventStatusAction(formData: FormData) {
@@ -600,6 +682,7 @@ export default async function BeltPromotionEventsPage({ searchParams }: { search
     event: pick(searchParams?.event) ?? '',
     q: pick(searchParams?.q) ?? '',
     view: pick(searchParams?.view) === 'live' ? 'live' : 'prep',
+    print: pick(searchParams?.print) ?? '',
   }
 
   const admin = getSupabaseAdminClientCached()
@@ -696,6 +779,61 @@ export default async function BeltPromotionEventsPage({ searchParams }: { search
   const liveCandidates = sortCandidatesForLive(filteredCandidates)
   const nextPrepHref = buildHref({ event: selectedEvent?.id ?? '', view: 'prep', q: filters.q })
   const nextLiveHref = buildHref({ event: selectedEvent?.id ?? '', view: 'live', q: filters.q })
+  const printHref = buildHref({ event: selectedEvent?.id ?? '', view: filters.view, q: filters.q, print: '1' })
+  const backFromPrintHref = buildHref({ event: selectedEvent?.id ?? '', view: filters.view, q: filters.q })
+  const candidatesCsvHref = csvDataHref(buildEventCandidatesCsv(enrichedCandidates))
+  const confirmedCsvHref = csvDataHref(buildConfirmedResultsCsv(enrichedCandidates))
+  const applyRunsCsvHref = csvDataHref(buildApplyRunsCsv(applyRuns))
+
+  if (filters.print === '1' && selectedEvent) {
+    return (
+      <main className="mx-auto flex w-full max-w-5xl flex-col gap-4 px-4 py-6 sm:px-6">
+        <div className="print:hidden">
+          <Link href={backFromPrintHref} className="inline-flex items-center justify-center rounded-2xl border border-[hsl(var(--border))] bg-white px-4 py-2 text-sm font-medium text-black transition hover:bg-[hsl(var(--bg))]">Back to event</Link>
+        </div>
+        <section className="rounded-3xl border border-[hsl(var(--border))] bg-white p-6 shadow-soft">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <h1 className="text-2xl font-semibold tracking-tight">{selectedEvent.title}</h1>
+              <p className="mt-2 text-sm text-[hsl(var(--muted))]">{fmtDate(selectedEvent.event_date)}{selectedEvent.event_time ? ` · ${selectedEvent.event_time}` : ''} · {eventAudienceLabel(selectedEvent.audience)} · {titleCase(selectedEvent.status)}</p>
+              {selectedEvent.notes ? <p className="mt-3 text-sm text-[hsl(var(--muted))]">{selectedEvent.notes}</p> : null}
+            </div>
+            <div className="print:hidden">
+              <a href={candidatesCsvHref} download={`belt-promotion-${selectedEvent.event_date}-candidates.csv`} className="inline-flex items-center justify-center rounded-2xl border border-black bg-black px-4 py-2 text-sm font-medium text-white transition hover:opacity-90">Export CSV</a>
+            </div>
+          </div>
+          <div className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] p-4"><div className="text-xs font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Candidates</div><div className="mt-2 text-2xl font-semibold tracking-tight">{summary.total}</div></div>
+            <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] p-4"><div className="text-xs font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Confirmed</div><div className="mt-2 text-2xl font-semibold tracking-tight">{summary.confirmed}</div></div>
+            <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] p-4"><div className="text-xs font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Belts</div><div className="mt-2 text-2xl font-semibold tracking-tight">{summary.belts}</div></div>
+            <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] p-4"><div className="text-xs font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Stripes</div><div className="mt-2 text-2xl font-semibold tracking-tight">{summary.stripes}</div></div>
+          </div>
+        </section>
+        <section className="rounded-3xl border border-[hsl(var(--border))] bg-white p-6 shadow-soft">
+          <h2 className="text-lg font-semibold tracking-tight">Candidate summary</h2>
+          <div className="mt-4 grid gap-3">
+            {enrichedCandidates.map((row) => (
+              <div key={row.id} className="rounded-2xl border border-[hsl(var(--border))] p-4">
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                  <div>
+                    <div className="font-medium text-black">{row.athlete_name}</div>
+                    <div className="mt-1 text-xs text-[hsl(var(--muted))]">{row.member_id ?? 'No member ID'} · {titleCase(row.program_level ?? 'pending')} · {titleCase(row.role ?? 'member')}</div>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <TinyBadge tone={finalDecisionTone(row.final_decision)}>{titleCase(row.final_decision)}</TinyBadge>
+                    <TinyBadge tone={paymentTone(row.payment_status)}>{titleCase(row.payment_status)}</TinyBadge>
+                    <TinyBadge tone={row.results_applied_at ? 'success' : 'warning'}>{row.results_applied_at ? 'Applied' : 'Pending apply'}</TinyBadge>
+                  </div>
+                </div>
+                <div className="mt-3 text-sm text-black">{decisionLabel(row.proposed_decision, row.proposed_belt, row.proposed_stripes)}</div>
+                {row.head_coach_note ? <p className="mt-2 text-sm text-[hsl(var(--muted))]">{row.head_coach_note}</p> : null}
+              </div>
+            ))}
+          </div>
+        </section>
+      </main>
+    )
+  }
 
   return (
     <main className="mx-auto flex w-full max-w-7xl flex-col gap-4 px-4 py-4 sm:px-6 lg:px-8">
@@ -779,6 +917,14 @@ export default async function BeltPromotionEventsPage({ searchParams }: { search
                   <div className="flex flex-wrap gap-2">
                     <Link href={nextPrepHref} scroll={false} className={`inline-flex items-center justify-center rounded-2xl border px-4 py-2 text-sm font-medium transition ${filters.view === 'prep' ? 'border-black bg-black text-white' : 'border-[hsl(var(--border))] bg-white text-black hover:bg-[hsl(var(--bg))]'}`}>Preparation</Link>
                     <Link href={nextLiveHref} scroll={false} className={`inline-flex items-center justify-center rounded-2xl border px-4 py-2 text-sm font-medium transition ${filters.view === 'live' ? 'border-black bg-black text-white' : 'border-[hsl(var(--border))] bg-white text-black hover:bg-[hsl(var(--bg))]'}`}>Live mode</Link>
+                    <Link href={printHref} scroll={false} className="inline-flex items-center justify-center rounded-2xl border border-[hsl(var(--border))] bg-white px-4 py-2 text-sm font-medium text-black transition hover:bg-[hsl(var(--bg))]">Print summary</Link>
+                    <a href={candidatesCsvHref} download={`belt-promotion-${selectedEvent.event_date}-candidates.csv`} className="inline-flex items-center justify-center rounded-2xl border border-[hsl(var(--border))] bg-white px-4 py-2 text-sm font-medium text-black transition hover:bg-[hsl(var(--bg))]">Export candidates CSV</a>
+                    <a href={confirmedCsvHref} download={`belt-promotion-${selectedEvent.event_date}-confirmed.csv`} className="inline-flex items-center justify-center rounded-2xl border border-[hsl(var(--border))] bg-white px-4 py-2 text-sm font-medium text-black transition hover:bg-[hsl(var(--bg))]">Export confirmed CSV</a>
+                    <form action={duplicateEventAction}>
+                      <input type="hidden" name="eventId" value={selectedEvent.id} />
+                      <input type="hidden" name="nextHref" value={nextPrepHref} />
+                      <button type="submit" className="inline-flex items-center justify-center rounded-2xl border border-[hsl(var(--border))] bg-white px-4 py-2 text-sm font-medium text-black transition hover:bg-[hsl(var(--bg))]">Duplicate event</button>
+                    </form>
                   </div>
                 </div>
 
@@ -848,7 +994,10 @@ export default async function BeltPromotionEventsPage({ searchParams }: { search
                       <h3 className="text-sm font-semibold tracking-tight">Apply history</h3>
                       <p className="mt-1 text-xs text-[hsl(var(--muted))]">Global apply runs for this event.</p>
                     </div>
-                    <TinyBadge>{applyRuns.length}</TinyBadge>
+                    <div className="flex flex-wrap gap-2">
+                      <TinyBadge>{applyRuns.length}</TinyBadge>
+                      <a href={applyRunsCsvHref} download={`belt-promotion-${selectedEvent.event_date}-apply-history.csv`} className="inline-flex items-center justify-center rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-xs font-medium text-black transition hover:bg-[hsl(var(--bg))]">Export apply history CSV</a>
+                    </div>
                   </div>
                   <div className="mt-4 grid gap-3">
                     {applyRuns.length === 0 ? (
