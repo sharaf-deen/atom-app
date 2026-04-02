@@ -390,3 +390,140 @@ export function applyStateLabel(appliedAt?: string | null) {
 export function applyStateTone(appliedAt?: string | null): 'success' | 'warning' {
   return appliedAt ? 'success' : 'warning'
 }
+
+
+export function csvEscape(value: unknown) {
+  const stringValue = String(value ?? '')
+  if (stringValue.includes(',') || stringValue.includes('\"') || stringValue.includes('\n')) {
+    return `"${stringValue.replace(/"/g, '""')}"`
+  }
+  return stringValue
+}
+export function csvDataHref(csv: string) {
+  return `data:text/csv;charset=utf-8,${encodeURIComponent(csv)}`
+}
+
+export function buildEventCandidatesCsv<T extends BeltPromotionCandidateRow & {
+  athlete_name?: string | null
+  member_id?: string | null
+  role?: string | null
+  program_level?: string | null
+  specialty?: string | null
+  reference_coach_name?: string | null
+  age_group?: string | null
+}>(rows: T[]) {
+  const headers = [
+    'athlete_name',
+    'member_id',
+    'role',
+    'age_group',
+    'program_level',
+    'specialty',
+    'current_belt',
+    'current_stripes',
+    'proposed_decision',
+    'proposed_belt',
+    'proposed_stripes',
+    'preparation_status',
+    'attendance_status',
+    'final_decision',
+    'payment_status',
+    'belt_delivered',
+    'certificate_delivered',
+    'reference_coach',
+    'head_coach_note',
+    'results_applied_at',
+  ]
+  const lines = [headers.join(',')]
+  for (const row of rows) {
+    lines.push([
+      row.athlete_name ?? '',
+      row.member_id ?? '',
+      row.role ?? '',
+      row.age_group ?? '',
+      row.program_level ?? '',
+      row.specialty ?? '',
+      row.current_belt ?? '',
+      Number(row.current_stripes ?? 0),
+      row.proposed_decision ?? '',
+      row.proposed_belt ?? '',
+      row.proposed_stripes ?? '',
+      row.preparation_status ?? '',
+      row.attendance_status ?? '',
+      row.final_decision ?? '',
+      row.payment_status ?? '',
+      row.belt_delivered ? 'yes' : 'no',
+      row.certificate_delivered ? 'yes' : 'no',
+      row.reference_coach_name ?? '',
+      row.head_coach_note ?? '',
+      row.results_applied_at ?? '',
+    ].map(csvEscape).join(','))
+  }
+  return lines.join('\n')
+}
+
+export function buildConfirmedResultsCsv<T extends BeltPromotionCandidateRow & {
+  athlete_name?: string | null
+  member_id?: string | null
+  role?: string | null
+  program_level?: string | null
+  reference_coach_name?: string | null
+}>(rows: T[]) {
+  const confirmed = rows.filter((row) => row.final_decision === 'confirmed')
+  const headers = [
+    'athlete_name',
+    'member_id',
+    'role',
+    'program_level',
+    'current_belt',
+    'current_stripes',
+    'final_decision',
+    'proposed_decision',
+    'proposed_belt',
+    'proposed_stripes',
+    'payment_status',
+    'belt_delivered',
+    'certificate_delivered',
+    'reference_coach',
+    'results_applied_at',
+  ]
+  const lines = [headers.join(',')]
+  for (const row of confirmed) {
+    lines.push([
+      row.athlete_name ?? '',
+      row.member_id ?? '',
+      row.role ?? '',
+      row.program_level ?? '',
+      row.current_belt ?? '',
+      Number(row.current_stripes ?? 0),
+      row.final_decision ?? '',
+      row.proposed_decision ?? '',
+      row.proposed_belt ?? '',
+      row.proposed_stripes ?? '',
+      row.payment_status ?? '',
+      row.belt_delivered ? 'yes' : 'no',
+      row.certificate_delivered ? 'yes' : 'no',
+      row.reference_coach_name ?? '',
+      row.results_applied_at ?? '',
+    ].map(csvEscape).join(','))
+  }
+  return lines.join('\n')
+}
+
+export function buildApplyRunsCsv(rows: BeltPromotionApplyRunRow[]) {
+  const headers = ['created_at', 'applied_count', 'stripe_count', 'belt_count', 'note_count', 'closed_event', 'applied_by', 'notes']
+  const lines = [headers.join(',')]
+  for (const row of rows) {
+    lines.push([
+      row.created_at ?? '',
+      row.applied_count,
+      row.stripe_count,
+      row.belt_count,
+      row.note_count,
+      row.closed_event ? 'yes' : 'no',
+      row.applied_by ?? '',
+      row.notes ?? '',
+    ].map(csvEscape).join(','))
+  }
+  return lines.join('\n')
+}
