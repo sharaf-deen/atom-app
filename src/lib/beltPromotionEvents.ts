@@ -24,6 +24,7 @@ export type BeltPromotionLogAction =
   | 'candidate_updated'
   | 'candidate_removed'
   | 'suggestions_added'
+  | 'results_applied'
 
 export const BELT_PROMOTION_AUDIENCES: BeltPromotionAudience[] = ['kids', 'adults', 'mixed']
 export const BELT_PROMOTION_EVENT_STATUSES: BeltPromotionEventStatus[] = ['draft', 'published', 'live', 'closed']
@@ -64,8 +65,23 @@ export type BeltPromotionCandidateRow = {
   belt_delivered: boolean
   certificate_delivered: boolean
   sort_order: number | null
+  results_applied_at: string | null
+  results_applied_by: string | null
   created_at: string | null
   updated_at: string | null
+}
+
+export type BeltPromotionApplyRunRow = {
+  id: string
+  event_id: string
+  applied_count: number
+  stripe_count: number
+  belt_count: number
+  note_count: number
+  closed_event: boolean
+  created_at: string | null
+  applied_by: string | null
+  notes: string | null
 }
 
 export type BeltPromotionLogRow = {
@@ -362,5 +378,15 @@ export function eventSummary(candidates: BeltPromotionCandidateRow[]) {
     rejected: candidates.filter((row) => row.final_decision === 'rejected').length,
     deliveredBelts: candidates.filter((row) => row.belt_delivered).length,
     deliveredCertificates: candidates.filter((row) => row.certificate_delivered).length,
+    applied: candidates.filter((row) => !!row.results_applied_at).length,
+    pendingApply: candidates.filter((row) => row.final_decision === 'confirmed' && !row.results_applied_at).length,
   }
+}
+
+export function applyStateLabel(appliedAt?: string | null) {
+  return appliedAt ? 'Applied' : 'Pending apply'
+}
+
+export function applyStateTone(appliedAt?: string | null): 'success' | 'warning' {
+  return appliedAt ? 'success' : 'warning'
 }
