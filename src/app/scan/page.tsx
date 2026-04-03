@@ -76,6 +76,20 @@ export default async function ScanPage() {
               <p className="mt-2 text-sm text-[hsl(var(--muted))]">
                 Front camera locked. Result shows on screen, then scanning restarts automatically after 7 seconds.
               </p>
+              <div className="mt-4 grid gap-3 text-left sm:grid-cols-3">
+                <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] p-3">
+                  <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[hsl(var(--muted))]">Device</div>
+                  <div className="mt-1 text-sm font-medium text-black">scan-terminal-front</div>
+                </div>
+                <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] p-3">
+                  <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[hsl(var(--muted))]">Camera</div>
+                  <div className="mt-1 text-sm font-medium text-black">Front camera locked</div>
+                </div>
+                <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] p-3">
+                  <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[hsl(var(--muted))]">Recovery</div>
+                  <div className="mt-1 text-sm font-medium text-black">Retry → Restart camera → Reload</div>
+                </div>
+              </div>
             </div>
             <KioskScanner size="lg" ratio="1:1" terminalLocked />
           </div>
