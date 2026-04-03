@@ -713,6 +713,7 @@ function HeroCard({
     assistant_coach: 'Fast access to your staff tools, QR code and useful updates.',
     head_coach: 'Coach shortcuts plus notification control and a read-only member lookup.',
     reception: 'Built for quick actions at the front desk: scan, member creation and daily queues.',
+    scan_terminal: 'Door tablet mode: scanner only, front camera locked, result screen and automatic restart.',
     admin: 'Daily operations first: members, finance, reporting and control.',
     super_admin: 'Full operational overview with direct access to all critical areas.',
   }
