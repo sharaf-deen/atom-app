@@ -1,6 +1,6 @@
 // src/app/layout.tsx
 import type { Metadata } from 'next'
-import { headers } from 'next/headers'
+import { cookies, headers } from 'next/headers'
 import { redirect } from 'next/navigation'
 import './globals.css'
 import { Poppins } from 'next/font/google'
@@ -26,9 +26,18 @@ export const metadata: Metadata = {
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
   const pathname = headers().get('x-pathname') || '/'
   const user = await getSessionUserCached()
+  const unlockCookie = cookies().get('atom_scan_terminal_unlock')?.value === '1'
 
-  if (isScanTerminalRole(user?.role) && !isScanTerminalPathAllowed(pathname)) {
-    redirect('/scan')
+  if (isScanTerminalRole(user?.role)) {
+    const wantsLogout = pathname === '/logout'
+
+    if (wantsLogout && !unlockCookie) {
+      redirect('/scan')
+    }
+
+    if (!wantsLogout && !isScanTerminalPathAllowed(pathname)) {
+      redirect('/scan')
+    }
   }
 
   return (
