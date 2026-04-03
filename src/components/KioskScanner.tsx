@@ -212,8 +212,13 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className, te
   const [deviceLabel, setDeviceLabel] = useState(terminalLocked ? 'scan-terminal-front' : 'web-kiosk')
   const [cameraRecoveryHint, setCameraRecoveryHint] = useState<string | null>(null)
   const [scannerReloadKey, setScannerReloadKey] = useState(0)
+  const [unlockOpen, setUnlockOpen] = useState(false)
+  const [unlockPin, setUnlockPin] = useState('')
+  const [unlockError, setUnlockError] = useState<string | null>(null)
+  const [unlockBusy, setUnlockBusy] = useState(false)
 
   const wakeLockRef = useRef<WakeLockSentinelLike | null>(null)
+  const unlockHoldTimerRef = useRef<number | null>(null)
   const wakeLockListenerRef = useRef<(() => void) | null>(null)
   const mountedRef = useRef(true)
   const resumeTimerRef = useRef<number | null>(null)
@@ -228,6 +233,14 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className, te
     if (resumeTimerRef.current) {
       window.clearTimeout(resumeTimerRef.current)
       resumeTimerRef.current = null
+    }
+  }, [])
+
+
+  const clearUnlockHoldTimer = useCallback(() => {
+    if (unlockHoldTimerRef.current) {
+      window.clearTimeout(unlockHoldTimerRef.current)
+      unlockHoldTimerRef.current = null
     }
   }, [])
 
@@ -298,15 +311,60 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className, te
     setScannerReloadKey((value) => value + 1)
   }, [abortActiveRequest, clearResumeTimer, terminalLocked])
 
+
+  const beginUnlockHold = useCallback(() => {
+    if (!terminalLocked || unlockBusy || unlockOpen) return
+    clearUnlockHoldTimer()
+    unlockHoldTimerRef.current = window.setTimeout(() => {
+      setUnlockPin('')
+      setUnlockError(null)
+      setUnlockOpen(true)
+      unlockHoldTimerRef.current = null
+    }, 4000)
+  }, [clearUnlockHoldTimer, terminalLocked, unlockBusy, unlockOpen])
+
+  const endUnlockHold = useCallback(() => {
+    clearUnlockHoldTimer()
+  }, [clearUnlockHoldTimer])
+
+  const submitUnlock = useCallback(async () => {
+    if (!terminalLocked || unlockBusy) return
+    const pin = unlockPin.trim()
+    if (!pin) {
+      setUnlockError('Enter the admin PIN to exit terminal mode.')
+      return
+    }
+    setUnlockBusy(true)
+    setUnlockError(null)
+    try {
+      const response = await fetch('/api/scan-terminal/unlock', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pin }),
+      })
+      const payload = await response.json().catch(() => ({ ok: false, error: 'unlock_failed' }))
+      if (!response.ok || !payload?.ok) {
+        setUnlockError(typeof payload?.error === 'string' ? payload.error : 'Terminal unlock failed.')
+        return
+      }
+      router.push('/logout')
+    } catch {
+      setUnlockError('Terminal unlock failed. Check the network connection and try again.')
+    } finally {
+      setUnlockBusy(false)
+    }
+  }, [router, terminalLocked, unlockBusy, unlockPin])
+
   useEffect(() => {
     mountedRef.current = true
     return () => {
       mountedRef.current = false
       abortActiveRequest()
       clearResumeTimer()
+      clearUnlockHoldTimer()
       releaseWakeLock().catch(() => {})
     }
-  }, [abortActiveRequest, clearResumeTimer, releaseWakeLock])
+  }, [abortActiveRequest, clearResumeTimer, clearUnlockHoldTimer, releaseWakeLock])
 
   useEffect(() => {
     if (terminalLocked) {
@@ -623,6 +681,49 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className, te
   )
 
   const statusBoxClass = statusToneClass(status)
+  const unlockDialog = unlockOpen ? (
+    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/45 p-4">
+      <div className="w-full max-w-sm rounded-3xl border border-[hsl(var(--border))] bg-white p-5 shadow-soft">
+        <div className="text-sm font-semibold tracking-tight text-black">Admin exit unlock</div>
+        <p className="mt-2 text-sm text-[hsl(var(--muted))]">Enter the terminal PIN to unlock the logout route for this device.</p>
+        <label className="mt-4 block text-sm">
+          <span className="mb-2 block text-[11px] font-semibold uppercase tracking-[0.18em] text-[hsl(var(--muted))]">Exit PIN</span>
+          <input
+            type="password"
+            inputMode="numeric"
+            autoFocus
+            value={unlockPin}
+            onChange={(event) => setUnlockPin(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') {
+                event.preventDefault()
+                void submitUnlock()
+              }
+            }}
+            className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-base outline-none transition focus:border-black"
+            placeholder="Admin PIN"
+          />
+        </label>
+        {unlockError ? <div className="mt-3 rounded-2xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{unlockError}</div> : null}
+        <div className="mt-4 flex flex-wrap justify-end gap-2">
+          <Button
+            variant="outline"
+            onClick={() => {
+              setUnlockOpen(false)
+              setUnlockError(null)
+              setUnlockPin('')
+            }}
+          >
+            Cancel
+          </Button>
+          <Button onClick={() => void submitUnlock()} disabled={unlockBusy}>
+            {unlockBusy ? 'Checking PIN…' : 'Unlock exit'}
+          </Button>
+        </div>
+      </div>
+    </div>
+  ) : null
+
   const scannerOverlay =
     paused || status === 'checking' || status === 'error' ? (
       <div className="absolute inset-0 z-10 flex items-center justify-center bg-black/35 p-4">
@@ -645,9 +746,11 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className, te
 
   if (fullScreen) {
     return (
-      <div className="fixed inset-0 z-50 bg-black/90 text-white">
-        <div className="absolute inset-x-0 top-0 z-10 border-b border-white/10 bg-black/50 backdrop-blur-md">
-          <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-3 px-4 py-3">
+      <>
+        {unlockDialog}
+        <div className="fixed inset-0 z-50 bg-black/90 text-white">
+          <div className="absolute inset-x-0 top-0 z-10 border-b border-white/10 bg-black/50 backdrop-blur-md">
+            <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-3 px-4 py-3">
             <div className="min-w-[220px]">
               <div className="flex items-center gap-2">
                 <div className="text-base font-semibold">Scan member QR</div>
@@ -699,23 +802,26 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className, te
               )}
             </div>
           </div>
-        </div>
+          </div>
 
-        <div className="mx-auto flex h-full max-w-6xl flex-col px-4 pb-4 pt-20">
-          <div className="flex-1">
-            <div className="relative h-full w-full overflow-hidden rounded-3xl border border-white/20 bg-black shadow-soft">
-              {scannerEl}
-              {scannerOverlay}
+          <div className="mx-auto flex h-full max-w-6xl flex-col px-4 pb-4 pt-20">
+            <div className="flex-1">
+              <div className="relative h-full w-full overflow-hidden rounded-3xl border border-white/20 bg-black shadow-soft">
+                {scannerEl}
+                {scannerOverlay}
+              </div>
             </div>
           </div>
         </div>
-      </div>
+      </>
     )
   }
 
   return (
-    <Card className={className}>
-      <CardContent>
+    <>
+      {unlockDialog}
+      <Card className={className}>
+        <CardContent>
         <div className="flex flex-col gap-4">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
             <div className="min-w-0">
@@ -730,7 +836,16 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className, te
               </p>
             </div>
 
-            <div className={`rounded-2xl border px-3 py-2 text-sm font-medium ${statusBoxClass}`}>
+            <div
+              className={`rounded-2xl border px-3 py-2 text-sm font-medium ${statusBoxClass} ${terminalLocked ? 'select-none' : ''}`}
+              onMouseDown={terminalLocked ? beginUnlockHold : undefined}
+              onMouseUp={terminalLocked ? endUnlockHold : undefined}
+              onMouseLeave={terminalLocked ? endUnlockHold : undefined}
+              onTouchStart={terminalLocked ? beginUnlockHold : undefined}
+              onTouchEnd={terminalLocked ? endUnlockHold : undefined}
+              onTouchCancel={terminalLocked ? endUnlockHold : undefined}
+              title={terminalLocked ? 'Hold 4 seconds for admin exit' : undefined}
+            >
               {statusTitle(status, paused)}
             </div>
           </div>
@@ -867,6 +982,7 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className, te
                   <div><span className="font-medium text-black">Device label:</span> {deviceLabel}</div>
                   <div><span className="font-medium text-black">Camera mode:</span> {terminalLocked ? 'Front camera locked' : facingMode === 'environment' ? 'Back camera active' : 'Front camera active'}</div>
                   <div><span className="font-medium text-black">Recovery:</span> Retry first, then restart the camera if needed.</div>
+                  <div><span className="font-medium text-black">Admin exit:</span> Hold the status badge 4 seconds, then enter the PIN.</div>
                 </div>
               </div>
 
@@ -876,14 +992,15 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className, te
                   <li>Keep one QR code in the frame.</li>
                   <li>{terminalLocked ? 'Front camera stays locked for this terminal account.' : 'Use the back camera when possible.'}</li>
                   <li>{terminalLocked ? 'Result screen returns automatically after 7 seconds.' : 'Kiosk mode stays inside this page.'}</li>
-                  <li>{terminalLocked ? 'No other route is available for this account.' : 'Use Full screen only when needed.'}</li>
+                  <li>{terminalLocked ? 'Logout stays locked until the admin PIN is validated.' : 'Use Full screen only when needed.'}</li>
                   <li>Tap Rescan after a blocked or invalid attempt.</li>
                 </ul>
               </div>
             </div>
           </div>
         </div>
-      </CardContent>
-    </Card>
+        </CardContent>
+      </Card>
+    </>
   )
 }
