@@ -7,15 +7,11 @@ import { redirect } from 'next/navigation'
 import { ClipboardList, ScanLine, UserPlus, Users } from 'lucide-react'
 import { getSessionUser } from '@/lib/session'
 import KioskScanner from '@/components/KioskScanner'
-import type { Role } from '@/lib/session'
 import PageHeader from '@/components/layout/PageHeader'
 import Section from '@/components/layout/Section'
 import AccessDeniedPage from '@/components/AccessDeniedPage'
 import KioskHealthBadge from '@/components/KioskHealthBadge'
-
-function canAccess(role: Role) {
-  return role === 'reception' || role === 'admin' || role === 'super_admin'
-}
+import { canAccessScan } from '@/lib/rbac'
 
 function QuickLink({
   href,
@@ -51,14 +47,14 @@ export default async function ScanPage() {
 
   if (!user) redirect('/login?next=/scan')
 
-  if (!canAccess(user.role)) {
+  if (!canAccessScan(user.role)) {
     return (
       <AccessDeniedPage
         title="Scan — Check-in & Validity"
         subtitle="Access restricted."
         signedInAs={user.email}
-        message="Only Reception / Admin / Super Admin can access the scanner."
-        allowed="reception, admin, super_admin"
+        message="Only Reception / Scan Terminal / Admin / Super Admin can access the scanner."
+        allowed="reception, scan_terminal, admin, super_admin"
         nextPath="/scan"
         actions={[{ href: '/members', label: 'Go to Members' }]}
         showBackHome
@@ -66,7 +62,27 @@ export default async function ScanPage() {
     )
   }
 
+  const isTerminal = user.role === 'scan_terminal'
   const showAudit = user.role === 'admin' || user.role === 'super_admin'
+
+  if (isTerminal) {
+    return (
+      <main className="min-h-[100dvh] bg-[hsl(var(--bg))]">
+        <Section className="flex min-h-[100dvh] max-w-3xl items-center justify-center px-4 py-4 sm:px-6">
+          <div className="w-full space-y-4">
+            <div className="rounded-3xl border border-[hsl(var(--border))] bg-white p-4 text-center shadow-soft">
+              <div className="text-xs font-semibold uppercase tracking-[0.18em] text-[hsl(var(--muted))]">Door scanner</div>
+              <h1 className="mt-2 text-2xl font-semibold tracking-tight text-black">Scan member QR</h1>
+              <p className="mt-2 text-sm text-[hsl(var(--muted))]">
+                Front camera locked. Result shows on screen, then scanning restarts automatically after 7 seconds.
+              </p>
+            </div>
+            <KioskScanner size="lg" ratio="1:1" terminalLocked />
+          </div>
+        </Section>
+      </main>
+    )
+  }
 
   return (
     <main>

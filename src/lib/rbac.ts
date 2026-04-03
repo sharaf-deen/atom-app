@@ -1,10 +1,11 @@
-export const APP_ROLES = ['member', 'champion', 'vip', 'assistant_coach', 'coach', 'head_coach', 'reception', 'admin', 'super_admin'] as const
+export const APP_ROLES = ['member', 'champion', 'vip', 'assistant_coach', 'coach', 'head_coach', 'reception', 'scan_terminal', 'admin', 'super_admin'] as const
 export type Role = (typeof APP_ROLES)[number]
 
 export const MEMBER_LIKE_ROLES = ['member', 'champion', 'vip'] as const satisfies readonly Role[]
 export const MEMBER_LIFETIME_ACCESS_ROLES = ['champion', 'vip'] as const satisfies readonly Role[]
-export const STAFF_ROLES = ['reception', 'assistant_coach', 'coach', 'head_coach', 'admin', 'super_admin'] as const satisfies readonly Role[]
+export const STAFF_ROLES = ['reception', 'scan_terminal', 'assistant_coach', 'coach', 'head_coach', 'admin', 'super_admin'] as const satisfies readonly Role[]
 export const FRONT_DESK_ROLES = ['reception', 'admin', 'super_admin'] as const satisfies readonly Role[]
+export const SCAN_TERMINAL_ROLES = ['scan_terminal'] as const satisfies readonly Role[]
 export const ADMIN_ROLES = ['admin', 'super_admin'] as const satisfies readonly Role[]
 export const SUPER_ADMIN_ROLES = ['super_admin'] as const satisfies readonly Role[]
 export const COACH_ROLES = ['coach', 'assistant_coach', 'head_coach'] as const satisfies readonly Role[]
@@ -99,6 +100,7 @@ const APP_NAV_BY_ROLE: MenuByRole = {
     { label: 'Packages & Promos', href: '/packages-and-promos', icon: 'gift' },
     { label: 'Store', href: '/store', icon: 'bag' },
   ],
+  scan_terminal: [],
   admin: [
     { label: 'Dashboard', href: '/admin', icon: 'dashboard' },
     { label: 'Front Desk', href: '/reception', icon: 'dashboard' },
@@ -246,11 +248,24 @@ export function canDeleteUser(role: Role | null | undefined, args?: { isSelf?: b
 }
 
 export function canAccessScan(role: Role | null | undefined) {
-  return hasAnyRole(role, FRONT_DESK_ROLES)
+  return hasAnyRole(role, FRONT_DESK_ROLES) || hasAnyRole(role, SCAN_TERMINAL_ROLES)
 }
 
 export function canAccessKiosk(role: Role | null | undefined) {
   return hasAnyRole(role, FRONT_DESK_ROLES)
+}
+
+export function isScanTerminalRole(role: Role | null | undefined) {
+  return hasAnyRole(role, SCAN_TERMINAL_ROLES)
+}
+
+export function canAccessScanTerminalOnly(role: Role | null | undefined) {
+  return canAccessScan(role) && !canAccessKiosk(role)
+}
+
+export function isScanTerminalPathAllowed(pathname: string | null | undefined) {
+  const path = String(pathname || '').trim() || '/'
+  return path === '/scan' || path === '/scan/result' || path === '/login' || path === '/logout'
 }
 
 export function canAccessScanAudit(role: Role | null | undefined) {
@@ -314,7 +329,7 @@ export function canAccessStoreAdmin(role: Role | null | undefined) {
 }
 
 export function canAccessNotifications(role: Role | null | undefined) {
-  return !!role && role !== 'reception'
+  return !!role && role !== 'reception' && role !== 'scan_terminal'
 }
 
 export function canManageNotifications(role: Role | null | undefined) {
@@ -597,6 +612,8 @@ export function roleLabel(role: Role | null | undefined) {
       return 'Head coach'
     case 'reception':
       return 'Reception'
+    case 'scan_terminal':
+      return 'Scan terminal'
     case 'admin':
       return 'Admin'
     case 'super_admin':

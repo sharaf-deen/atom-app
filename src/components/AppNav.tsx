@@ -4,7 +4,7 @@ export const revalidate = 0
 
 import Link from 'next/link'
 import Image from 'next/image'
-import { getSessionUser } from '@/lib/session'
+import { getSessionUserCached } from '@/lib/requestCache'
 import { getAppNavForRole, type NavIconKey as IconKey, type NavMenuItem as MenuItem } from '@/lib/rbac'
 import SignOutButton from '@/components/SignOutButton'
 import NavLoginLink from '@/components/NavLoginLink'
@@ -16,9 +16,11 @@ import HideMenuOnRoutes from '@/components/HideMenuOnRoutes'
 const AUTH_ROUTES = ['/login', '/signup', '/reset-password']
 
 export default async function AppNav() {
-  const user = await getSessionUser()
+  const user = await getSessionUserCached()
   const items = user ? getAppNavForRole(user.role) : []
   const hasNotifications = items.some((it) => it.href === '/notifications')
+
+  if (user?.role === 'scan_terminal') return null
 
   return (
     <nav className="app-nav sticky top-0 z-30 border-b bg-white dark:bg-black">

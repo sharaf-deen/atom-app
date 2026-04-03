@@ -7,7 +7,7 @@ import { createSupabaseServerActionClient } from '@/lib/supabaseServer'
 import { createSupabaseAdminClient } from '@/lib/supabaseAdmin'
 import { cairoTodayDateOnly } from '@/lib/cairoTime'
 import { jsonWithApiRuntime, logApiError, startApiRuntime } from '@/lib/apiRuntime'
-import { hasLifetimeGymAccess, normalizeRole } from '@/lib/rbac'
+import { canAccessScan, hasLifetimeGymAccess, normalizeRole } from '@/lib/rbac'
 
 type ScanBody = { code?: string }
 
@@ -123,9 +123,8 @@ export async function POST(req: Request) {
     return json(meta, 500, { ok: false, message: actorErr.message })
   }
 
-  const actorRole = actorProfile?.role ?? 'member'
-  const isStaff = actorRole === 'reception' || actorRole === 'admin' || actorRole === 'super_admin'
-  if (!isStaff) {
+  const actorRole = normalizeRole(actorProfile?.role ?? 'member')
+  if (!canAccessScan(actorRole)) {
     return json(meta, 403, { ok: false, message: 'Forbidden' })
   }
 
