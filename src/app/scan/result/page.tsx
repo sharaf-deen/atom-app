@@ -22,7 +22,7 @@ import { Card, CardContent } from '@/components/ui/Card'
 import Button from '@/components/ui/Button'
 import AccessDeniedPage from '@/components/AccessDeniedPage'
 import { getSessionUserCached, getSupabaseAdminClientCached } from '@/lib/requestCache'
-import type { Role } from '@/lib/session'
+import { canAccessScan } from '@/lib/rbac'
 import AutoReturn from './AutoReturn'
 import ResultSound from './ResultSound'
 
@@ -65,9 +65,6 @@ type SubscriptionSummary = {
   detailLabel: string
 }
 
-function canAccess(role: Role) {
-  return role === 'reception' || role === 'admin' || role === 'super_admin'
-}
 
 function isUuid(v?: string | null) {
   return !!v && /^[0-9a-f-]{36}$/i.test(v)
@@ -318,14 +315,14 @@ export default async function ScanResultPage({ searchParams }: { searchParams: S
   const me = await getSessionUserCached()
   if (!me) redirect('/login?next=/scan')
 
-  if (!canAccess(me.role)) {
+  if (!canAccessScan(me.role)) {
     return (
       <AccessDeniedPage
         title="Scan — Check-in & Validity"
         subtitle="Access restricted."
         signedInAs={me.email}
-        message="Only Reception / Admin / Super Admin can access scan results."
-        allowed="reception, admin, super_admin"
+        message="Only Reception / Scan Terminal / Admin / Super Admin can access scan results."
+        allowed="reception, scan_terminal, admin, super_admin"
         nextPath="/scan"
         actions={[{ href: '/members', label: 'Go to Members' }]}
         showBackHome
@@ -335,8 +332,9 @@ export default async function ScanResultPage({ searchParams }: { searchParams: S
 
   const frozen = searchParams.frozen === '1'
   const valid = searchParams.valid === '1'
-  const kioskMode = searchParams.kiosk === '1'
-  const returnHref = kioskMode ? '/scan?kiosk=1' : '/scan'
+  const isTerminal = me.role === 'scan_terminal'
+  const kioskMode = isTerminal || searchParams.kiosk === '1'
+  const returnHref = '/scan'
   const apiMessage = safeMessage(searchParams.message)
   const memberId = isUuid(searchParams.memberId) ? (searchParams.memberId as string) : null
 
@@ -502,28 +500,39 @@ export default async function ScanResultPage({ searchParams }: { searchParams: S
               </div>
 
               <div className="flex flex-col gap-3 sm:flex-row">
-                <Link href={primaryHref} className="sm:flex-1">
-                  <Button className="w-full">
-                    {primaryIcon}
-                    {primaryLabel}
-                  </Button>
-                </Link>
-
-                {memberId ? (
-                  <Link href={`/members/${memberId}`} className="sm:flex-1">
-                    <Button variant="outline" className="w-full">
-                      <QrCode size={16} className="mr-2" />
-                      Open profile
+                {isTerminal ? (
+                  <Link href={returnHref} className="sm:flex-1">
+                    <Button className="w-full">
+                      <ArrowLeft size={16} className="mr-2" />
+                      Back to scan
                     </Button>
                   </Link>
-                ) : null}
+                ) : (
+                  <>
+                    <Link href={primaryHref} className="sm:flex-1">
+                      <Button className="w-full">
+                        {primaryIcon}
+                        {primaryLabel}
+                      </Button>
+                    </Link>
 
-                <Link href={returnHref} className="sm:flex-1">
-                  <Button variant="outline" className="w-full">
-                    <ArrowLeft size={16} className="mr-2" />
-                    Back to scan
-                  </Button>
-                </Link>
+                    {memberId ? (
+                      <Link href={`/members/${memberId}`} className="sm:flex-1">
+                        <Button variant="outline" className="w-full">
+                          <QrCode size={16} className="mr-2" />
+                          Open profile
+                        </Button>
+                      </Link>
+                    ) : null}
+
+                    <Link href={returnHref} className="sm:flex-1">
+                      <Button variant="outline" className="w-full">
+                        <ArrowLeft size={16} className="mr-2" />
+                        Back to scan
+                      </Button>
+                    </Link>
+                  </>
+                )}
               </div>
             </div>
           </CardContent>

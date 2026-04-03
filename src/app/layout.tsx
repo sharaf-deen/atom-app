@@ -1,5 +1,7 @@
 // src/app/layout.tsx
 import type { Metadata } from 'next'
+import { headers } from 'next/headers'
+import { redirect } from 'next/navigation'
 import './globals.css'
 import { Poppins } from 'next/font/google'
 import AppNav from '@/components/AppNav'
@@ -7,6 +9,8 @@ import ThemeProvider from '@/components/ThemeProvider'
 import { Toaster } from 'sonner'
 import BackButtonHandler from '@/components/BackButtonHandler'
 import AuthHashRedirect from '@/components/AuthHashRedirect'
+import { getSessionUserCached } from '@/lib/requestCache'
+import { isScanTerminalPathAllowed, isScanTerminalRole } from '@/lib/rbac'
 
 const poppins = Poppins({
   subsets: ['latin'],
@@ -19,7 +23,14 @@ export const metadata: Metadata = {
   description: 'ATOM Jiu-Jitsu',
 }
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  const pathname = headers().get('x-pathname') || '/'
+  const user = await getSessionUserCached()
+
+  if (isScanTerminalRole(user?.role) && !isScanTerminalPathAllowed(pathname)) {
+    redirect('/scan')
+  }
+
   return (
     <html lang="en" suppressHydrationWarning>
       <body className={poppins.className}>

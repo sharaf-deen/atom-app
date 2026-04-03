@@ -74,6 +74,7 @@ type KioskScannerProps = {
   size?: 'sm' | 'md' | 'lg'
   ratio?: '4:3' | '1:1'
   className?: string
+  terminalLocked?: boolean
 }
 
 type WakeLockSentinelLike = {
@@ -194,18 +195,18 @@ function ActionChip({ icon, label }: { icon: ReactNode; label: string }) {
   )
 }
 
-export default function KioskScanner({ size = 'sm', ratio = '1:1', className }: KioskScannerProps) {
+export default function KioskScanner({ size = 'sm', ratio = '1:1', className, terminalLocked = false }: KioskScannerProps) {
   const router = useRouter()
   const searchParams = useSearchParams()
   const kioskRequested = searchParams?.get('kiosk') === '1'
 
-  const [kioskMode, setKioskMode] = useState(false)
+  const [kioskMode, setKioskMode] = useState(terminalLocked)
   const [ScannerComponent, setScannerComponent] = useState<ComponentType<any> | null>(null)
   const [paused, setPaused] = useState(false)
   const [status, setStatus] = useState<Status>('idle')
   const [msg, setMsg] = useState<string>('Ready')
   const [online, setOnline] = useState(true)
-  const [facingMode, setFacingMode] = useState<FacingMode>('environment')
+  const [facingMode, setFacingMode] = useState<FacingMode>(terminalLocked ? 'user' : 'environment')
   const [fullScreen, setFullScreen] = useState(false)
 
   const wakeLockRef = useRef<WakeLockSentinelLike | null>(null)
@@ -292,6 +293,12 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className }: 
   }, [abortActiveRequest, clearResumeTimer, releaseWakeLock])
 
   useEffect(() => {
+    if (terminalLocked) {
+      setKioskMode(true)
+      setFacingMode('user')
+      return
+    }
+
     try {
       const stored = window.localStorage.getItem('atom:kiosk') === '1'
       if (kioskRequested || stored) {
@@ -307,7 +314,7 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className }: 
         router.replace('/scan')
       }
     }
-  }, [kioskRequested, router])
+  }, [kioskRequested, router, terminalLocked])
 
   useEffect(() => {
     if (!kioskMode) {
@@ -405,6 +412,7 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className }: 
   }, [])
 
   function enterKioskMode() {
+    if (terminalLocked) return
     try {
       window.localStorage.setItem('atom:kiosk', '1')
     } catch {}
@@ -413,6 +421,7 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className }: 
   }
 
   function exitKioskMode() {
+    if (terminalLocked) return
     abortActiveRequest()
     try {
       window.localStorage.setItem('atom:kiosk', '0')
@@ -558,6 +567,7 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className }: 
   }
 
   function toggleFacingMode() {
+    if (terminalLocked) return
     manualRescan()
     setFacingMode((m) => (m === 'environment' ? 'user' : 'environment'))
   }
@@ -692,7 +702,7 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className }: 
                 {kioskMode ? <Badge>Kiosk</Badge> : null}
               </div>
               <p className="mt-1 text-sm text-[hsl(var(--muted))]">
-                Flip camera, open full screen manually, or keep kiosk mode active inside this page.
+                {terminalLocked ? 'Front camera is locked for this door terminal. The scanner restarts automatically after each result.' : 'Flip camera, open full screen manually, or keep kiosk mode active inside this page.'}
               </p>
             </div>
 
@@ -738,25 +748,31 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className }: 
           ) : null}
 
           <div className="flex flex-wrap gap-2">
-            <Button variant="outline" onClick={toggleFacingMode} title="Switch camera">
-              <RotateCcw size={16} className="mr-2" />
-              Flip camera
-            </Button>
-            <Button variant="outline" onClick={() => setFullScreen(true)} title="Open camera in full screen">
-              {fullScreen ? <Minimize2 size={16} className="mr-2" /> : <Expand size={16} className="mr-2" />}
-              Full screen
-            </Button>
-            {kioskMode ? (
-              <Button variant="outline" onClick={exitKioskMode} title="Leave kiosk mode">
-                <Smartphone size={16} className="mr-2" />
-                Exit kiosk mode
+            {!terminalLocked ? (
+              <Button variant="outline" onClick={toggleFacingMode} title="Switch camera">
+                <RotateCcw size={16} className="mr-2" />
+                Flip camera
               </Button>
-            ) : (
-              <Button variant="outline" onClick={enterKioskMode} title="Keep kiosk mode available on this page">
-                <Smartphone size={16} className="mr-2" />
-                Enable kiosk mode
+            ) : null}
+            {!terminalLocked ? (
+              <Button variant="outline" onClick={() => setFullScreen(true)} title="Open camera in full screen">
+                {fullScreen ? <Minimize2 size={16} className="mr-2" /> : <Expand size={16} className="mr-2" />}
+                Full screen
               </Button>
-            )}
+            ) : null}
+            {!terminalLocked ? (
+              kioskMode ? (
+                <Button variant="outline" onClick={exitKioskMode} title="Leave kiosk mode">
+                  <Smartphone size={16} className="mr-2" />
+                  Exit kiosk mode
+                </Button>
+              ) : (
+                <Button variant="outline" onClick={enterKioskMode} title="Keep kiosk mode available on this page">
+                  <Smartphone size={16} className="mr-2" />
+                  Enable kiosk mode
+                </Button>
+              )
+            ) : null}
             <Button variant="outline" onClick={manualRescan} disabled={!paused && status === 'idle'} title="Resume scanning">
               <RefreshCw size={16} className="mr-2" />
               Rescan
@@ -800,9 +816,9 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className }: 
                 <div className="text-sm font-semibold tracking-tight">Desk tips</div>
                 <ul className="mt-2 space-y-2 text-sm text-[hsl(var(--muted))]">
                   <li>Keep one QR code in the frame.</li>
-                  <li>Use the back camera when possible.</li>
-                  <li>Kiosk mode stays inside this page.</li>
-                  <li>Use Full screen only when needed.</li>
+                  <li>{terminalLocked ? 'Front camera stays locked for this terminal account.' : 'Use the back camera when possible.'}</li>
+                  <li>{terminalLocked ? 'Result screen returns automatically after 7 seconds.' : 'Kiosk mode stays inside this page.'}</li>
+                  <li>{terminalLocked ? 'No other route is available for this account.' : 'Use Full screen only when needed.'}</li>
                   <li>Tap Rescan after a blocked or invalid attempt.</li>
                 </ul>
               </div>
