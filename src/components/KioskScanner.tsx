@@ -327,6 +327,14 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className, te
     clearUnlockHoldTimer()
   }, [clearUnlockHoldTimer])
 
+  const openUnlockDialog = useCallback(() => {
+    if (!terminalLocked || unlockBusy) return
+    clearUnlockHoldTimer()
+    setUnlockPin('')
+    setUnlockError(null)
+    setUnlockOpen(true)
+  }, [clearUnlockHoldTimer, terminalLocked, unlockBusy])
+
   const submitUnlock = useCallback(async () => {
     if (!terminalLocked || unlockBusy) return
     const pin = unlockPin.trim()
@@ -781,7 +789,16 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className, te
                   Retry
                 </Button>
               ) : null}
-              {kioskMode ? (
+              {terminalLocked ? (
+                <Button
+                  variant="outline"
+                  className="!bg-transparent !text-white !border-white/30 hover:!bg-white/10"
+                  onClick={openUnlockDialog}
+                  title="Admin exit"
+                >
+                  Admin exit
+                </Button>
+              ) : kioskMode ? (
                 <Button
                   variant="outline"
                   className="!bg-transparent !text-white !border-white/30 hover:!bg-white/10"
@@ -844,7 +861,7 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className, te
               onTouchStart={terminalLocked ? beginUnlockHold : undefined}
               onTouchEnd={terminalLocked ? endUnlockHold : undefined}
               onTouchCancel={terminalLocked ? endUnlockHold : undefined}
-              title={terminalLocked ? 'Hold 4 seconds for admin exit' : undefined}
+              title={terminalLocked ? 'Admin exit available' : undefined}
             >
               {statusTitle(status, paused)}
             </div>
@@ -912,6 +929,12 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className, te
           ) : null}
 
           <div className="flex flex-wrap gap-2">
+            {terminalLocked ? (
+              <Button variant="outline" onClick={openUnlockDialog} title="Open admin exit PIN prompt">
+                <ShieldCheck size={16} className="mr-2" />
+                Admin exit
+              </Button>
+            ) : null}
             {!terminalLocked ? (
               <Button variant="outline" onClick={toggleFacingMode} title="Switch camera">
                 <RotateCcw size={16} className="mr-2" />
@@ -982,7 +1005,7 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className, te
                   <div><span className="font-medium text-black">Device label:</span> {deviceLabel}</div>
                   <div><span className="font-medium text-black">Camera mode:</span> {terminalLocked ? 'Front camera locked' : facingMode === 'environment' ? 'Back camera active' : 'Front camera active'}</div>
                   <div><span className="font-medium text-black">Recovery:</span> Retry first, then restart the camera if needed.</div>
-                  <div><span className="font-medium text-black">Admin exit:</span> Hold the status badge 4 seconds, then enter the PIN.</div>
+                  <div><span className="font-medium text-black">Admin exit:</span> Use the Admin exit button, then enter the PIN.</div>
                 </div>
               </div>
 
@@ -992,7 +1015,7 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className, te
                   <li>Keep one QR code in the frame.</li>
                   <li>{terminalLocked ? 'Front camera stays locked for this terminal account.' : 'Use the back camera when possible.'}</li>
                   <li>{terminalLocked ? 'Result screen returns automatically after 7 seconds.' : 'Kiosk mode stays inside this page.'}</li>
-                  <li>{terminalLocked ? 'Logout stays locked until the admin PIN is validated.' : 'Use Full screen only when needed.'}</li>
+                  <li>{terminalLocked ? 'Use Admin exit, then enter the PIN to leave this terminal.' : 'Use Full screen only when needed.'}</li>
                   <li>Tap Rescan after a blocked or invalid attempt.</li>
                 </ul>
               </div>
