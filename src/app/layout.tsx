@@ -1,4 +1,3 @@
-// src/app/layout.tsx
 import type { Metadata } from 'next'
 import { cookies, headers } from 'next/headers'
 import { redirect } from 'next/navigation'
@@ -24,11 +23,11 @@ export const metadata: Metadata = {
 }
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
-  const pathname = headers().get('x-pathname') || '/'
+  const pathname = headers().get('x-pathname')?.split('?')[0]?.trim() || null
   const user = await getSessionUserCached()
   const unlockCookie = cookies().get('atom_scan_terminal_unlock')?.value === '1'
 
-  if (isScanTerminalRole(user?.role)) {
+  if (isScanTerminalRole(user?.role) && pathname) {
     const wantsLogout = pathname === '/logout'
 
     if (wantsLogout && !unlockCookie) {
