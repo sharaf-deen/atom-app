@@ -85,6 +85,7 @@ export default function CreateMemberForm({
 }) {
   const router = useRouter()
   const emailRef = useRef<HTMLInputElement>(null)
+  const submitLockRef = useRef(false)
 
   const initialForm = useMemo(() => buildInitialForm(initialValues), [initialValues])
 
@@ -144,6 +145,10 @@ export default function CreateMemberForm({
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault()
+
+    if (busy || submitLockRef.current) return
+
+    submitLockRef.current = true
     setBusy(true)
     setStatus({ kind: 'info', msg: 'Creating member…' })
     setCreatedId(null)
@@ -244,6 +249,7 @@ export default function CreateMemberForm({
       setStatus({ kind: 'error', msg })
       toast.error('Network error')
     } finally {
+      submitLockRef.current = false
       setBusy(false)
     }
   }
