@@ -119,7 +119,7 @@ export default function NotificationsList({ isAdmin = false, sentOnly = false }:
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [openId, setOpenId] = useState<string | null>(null)
   const [actionMsg, setActionMsg] = useState('')
-  const [audCounts, setAudCounts] = useState<{ members: number; coaches: number; assistant_coaches: number } | null>(
+  const [audCounts, setAudCounts] = useState<{ members: number; coaches: number; assistant_coaches: number; head_coaches: number } | null>(
     null,
   )
 
@@ -164,15 +164,16 @@ export default function NotificationsList({ isAdmin = false, sentOnly = false }:
           members: Number(j.members || 0),
           coaches: Number(j.coaches || 0),
           assistant_coaches: Number(j.assistant_coaches || 0),
+          head_coaches: Number(j.head_coaches || 0),
         }
         setAudCounts(next)
         return next
       }
     } catch {}
-    return { members: 0, coaches: 0, assistant_coaches: 0 }
+    return { members: 0, coaches: 0, assistant_coaches: 0, head_coaches: 0 }
   }
 
-  function groupSent(rows: any[], counts: { members: number; coaches: number; assistant_coaches: number }): Item[] {
+  function groupSent(rows: any[], counts: { members: number; coaches: number; assistant_coaches: number; head_coaches: number }): Item[] {
     const norm = (s: any) => String(s ?? '').trim().replace(/\s+/g, ' ')
     const timeKey = (iso: any) => {
       const s = String(iso ?? '')
@@ -230,7 +231,7 @@ export default function NotificationsList({ isAdmin = false, sentOnly = false }:
         if (counts.members > 0 && n === counts.members) item.recipient_name = 'All members'
         else if (counts.coaches > 0 && n === counts.coaches) item.recipient_name = 'All coaches'
         else if (counts.assistant_coaches > 0 && n === counts.assistant_coaches) item.recipient_name = 'All assistant coaches'
-        else if (counts.coaches + counts.assistant_coaches > 0 && n === counts.coaches + counts.assistant_coaches) item.recipient_name = 'All coaches + assistants'
+        else if (counts.coaches + counts.assistant_coaches + counts.head_coaches > 0 && n === counts.coaches + counts.assistant_coaches + counts.head_coaches) item.recipient_name = 'All coaches + assistants + head coaches'
         else item.recipient_name = `Custom (${n})`
         item.recipient_email = null
       } else {
@@ -480,18 +481,25 @@ export default function NotificationsList({ isAdmin = false, sentOnly = false }:
 
   return (
     <Card hover>
-      <CardHeader className="items-start">
-        <CardTitle>{isSentView ? 'Sent notifications' : 'My inbox'}</CardTitle>
+      <CardHeader className="items-start gap-3">
+        <div>
+          <CardTitle className="text-xl">{isSentView ? 'Sent notifications' : 'My inbox'}</CardTitle>
+          <p className="mt-1 text-sm leading-6 text-[hsl(var(--muted))]">
+            {isSentView
+              ? 'Review what was sent and keep the history clean.'
+              : 'Unread items and key actions stay visible first.'}
+          </p>
+        </div>
       </CardHeader>
 
       <CardContent>
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+        <div className="flex flex-col gap-3 rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] p-3 sm:flex-row sm:flex-wrap sm:items-center">
           {isAdmin && !sentOnly && (
             <div className="flex w-fit items-center gap-1 rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] p-1">
               <button
                 onClick={() => setBox('inbox')}
                 className={
-                  'rounded-xl px-3 py-1.5 text-sm ' +
+                  'rounded-xl px-3.5 py-2 text-sm font-medium ' +
                   (box === 'inbox'
                     ? 'bg-[hsl(var(--card))] border border-[hsl(var(--border))] shadow-soft'
                     : 'hover:bg-black/5')
@@ -502,7 +510,7 @@ export default function NotificationsList({ isAdmin = false, sentOnly = false }:
               <button
                 onClick={() => setBox('sent')}
                 className={
-                  'rounded-xl px-3 py-1.5 text-sm ' +
+                  'rounded-xl px-3.5 py-2 text-sm font-medium ' +
                   (box === 'sent'
                     ? 'bg-[hsl(var(--card))] border border-[hsl(var(--border))] shadow-soft'
                     : 'hover:bg-black/5')
@@ -518,7 +526,7 @@ export default function NotificationsList({ isAdmin = false, sentOnly = false }:
               <button
                 onClick={() => setTab('all')}
                 className={
-                  'rounded-xl px-3 py-1.5 text-sm ' +
+                  'rounded-xl px-3.5 py-2 text-sm font-medium ' +
                   (tab === 'all'
                     ? 'bg-[hsl(var(--card))] border border-[hsl(var(--border))] shadow-soft'
                     : 'hover:bg-black/5')
@@ -529,7 +537,7 @@ export default function NotificationsList({ isAdmin = false, sentOnly = false }:
               <button
                 onClick={() => setTab('unread')}
                 className={
-                  'rounded-xl px-3 py-1.5 text-sm ' +
+                  'rounded-xl px-3.5 py-2 text-sm font-medium ' +
                   (tab === 'unread'
                     ? 'bg-[hsl(var(--card))] border border-[hsl(var(--border))] shadow-soft'
                     : 'hover:bg-black/5')
@@ -540,7 +548,7 @@ export default function NotificationsList({ isAdmin = false, sentOnly = false }:
             </div>
           )}
 
-          <Select value={kind} onChange={(e) => setKind(e.target.value as KindFilter)} className="sm:w-44">
+          <Select value={kind} onChange={(e) => setKind(e.target.value as KindFilter)} className="sm:w-44 text-sm">
             {KINDS.map((k) => (
               <option key={k} value={k}>
                 {k === 'all' ? 'All kinds' : kindLabel(k)}
@@ -548,13 +556,13 @@ export default function NotificationsList({ isAdmin = false, sentOnly = false }:
             ))}
           </Select>
 
-          <Select value={sortMode} onChange={(e) => setSortMode(e.target.value as SortMode)} className="sm:w-44">
+          <Select value={sortMode} onChange={(e) => setSortMode(e.target.value as SortMode)} className="sm:w-44 text-sm">
             <option value="unread_first">Unread first</option>
             <option value="recent">Recent first</option>
             <option value="important_first">Important first</option>
           </Select>
 
-          <div className="w-full sm:max-w-xs">
+          <div className="w-full sm:max-w-sm">
             <Input
               value={q}
               onChange={(e) => setQ(e.target.value)}
@@ -565,7 +573,7 @@ export default function NotificationsList({ isAdmin = false, sentOnly = false }:
         </div>
 
         {!isSentView && (
-          <div className="mt-3 flex flex-wrap items-center gap-2">
+          <div className="mt-3 flex flex-wrap items-center gap-2 rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] p-3">
             <Button onClick={markSelectedRead} disabled={selectedUnreadIds.length === 0 || loading} variant="outline" size="sm">
               Mark selected read
             </Button>
@@ -592,27 +600,26 @@ export default function NotificationsList({ isAdmin = false, sentOnly = false }:
           </div>
         )}
 
-        <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+        <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
           <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] px-4 py-3">
-            <div className="text-xs uppercase tracking-wide text-[hsl(var(--muted))]">View</div>
-            <div className="mt-1 text-lg font-semibold">{isSentView ? 'Sent' : tab === 'unread' ? 'Unread inbox' : 'All inbox'}</div>
+            <div className="text-xs font-semibold uppercase tracking-[0.2em] text-[hsl(var(--muted))]">View</div>
+            <div className="mt-1 text-xl font-semibold">{isSentView ? 'Sent' : tab === 'unread' ? 'Unread' : 'Inbox'}</div>
+            <p className="mt-1 text-sm text-[hsl(var(--muted))]">{isSentView ? 'Sent history' : 'Current reading mode'}</p>
           </div>
           <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] px-4 py-3">
-            <div className="text-xs uppercase tracking-wide text-[hsl(var(--muted))]">Visible</div>
-            <div className="mt-1 text-lg font-semibold">{visibleItems.length}</div>
+            <div className="text-xs font-semibold uppercase tracking-[0.2em] text-[hsl(var(--muted))]">On this page</div>
+            <div className="mt-1 text-xl font-semibold">{visibleItems.length}</div>
+            <p className="mt-1 text-sm text-[hsl(var(--muted))]">Notification{visibleItems.length === 1 ? '' : 's'} visible</p>
           </div>
           <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] px-4 py-3">
-            <div className="text-xs uppercase tracking-wide text-[hsl(var(--muted))]">Unread on page</div>
-            <div className="mt-1 text-lg font-semibold">{isSentView ? '—' : unreadOnPage}</div>
+            <div className="text-xs font-semibold uppercase tracking-[0.2em] text-[hsl(var(--muted))]">Unread</div>
+            <div className="mt-1 text-xl font-semibold">{isSentView ? '—' : unreadOnPage}</div>
+            <p className="mt-1 text-sm text-[hsl(var(--muted))]">{isSentView ? 'Not used in sent view' : `${importantOnPage} important · ${recentOnPage} recent`}</p>
           </div>
           <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] px-4 py-3">
-            <div className="text-xs uppercase tracking-wide text-[hsl(var(--muted))]">Recent on page</div>
-            <div className="mt-1 text-lg font-semibold">{recentOnPage}</div>
-          </div>
-          <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] px-4 py-3">
-            <div className="text-xs uppercase tracking-wide text-[hsl(var(--muted))]">Selected</div>
-            <div className="mt-1 text-lg font-semibold">{selected.size}</div>
-            {!isSentView ? <div className="mt-1 text-xs text-[hsl(var(--muted))]">Important on page: {importantOnPage}</div> : null}
+            <div className="text-xs font-semibold uppercase tracking-[0.2em] text-[hsl(var(--muted))]">Selected</div>
+            <div className="mt-1 text-xl font-semibold">{selected.size}</div>
+            <p className="mt-1 text-sm text-[hsl(var(--muted))]">For quick bulk actions</p>
           </div>
         </div>
 
@@ -633,15 +640,15 @@ export default function NotificationsList({ isAdmin = false, sentOnly = false }:
             <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
               <div className="space-y-2">
                 <div className="flex flex-wrap items-center gap-2">
-                  <h4 className="text-base font-semibold">{openItem.title || 'Untitled notification'}</h4>
+                  <h4 className="text-lg font-semibold leading-7">{openItem.title || 'Untitled notification'}</h4>
                   <Badge>{kindLabel(openItem.kind)}</Badge>
                   {rowSignals(openItem).important ? <Badge>Important</Badge> : null}
                   {rowSignals(openItem).recent ? <Badge>Recent</Badge> : null}
                   {!isSentView ? openItem.read_at ? <Badge className="bg-black text-white border-black">Read</Badge> : <Badge>Unread</Badge> : null}
                 </div>
-                <div className="text-xs text-[hsl(var(--muted))]">{fmtDate(openItem.created_at)}</div>
+                <div className="text-sm text-[hsl(var(--muted))]">{fmtDate(openItem.created_at)}</div>
                 {isSentView ? (
-                  <div className="text-sm text-[hsl(var(--muted))]">
+                  <div className="text-base text-[hsl(var(--muted))]">
                     Recipient: <span className="font-medium text-black">{openItem.recipient_name || '—'}</span>
                     {openItem.recipient_email ? ` · ${openItem.recipient_email}` : ''}
                     {typeof openItem.recipient_count === 'number'
@@ -649,7 +656,7 @@ export default function NotificationsList({ isAdmin = false, sentOnly = false }:
                       : ''}
                   </div>
                 ) : (
-                  <div className="text-sm text-[hsl(var(--muted))]">
+                  <div className="text-base text-[hsl(var(--muted))]">
                     Triage: {rowSignals(openItem).unread ? 'Unread first' : 'Already read'}
                     {rowSignals(openItem).recent ? ' · Recent' : ''}
                     {rowSignals(openItem).important ? ' · Important' : ''}
@@ -685,7 +692,7 @@ export default function NotificationsList({ isAdmin = false, sentOnly = false }:
               ) : null}
             </div>
 
-            <div className="mt-4 whitespace-pre-wrap text-sm leading-6">{openItem.body}</div>
+            <div className="mt-4 whitespace-pre-wrap text-base leading-7">{openItem.body}</div>
           </div>
         )}
 
@@ -705,10 +712,10 @@ export default function NotificationsList({ isAdmin = false, sentOnly = false }:
                     )}
                   </th>
                   <th className="border-b border-[hsl(var(--border))] p-3 font-medium">Title</th>
-                  <th className="border-b border-[hsl(var(--border))] p-3 font-medium">Preview</th>
-                  <th className="border-b border-[hsl(var(--border))] p-3 font-medium">Signals</th>
+                  <th className="border-b border-[hsl(var(--border))] p-3 font-medium">Message</th>
+                  <th className="border-b border-[hsl(var(--border))] p-3 font-medium">Status</th>
                   <th className="border-b border-[hsl(var(--border))] p-3 font-medium">Created</th>
-                  <th className="border-b border-[hsl(var(--border))] p-3 font-medium">{isSentView ? 'Recipient' : 'Status'}</th>
+                  <th className="border-b border-[hsl(var(--border))] p-3 font-medium">{isSentView ? 'Recipient' : 'Quick read'}</th>
                   <th className="border-b border-[hsl(var(--border))] p-3" />
                 </tr>
               </thead>
@@ -735,13 +742,19 @@ export default function NotificationsList({ isAdmin = false, sentOnly = false }:
                           )}
                         </td>
                         <td className="border-t border-[hsl(var(--border))] p-3 font-medium">{n.title || '—'}</td>
-                        <td className="border-t border-[hsl(var(--border))] p-3 text-[hsl(var(--muted))]">{preview(n.body)}</td>
-                        <td className="border-t border-[hsl(var(--border))] p-3">
-                          <div className="flex flex-wrap gap-2">
+                        <td className="border-t border-[hsl(var(--border))] p-3 text-sm leading-6 text-[hsl(var(--muted))]">
+                          <div>{preview(n.body, 160)}</div>
+                          <div className="mt-2 flex flex-wrap gap-2">
                             <Badge>{kindLabel(n.kind)}</Badge>
                             {signals.important ? <Badge>Important</Badge> : null}
                             {signals.recent ? <Badge>Recent</Badge> : null}
                             {signals.unread ? <Badge>Unread</Badge> : null}
+                          </div>
+                        </td>
+                        <td className="border-t border-[hsl(var(--border))] p-3">
+                          <div className="space-y-2">
+                            <div>{n.read_at ? <Badge className="bg-black text-white border-black">Read</Badge> : <Badge>Unread</Badge>}</div>
+                            <div className="text-xs text-[hsl(var(--muted))]">{signals.important ? 'Important' : signals.recent ? 'Recent' : 'Standard'}</div>
                           </div>
                         </td>
                         <td className="border-t border-[hsl(var(--border))] p-3">{fmtDate(n.created_at)}</td>
@@ -756,10 +769,8 @@ export default function NotificationsList({ isAdmin = false, sentOnly = false }:
                                 </div>
                               ) : null}
                             </div>
-                          ) : n.read_at ? (
-                            <Badge className="bg-black text-white border-black">Read</Badge>
                           ) : (
-                            <Badge>Unread</Badge>
+                            <div className="text-sm text-[hsl(var(--muted))]">Open to read full message</div>
                           )}
                         </td>
                         <td className="border-t border-[hsl(var(--border))] p-3">
@@ -812,18 +823,18 @@ export default function NotificationsList({ isAdmin = false, sentOnly = false }:
               visibleItems.map((n) => {
                 const signals = rowSignals(n)
                 return (
-                  <div key={n.id} className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4 shadow-soft">
+                  <div key={n.id} className="rounded-3xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4 shadow-soft">
                     <div className="mb-2 flex items-start justify-between gap-2">
                       <div>
-                        <div className="font-semibold">{n.title || '—'}</div>
-                        <div className="mt-1 text-xs text-[hsl(var(--muted))]">{fmtDate(n.created_at)}</div>
+                        <div className="text-base font-semibold leading-6">{n.title || '—'}</div>
+                        <div className="mt-1 text-sm text-[hsl(var(--muted))]">{fmtDate(n.created_at)}</div>
                       </div>
                       {!isSentView && (
                         <input type="checkbox" checked={selected.has(n.id)} onChange={() => toggle(n.id)} aria-label="Select" />
                       )}
                     </div>
 
-                    <div className="mb-2 text-sm text-[hsl(var(--muted))]">{preview(n.body, 140)}</div>
+                    <div className="mb-3 text-base leading-7 text-[hsl(var(--muted))]">{preview(n.body, 160)}</div>
 
                     <div className="mb-3 flex flex-wrap items-center gap-2">
                       <Badge>{kindLabel(n.kind)}</Badge>
@@ -834,7 +845,7 @@ export default function NotificationsList({ isAdmin = false, sentOnly = false }:
                     </div>
 
                     {isSentView ? (
-                      <div className="mb-3 text-sm text-[hsl(var(--muted))]">
+                      <div className="mb-3 text-base text-[hsl(var(--muted))]">
                         Recipient: <span className="font-medium text-black">{n.recipient_name || '—'}</span>
                         {n.recipient_email ? ` · ${n.recipient_email}` : ''}
                       </div>
@@ -879,7 +890,7 @@ export default function NotificationsList({ isAdmin = false, sentOnly = false }:
         </div>
 
         {totalPages > 1 && (
-          <div className="mt-4 flex flex-wrap items-center gap-2">
+          <div className="mt-4 flex flex-wrap items-center gap-2 rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] p-3">
             <Button variant="outline" onClick={() => load(Math.max(1, page - 1))} disabled={page <= 1 || loading}>
               Prev
             </Button>

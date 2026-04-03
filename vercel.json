@@ -11,7 +11,11 @@
     },
     {
       "path": "/api/admin/health-monitor/run",
-      "schedule": "15 5 * * *"
+      "schedule": "0 19 * * *"
+    },
+    {
+      "path": "/api/admin/health-monitor/run",
+      "schedule": "0 20 * * *"
     }
   ]
 }

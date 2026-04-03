@@ -1,7 +1,7 @@
 // src/components/KioskScanner.tsx
 'use client'
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ComponentType, ReactNode } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import {
@@ -18,6 +18,7 @@ import {
 import { Card, CardContent } from '@/components/ui/Card'
 import Button from '@/components/ui/Button'
 import Badge from '@/components/ui/Badge'
+import { formatRequestRef } from '@/lib/requestRef'
 
 function buildDeviceTag() {
   if (typeof window === 'undefined') return 'web-kiosk'
@@ -50,6 +51,7 @@ function buildDeviceTag() {
 
 type ScanResponse = {
   ok: boolean
+  request_id?: string
   valid?: boolean
   message?: string
   member_id?: string
@@ -65,6 +67,22 @@ type ScanResponse = {
 
 type Detected = { rawValue: string }
 
+type Status = 'idle' | 'checking' | 'ok' | 'invalid' | 'error'
+type FacingMode = 'environment' | 'user'
+
+type KioskScannerProps = {
+  size?: 'sm' | 'md' | 'lg'
+  ratio?: '4:3' | '1:1'
+  className?: string
+}
+
+type WakeLockSentinelLike = {
+  released?: boolean
+  release?: () => Promise<void>
+  addEventListener?: (type: string, listener: () => void) => void
+  removeEventListener?: (type: string, listener: () => void) => void
+}
+
 function parseMemberText(text: string): string | null {
   const t = (text || '').trim()
   if (!t) return null
@@ -77,13 +95,41 @@ function parseMemberText(text: string): string | null {
 function errToString(err: unknown) {
   if (typeof err === 'string') return err
   if (err && typeof err === 'object' && 'message' in err) {
-    const m = (err as any).message
+    const m = (err as { message?: unknown }).message
     if (typeof m === 'string') return m
   }
   try {
     return JSON.stringify(err)
   } catch {}
   return 'Camera error'
+}
+
+function classifyCameraError(err: unknown) {
+  const raw = errToString(err)
+  const normalized = raw.toLowerCase()
+
+  if (normalized.includes('notallowederror') || normalized.includes('permission denied')) {
+    return 'Camera permission denied — allow camera access, then tap Retry.'
+  }
+  if (normalized.includes('notfounderror') || normalized.includes('requested device not found')) {
+    return 'No camera found on this device.'
+  }
+  if (normalized.includes('notreadableerror') || normalized.includes('could not start video source')) {
+    return 'Camera busy or unavailable — close other camera apps, then tap Retry.'
+  }
+  if (normalized.includes('overconstrainederror')) {
+    return 'Selected camera is not available — try Flip camera or Retry.'
+  }
+  if (normalized.includes('securityerror')) {
+    return 'Camera blocked by browser security settings.'
+  }
+  if (normalized.includes('aborterror')) {
+    return 'Camera start was interrupted — tap Retry.'
+  }
+  if (normalized.includes('load camera scanner')) {
+    return 'Failed to load camera scanner'
+  }
+  return raw || 'Camera error'
 }
 
 
@@ -104,16 +150,6 @@ function buildResultParams(j: ScanResponse, kioskMode: boolean) {
   if (j.message) sp.set('message', String(j.message).slice(0, 180))
   return sp
 }
-
-type Status = 'idle' | 'checking' | 'ok' | 'invalid' | 'error'
-
-type KioskScannerProps = {
-  size?: 'sm' | 'md' | 'lg'
-  ratio?: '4:3' | '1:1'
-  className?: string
-}
-
-type FacingMode = 'environment' | 'user'
 
 function StatusPill({ status }: { status: Status }) {
   switch (status) {
@@ -147,13 +183,7 @@ function statusToneClass(status: Status) {
   return 'border-[hsl(var(--border))] bg-[hsl(var(--bg))] text-[hsl(var(--muted))]'
 }
 
-function ActionChip({
-  icon,
-  label,
-}: {
-  icon: ReactNode
-  label: string
-}) {
+function ActionChip({ icon, label }: { icon: ReactNode; label: string }) {
   return (
     <div className="flex items-center gap-2 rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] px-3 py-2 text-sm">
       <span className="inline-flex h-8 w-8 items-center justify-center rounded-xl border border-[hsl(var(--border))] bg-white text-black">
@@ -170,138 +200,139 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className }: 
   const kioskRequested = searchParams?.get('kiosk') === '1'
 
   const [kioskMode, setKioskMode] = useState(false)
-  const wakeLockRef = useRef<any>(null)
+  const [ScannerComponent, setScannerComponent] = useState<ComponentType<any> | null>(null)
+  const [paused, setPaused] = useState(false)
+  const [status, setStatus] = useState<Status>('idle')
+  const [msg, setMsg] = useState<string>('Ready')
+  const [online, setOnline] = useState(true)
+  const [facingMode, setFacingMode] = useState<FacingMode>('environment')
+  const [fullScreen, setFullScreen] = useState(false)
 
-  const [exitOpen, setExitOpen] = useState(false)
-  const [exitPin, setExitPin] = useState('')
-  const [exitError, setExitError] = useState<string | null>(null)
-  const [exitHolding, setExitHolding] = useState(false)
-  const exitHoldRef = useRef<number | null>(null)
+  const wakeLockRef = useRef<WakeLockSentinelLike | null>(null)
+  const wakeLockListenerRef = useRef<(() => void) | null>(null)
+  const mountedRef = useRef(true)
+  const resumeTimerRef = useRef<number | null>(null)
+  const requestAbortRef = useRef<AbortController | null>(null)
+  const requestSeqRef = useRef(0)
+  const deviceTagRef = useRef<string>('web-kiosk')
+  const lastScanRef = useRef<{ scanKey: string; at: number; params: string } | null>(null)
+  const wasOfflineRef = useRef(false)
+  const repeatCooldownMs = kioskMode ? 8000 : 5000
+
+  const clearResumeTimer = useCallback(() => {
+    if (resumeTimerRef.current) {
+      window.clearTimeout(resumeTimerRef.current)
+      resumeTimerRef.current = null
+    }
+  }, [])
+
+  const abortActiveRequest = useCallback(() => {
+    requestSeqRef.current += 1
+    if (requestAbortRef.current) {
+      requestAbortRef.current.abort()
+      requestAbortRef.current = null
+    }
+  }, [])
+
+  const releaseWakeLock = useCallback(async () => {
+    const listener = wakeLockListenerRef.current
+    const current = wakeLockRef.current
+    if (listener && current?.removeEventListener) {
+      try {
+        current.removeEventListener('release', listener)
+      } catch {}
+    }
+    wakeLockListenerRef.current = null
+    wakeLockRef.current = null
+    if (current?.release) {
+      try {
+        await current.release()
+      } catch {}
+    }
+  }, [])
+
+  const requestWakeLock = useCallback(async () => {
+    if (wakeLockRef.current) return
+    if (!kioskMode) return
+    try {
+      const wl = await (navigator as any).wakeLock?.request?.('screen')
+      if (!wl) return
+
+      const onRelease = () => {
+        wakeLockRef.current = null
+      }
+      wakeLockListenerRef.current = onRelease
+      if (wl.addEventListener) {
+        try {
+          wl.addEventListener('release', onRelease)
+        } catch {}
+      }
+      wakeLockRef.current = wl
+    } catch {
+      // ignore
+    }
+  }, [kioskMode])
+
+  const manualRescan = useCallback(() => {
+    abortActiveRequest()
+    clearResumeTimer()
+    setPaused(false)
+    setStatus('idle')
+    setMsg(kioskMode ? 'Ready for next member' : 'Ready')
+  }, [abortActiveRequest, clearResumeTimer, kioskMode])
+
+  useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+      abortActiveRequest()
+      clearResumeTimer()
+      releaseWakeLock().catch(() => {})
+    }
+  }, [abortActiveRequest, clearResumeTimer, releaseWakeLock])
 
   useEffect(() => {
     try {
       const stored = window.localStorage.getItem('atom:kiosk') === '1'
       if (kioskRequested || stored) {
         setKioskMode(true)
-        setFullScreen(true)
       }
       if (kioskRequested) {
         window.localStorage.setItem('atom:kiosk', '1')
+        router.replace('/scan')
       }
     } catch {
       if (kioskRequested) {
         setKioskMode(true)
-        setFullScreen(true)
+        router.replace('/scan')
       }
     }
-  }, [kioskRequested])
+  }, [kioskRequested, router])
 
   useEffect(() => {
     if (!kioskMode) {
       document.body.classList.remove('kiosk-mode')
-      if (wakeLockRef.current?.release) {
-        wakeLockRef.current.release().catch(() => {})
-      }
-      wakeLockRef.current = null
+      releaseWakeLock().catch(() => {})
       return
     }
 
     document.body.classList.add('kiosk-mode')
+    requestWakeLock().catch(() => {})
 
-    const requestWake = async () => {
-      try {
-        const wl = await (navigator as any).wakeLock?.request?.('screen')
-        if (wl) wakeLockRef.current = wl
-      } catch {
-        // ignore
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        requestWakeLock().catch(() => {})
       }
     }
 
-    requestWake()
+    document.addEventListener('visibilitychange', onVisibilityChange)
 
     return () => {
       document.body.classList.remove('kiosk-mode')
-      if (wakeLockRef.current?.release) {
-        wakeLockRef.current.release().catch(() => {})
-      }
-      wakeLockRef.current = null
+      document.removeEventListener('visibilitychange', onVisibilityChange)
+      releaseWakeLock().catch(() => {})
     }
-  }, [kioskMode])
-
-  async function verifyExitPin(pin: string): Promise<{ ok: boolean; message?: string }> {
-    const r = await fetch('/api/kiosk/verify-exit-pin', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ pin }),
-    })
-    const j = await r.json().catch(() => ({ ok: false }))
-    return { ok: !!j?.ok && r.ok, message: j?.message }
-  }
-
-  function cancelExitHold() {
-    if (exitHoldRef.current) window.clearTimeout(exitHoldRef.current)
-    exitHoldRef.current = null
-    setExitHolding(false)
-  }
-
-  function startExitHold() {
-    if (!kioskMode) return
-    cancelExitHold()
-    setExitHolding(true)
-    exitHoldRef.current = window.setTimeout(() => {
-      exitHoldRef.current = null
-      setExitHolding(false)
-      setExitError(null)
-      setExitPin('')
-      setExitOpen(true)
-    }, 2000) as any
-  }
-
-  async function confirmExitKiosk() {
-    setExitError(null)
-    const res = await verifyExitPin(exitPin || '')
-    if (!res.ok) {
-      setExitError(res.message || 'Invalid PIN')
-      return
-    }
-
-    try {
-      window.localStorage.setItem('atom:kiosk', '0')
-    } catch {}
-
-    cancelExitHold()
-    setExitOpen(false)
-    setKioskMode(false)
-    setFullScreen(false)
-    router.replace('/scan')
-  }
-
-  function closeExitModal() {
-    cancelExitHold()
-    setExitOpen(false)
-    setExitError(null)
-    setExitPin('')
-  }
-
-  function enterKioskMode() {
-    try {
-      window.localStorage.setItem('atom:kiosk', '1')
-    } catch {}
-    setKioskMode(true)
-    setFullScreen(true)
-    router.replace('/scan?kiosk=1')
-  }
-
-  const [ScannerComponent, setScannerComponent] = useState<ComponentType<any> | null>(null)
-  const [paused, setPaused] = useState(false)
-  const [status, setStatus] = useState<Status>('idle')
-  const [msg, setMsg] = useState<string>('Ready')
-  const resumeTimerRef = useRef<number | null>(null)
-  const lastScanRef = useRef<{ scanKey: string; at: number; params: string } | null>(null)
-  const repeatCooldownMs = kioskMode ? 8000 : 5000
-
-  const [online, setOnline] = useState(true)
-  const wasOfflineRef = useRef(false)
+  }, [kioskMode, releaseWakeLock, requestWakeLock])
 
   useEffect(() => {
     const update = () => setOnline(typeof navigator !== 'undefined' ? navigator.onLine : true)
@@ -317,6 +348,8 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className }: 
   useEffect(() => {
     if (!online) {
       wasOfflineRef.current = true
+      abortActiveRequest()
+      clearResumeTimer()
       setPaused(true)
       setStatus('error')
       setMsg('Offline — reconnect to the internet, then tap Retry.')
@@ -327,11 +360,7 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className }: 
       wasOfflineRef.current = false
       manualRescan()
     }
-  }, [online])
-
-  const [facingMode, setFacingMode] = useState<FacingMode>('environment')
-  const [fullScreen, setFullScreen] = useState(false)
-  const deviceTagRef = useRef<string>('web-kiosk')
+  }, [abortActiveRequest, clearResumeTimer, manualRescan, online])
 
   useEffect(() => {
     deviceTagRef.current = buildDeviceTag()
@@ -361,11 +390,11 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className }: 
         const mod: any = await import('@yudiel/react-qr-scanner')
         const Comp = mod?.Scanner
         if (!Comp) throw new Error('Scanner export not found in @yudiel/react-qr-scanner')
-        if (!cancelled) setScannerComponent(() => Comp)
+        if (!cancelled && mountedRef.current) setScannerComponent(() => Comp)
       } catch (e) {
-        if (cancelled) return
+        if (cancelled || !mountedRef.current) return
         setStatus('error')
-        setMsg('Failed to load camera scanner')
+        setMsg(classifyCameraError(e))
         console.error(e)
       }
     })()
@@ -375,12 +404,23 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className }: 
     }
   }, [])
 
-  useEffect(() => {
-    return () => {
-      if (resumeTimerRef.current) window.clearTimeout(resumeTimerRef.current)
-      if (exitHoldRef.current) window.clearTimeout(exitHoldRef.current)
-    }
-  }, [])
+  function enterKioskMode() {
+    try {
+      window.localStorage.setItem('atom:kiosk', '1')
+    } catch {}
+    setKioskMode(true)
+    router.replace('/scan')
+  }
+
+  function exitKioskMode() {
+    abortActiveRequest()
+    try {
+      window.localStorage.setItem('atom:kiosk', '0')
+    } catch {}
+    setKioskMode(false)
+    setFullScreen(false)
+    router.replace('/scan')
+  }
 
   const handleScan = useCallback(
     async (codes: Detected[]) => {
@@ -389,16 +429,17 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className }: 
       if (!raw) return
 
       let didNavigate = false
+      let reqId = requestSeqRef.current
+      let controller: AbortController | null = null
+      const maybeId = parseMemberText(raw)
+      const scanKey = maybeId ? `atom:${maybeId}` : raw.trim()
+      const payload = { code: maybeId ? `atom:${maybeId}` : raw }
 
       setPaused(true)
       setStatus('checking')
       setMsg('Checking…')
 
       try {
-        const maybeId = parseMemberText(raw)
-        const scanKey = maybeId ? `atom:${maybeId}` : raw.trim()
-        const payload = { code: maybeId ? `atom:${maybeId}` : raw }
-
         if (!online) {
           setStatus('error')
           setMsg('Offline — reconnect to the internet, then tap Retry.')
@@ -413,47 +454,86 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className }: 
           sp.set('repeatSeconds', String(Math.max(1, Math.round(repeatAgeMs / 1000))))
           if (kioskMode) sp.set('kiosk', '1')
           setStatus('ok')
-          setMsg('Same member scanned again — reusing the latest entrance decision and presence context.')
+          setMsg('Same member scanned again — latest decision reused.')
           router.push(`/scan/result?${sp.toString()}`)
           didNavigate = true
           return
         }
 
-        const r = await fetch('/api/kiosk/scan', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'x-device-tag': deviceTagRef.current || 'web-kiosk',
-          },
-          body: JSON.stringify(payload),
-        })
+        abortActiveRequest()
+        controller = new AbortController()
+        const activeController = controller
+        requestAbortRef.current = activeController
+        reqId = requestSeqRef.current + 1
+        requestSeqRef.current = reqId
+        const timeout = window.setTimeout(() => activeController.abort(), 12000)
+
+        let r: Response
+        try {
+          r = await fetch('/api/kiosk/scan', {
+            method: 'POST',
+            cache: 'no-store',
+            headers: {
+              'Content-Type': 'application/json',
+              'x-device-tag': deviceTagRef.current || 'web-kiosk',
+            },
+            body: JSON.stringify(payload),
+            signal: activeController.signal,
+          })
+        } finally {
+          window.clearTimeout(timeout)
+        }
+
+        if (requestSeqRef.current !== reqId || activeController.signal.aborted) {
+          return
+        }
+
         const j: ScanResponse = await r.json().catch(() => ({ ok: false, message: 'Invalid response' }))
+        const requestId = String(j?.request_id || r.headers.get('x-request-id') || '').trim() || null
 
         if (!r.ok || !j.ok) {
-          setStatus('error')
-          setMsg(j?.message || 'Scan failed')
-        } else {
-          const sp = buildResultParams(j, kioskMode)
-          lastScanRef.current = {
-            scanKey,
-            at: Date.now(),
-            params: sp.toString(),
-          }
-
-          router.push(`/scan/result?${sp.toString()}`)
-          didNavigate = true
+          setStatus(j.valid === false ? 'invalid' : 'error')
+          setMsg(formatRequestRef(j?.message || 'Scan failed', requestId, 'paren'))
           return
         }
+
+        const sp = buildResultParams(j, kioskMode)
+        lastScanRef.current = {
+          scanKey,
+          at: Date.now(),
+          params: sp.toString(),
+        }
+
+        setStatus(j.valid ? 'ok' : 'invalid')
+        setMsg(j?.message || (j.valid ? 'Access granted' : 'Access denied'))
+        router.push(`/scan/result?${sp.toString()}`)
+        didNavigate = true
       } catch (e) {
+        const aborted = e instanceof DOMException && e.name === 'AbortError'
+        if (aborted) {
+          if (requestSeqRef.current !== reqId || !mountedRef.current) return
+          if (!online || (typeof navigator !== 'undefined' && !navigator.onLine)) {
+            setStatus('error')
+            setMsg('Offline — reconnect to the internet, then tap Retry.')
+          } else {
+            setStatus('error')
+            setMsg('Scanner request timed out — tap Retry.')
+          }
+          return
+        }
+
         setStatus('error')
         setMsg(
           !online || (typeof navigator !== 'undefined' && !navigator.onLine)
             ? 'Offline — reconnect to the internet, then tap Retry.'
-            : errToString(e)
+            : classifyCameraError(e)
         )
       } finally {
+        if (requestAbortRef.current === controller) {
+          requestAbortRef.current = null
+        }
         if (didNavigate || !online) return
-        if (resumeTimerRef.current) window.clearTimeout(resumeTimerRef.current)
+        clearResumeTimer()
         resumeTimerRef.current = window.setTimeout(() => {
           setPaused(false)
           setStatus('idle')
@@ -461,19 +541,14 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className }: 
         }, 1500)
       }
     },
-    [paused, router, kioskMode, online, repeatCooldownMs]
+    [abortActiveRequest, clearResumeTimer, kioskMode, online, paused, repeatCooldownMs, router]
   )
-
-  function manualRescan() {
-    if (resumeTimerRef.current) window.clearTimeout(resumeTimerRef.current)
-    setPaused(false)
-    setStatus('idle')
-    setMsg(kioskMode ? 'Ready for next member' : 'Ready')
-  }
 
   function retryNow() {
     const nowOnline = typeof navigator !== 'undefined' ? navigator.onLine : online
     if (!nowOnline) {
+      abortActiveRequest()
+      clearResumeTimer()
       setPaused(true)
       setStatus('error')
       setMsg('Offline — reconnect to the internet, then tap Retry.')
@@ -498,7 +573,7 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className }: 
       onScan={handleScan}
       onError={(err: unknown) => {
         setStatus('error')
-        setMsg(errToString(err))
+        setMsg(classifyCameraError(err))
       }}
       components={{ finder: false }}
       paused={paused}
@@ -536,110 +611,71 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className }: 
 
   if (fullScreen) {
     return (
-      <>
-        <div className="fixed inset-0 z-50 bg-black/90 text-white">
-          <div className="absolute inset-x-0 top-0 z-10 border-b border-white/10 bg-black/50 backdrop-blur-md">
-            <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-3 px-4 py-3">
-              <div className="min-w-[220px]">
-                <div className="flex items-center gap-2">
-                  <div className="text-base font-semibold">Scan member QR</div>
-                  {kioskMode ? (
-                    <span className="rounded-full border border-emerald-400/30 bg-emerald-500/10 px-2 py-0.5 text-xs text-emerald-100">
-                      Kiosk mode
-                    </span>
-                  ) : null}
-                </div>
-                <div className="mt-1 flex flex-wrap items-center gap-2 text-xs">
-                  <span className={(status === 'error' ? 'text-rose-200' : status === 'ok' ? 'text-emerald-200' : status === 'invalid' ? 'text-amber-200' : 'text-white/80') + ' truncate'}>
-                    {msg}
-                  </span>
-                  {!online ? (
-                    <span className="rounded-full border border-rose-400/30 bg-rose-500/10 px-2 py-0.5 text-rose-100">Offline</span>
-                  ) : null}
-                  {!kioskMode ? (
-                    <span className="text-white/50">• Press ESC to exit</span>
-                  ) : (
-                    <span className="text-white/50">• Hold Exit 2s</span>
-                  )}
-                </div>
-              </div>
-
+      <div className="fixed inset-0 z-50 bg-black/90 text-white">
+        <div className="absolute inset-x-0 top-0 z-10 border-b border-white/10 bg-black/50 backdrop-blur-md">
+          <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-3 px-4 py-3">
+            <div className="min-w-[220px]">
               <div className="flex items-center gap-2">
-                {!online ? (
-                  <Button
-                    variant="outline"
-                    className="!bg-transparent !text-white !border-white/30 hover:!bg-white/10"
-                    onClick={retryNow}
-                  >
-                    Retry
-                  </Button>
+                <div className="text-base font-semibold">Scan member QR</div>
+                {kioskMode ? (
+                  <span className="rounded-full border border-emerald-400/30 bg-emerald-500/10 px-2 py-0.5 text-xs text-emerald-100">
+                    Kiosk mode
+                  </span>
                 ) : null}
+              </div>
+              <div className="mt-1 flex flex-wrap items-center gap-2 text-xs">
+                <span className={(status === 'error' ? 'text-rose-200' : status === 'ok' ? 'text-emerald-200' : status === 'invalid' ? 'text-amber-200' : 'text-white/80') + ' truncate'}>
+                  {msg}
+                </span>
+                {!online ? (
+                  <span className="rounded-full border border-rose-400/30 bg-rose-500/10 px-2 py-0.5 text-rose-100">Offline</span>
+                ) : null}
+                {!kioskMode ? <span className="text-white/50">• Press ESC to exit</span> : null}
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2">
+              {!online ? (
                 <Button
                   variant="outline"
                   className="!bg-transparent !text-white !border-white/30 hover:!bg-white/10"
-                  onClick={() => {
-                    if (!kioskMode) setFullScreen(false)
-                  }}
-                  onPointerDown={kioskMode ? startExitHold : undefined}
-                  onPointerUp={kioskMode ? cancelExitHold : undefined}
-                  onPointerLeave={kioskMode ? cancelExitHold : undefined}
-                  onPointerCancel={kioskMode ? cancelExitHold : undefined}
-                  title={kioskMode ? 'Hold 2s to exit kiosk' : 'Exit full screen'}
+                  onClick={retryNow}
                 >
-                  {kioskMode ? (exitHolding ? 'Holding…' : 'Hold to exit') : 'Exit full screen'}
+                  Retry
                 </Button>
-              </div>
-            </div>
-          </div>
-
-          <div className="mx-auto flex h-full max-w-6xl flex-col px-4 pb-4 pt-20">
-            <div className="flex-1">
-              <div className="relative h-full w-full overflow-hidden rounded-3xl border border-white/20 bg-black shadow-soft">
-                {scannerEl}
-                {scannerOverlay}
-              </div>
+              ) : null}
+              {kioskMode ? (
+                <Button
+                  variant="outline"
+                  className="!bg-transparent !text-white !border-white/30 hover:!bg-white/10"
+                  onClick={exitKioskMode}
+                  title="Exit kiosk mode"
+                >
+                  Exit kiosk mode
+                </Button>
+              ) : (
+                <Button
+                  variant="outline"
+                  className="!bg-transparent !text-white !border-white/30 hover:!bg-white/10"
+                  onClick={() => setFullScreen(false)}
+                  title="Exit full screen"
+                >
+                  Exit full screen
+                </Button>
+              )}
             </div>
           </div>
         </div>
 
-        {exitOpen ? (
-          <div className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/60 p-4">
-            <div className="w-full max-w-sm rounded-2xl border border-[hsl(var(--border))] bg-white p-4 text-gray-900 shadow-soft">
-              <div className="text-base font-semibold">Exit kiosk</div>
-              <p className="mt-1 text-sm text-gray-600">Hold confirmed. Enter PIN to exit kiosk mode.</p>
-
-              <input
-                className="mt-3 w-full rounded-xl border border-[hsl(var(--border))] px-3 py-2 text-sm outline-none"
-                type="password"
-                inputMode="numeric"
-                placeholder="PIN"
-                value={exitPin}
-                onChange={(e) => setExitPin(e.target.value)}
-                autoFocus
-              />
-
-              {exitError ? <p className="mt-2 text-sm text-rose-700">{exitError}</p> : null}
-
-              <div className="mt-4 flex justify-end gap-2">
-                <button
-                  type="button"
-                  className="rounded-xl border border-[hsl(var(--border))] bg-white px-4 py-2 text-sm font-medium"
-                  onClick={closeExitModal}
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  className="rounded-xl bg-black px-4 py-2 text-sm font-medium text-white"
-                  onClick={confirmExitKiosk}
-                >
-                  Exit
-                </button>
-              </div>
+        <div className="mx-auto flex h-full max-w-6xl flex-col px-4 pb-4 pt-20">
+          <div className="flex-1">
+            <div className="relative h-full w-full overflow-hidden rounded-3xl border border-white/20 bg-black shadow-soft">
+              {scannerEl}
+              {scannerOverlay}
             </div>
           </div>
-        ) : null}
-      </>
+        </div>
+      </div>
     )
   }
 
@@ -656,7 +692,7 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className }: 
                 {kioskMode ? <Badge>Kiosk</Badge> : null}
               </div>
               <p className="mt-1 text-sm text-[hsl(var(--muted))]">
-                Fast front-desk scanning with full-screen mode, kiosk mode, repeat-scan guardrails, presence context and clear entrance decision cues.
+                Flip camera, open full screen manually, or keep kiosk mode active inside this page.
               </p>
             </div>
 
@@ -676,11 +712,11 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className }: 
             />
             <ActionChip
               icon={<Smartphone size={16} strokeWidth={2.1} />}
-              label={kioskMode ? 'Kiosk mode + full screen' : 'Standard scanner view'}
+              label={kioskMode ? (fullScreen ? 'Kiosk mode active · full screen' : 'Kiosk mode active in page') : 'Standard scanner view'}
             />
             <ActionChip
               icon={online ? <ShieldCheck size={16} strokeWidth={2.1} /> : <WifiOff size={16} strokeWidth={2.1} />}
-              label={online ? (kioskMode ? 'Auto-return + decision cues' : 'Decision cues ready') : 'Internet required'}
+              label={online ? (kioskMode ? 'Auto-return active' : 'Decision cues ready') : 'Internet required'}
             />
           </div>
 
@@ -707,13 +743,20 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className }: 
               Flip camera
             </Button>
             <Button variant="outline" onClick={() => setFullScreen(true)} title="Open camera in full screen">
-              <Expand size={16} className="mr-2" />
+              {fullScreen ? <Minimize2 size={16} className="mr-2" /> : <Expand size={16} className="mr-2" />}
               Full screen
             </Button>
-            <Button variant="outline" onClick={enterKioskMode} title="Enter kiosk mode (hide nav + keep awake)">
-              <Smartphone size={16} className="mr-2" />
-              Kiosk mode
-            </Button>
+            {kioskMode ? (
+              <Button variant="outline" onClick={exitKioskMode} title="Leave kiosk mode">
+                <Smartphone size={16} className="mr-2" />
+                Exit kiosk mode
+              </Button>
+            ) : (
+              <Button variant="outline" onClick={enterKioskMode} title="Keep kiosk mode available on this page">
+                <Smartphone size={16} className="mr-2" />
+                Enable kiosk mode
+              </Button>
+            )}
             <Button variant="outline" onClick={manualRescan} disabled={!paused && status === 'idle'} title="Resume scanning">
               <RefreshCw size={16} className="mr-2" />
               Rescan
@@ -743,10 +786,10 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className }: 
                     (status === 'ok'
                       ? 'text-emerald-700'
                       : status === 'invalid'
-                      ? 'text-amber-800'
-                      : status === 'error'
-                      ? 'text-rose-700'
-                      : 'text-[hsl(var(--muted))]')
+                        ? 'text-amber-800'
+                        : status === 'error'
+                          ? 'text-rose-700'
+                          : 'text-[hsl(var(--muted))]')
                   }
                 >
                   {msg}
@@ -754,21 +797,16 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className }: 
               </div>
 
               <div className="rounded-3xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] p-4">
-                <div className="text-sm font-semibold tracking-tight">Desk decision tips</div>
+                <div className="text-sm font-semibold tracking-tight">Desk tips</div>
                 <ul className="mt-2 space-y-2 text-sm text-[hsl(var(--muted))]">
-                  <li>Keep only one QR code in the frame.</li>
-                  <li>Use the back camera for faster detection.</li>
-                  <li>Use the result page cue first: Let in, Check desk or Open profile.</li>
-                  <li>Tap Rescan after any blocked or invalid attempt.</li>
-                  <li>Use kiosk mode for the academy entrance.</li>
-                  <li>Kiosk mode returns automatically to the next scan after the result page.</li>
+                  <li>Keep one QR code in the frame.</li>
+                  <li>Use the back camera when possible.</li>
+                  <li>Kiosk mode stays inside this page.</li>
+                  <li>Use Full screen only when needed.</li>
+                  <li>Tap Rescan after a blocked or invalid attempt.</li>
                 </ul>
               </div>
             </div>
-          </div>
-
-          <div className="text-sm text-[hsl(var(--muted))]">
-            The scanner validates the member and opens a result page with a stronger entrance decision cue for the desk.
           </div>
         </div>
       </CardContent>

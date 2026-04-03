@@ -3,9 +3,11 @@ export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
-import { NextResponse } from 'next/server'
 import { createSupabaseServerActionClient } from '@/lib/supabaseServer'
 import { createSupabaseAdminClient } from '@/lib/supabaseAdmin'
+import { cairoTodayDateOnly } from '@/lib/cairoTime'
+import { jsonWithApiRuntime, logApiError, startApiRuntime } from '@/lib/apiRuntime'
+import { hasLifetimeGymAccess, normalizeRole } from '@/lib/rbac'
 
 type ScanBody = { code?: string }
 
@@ -37,10 +39,15 @@ type AttendanceWrite = {
   source?: string
 }
 
-function json(status: number, body: ScanResponse) {
-  const res = NextResponse.json(body, { status })
-  res.headers.set('Cache-Control', 'no-store')
-  return res
+function sanitizeDeviceTag(value: string | null) {
+  return (value || '')
+    .replace(/[^a-zA-Z0-9._:-]+/g, '-')
+    .replace(/-+/g, '-')
+    .slice(0, 64) || null
+}
+
+function json(meta: ReturnType<typeof startApiRuntime>, status: number, body: ScanResponse) {
+  return jsonWithApiRuntime(meta, status, body, 'no-store')
 }
 
 function parseMemberIdFromCode(code: string): string | null {
@@ -53,21 +60,6 @@ function parseMemberIdFromCode(code: string): string | null {
   }
   if (/^[0-9a-f-]{36}$/i.test(t)) return t
   return null
-}
-
-const CAIRO_TZ = 'Africa/Cairo'
-
-function todayDateOnlyCairo() {
-  const parts = new Intl.DateTimeFormat('en-CA', {
-    timeZone: CAIRO_TZ,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).formatToParts(new Date())
-  const y = parts.find((p) => p.type === 'year')?.value ?? '1970'
-  const m = parts.find((p) => p.type === 'month')?.value ?? '01'
-  const d = parts.find((p) => p.type === 'day')?.value ?? '01'
-  return `${y}-${m}-${d}`
 }
 
 function daysBetweenUTC(fromDateOnly: string, toDateOnly: string) {
@@ -106,15 +98,17 @@ async function persistAttendance(
 }
 
 export async function POST(req: Request) {
+  const meta = startApiRuntime('/api/kiosk/scan')
   const admin = makeAdminClient()
   if (!admin) {
-    return json(500, { ok: false, message: 'Server missing service key' })
+    logApiError(meta, 'env', 'Server missing service key')
+    return json(meta, 500, { ok: false, message: 'Server missing service key' })
   }
 
   const supa = createSupabaseServerActionClient()
   const { data: auth } = await supa.auth.getUser()
   if (!auth.user) {
-    return json(401, { ok: false, message: 'Not authenticated' })
+    return json(meta, 401, { ok: false, message: 'Not authenticated' })
   }
 
   const actorId = auth.user.id
@@ -125,13 +119,14 @@ export async function POST(req: Request) {
     .maybeSingle<{ role: string | null }>()
 
   if (actorErr) {
-    return json(500, { ok: false, message: actorErr.message })
+    logApiError(meta, 'actor_profile_lookup', actorErr, { actor_id: actorId })
+    return json(meta, 500, { ok: false, message: actorErr.message })
   }
 
   const actorRole = actorProfile?.role ?? 'member'
   const isStaff = actorRole === 'reception' || actorRole === 'admin' || actorRole === 'super_admin'
   if (!isStaff) {
-    return json(403, { ok: false, message: 'Forbidden' })
+    return json(meta, 403, { ok: false, message: 'Forbidden' })
   }
 
   let body: ScanBody = {}
@@ -141,13 +136,19 @@ export async function POST(req: Request) {
     body = {}
   }
 
-  const memberId = parseMemberIdFromCode(body.code || '')
-  if (!memberId) {
-    return json(400, { ok: false, message: 'Invalid QR code' })
+  const rawCode = String(body.code ?? '').trim()
+  if (rawCode.length > 200) {
+    logApiError(meta, 'invalid_code_length', 'QR code too long', { actor_id: actorId, length: rawCode.length })
+    return json(meta, 400, { ok: false, message: 'Invalid QR code' })
   }
 
-  const today = todayDateOnlyCairo()
-  const deviceTag = (req.headers.get('x-device-tag') || '').slice(0, 64) || null
+  const memberId = parseMemberIdFromCode(rawCode)
+  if (!memberId) {
+    return json(meta, 400, { ok: false, message: 'Invalid QR code' })
+  }
+
+  const today = cairoTodayDateOnly()
+  const deviceTag = sanitizeDeviceTag(req.headers.get('x-device-tag'))
 
   try {
     const { data: existingAttendance, error: existingErr } = await admin
@@ -160,11 +161,51 @@ export async function POST(req: Request) {
       .maybeSingle<{ id: string; valid: boolean | null; source: string | null }>()
 
     if (existingErr) {
-      return json(500, { ok: false, message: existingErr.message })
+      logApiError(meta, 'existing_attendance_lookup', existingErr, { actor_id: actorId, member_id: memberId })
+      return json(meta, 500, { ok: false, message: existingErr.message })
     }
 
     const existingId = existingAttendance?.id ?? null
     const alreadyValidToday = !!existingAttendance?.valid
+
+    const { data: memberProfile, error: memberProfileErr } = await admin
+      .from('profiles')
+      .select('role')
+      .eq('user_id', memberId)
+      .maybeSingle<{ role: string | null }>()
+
+    if (memberProfileErr) {
+      logApiError(meta, 'member_profile_lookup', memberProfileErr, { actor_id: actorId, member_id: memberId })
+      return json(meta, 500, { ok: false, message: memberProfileErr.message })
+    }
+
+    if (!memberProfile) {
+      return json(meta, 404, { ok: false, message: 'Member not found' })
+    }
+
+    const memberRole = normalizeRole(memberProfile.role ?? 'member')
+    if (hasLifetimeGymAccess(memberRole)) {
+      await persistAttendance(admin, existingId, {
+        member_id: memberId,
+        date: today,
+        valid: true,
+        status: 'ok',
+        from_sessions: false,
+        subscription_id: null,
+        scanned_by: actorId,
+        device_tag: deviceTag,
+      })
+
+      return json(meta, 200, {
+        ok: true,
+        valid: true,
+        member_id: memberId,
+        subscription_id: null,
+        days_remaining: null,
+        expires_on: null,
+        message: alreadyValidToday ? 'Already checked in today' : 'Always active access',
+      })
+    }
 
     const { data: timeSub, error: timeErr } = await admin
       .from('subscriptions')
@@ -189,15 +230,14 @@ export async function POST(req: Request) {
       }>()
 
     if (timeErr) {
-      return json(500, { ok: false, message: timeErr.message })
+      logApiError(meta, 'time_subscription_lookup', timeErr, { actor_id: actorId, member_id: memberId })
+      return json(meta, 500, { ok: false, message: timeErr.message })
     }
 
     if (timeSub) {
       const isFrozen = !!(
         timeSub.frozen_until &&
-        (timeSub.frozen_from
-          ? today >= timeSub.frozen_from && today < timeSub.frozen_until
-          : today < timeSub.frozen_until)
+        (timeSub.frozen_from ? today >= timeSub.frozen_from && today < timeSub.frozen_until : today < timeSub.frozen_until)
       )
 
       if (isFrozen) {
@@ -214,7 +254,7 @@ export async function POST(req: Request) {
           device_tag: deviceTag,
         })
 
-        return json(200, {
+        return json(meta, 200, {
           ok: true,
           valid: false,
           frozen: true,
@@ -239,7 +279,7 @@ export async function POST(req: Request) {
         device_tag: deviceTag,
       })
 
-      return json(200, {
+      return json(meta, 200, {
         ok: true,
         valid: true,
         member_id: memberId,
@@ -268,7 +308,8 @@ export async function POST(req: Request) {
       }>()
 
     if (sessErr) {
-      return json(500, { ok: false, message: sessErr.message })
+      logApiError(meta, 'sessions_subscription_lookup', sessErr, { actor_id: actorId, member_id: memberId })
+      return json(meta, 500, { ok: false, message: sessErr.message })
     }
 
     if (sessSub) {
@@ -282,7 +323,8 @@ export async function POST(req: Request) {
             .eq('id', sessSub.id)
 
           if (subUpdateErr) {
-            return json(500, { ok: false, message: subUpdateErr.message })
+            logApiError(meta, 'sessions_increment', subUpdateErr, { actor_id: actorId, member_id: memberId, subscription_id: sessSub.id })
+            return json(meta, 500, { ok: false, message: subUpdateErr.message })
           }
         }
 
@@ -299,7 +341,7 @@ export async function POST(req: Request) {
 
         const remainingAfter = alreadyValidToday ? remaining : remaining - 1
 
-        return json(200, {
+        return json(meta, 200, {
           ok: true,
           valid: true,
           member_id: memberId,
@@ -321,7 +363,7 @@ export async function POST(req: Request) {
         device_tag: deviceTag,
       })
 
-      return json(200, {
+      return json(meta, 200, {
         ok: true,
         valid: false,
         member_id: memberId,
@@ -341,7 +383,8 @@ export async function POST(req: Request) {
       .maybeSingle<{ end_date: string | null }>()
 
     if (lastSubErr) {
-      return json(500, { ok: false, message: lastSubErr.message })
+      logApiError(meta, 'last_subscription_lookup', lastSubErr, { actor_id: actorId, member_id: memberId })
+      return json(meta, 500, { ok: false, message: lastSubErr.message })
     }
 
     const expiredOn = lastSub?.end_date || today
@@ -358,7 +401,7 @@ export async function POST(req: Request) {
       device_tag: deviceTag,
     })
 
-    return json(200, {
+    return json(meta, 200, {
       ok: true,
       valid: false,
       member_id: memberId,
@@ -368,6 +411,7 @@ export async function POST(req: Request) {
       message: 'No active subscription',
     })
   } catch (e: any) {
-    return json(500, { ok: false, message: String(e?.message || e) })
+    logApiError(meta, 'unexpected', e, { actor_id: actorId, member_id: memberId, device_tag: deviceTag })
+    return json(meta, 500, { ok: false, message: String(e?.message || e) })
   }
 }

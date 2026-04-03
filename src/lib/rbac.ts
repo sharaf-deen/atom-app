@@ -1,11 +1,16 @@
-export const APP_ROLES = ['member', 'assistant_coach', 'coach', 'reception', 'admin', 'super_admin'] as const
+export const APP_ROLES = ['member', 'champion', 'vip', 'assistant_coach', 'coach', 'head_coach', 'reception', 'admin', 'super_admin'] as const
 export type Role = (typeof APP_ROLES)[number]
 
-export const STAFF_ROLES = ['reception', 'assistant_coach', 'coach', 'admin', 'super_admin'] as const satisfies readonly Role[]
+export const MEMBER_LIKE_ROLES = ['member', 'champion', 'vip'] as const satisfies readonly Role[]
+export const MEMBER_LIFETIME_ACCESS_ROLES = ['champion', 'vip'] as const satisfies readonly Role[]
+export const STAFF_ROLES = ['reception', 'assistant_coach', 'coach', 'head_coach', 'admin', 'super_admin'] as const satisfies readonly Role[]
 export const FRONT_DESK_ROLES = ['reception', 'admin', 'super_admin'] as const satisfies readonly Role[]
 export const ADMIN_ROLES = ['admin', 'super_admin'] as const satisfies readonly Role[]
 export const SUPER_ADMIN_ROLES = ['super_admin'] as const satisfies readonly Role[]
-export const COACH_ROLES = ['coach', 'assistant_coach'] as const satisfies readonly Role[]
+export const COACH_ROLES = ['coach', 'assistant_coach', 'head_coach'] as const satisfies readonly Role[]
+export const LIFETIME_ACCESS_ROLES = ['assistant_coach', 'coach', 'head_coach', 'champion', 'vip'] as const satisfies readonly Role[]
+export const NOTIFICATION_MANAGER_ROLES = ['head_coach', 'admin', 'super_admin'] as const satisfies readonly Role[]
+export const NOTIFICATION_RECIPIENT_ROLES = ['member', 'champion', 'vip', 'assistant_coach', 'coach', 'head_coach'] as const satisfies readonly Role[]
 
 export type NavIconKey =
   | 'home'
@@ -46,13 +51,37 @@ const APP_NAV_BY_ROLE: MenuByRole = {
     { label: 'Packages & Promos', href: '/packages-and-promos', icon: 'gift' },
     { label: 'Contact Admin', href: '/contact', icon: 'user-cog' },
   ],
+  champion: [
+    { label: 'Notifications', href: '/notifications', icon: 'bell' },
+    { label: 'Schedule', href: '/schedule', icon: 'calendar' },
+    { label: 'My Profile', href: '/profile', icon: 'id' },
+    { label: 'Packages & Promos', href: '/packages-and-promos', icon: 'gift' },
+    { label: 'Contact Admin', href: '/contact', icon: 'user-cog' },
+  ],
+  vip: [
+    { label: 'Notifications', href: '/notifications', icon: 'bell' },
+    { label: 'Schedule', href: '/schedule', icon: 'calendar' },
+    { label: 'My Profile', href: '/profile', icon: 'id' },
+    { label: 'Packages & Promos', href: '/packages-and-promos', icon: 'gift' },
+    { label: 'Contact Admin', href: '/contact', icon: 'user-cog' },
+  ],
   assistant_coach: [
+    { label: 'Training Useful', href: '/training-useful', icon: 'dashboard' },
     { label: 'Notifications', href: '/notifications', icon: 'bell' },
     { label: 'Schedule', href: '/schedule', icon: 'calendar' },
     { label: 'My Profile', href: '/profile', icon: 'id' },
     { label: 'Packages & Promos', href: '/packages-and-promos', icon: 'gift' },
   ],
   coach: [
+    { label: 'Training Useful', href: '/training-useful', icon: 'dashboard' },
+    { label: 'Notifications', href: '/notifications', icon: 'bell' },
+    { label: 'Schedule', href: '/schedule', icon: 'calendar' },
+    { label: 'My Profile', href: '/profile', icon: 'id' },
+    { label: 'Packages & Promos', href: '/packages-and-promos', icon: 'gift' },
+  ],
+  head_coach: [
+    { label: 'Training Useful', href: '/training-useful', icon: 'dashboard' },
+    { label: 'Athletes', href: '/head-coach/athletes', icon: 'users' },
     { label: 'Notifications', href: '/notifications', icon: 'bell' },
     { label: 'Schedule', href: '/schedule', icon: 'calendar' },
     { label: 'My Profile', href: '/profile', icon: 'id' },
@@ -66,6 +95,7 @@ const APP_NAV_BY_ROLE: MenuByRole = {
     { label: 'Scan', href: '/scan', icon: 'scan' },
     { label: 'Members', href: '/members', icon: 'users' },
     { label: 'CRM', href: '/admin/crm', icon: 'users' },
+    { label: 'Visitors', href: '/admin/visitors', icon: 'users' },
     { label: 'Packages & Promos', href: '/packages-and-promos', icon: 'gift' },
     { label: 'Store', href: '/store', icon: 'bag' },
   ],
@@ -84,7 +114,9 @@ const APP_NAV_BY_ROLE: MenuByRole = {
     { label: 'Scan', href: '/scan', icon: 'scan' },
     { label: 'Members', href: '/members', icon: 'users' },
     { label: 'CRM', href: '/admin/crm', icon: 'users' },
+    { label: 'Visitors', href: '/admin/visitors', icon: 'users' },
     { label: 'Coaches', href: '/coaches', icon: 'user-cog' },
+    { label: 'Athletes', href: '/head-coach/athletes', icon: 'users' },
     { label: 'Store', href: '/store', icon: 'bag' },
     { label: 'Invoices', href: '/invoices', icon: 'file-text' },
     { label: 'Payments', href: '/admin/payments', icon: 'file-text' },
@@ -93,6 +125,7 @@ const APP_NAV_BY_ROLE: MenuByRole = {
     { label: 'Membership Activity', href: '/admin/membership-activity', icon: 'file-text' },
     { label: 'Expiring Soon', href: '/admin/expiring-soon', icon: 'bell' },
     { label: 'Expenses', href: '/expenses', icon: 'wallet' },
+    { label: 'Other Income', href: '/admin/external-income', icon: 'wallet' },
   ],
   super_admin: [
     { label: 'Home', href: '/', icon: 'home' },
@@ -110,6 +143,7 @@ const APP_NAV_BY_ROLE: MenuByRole = {
     { label: 'Scan', href: '/scan', icon: 'scan' },
     { label: 'Members', href: '/members', icon: 'users' },
     { label: 'CRM', href: '/admin/crm', icon: 'users' },
+    { label: 'Visitors', href: '/admin/visitors', icon: 'users' },
     { label: 'Coaches', href: '/coaches', icon: 'user-cog' },
     { label: 'Store', href: '/store', icon: 'bag' },
     { label: 'Store Admin', href: '/admin/store', icon: 'bag' },
@@ -120,6 +154,7 @@ const APP_NAV_BY_ROLE: MenuByRole = {
     { label: 'Membership Activity', href: '/admin/membership-activity', icon: 'file-text' },
     { label: 'Expiring Soon', href: '/admin/expiring-soon', icon: 'bell' },
     { label: 'Expenses', href: '/expenses', icon: 'wallet' },
+    { label: 'Other Income', href: '/admin/external-income', icon: 'wallet' },
   ],
 }
 
@@ -135,6 +170,18 @@ export function hasAnyRole(role: Role | null | undefined, allowed: readonly Role
   return !!role && allowed.includes(role)
 }
 
+export function isMemberLikeRole(role: Role | null | undefined) {
+  return hasAnyRole(role, MEMBER_LIKE_ROLES)
+}
+
+export function hasLifetimeGymAccess(role: Role | null | undefined) {
+  return hasAnyRole(role, LIFETIME_ACCESS_ROLES)
+}
+
+export function hasVisibleNotificationInbox(role: Role | null | undefined) {
+  return hasAnyRole(role, NOTIFICATION_RECIPIENT_ROLES)
+}
+
 export function canAccessAdminDashboard(role: Role | null | undefined) {
   return hasAnyRole(role, ADMIN_ROLES)
 }
@@ -144,7 +191,7 @@ export function canAccessMembersList(role: Role | null | undefined) {
 }
 
 export function canOpenOtherMemberProfile(role: Role | null | undefined) {
-  return canAccessMembersList(role) || role === 'coach'
+  return canAccessMembersList(role) || role === 'coach' || role === 'head_coach'
 }
 
 export function canAccessCrm(role: Role | null | undefined) {
@@ -163,7 +210,18 @@ export function canAccessMemberProfile(
   const isSelf = !!args.viewerUserId && !!args.targetUserId && args.viewerUserId === args.targetUserId
   if (isSelf) return true
   if (canAccessMembersList(role)) return true
-  if (role === 'coach') return normalizeRole(args.targetRole ?? 'member') === 'member'
+
+  const normalizedTargetRole = normalizeRole(args.targetRole ?? 'member')
+
+  if (role === 'coach') return isMemberLikeRole(normalizedTargetRole)
+  if (role === 'head_coach') {
+    return normalizedTargetRole === 'member'
+      || normalizedTargetRole === 'champion'
+      || normalizedTargetRole === 'vip'
+      || normalizedTargetRole === 'assistant_coach'
+      || normalizedTargetRole === 'coach'
+  }
+
   return false
 }
 
@@ -223,8 +281,24 @@ export function canAccessPersonalFunds(role: Role | null | undefined) {
   return hasAnyRole(role, ADMIN_ROLES)
 }
 
+export function canAccessExternalIncome(role: Role | null | undefined) {
+  return hasAnyRole(role, ADMIN_ROLES)
+}
+
+export function canAccessVisitorTrials(role: Role | null | undefined) {
+  return hasAnyRole(role, FRONT_DESK_ROLES)
+}
+
 export function canAccessCoaches(role: Role | null | undefined) {
   return hasAnyRole(role, ADMIN_ROLES)
+}
+
+export function canAccessTrainingUseful(role: Role | null | undefined) {
+  return hasAnyRole(role, ['coach', 'assistant_coach', 'head_coach', 'admin', 'super_admin'])
+}
+
+export function canAccessHeadCoachAthletes(role: Role | null | undefined) {
+  return hasAnyRole(role, ['head_coach', 'super_admin'])
 }
 
 export function canManageCoaches(role: Role | null | undefined) {
@@ -244,7 +318,7 @@ export function canAccessNotifications(role: Role | null | undefined) {
 }
 
 export function canManageNotifications(role: Role | null | undefined) {
-  return hasAnyRole(role, ADMIN_ROLES)
+  return hasAnyRole(role, NOTIFICATION_MANAGER_ROLES)
 }
 
 export function canAccessInvoices(role: Role | null | undefined) {
@@ -291,6 +365,14 @@ const CAPABILITY_BLUEPRINTS: CapabilityBlueprint[] = [
     description: 'Review who should be contacted today and open desk follow-up actions.',
     href: '/admin/crm',
     check: (role) => canAccessCrm(role),
+  },
+  {
+    key: 'visitor_trials',
+    category: 'Front desk',
+    label: 'Visitor trials',
+    description: 'Track free trial visitors, follow-up due cases, and member conversions.',
+    href: '/admin/visitors',
+    check: (role) => canAccessVisitorTrials(role),
   },
   {
     key: 'other_member_profile',
@@ -373,6 +455,14 @@ const CAPABILITY_BLUEPRINTS: CapabilityBlueprint[] = [
     check: (role) => canAccessPersonalFunds(role),
   },
   {
+    key: 'external_income',
+    category: 'Finance',
+    label: 'Other Income',
+    description: 'Track money entries outside subscriptions such as bar or store sales.',
+    href: '/admin/external-income',
+    check: (role) => canAccessExternalIncome(role),
+  },
+  {
     key: 'scan_audit',
     category: 'Admin ops',
     label: 'Scan Audit',
@@ -403,6 +493,22 @@ const CAPABILITY_BLUEPRINTS: CapabilityBlueprint[] = [
     description: 'Perform coach management actions reserved for super admins.',
     href: '/coaches',
     check: (role) => canManageCoaches(role),
+  },
+  {
+    key: 'training_useful',
+    category: 'Core',
+    label: 'Training useful hub',
+    description: 'Open the coach-facing hub with QR, schedule, staff updates and member lookup shortcuts.',
+    href: '/training-useful',
+    check: (role) => canAccessTrainingUseful(role),
+  },
+  {
+    key: 'head_coach_athletes',
+    category: 'Core',
+    label: 'Head coach athletes',
+    description: 'Open the athlete dashboard for program, belt, attendance, competition, and promotion tracking.',
+    href: '/head-coach/athletes',
+    check: (role) => canAccessHeadCoachAthletes(role),
   },
   {
     key: 'roles_manage',
@@ -479,10 +585,16 @@ export function allowedRolesLabel(roles: readonly Role[]) {
 
 export function roleLabel(role: Role | null | undefined) {
   switch (role) {
+    case 'champion':
+      return 'Champion'
+    case 'vip':
+      return 'VIP'
     case 'assistant_coach':
       return 'Assistant coach'
     case 'coach':
       return 'Coach'
+    case 'head_coach':
+      return 'Head coach'
     case 'reception':
       return 'Reception'
     case 'admin':

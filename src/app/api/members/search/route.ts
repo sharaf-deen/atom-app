@@ -5,8 +5,9 @@ export const revalidate = 0
 
 import { NextResponse } from 'next/server'
 import { getSessionUser } from '@/lib/session'
-import { canOpenOtherMemberProfile, normalizeRole, type Role } from '@/lib/rbac'
+import { MEMBER_LIKE_ROLES, canOpenOtherMemberProfile, hasLifetimeGymAccess, type Role } from '@/lib/rbac'
 import { createSupabaseAdminClient } from '@/lib/supabaseAdmin'
+import { cairoTodayDateOnly } from '@/lib/cairoTime'
 
 type MemberRow = {
   user_id: string
@@ -79,12 +80,13 @@ export async function GET(req: Request) {
 
   try {
     const admin = createSupabaseAdminClient()
-    const today = new Date().toISOString().slice(0, 10)
+    const today = cairoTodayDateOnly()
 
-    let qb = admin
-      .from('profiles')
-      .select(
-        `
+    let qb = (q
+      ? admin
+          .from('profiles')
+          .select(
+            `
         user_id,
         email,
         first_name,
@@ -95,9 +97,24 @@ export async function GET(req: Request) {
         member_id,
         date_of_birth
       `,
-        { count: 'exact' },
-      )
-      .eq('role', 'member')
+            { count: 'exact' },
+          )
+      : admin
+          .from('profiles')
+          .select(
+            `
+        user_id,
+        email,
+        first_name,
+        last_name,
+        phone,
+        role,
+        created_at,
+        member_id,
+        date_of_birth
+      `,
+          ))
+      .in('role', [...MEMBER_LIKE_ROLES])
       .order('created_at', { ascending: false })
       .range(from, to)
 
@@ -108,7 +125,7 @@ export async function GET(req: Request) {
         `member_id.ilike.%${q}%`,
       ]
 
-      if (me.role !== 'coach') {
+      if (me.role !== 'coach' && me.role !== 'head_coach') {
         ors.push(`email.ilike.%${q}%`)
         ors.push(`phone.ilike.%${q}%`)
         if (qDigits.length >= 4) {
@@ -134,10 +151,10 @@ export async function GET(req: Request) {
 
     const items: MemberRow[] = (data ?? []).map((r: any) => ({
       user_id: r.user_id,
-      email: me.role === 'coach' ? null : r.email ?? null,
+      email: me.role === 'coach' || me.role === 'head_coach' ? null : r.email ?? null,
       first_name: r.first_name ?? null,
       last_name: r.last_name ?? null,
-      phone: me.role === 'coach' ? null : r.phone ?? null,
+      phone: me.role === 'coach' || me.role === 'head_coach' ? null : r.phone ?? null,
       role: (r.role ?? null) as Role | null,
       created_at: r.created_at ?? null,
       member_id: r.member_id ?? null,
@@ -145,45 +162,52 @@ export async function GET(req: Request) {
     }))
 
     const ids = items.map((i) => i.user_id).filter(Boolean)
+    const nonLifetimeIds = items.filter((item) => !hasLifetimeGymAccess(item.role)).map((item) => item.user_id).filter(Boolean)
 
     if (ids.length > 0) {
-      const { data: subs, error: subsError } = await admin
-        .from('subscriptions')
-        .select(
-          'member_id, end_date, status, subscription_type, frozen_from, frozen_until, sessions_total, sessions_used'
-        )
-        .eq('status', 'active')
-        .in('member_id', ids)
+      if (nonLifetimeIds.length === 0) {
+        for (const it of items) it.is_active = true
+      } else {
+        const { data: subs, error: subsError } = await admin
+          .from('subscriptions')
+          .select(
+            'member_id, end_date, status, subscription_type, frozen_from, frozen_until, sessions_total, sessions_used'
+          )
+          .eq('status', 'active')
+          .in('member_id', nonLifetimeIds)
 
-      if (!subsError) {
-        const activeSet = new Set<string>()
+        if (!subsError) {
+          const activeSet = new Set<string>()
 
-        for (const s of subs ?? []) {
-          const mid = (s as any)?.member_id as string | null
-          if (!mid) continue
+          for (const s of subs ?? []) {
+            const mid = (s as any)?.member_id as string | null
+            if (!mid) continue
 
-          const subscriptionType = (
-            (s as any)?.subscription_type ??
-            ((s as any)?.end_date ? 'time' : 'sessions')
-          ) as 'time' | 'sessions'
+            const subscriptionType = (
+              (s as any)?.subscription_type ??
+              ((s as any)?.end_date ? 'time' : 'sessions')
+            ) as 'time' | 'sessions'
 
-          if (subscriptionType === 'time') {
-            const endDate = (s as any)?.end_date as string | null
-            if (!endDate || endDate < today) continue
-            if (isFrozenNow(s as any, today)) continue
-            activeSet.add(mid)
-            continue
+            if (subscriptionType === 'time') {
+              const endDate = (s as any)?.end_date as string | null
+              if (!endDate || endDate < today) continue
+              if (isFrozenNow(s as any, today)) continue
+              activeSet.add(mid)
+              continue
+            }
+
+            const total = Number((s as any)?.sessions_total ?? 0)
+            const used = Number((s as any)?.sessions_used ?? 0)
+            if (Math.max(total - used, 0) > 0) activeSet.add(mid)
           }
 
-          const total = Number((s as any)?.sessions_total ?? 0)
-          const used = Number((s as any)?.sessions_used ?? 0)
-          if (Math.max(total - used, 0) > 0) activeSet.add(mid)
+          for (const it of items) {
+            it.is_active = hasLifetimeGymAccess(it.role) ? true : activeSet.has(it.user_id)
+          }
+        } else {
+          console.error('Error fetching subscriptions (search active flag):', subsError)
+          for (const it of items) it.is_active = hasLifetimeGymAccess(it.role) ? true : null
         }
-
-        for (const it of items) it.is_active = activeSet.has(it.user_id)
-      } else {
-        console.error('Error fetching subscriptions (search active flag):', subsError)
-        for (const it of items) it.is_active = null
       }
     }
 

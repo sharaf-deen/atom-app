@@ -9,6 +9,8 @@ import Section from '@/components/layout/Section'
 import NotificationsSender from '@/components/NotificationsSender'
 import NotificationsList from '@/components/NotificationsList'
 import NotificationsMemberInbox from '@/components/NotificationsMemberInbox'
+import Badge from '@/components/ui/Badge'
+import { canManageNotifications, hasVisibleNotificationInbox } from '@/lib/rbac'
 
 export default async function NotificationsPage() {
   const me = await getSessionUser()
@@ -34,74 +36,91 @@ export default async function NotificationsPage() {
   }
 
   const role = me.role
-  const isAdmin = role === 'admin'
-  const isSuper = role === 'super_admin'
-  const isMember = role === 'member'
-  const isCoach = role === 'coach'
-  const isAssistantCoach = role === 'assistant_coach'
+  const canManage = canManageNotifications(role)
+  const hasInbox = hasVisibleNotificationInbox(role)
 
   return (
     <main>
       <PageHeader
         title="Notifications"
-        subtitle={
-          isAdmin || isSuper
-            ? 'Send announcements with clearer role targeting, estimated recipient counts, and stronger delivery feedback.'
-            : 'Read updates, triage unread items first, and manage your inbox status faster.'
-        }
+        subtitle={canManage ? 'Send clearly. Read quickly. Keep only the useful updates visible.' : 'Unread first, clear actions, and faster reading.'}
       />
 
       <Section className="space-y-6">
-        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-          <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4 shadow-soft">
-            <div className="text-sm font-semibold">Inbox triage</div>
-            <p className="mt-1 text-sm text-[hsl(var(--muted))]">
-              Put unread or recent items first when you need to clear the inbox quickly.
-            </p>
+        <div className="rounded-3xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-5 shadow-soft">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+            <div className="max-w-2xl">
+              <div className="flex flex-wrap items-center gap-2">
+                <h2 className="text-xl font-semibold tracking-tight">Clearer notifications, less noise</h2>
+                {canManage ? <Badge>Admin tools</Badge> : <Badge>Inbox</Badge>}
+              </div>
+              <p className="mt-2 text-base leading-7 text-[hsl(var(--muted))]">
+                This screen is now meant for 3 quick actions: check unread items, send one useful message, and remove what is no longer needed.
+              </p>
+            </div>
+
+            <div className="grid gap-3 sm:grid-cols-2 lg:min-w-[320px]">
+              <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] px-4 py-3">
+                <div className="text-xs font-semibold uppercase tracking-[0.2em] text-[hsl(var(--muted))]">Priority</div>
+                <div className="mt-1 text-base font-semibold">Unread first</div>
+                <p className="mt-1 text-sm leading-6 text-[hsl(var(--muted))]">Read the newest important items before everything else.</p>
+              </div>
+
+              <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] px-4 py-3">
+                <div className="text-xs font-semibold uppercase tracking-[0.2em] text-[hsl(var(--muted))]">Actions</div>
+                <div className="mt-1 text-base font-semibold">Read, unread, delete</div>
+                <p className="mt-1 text-sm leading-6 text-[hsl(var(--muted))]">The essential actions stay visible without extra noise.</p>
+              </div>
+            </div>
           </div>
 
-          <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4 shadow-soft">
-            <div className="text-sm font-semibold">Bulk actions</div>
-            <p className="mt-1 text-sm text-[hsl(var(--muted))]">
-              Select multiple rows to mark them read, unread, or delete them in one pass.
-            </p>
+          <div className="mt-4 flex flex-wrap gap-2 text-sm">
+            {hasInbox ? <Badge className="px-3 py-1">Personal inbox</Badge> : null}
+            {canManage ? <Badge className="px-3 py-1">Send notifications</Badge> : null}
+            {canManage ? <Badge className="px-3 py-1">Sent history</Badge> : null}
+            {canManage ? <Badge className="px-3 py-1">Member messages</Badge> : null}
           </div>
-
-          {(isAdmin || isSuper) && (
-            <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4 shadow-soft">
-              <div className="text-sm font-semibold">Targeting clarity</div>
-              <p className="mt-1 text-sm text-[hsl(var(--muted))]">
-                Before sending, the admin composer now shows who is eligible to receive the message and the estimated recipient count.
-              </p>
-            </div>
-          )}
-
-          {(isAdmin || isSuper) && (
-            <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4 shadow-soft">
-              <div className="text-sm font-semibold">Delivery feedback</div>
-              <p className="mt-1 text-sm text-[hsl(var(--muted))]">
-                After sending, the admin sees how many eligible recipients were reached and what was filtered out or unmatched.
-              </p>
-            </div>
-          )}
-
-          {(isMember || isCoach || isAssistantCoach) && (
-            <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4 shadow-soft">
-              <div className="text-sm font-semibold">Your role inbox</div>
-              <p className="mt-1 text-sm text-[hsl(var(--muted))]">
-                Members, coaches, and assistant coaches can read the notifications sent from the admin center here.
-              </p>
-            </div>
-          )}
         </div>
 
-        {(isAdmin || isSuper) && <NotificationsSender />}
+        {canManage ? (
+          <div className="space-y-3">
+            <div>
+              <h2 className="text-lg font-semibold tracking-tight">Send</h2>
+              <p className="text-sm text-[hsl(var(--muted))]">Compose one message, choose the right audience, then send.</p>
+            </div>
+            <NotificationsSender />
+          </div>
+        ) : null}
 
-        {(isMember || isCoach || isAssistantCoach) && <NotificationsList />}
+        {hasInbox ? (
+          <div className="space-y-3">
+            <div>
+              <h2 className="text-lg font-semibold tracking-tight">Inbox</h2>
+              <p className="text-sm text-[hsl(var(--muted))]">Unread and important items stay easy to spot.</p>
+            </div>
+            <NotificationsList />
+          </div>
+        ) : null}
 
-        {(isAdmin || isSuper) && <NotificationsList isAdmin sentOnly />}
+        {canManage ? (
+          <div className="space-y-3">
+            <div>
+              <h2 className="text-lg font-semibold tracking-tight">Sent</h2>
+              <p className="text-sm text-[hsl(var(--muted))]">Review what was sent and remove rows you no longer need.</p>
+            </div>
+            <NotificationsList isAdmin sentOnly />
+          </div>
+        ) : null}
 
-        {(isAdmin || isSuper) && <NotificationsMemberInbox canDelete />}
+        {canManage ? (
+          <div className="space-y-3">
+            <div>
+              <h2 className="text-lg font-semibold tracking-tight">Member messages</h2>
+              <p className="text-sm text-[hsl(var(--muted))]">Review direct messages sent by members in one place.</p>
+            </div>
+            <NotificationsMemberInbox canDelete />
+          </div>
+        ) : null}
       </Section>
     </main>
   )

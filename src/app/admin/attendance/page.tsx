@@ -373,10 +373,11 @@ export default async function AttendanceDashboard({
   })
 
   const headerRight = (
-    <div className="flex items-center gap-2">
+    <div className="flex flex-col items-end gap-1">
       <Button asChild variant="outline" size="sm">
-                <a href={exportHref}>Export CSV</a>
+        <a href={exportHref}>Export CSV</a>
       </Button>
+      <span className="text-xs text-[hsl(var(--muted))]">Uses current filters</span>
     </div>
   )
 
@@ -384,7 +385,7 @@ export default async function AttendanceDashboard({
     <main>
       <PageHeader
         title="Attendance"
-        subtitle={`Attendance dashboard — date filters are shown in Cairo time (${CAIRO_TZ}).`}
+        subtitle={`Focus the dashboard before reviewing attendance and inactivity.`}
         right={headerRight}
       />
       <Section className="space-y-5">

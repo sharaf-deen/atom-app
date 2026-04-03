@@ -4,10 +4,12 @@ import { useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import Button from '@/components/ui/Button'
+import { formatRequestRef } from '@/lib/requestRef'
 
 type Props = {
   sendEmail?: boolean
 }
+
 
 export default function RunHealthMonitorButton({ sendEmail = false }: Props) {
   const [loading, setLoading] = useState(false)
@@ -25,23 +27,26 @@ export default function RunHealthMonitorButton({ sendEmail = false }: Props) {
       const path = `/api/admin/health-monitor/run${sendEmail ? '?send_email=1' : ''}`
       const res = await fetch(path, {
         method: 'GET',
+        cache: 'no-store',
+        credentials: 'same-origin',
         headers: { 'cache-control': 'no-store' },
       })
-      const json = await res.json().catch(() => null)
+      const json = await res.json().catch(() => ({}))
+      const requestId = String((json as any)?.request_id || res.headers.get('x-request-id') || '').trim() || null
 
       if (!res.ok) {
-        const msg = json?.details || json?.error || 'Failed'
-        toast.error(`Health monitor: ${msg}`)
+        const msg = (json as any)?.details || (json as any)?.error || 'Failed'
+        toast.error(`Health monitor: ${formatRequestRef(String(msg), requestId, 'sentence')}`)
         return
       }
 
-      const status = String(json?.summary?.overall_status ?? 'healthy')
-      const scans = Number(json?.summary?.counts?.scans_today ?? 0)
-      const orphan = Number(json?.summary?.counts?.orphan_profiles ?? 0)
-      const warnings = Array.isArray(json?.summary?.warnings) ? json.summary.warnings.length : 0
-      const emailSent = !!json?.email_sent
-      const persistError = json?.persist_error
-      const reportId = String(json?.report_id ?? '').trim()
+      const status = String((json as any)?.summary?.overall_status ?? 'healthy')
+      const scans = Number((json as any)?.summary?.counts?.scans_today ?? 0)
+      const orphan = Number((json as any)?.summary?.counts?.orphan_profiles ?? 0)
+      const warnings = Array.isArray((json as any)?.summary?.warnings) ? (json as any).summary.warnings.length : 0
+      const emailSent = !!(json as any)?.email_sent
+      const persistError = (json as any)?.persist_error
+      const reportId = String((json as any)?.report_id ?? '').trim()
       const needsReview = status === 'warning' || status === 'critical'
 
       const suffix = sendEmail
@@ -54,13 +59,13 @@ export default function RunHealthMonitorButton({ sendEmail = false }: Props) {
       const base = `Status ${status}. Warnings ${warnings}. Scans today ${scans}. Orphans ${orphan}.${triage}${suffix}`
 
       if (persistError) {
-        toast.warning(base, { description: `Report save warning: ${persistError}` })
+        toast.warning(formatRequestRef(base, requestId, 'sentence'), { description: `Report save warning: ${persistError}` })
       } else if (status === 'critical') {
-        toast.error(base)
+        toast.error(formatRequestRef(base, requestId, 'sentence'))
       } else if (status === 'warning') {
-        toast.warning(base)
+        toast.warning(formatRequestRef(base, requestId, 'sentence'))
       } else {
-        toast.success(base)
+        toast.success(formatRequestRef(base, requestId, 'sentence'))
       }
 
       if (reportId) {
@@ -81,8 +86,13 @@ export default function RunHealthMonitorButton({ sendEmail = false }: Props) {
   }
 
   return (
-    <Button onClick={run} disabled={loading} variant={sendEmail ? 'outline' : 'solid'}>
-      {label}
-    </Button>
+    <div className="flex items-center gap-2">
+      <Button type="button" onClick={run} disabled={loading} variant={sendEmail ? 'outline' : 'solid'} loading={loading} loadingText={label}>
+        {sendEmail ? 'Run + email' : 'Run now'}
+      </Button>
+      <span className="sr-only" role="status" aria-live="polite">
+        {loading ? label : ''}
+      </span>
+    </div>
   )
 }

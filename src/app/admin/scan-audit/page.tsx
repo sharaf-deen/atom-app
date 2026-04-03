@@ -107,7 +107,7 @@ export default async function ScanAuditPage({ searchParams }: { searchParams: Se
           <div>
             <h1 className="text-2xl font-semibold tracking-tight">Scan Audit</h1>
             <p className="mt-1 text-sm text-[hsl(var(--muted))]">
-              Kiosk scan history (attendance) with staff + device context. Time shown in Egypt time.
+              Refine the audit, then review exactly this scan history.
             </p>
             {truncated ? (
               <p className="mt-1 text-xs text-amber-700">
@@ -116,14 +116,15 @@ export default async function ScanAuditPage({ searchParams }: { searchParams: Se
             ) : null}
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex flex-col items-end gap-1">
             <a
               href={exportHref}
               className="rounded-xl border px-3 py-2 text-sm font-semibold hover:bg-black/[0.03] dark:hover:bg-white/[0.06]"
-              title="Download CSV"
+              title="Export CSV"
             >
               Export CSV
             </a>
+            <span className="text-xs text-[hsl(var(--muted))]">Uses current filters</span>
           </div>
         </div>
 

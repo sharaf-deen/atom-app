@@ -525,13 +525,13 @@ export default async function AdminCashReportPage({
 
         <div className="flex flex-wrap gap-2">
           <Link prefetch={false} href={`/api/admin/cash-report/export?${exportQuery.toString()}`} className="rounded-xl border px-4 py-2 text-sm font-medium hover:bg-gray-50">
-            Export filtered CSV
+            Export CSV
           </Link>
           <Link prefetch={false} href={`/api/admin/cash-report/export-pdf?${exportQuery.toString()}`} className="rounded-xl border px-4 py-2 text-sm font-medium hover:bg-gray-50">
-            Export filtered PDF
+            Export PDF
           </Link>
           <div className="self-center text-xs text-[hsl(var(--muted))]">
-            Exports and shortcuts follow the same selected period and include Personal Funds cash in/out. Off-cash personal expenses stay contextual only.
+            Uses current filters
           </div>
         </div>
       </Card>

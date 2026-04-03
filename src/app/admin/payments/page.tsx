@@ -379,8 +379,8 @@ export default async function AdminPaymentsPage({
 
       <Card>
         <CardHeader>
-          <CardTitle>Quick filters</CardTitle>
-          <div className="text-sm text-[hsl(var(--muted))]">Egypt time (Africa/Cairo)</div>
+          <CardTitle>Filters</CardTitle>
+          <div className="text-sm text-[hsl(var(--muted))]">Refine the view, then export exactly this selection.</div>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="flex flex-wrap gap-2">
@@ -397,7 +397,7 @@ export default async function AdminPaymentsPage({
               Custom
             </Link>
             <Link prefetch={false} href={quickLinks.reset} className="inline-flex items-center justify-center rounded-2xl border border-[hsl(var(--border))] bg-white px-4 py-2 text-sm font-medium hover:bg-[hsl(var(--bg))]/80">
-              Reset all
+              Reset filters
             </Link>
           </div>
 
@@ -466,11 +466,12 @@ export default async function AdminPaymentsPage({
                 Apply filters
               </button>
               <a href={`/api/admin/payments/export?${exportQS}`} className="inline-flex items-center justify-center rounded-2xl shadow-soft border border-[hsl(var(--border))] bg-white px-4 py-2 text-sm font-medium hover:bg-[hsl(var(--bg))]/80">
-                Export filtered CSV
+                Export CSV
               </a>
               <a href={`/api/admin/payments/export-pdf?${exportQS}`} className="inline-flex items-center justify-center rounded-2xl shadow-soft border border-[hsl(var(--border))] bg-white px-4 py-2 text-sm font-medium hover:bg-[hsl(var(--bg))]/80">
-                Export filtered PDF
+                Export PDF
               </a>
+              <span className="text-xs text-[hsl(var(--muted))]">Uses current filters</span>
               <Link
                 prefetch={false}
                 href="/admin/payments"
@@ -482,7 +483,9 @@ export default async function AdminPaymentsPage({
           </form>
 
           {activeFilters.length ? (
-            <div className="flex flex-wrap gap-2">
+            <div className="space-y-2">
+              <div className="text-xs font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Current view</div>
+              <div className="flex flex-wrap gap-2">
               {activeFilters.map((label) => (
                 <span
                   key={label}
@@ -491,6 +494,7 @@ export default async function AdminPaymentsPage({
                   {label}
                 </span>
               ))}
+              </div>
             </div>
           ) : null}
         </CardContent>

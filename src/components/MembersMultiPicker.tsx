@@ -4,6 +4,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import Button from '@/components/ui/Button'
 import Input from '@/components/ui/Input'
+import InlineAlert from '@/components/ui/InlineAlert'
 
 type Member = {
   user_id: string
@@ -31,6 +32,8 @@ export default function MembersMultiPicker({
   const [selected, setSelected] = useState<Set<string>>(new Set(initialSelected))
 
   const debTimer = useRef<number | null>(null)
+  const abortRef = useRef<AbortController | null>(null)
+  const requestSeqRef = useRef(0)
   const query = useMemo(() => q.trim(), [q])
 
   // notify parent on selection change
@@ -41,6 +44,10 @@ export default function MembersMultiPicker({
   // first load
   useEffect(() => {
     runSearch(query)
+    return () => {
+      abortRef.current?.abort()
+      if (debTimer.current) window.clearTimeout(debTimer.current)
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -56,13 +63,21 @@ export default function MembersMultiPicker({
 
   async function runSearch(qs: string) {
     if (disabled) return
+
+    abortRef.current?.abort()
+    const controller = new AbortController()
+    abortRef.current = controller
+    const requestSeq = requestSeqRef.current + 1
+    requestSeqRef.current = requestSeq
+
     setLoading(true)
     setErr('')
     try {
       const url = new URL('/api/members/search', window.location.origin)
       if (qs) url.searchParams.set('q', qs)
-      const r = await fetch(url.toString(), { cache: 'no-store' })
+      const r = await fetch(url.toString(), { cache: 'no-store', signal: controller.signal })
       const j = await r.json().catch(() => ({}))
+      if (controller.signal.aborted || requestSeq !== requestSeqRef.current) return
       if (!r.ok || !j?.ok) {
         setErr(j?.error || 'Failed to load members')
         setItems([])
@@ -70,10 +85,14 @@ export default function MembersMultiPicker({
       }
       setItems(Array.isArray(j.items) ? j.items : [])
     } catch (e: any) {
+      if (controller.signal.aborted || requestSeq !== requestSeqRef.current) return
       setErr(String(e?.message || e))
       setItems([])
     } finally {
-      setLoading(false)
+      if (requestSeq === requestSeqRef.current) {
+        setLoading(false)
+        if (abortRef.current === controller) abortRef.current = null
+      }
     }
   }
 
@@ -129,8 +148,10 @@ export default function MembersMultiPicker({
             type="button"
             onClick={() => runSearch(query)}
             disabled={disabled || loading}
+            loading={loading}
+            loadingText="Searching…"
           >
-            {loading ? 'Searching…' : 'Search'}
+            Search
           </Button>
           <Button
             type="button"
@@ -172,18 +193,19 @@ export default function MembersMultiPicker({
       </div>
 
       {/* Error */}
-      {err && (
-        <div className="mt-2 rounded-2xl border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-700">
-          {err}
-        </div>
-      )}
+      <div className="mt-2 space-y-2">
+        {loading ? <InlineAlert compact variant="info">Loading members…</InlineAlert> : null}
+        {err ? <InlineAlert variant="error">{err}</InlineAlert> : null}
+      </div>
 
       {/* Results list */}
       <div className="mt-3 max-h-64 overflow-auto rounded-2xl border border-[hsl(var(--border))] bg-white">
         {items.length === 0 && !loading ? (
-          <div className="p-3 text-sm text-[hsl(var(--muted))]">No results.</div>
+          <div className="p-3">
+            <InlineAlert compact variant="info">No results.</InlineAlert>
+          </div>
         ) : (
-          items.map((m, i) => (
+          items.map((m) => (
             <label
               key={m.user_id}
               className="flex items-center gap-2 px-3 py-2 border-b border-[hsl(var(--border))] last:border-b-0"

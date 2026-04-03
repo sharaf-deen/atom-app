@@ -3,19 +3,22 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
+import { formatRequestRef } from '@/lib/requestRef'
 
 type AutoReturnProps = {
-  /** Seconds before redirecting back to the scanner (default: 7) */
   seconds?: number
-  /** Destination route (default: /scan) */
   href?: string
-  /** Hide the countdown text */
   hideText?: boolean
 }
 
-type VerifyRes = { ok: boolean; message?: string }
+type VerifyRes = { ok: boolean; message?: string; request_id?: string }
 
-type WakeLockSentinel = { release: () => Promise<void> }
+type WakeLockSentinel = {
+  release?: () => Promise<void>
+  addEventListener?: (type: string, listener: () => void) => void
+  removeEventListener?: (type: string, listener: () => void) => void
+}
+
 
 function isKioskUrl(): boolean {
   try {
@@ -37,58 +40,88 @@ function isKioskStored(): boolean {
 export default function AutoReturn({ seconds = 7, href = '/scan', hideText }: AutoReturnProps) {
   const router = useRouter()
   const [left, setLeft] = useState<number>(seconds)
-  const wakeLockRef = useRef<WakeLockSentinel | null>(null)
-
-
-// Network status (offline fallback)
-const [online, setOnline] = useState(true)
-
-useEffect(() => {
-  const update = () => setOnline(typeof navigator !== 'undefined' ? navigator.onLine : true)
-  update()
-  window.addEventListener('online', update)
-  window.addEventListener('offline', update)
-  return () => {
-    window.removeEventListener('online', update)
-    window.removeEventListener('offline', update)
-  }
-}, [])
-
+  const [online, setOnline] = useState(true)
   const [exitOpen, setExitOpen] = useState(false)
   const [exitPin, setExitPin] = useState('')
   const [exitError, setExitError] = useState<string | null>(null)
   const [exitHolding, setExitHolding] = useState(false)
+  const wakeLockRef = useRef<WakeLockSentinel | null>(null)
+  const wakeLockListenerRef = useRef<(() => void) | null>(null)
   const exitHoldRef = useRef<number | null>(null)
+  const verifyAbortRef = useRef<AbortController | null>(null)
 
-  const kiosk = typeof window !== 'undefined' ? (isKioskUrl() || isKioskStored()) : false
+  const kiosk = typeof window !== 'undefined' ? isKioskUrl() || isKioskStored() : false
   const hrefFinal = kiosk && href === '/scan' ? '/scan?kiosk=1' : href
 
-  // Keep kiosk CSS active on result pages too
+  useEffect(() => {
+    const update = () => setOnline(typeof navigator !== 'undefined' ? navigator.onLine : true)
+    update()
+    window.addEventListener('online', update)
+    window.addEventListener('offline', update)
+    return () => {
+      window.removeEventListener('online', update)
+      window.removeEventListener('offline', update)
+    }
+  }, [])
+
   useEffect(() => {
     if (!kiosk) return
+
     document.body.classList.add('kiosk-mode')
     try {
       window.localStorage.setItem('atom:kiosk', '1')
     } catch {}
 
+    const releaseWakeLock = async () => {
+      const listener = wakeLockListenerRef.current
+      const current = wakeLockRef.current
+      if (listener && current?.removeEventListener) {
+        try {
+          current.removeEventListener('release', listener)
+        } catch {}
+      }
+      wakeLockListenerRef.current = null
+      wakeLockRef.current = null
+      if (current?.release) {
+        try {
+          await current.release()
+        } catch {}
+      }
+    }
+
     const requestWake = async () => {
+      if (wakeLockRef.current) return
       try {
-        // @ts-ignore wakeLock may be missing in some TS libs
         const wl = await (navigator as any).wakeLock?.request?.('screen')
-        if (wl) wakeLockRef.current = wl
+        if (!wl) return
+        const onRelease = () => {
+          wakeLockRef.current = null
+        }
+        wakeLockListenerRef.current = onRelease
+        if (wl.addEventListener) {
+          try {
+            wl.addEventListener('release', onRelease)
+          } catch {}
+        }
+        wakeLockRef.current = wl
       } catch {
         // ignore
       }
     }
 
-    requestWake()
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        requestWake().catch(() => {})
+      }
+    }
+
+    requestWake().catch(() => {})
+    document.addEventListener('visibilitychange', onVisibilityChange)
 
     return () => {
       document.body.classList.remove('kiosk-mode')
-      if (wakeLockRef.current) {
-        wakeLockRef.current.release().catch(() => {})
-        wakeLockRef.current = null
-      }
+      document.removeEventListener('visibilitychange', onVisibilityChange)
+      releaseWakeLock().catch(() => {})
     }
   }, [kiosk])
 
@@ -96,12 +129,10 @@ useEffect(() => {
     if (exitOpen) return
     setLeft(seconds)
 
-    // Countdown
     const interval = window.setInterval(() => {
       setLeft((prev) => Math.max(0, prev - 1))
     }, 1000)
 
-    // Redirect (replace so Back doesn't return to result)
     const timeout = window.setTimeout(() => {
       router.replace(hrefFinal)
     }, Math.max(0, seconds) * 1000)
@@ -112,6 +143,12 @@ useEffect(() => {
     }
   }, [seconds, hrefFinal, router, exitOpen])
 
+  useEffect(() => {
+    return () => {
+      if (exitHoldRef.current) window.clearTimeout(exitHoldRef.current)
+      verifyAbortRef.current?.abort()
+    }
+  }, [])
 
   function cancelExitHold() {
     if (exitHoldRef.current) window.clearTimeout(exitHoldRef.current)
@@ -128,11 +165,12 @@ useEffect(() => {
       setExitError(null)
       setExitPin('')
       setExitOpen(true)
-    }, 2000) as any
+    }, 2000)
   }
 
   function closeExitModal() {
     cancelExitHold()
+    verifyAbortRef.current?.abort()
     setExitOpen(false)
     setExitError(null)
     setExitPin('')
@@ -146,15 +184,22 @@ useEffect(() => {
       return
     }
 
+    verifyAbortRef.current?.abort()
+    const controller = new AbortController()
+    verifyAbortRef.current = controller
+
     try {
       const r = await fetch('/api/kiosk/verify-exit-pin', {
         method: 'POST',
+        cache: 'no-store',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ pin: exitPin || '' }),
+        signal: controller.signal,
       })
       const j: VerifyRes = await r.json().catch(() => ({ ok: false }))
+      const requestId = String(j.request_id || r.headers.get('x-request-id') || '').trim() || null
       if (!r.ok || !j.ok) {
-        setExitError(j.message || 'Invalid PIN')
+        setExitError(formatRequestRef(j.message || 'Invalid PIN', requestId, 'paren'))
         return
       }
 
@@ -163,18 +208,23 @@ useEffect(() => {
       } catch {}
       document.body.classList.remove('kiosk-mode')
 
-      // Best-effort exit native fullscreen if used
       try {
         ;(document as any).exitFullscreen?.()
       } catch {}
 
       closeExitModal()
       router.replace('/scan')
-    } catch {
-      setExitError(!online || (typeof navigator !== 'undefined' && !navigator.onLine) ? 'Offline — reconnect to verify PIN' : 'Failed to verify PIN')
+    } catch (err) {
+      if (err instanceof DOMException && err.name === 'AbortError') return
+      setExitError(
+        !online || (typeof navigator !== 'undefined' && !navigator.onLine)
+          ? 'Offline — reconnect to verify PIN'
+          : 'Failed to verify PIN'
+      )
+    } finally {
+      if (verifyAbortRef.current === controller) verifyAbortRef.current = null
     }
   }
-
 
   return (
     <div className={kiosk ? 'relative' : ''}>
@@ -195,7 +245,6 @@ useEffect(() => {
         </button>
       ) : null}
 
-      
       {exitOpen ? (
         <div className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/60 p-4">
           <div className="w-full max-w-sm rounded-2xl border border-[hsl(var(--border))] bg-white p-4 text-gray-900 shadow-soft">
@@ -210,6 +259,16 @@ useEffect(() => {
               placeholder="PIN"
               value={exitPin}
               onChange={(e) => setExitPin(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault()
+                  confirmExitKiosk()
+                }
+                if (e.key === 'Escape') {
+                  e.preventDefault()
+                  closeExitModal()
+                }
+              }}
               autoFocus
             />
 
@@ -218,28 +277,24 @@ useEffect(() => {
             <div className="mt-4 flex justify-end gap-2">
               <button
                 type="button"
-                className="rounded-xl border border-[hsl(var(--border))] bg-white px-4 py-2 text-sm font-medium"
                 onClick={closeExitModal}
+                className="rounded-xl border border-[hsl(var(--border))] px-3 py-2 text-sm font-medium"
               >
                 Cancel
               </button>
               <button
                 type="button"
-                className="rounded-xl bg-black px-4 py-2 text-sm font-medium text-white"
                 onClick={confirmExitKiosk}
+                className="rounded-xl bg-black px-3 py-2 text-sm font-medium text-white"
               >
-                Exit
+                Exit kiosk
               </button>
             </div>
           </div>
         </div>
       ) : null}
 
-{hideText ? null : (
-        <p className="text-sm text-[hsl(var(--muted))]">
-          Returning to scanner in <span className="font-semibold">{left}</span>s…
-        </p>
-      )}
+      {!hideText ? <div className="mt-3 text-center text-xs text-[hsl(var(--muted))]">Returning to scanner in {left}s…</div> : null}
     </div>
   )
 }

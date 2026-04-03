@@ -89,8 +89,11 @@ export default async function PermissionsAuditPage() {
     ),
     category: <Badge>{cap.category}</Badge>,
     member: yesNoBadge(cap.allowedRoles.includes('member')),
+    champion: yesNoBadge(cap.allowedRoles.includes('champion')),
+    vip: yesNoBadge(cap.allowedRoles.includes('vip')),
     assistant_coach: yesNoBadge(cap.allowedRoles.includes('assistant_coach')),
     coach: yesNoBadge(cap.allowedRoles.includes('coach')),
+    head_coach: yesNoBadge(cap.allowedRoles.includes('head_coach')),
     reception: yesNoBadge(cap.allowedRoles.includes('reception')),
     admin: yesNoBadge(cap.allowedRoles.includes('admin')),
     super_admin: yesNoBadge(cap.allowedRoles.includes('super_admin')),
@@ -105,7 +108,7 @@ export default async function PermissionsAuditPage() {
 
   const totalCapabilities = capabilities.length
   const adminOnly = capabilities.filter(
-    (cap) => cap.allowedRoles.includes('admin') && !cap.allowedRoles.includes('reception') && !cap.allowedRoles.includes('coach') && !cap.allowedRoles.includes('assistant_coach') && !cap.allowedRoles.includes('member'),
+    (cap) => cap.allowedRoles.includes('admin') && !cap.allowedRoles.includes('reception') && !cap.allowedRoles.includes('head_coach') && !cap.allowedRoles.includes('coach') && !cap.allowedRoles.includes('assistant_coach') && !cap.allowedRoles.includes('vip') && !cap.allowedRoles.includes('champion') && !cap.allowedRoles.includes('member'),
   ).length
   const superAdminOnly = capabilities.filter(
     (cap) => cap.allowedRoles.length === 1 && cap.allowedRoles[0] === 'super_admin',
@@ -201,8 +204,11 @@ export default async function PermissionsAuditPage() {
             { key: 'capability', header: 'Capability', tdClassName: 'whitespace-normal' },
             { key: 'category', header: 'Area', thClassName: 'w-24' },
             { key: 'member', header: 'Member', thClassName: 'w-20', tdClassName: 'text-center' },
+            { key: 'champion', header: 'Champion', thClassName: 'w-20', tdClassName: 'text-center' },
+            { key: 'vip', header: 'VIP', thClassName: 'w-20', tdClassName: 'text-center' },
             { key: 'assistant_coach', header: 'Assistant', thClassName: 'w-20', tdClassName: 'text-center' },
             { key: 'coach', header: 'Coach', thClassName: 'w-20', tdClassName: 'text-center' },
+            { key: 'head_coach', header: 'Head coach', thClassName: 'w-24', tdClassName: 'text-center' },
             { key: 'reception', header: 'Reception', thClassName: 'w-20', tdClassName: 'text-center' },
             { key: 'admin', header: 'Admin', thClassName: 'w-20', tdClassName: 'text-center' },
             { key: 'super_admin', header: 'Super admin', thClassName: 'w-24', tdClassName: 'text-center' },

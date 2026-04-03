@@ -21,6 +21,7 @@ type Body =
       date_of_birth?: string
       dateOfBirth?: string
       dob?: string
+      visitor_trial_id?: string
     }
   | Record<string, any>
 
@@ -30,6 +31,21 @@ type CreateOutcome =
   | 'existing_auth_user'
 
 type InviteMode = 'custom_qr' | 'custom_qr_failed' | 'supabase_default' | 'none'
+
+type ExistingMemberPayload = {
+  user_id: string
+  email: string | null
+  first_name: string | null
+  last_name: string | null
+  phone: string | null
+}
+
+async function findAuthUserByEmail(admin: any, email: string) {
+  const { data, error } = await admin.auth.admin.listUsers({ page: 1, perPage: 1000 })
+  if (error) return { user: null, error }
+  const user = data?.users?.find((u: any) => u.email && String(u.email).toLowerCase() === email) ?? null
+  return { user, error: null }
+}
 
 function isValidDateOnly(dateOnly: string) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(dateOnly)) return false
@@ -46,6 +62,10 @@ function isValidDateOnly(dateOnly: string) {
 
 function todayDateOnlyUTC() {
   return new Date().toISOString().slice(0, 10)
+}
+
+function isUuidLike(value: string) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)
 }
 
 function noStore(res: NextResponse) {
@@ -111,6 +131,7 @@ export async function POST(req: Request) {
       (body as any).date_of_birth ?? (body as any).dateOfBirth ?? (body as any).dob ?? '',
     ).trim()
     const date_of_birth = (dobRaw || null) as string | null
+    const visitor_trial_id = String((body as any).visitor_trial_id ?? '').trim() || null
 
     if (date_of_birth) {
       if (!isValidDateOnly(date_of_birth)) {
@@ -132,6 +153,12 @@ export async function POST(req: Request) {
       )
     }
 
+    if (visitor_trial_id && !isUuidLike(visitor_trial_id)) {
+      return noStore(
+        NextResponse.json({ ok: false, error: 'INVALID_VISITOR_TRIAL_ID' }, { status: 400 }),
+      )
+    }
+
     // 3) Client admin (Service Role)
     const url = process.env.NEXT_PUBLIC_SUPABASE_URL
     const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY
@@ -149,53 +176,91 @@ export async function POST(req: Request) {
       auth: { autoRefreshToken: false, persistSession: false },
     })
 
-    // 4) Si un profile existe déjà pour cet email → on met juste à jour les infos
+    // 4) Duplicate email safety: never overwrite an existing member from the create flow
     {
-      const { data: existing } = await admin
+      const { data: existingProfile, error: existingProfileErr } = await admin
         .from('profiles')
-        .select('user_id, first_name, last_name, phone, date_of_birth')
+        .select('user_id, email, first_name, last_name, phone')
         .ilike('email', email)
         .maybeSingle()
 
-      if (existing?.user_id) {
-        const patch: Record<string, any> = {}
-        if (first_name) patch.first_name = first_name
-        if (last_name) patch.last_name = last_name
-        if (phone) patch.phone = phone
-        if (date_of_birth) patch.date_of_birth = date_of_birth
+      if (existingProfileErr) {
+        return noStore(
+          NextResponse.json(
+            { ok: false, error: `PROFILE_LOOKUP_FAILED: ${existingProfileErr.message}` },
+            { status: 500 },
+          ),
+        )
+      }
 
-        if (Object.keys(patch).length > 0) {
-          await admin.from('profiles').update(patch).eq('user_id', existing.user_id)
+      if (existingProfile?.user_id) {
+        return noStore(
+          NextResponse.json(
+            {
+              ok: false,
+              error: 'EMAIL_ALREADY_IN_USE',
+              details:
+                'This email already belongs to an existing member. Open the existing member instead of creating a new one.',
+              next_action: 'open_existing_member',
+              existing_member: existingProfile as ExistingMemberPayload,
+            },
+            { status: 409 },
+          ),
+        )
+      }
+
+      const { user: existingAuthUser, error: authLookupErr } = await findAuthUserByEmail(admin, email)
+      if (authLookupErr) {
+        return noStore(
+          NextResponse.json(
+            { ok: false, error: `AUTH_LOOKUP_FAILED: ${authLookupErr.message}` },
+            { status: 500 },
+          ),
+        )
+      }
+
+      if (existingAuthUser?.id) {
+        const { data: existingProfileById, error: existingByIdErr } = await admin
+          .from('profiles')
+          .select('user_id, email, first_name, last_name, phone')
+          .eq('user_id', existingAuthUser.id)
+          .maybeSingle()
+
+        if (existingByIdErr) {
+          return noStore(
+            NextResponse.json(
+              { ok: false, error: `PROFILE_LOOKUP_FAILED: ${existingByIdErr.message}` },
+              { status: 500 },
+            ),
+          )
         }
 
-        try {
-          revalidateTag('members')
-        } catch {}
-        try {
-          revalidatePath('/members')
-        } catch {}
+        if (existingProfileById?.user_id) {
+          return noStore(
+            NextResponse.json(
+              {
+                ok: false,
+                error: 'EMAIL_ALREADY_IN_USE',
+                details:
+                  'This email already belongs to an existing member. Open the existing member instead of creating a new one.',
+                next_action: 'open_existing_member',
+                existing_member: existingProfileById as ExistingMemberPayload,
+              },
+              { status: 409 },
+            ),
+          )
+        }
 
         return noStore(
-          NextResponse.json({
-            ok: true,
-            outcome: 'existing_profile' as CreateOutcome,
-            invite_sent: false,
-            profile_action: Object.keys(patch).length > 0 ? 'updated' : 'unchanged',
-            next_action: 'open_profile',
-            user_id: existing.user_id,
-            user: {
-              id: existing.user_id,
-              email,
-              first_name,
-              last_name,
-              phone,
-              date_of_birth,
+          NextResponse.json(
+            {
+              ok: false,
+              error: 'EMAIL_ALREADY_IN_USE',
+              details:
+                'This email is already linked to an existing account. Use another email or recover the original account before creating a new member.',
             },
-            message:
-              Object.keys(patch).length > 0
-                ? 'Existing member found. Profile updated. No invite email was sent.'
-                : 'This member already exists. No invite email was sent.',
-          }),
+            { status: 409 },
+          ),
         )
       }
     }
@@ -387,11 +452,33 @@ export async function POST(req: Request) {
       }
     }
 
+    if (visitor_trial_id) {
+      const { error: visitorLinkError } = await admin
+        .from('visitor_trials')
+        .update({
+          linked_member_id: userId,
+          updated_by: actor.id,
+        })
+        .eq('id', visitor_trial_id)
+
+      if (visitorLinkError) {
+        return noStore(
+          NextResponse.json(
+            { ok: false, error: `VISITOR_TRIAL_LINK_FAILED: ${visitorLinkError.message}` },
+            { status: 500 },
+          ),
+        )
+      }
+    }
+
     try {
       revalidateTag('members')
     } catch {}
     try {
       revalidatePath('/members')
+    } catch {}
+    try {
+      revalidatePath('/admin/visitors')
     } catch {}
 
     return noStore(
@@ -406,6 +493,7 @@ export async function POST(req: Request) {
         next_action: inviteSent ? 'none' : 'open_profile',
         user_id: userId,
         user: { id: userId, email, first_name, last_name, phone, date_of_birth },
+        visitor_trial_id,
         message:
           outcome === 'invited_new_user'
             ? inviteMode === 'custom_qr'

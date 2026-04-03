@@ -190,7 +190,7 @@ export default async function AdminPage() {
     <main>
       <PageHeader
         title="Admin Dashboard"
-        subtitle={`Daily ops — Cairo time (${CAIRO_TZ}).`}
+        subtitle={`Daily ops · Cairo time (${CAIRO_TZ}).`}
         right={
           <div className="flex flex-wrap items-center gap-2">
             <Button asChild variant="outline" href="/scan?kiosk=1">
@@ -208,13 +208,13 @@ export default async function AdminPage() {
           <StatCard
             label="Active members"
             value={activeCount ?? 0}
-            hint={`Active subscriptions (end date ≥ ${today})`}
+            hint={`Active subscriptions as of ${today}`}
             href="/members"
           />
           <StatCard
             label="Expiring in 7 days"
             value={expiring7Count ?? 0}
-            hint={`${today} → ${next7}`}
+            hint={`Window: ${today} → ${next7}`}
             href="/admin/expiring-soon"
           />
           <StatCard
@@ -226,7 +226,7 @@ export default async function AdminPage() {
           <StatCard
             label="Scans today"
             value={scansToday}
-            hint={`Kiosk attendance — ${today}`}
+            hint={`Attendance — ${today}`}
             href="/admin/scan-audit"
           />
         </div>
@@ -237,16 +237,16 @@ export default async function AdminPage() {
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
           <TodayCard
             href="/admin/crm"
-            label="Follow-up queue"
+            label="Follow-up"
             title="Open CRM"
-            hint="Work through renewals, dues and low-attendance cases."
+            hint="Start with renewals, dues and low-attendance cases."
             icon={<MessageSquare size={18} strokeWidth={2.1} />}
           />
           <TodayCard
             href="/admin/health-monitor"
-            label="System health"
+            label="Health"
             title={latestHealthLabel}
-            hint={latestHealthDate ? `Latest report saved ${new Date(latestHealthDate).toLocaleDateString('en-GB')}.` : 'Open Health Monitor to run or review the latest status.'}
+            hint={latestHealthDate ? `Latest report saved ${new Date(latestHealthDate).toLocaleDateString('en-GB')}.` : 'Open Health Monitor to review or run a check.'}
             icon={
               latestHealthStatus === 'healthy' ? (
                 <ShieldCheck size={18} strokeWidth={2.1} />
@@ -258,15 +258,15 @@ export default async function AdminPage() {
           <TodayCard
             href="/admin/payments"
             label="Finance"
-            title={outstandingCount > 0 ? fmtMoneyEGP(outstandingTotal) : 'Payments look clear'}
-            hint={outstandingCount > 0 ? `${outstandingCount} member(s) still have dues to settle.` : 'Move into Payments and Cash Report when you need the detailed view.'}
+            title={outstandingCount > 0 ? fmtMoneyEGP(outstandingTotal) : 'Payments clear'}
+            hint={outstandingCount > 0 ? `${outstandingCount} member(s) still have dues to settle.` : 'Open Payments or Cash Report for detail.'}
             icon={<Wallet size={18} strokeWidth={2.1} />}
           />
           <TodayCard
             href={me.role === 'super_admin' ? '/admin/permissions-audit' : '/admin/personal-funds'}
             label={me.role === 'super_admin' ? 'Control' : 'Review'}
             title={me.role === 'super_admin' ? 'Permissions audit' : 'Personal funds'}
-            hint={me.role === 'super_admin' ? 'Review who can access what in one place.' : 'Review partner advances, reimbursements and attached proof.'}
+            hint={me.role === 'super_admin' ? 'Review access in one place.' : 'Review advances, reimbursements and proof.'}
             icon={<UserCog size={18} strokeWidth={2.1} />}
           />
         </div>
@@ -278,12 +278,6 @@ export default async function AdminPage() {
           <Button asChild variant="outline" href="/admin/crm">
             CRM
           </Button>
-          <Button asChild variant="outline" href="/admin/expiring-soon">
-            Expiring
-          </Button>
-          <Button asChild variant="outline" href="/admin/outstanding-dues">
-            Outstanding
-          </Button>
           <Button asChild variant="outline" href="/admin/payments">
             Payments
           </Button>
@@ -293,14 +287,14 @@ export default async function AdminPage() {
           <Button asChild variant="outline" href="/expenses">
             Expenses
           </Button>
+          <Button asChild variant="outline" href="/admin/health-monitor">
+            Health Monitor
+          </Button>
           <Button asChild variant="outline" href="/admin/personal-funds">
             Personal Funds
           </Button>
-          <Button asChild variant="outline" href="/admin/scan-audit">
-            Scan Audit
-          </Button>
-          <Button asChild variant="outline" href="/admin/health-monitor">
-            Health Monitor
+          <Button asChild variant="outline" href="/admin/external-income">
+            Other Income
           </Button>
           {me.role === 'super_admin' ? (
             <Button asChild variant="outline" href="/admin/permissions-audit">
@@ -319,7 +313,6 @@ export default async function AdminPage() {
             <span className={`inline-flex rounded-full border px-3 py-1 text-xs font-semibold ${healthBadgeClass(latestHealthStatus)}`}>
               Health: {latestHealthLabel}
             </span>
-            <span>CRM and finance shortcuts are surfaced first to reduce clicks during daily ops.</span>
             <Link href="/" className="ml-auto underline">
               Back to home
             </Link>

@@ -5,6 +5,7 @@ export const revalidate = 0
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import AccessDeniedCard from '@/components/AccessDeniedCard'
+import Button from '@/components/ui/Button'
 import { getSessionUser, type Role } from '@/lib/session'
 import { getSupabaseAdminClientCached } from '@/lib/requestCache'
 import AdminMembersFilters from './_components/AdminMembersFilters'
@@ -25,8 +26,11 @@ type RoleOption = { id: Role; label: string }
 
 const FALLBACK_ROLE_OPTIONS: RoleOption[] = [
   { id: 'member', label: 'Member' },
+  { id: 'champion', label: 'Champion' },
+  { id: 'vip', label: 'VIP' },
   { id: 'assistant_coach', label: 'Assistant Coach' },
   { id: 'coach', label: 'Coach' },
+  { id: 'head_coach', label: 'Head Coach' },
   { id: 'reception', label: 'Reception' },
   { id: 'admin', label: 'Admin' },
   { id: 'super_admin', label: 'Super Admin' },
@@ -41,7 +45,7 @@ function clampInt(v: number, min: number, max: number) {
 
 function normalizeRole(v: unknown): Role | null {
   const s = typeof v === 'string' ? v : ''
-  const allowed: Role[] = ['member', 'assistant_coach', 'coach', 'reception', 'admin', 'super_admin']
+  const allowed: Role[] = ['member', 'champion', 'vip', 'assistant_coach', 'coach', 'head_coach', 'reception', 'admin', 'super_admin']
   return (allowed as string[]).includes(s) ? (s as Role) : null
 }
 
@@ -165,7 +169,7 @@ export default async function AdminMembersPage({
   }
 
   return (
-    <main className="p-6 space-y-4">
+    <main className="mx-auto max-w-6xl space-y-4 p-4 sm:p-6">
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div>
           <h1 className="text-2xl font-bold">Admin · Members</h1>
@@ -174,13 +178,13 @@ export default async function AdminMembersPage({
           </p>
         </div>
 
-        <div className="flex gap-2">
-          <Link prefetch={false} href="/admin" className="border px-4 py-2 rounded-lg hover:bg-gray-50">
+        <div className="grid w-full gap-2 sm:w-auto sm:grid-cols-2">
+          <Button asChild variant="outline" className="w-full" href="/admin">
             ← Admin
-          </Link>
-          <Link prefetch={false} href="/members" className="border px-4 py-2 rounded-lg hover:bg-gray-50">
+          </Button>
+          <Button asChild variant="outline" className="w-full" href="/members">
             Members (public)
-          </Link>
+          </Button>
         </div>
       </div>
 
@@ -227,17 +231,13 @@ export default async function AdminMembersPage({
                   </div>
                 </div>
 
-                <div className={`mt-3 flex items-center gap-2 border-t border-[hsl(var(--border))] pt-3 ${canEdit ? 'justify-between' : 'justify-end'}`}>
+                <div className={`mt-3 flex flex-col gap-2 border-t border-[hsl(var(--border))] pt-3 sm:flex-row sm:items-center ${canEdit ? 'sm:justify-between' : 'sm:justify-end'}`}>
                   {canEdit ? (
                     <AdminRoleEditor userId={m.user_id} currentRole={(m.role ?? 'member') as Role} options={roleOptions} compact />
                   ) : null}
-                  <Link
-                    prefetch={false}
-                    className="inline-flex items-center rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm font-semibold hover:bg-[hsl(var(--bg))]"
-                    href={`/members/${m.user_id}`}
-                  >
+                  <Button asChild variant="outline" size="sm" className="w-full sm:w-auto" href={`/members/${m.user_id}`}>
                     Open
-                  </Link>
+                  </Button>
                 </div>
               </div>
             )
@@ -286,9 +286,9 @@ export default async function AdminMembersPage({
                     )}
                   </td>
                   <td className="border-t border-[hsl(var(--border))] px-4 py-3">
-                    <Link prefetch={false} className="underline" href={`/members/${m.user_id}`}>
+                    <Button asChild variant="outline" size="sm" href={`/members/${m.user_id}`}>
                       Open
-                    </Link>
+                    </Button>
                   </td>
                 </tr>
               ))}
@@ -306,7 +306,7 @@ export default async function AdminMembersPage({
       </div>
 
       {/* Pagination */}
-      <div className="flex items-center justify-between gap-3 flex-wrap">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="text-sm text-[hsl(var(--muted))]">
           Total: <span className="font-medium">{total}</span> · Page{' '}
           <span className="font-medium">
@@ -314,39 +314,39 @@ export default async function AdminMembersPage({
           </span>
         </div>
 
-        <div className="flex gap-2">
-          <Link
-            prefetch={false}
-            className={`border px-4 py-2 rounded-lg hover:bg-gray-50 ${page <= 1 ? 'pointer-events-none opacity-50' : ''}`}
+        <div className="grid w-full grid-cols-2 gap-2 sm:w-auto sm:grid-cols-4">
+          <Button
+            asChild
+            variant="outline"
+            className={`w-full ${page <= 1 ? 'pointer-events-none opacity-50' : ''}`}
             href={hrefForPage(1)}
-            aria-disabled={page <= 1}
           >
             First
-          </Link>
-          <Link
-            prefetch={false}
-            className={`border px-4 py-2 rounded-lg hover:bg-gray-50 ${page <= 1 ? 'pointer-events-none opacity-50' : ''}`}
+          </Button>
+          <Button
+            asChild
+            variant="outline"
+            className={`w-full ${page <= 1 ? 'pointer-events-none opacity-50' : ''}`}
             href={hrefForPage(Math.max(1, page - 1))}
-            aria-disabled={page <= 1}
           >
             Prev
-          </Link>
-          <Link
-            prefetch={false}
-            className={`border px-4 py-2 rounded-lg hover:bg-gray-50 ${page >= totalPages ? 'pointer-events-none opacity-50' : ''}`}
+          </Button>
+          <Button
+            asChild
+            variant="outline"
+            className={`w-full ${page >= totalPages ? 'pointer-events-none opacity-50' : ''}`}
             href={hrefForPage(Math.min(totalPages, page + 1))}
-            aria-disabled={page >= totalPages}
           >
             Next
-          </Link>
-          <Link
-            prefetch={false}
-            className={`border px-4 py-2 rounded-lg hover:bg-gray-50 ${page >= totalPages ? 'pointer-events-none opacity-50' : ''}`}
+          </Button>
+          <Button
+            asChild
+            variant="outline"
+            className={`w-full ${page >= totalPages ? 'pointer-events-none opacity-50' : ''}`}
             href={hrefForPage(totalPages)}
-            aria-disabled={page >= totalPages}
           >
             Last
-          </Link>
+          </Button>
         </div>
       </div>
 

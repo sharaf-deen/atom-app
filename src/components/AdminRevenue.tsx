@@ -4,12 +4,16 @@
 import { useEffect, useMemo, useState } from 'react'
 
 type Plan = '1m' | '3m' | '6m' | '12m' | 'sessions'
+type RevenueMode = 'cash' | 'recognized'
 type RevenueResp =
   | {
       ok: true
       range: { from: string; to: string; days: number }
+      revenue_mode?: RevenueMode
       totals: { sum: number; by_plan: Record<Plan, number> }
       daily: Array<{ date: string; sum: number }>
+      monthly?: Array<{ month: string; sum: number }>
+      note?: string
     }
   | {
       ok: false
@@ -43,10 +47,16 @@ function fmtCurrency(n: number) {
 function classCard() {
   return 'rounded-xl border bg-white p-4'
 }
+function monthLabel(month: string) {
+  const [y, m] = month.split('-').map(Number)
+  const dt = new Date(Date.UTC(y, (m || 1) - 1, 1))
+  return dt.toLocaleDateString('en-GB', { month: 'short', year: 'numeric', timeZone: 'UTC' })
+}
 
 export default function AdminRevenue() {
   const [from, setFrom] = useState(addDays(todayLocal(), -29))
   const [to, setTo] = useState(todayLocal())
+  const [mode, setMode] = useState<RevenueMode>('cash')
   const [data, setData] = useState<RevenueResp | null>(null)
   const [loading, setLoading] = useState(false)
 
@@ -60,8 +70,7 @@ export default function AdminRevenue() {
     setLoading(true)
     setData(null)
     try {
-      // ✅ ajoute 'type=revenue' dans la requête
-      const p = new URLSearchParams({ from, to, type: 'revenue' })
+      const p = new URLSearchParams({ from, to, type: 'revenue', mode })
       const r = await fetch(`/api/admin/stats/revenue?${p.toString()}`, { cache: 'no-store' })
       const j = await r.json()
       setData(j)
@@ -73,17 +82,14 @@ export default function AdminRevenue() {
   }
 
   useEffect(() => {
-    load() /* initial */
+    load()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // chart path (simple SVG)
   const pathD = useMemo(() => {
     if (!data || !('daily' in data) || data.daily.length === 0) return ''
     const daily = data.daily
-    const W = 720,
-      H = 180,
-      P = 8
+    const W = 720, H = 180, P = 8
     const max = Math.max(1, ...daily.map((d) => d.sum))
     const dx = (W - 2 * P) / Math.max(1, daily.length - 1)
     const normY = (v: number) => H - P - (v / max) * (H - 2 * P)
@@ -91,70 +97,89 @@ export default function AdminRevenue() {
     return pts.map((p, i) => (i === 0 ? `M${p[0]},${p[1]}` : `L${p[0]},${p[1]}`)).join(' ')
   }, [data])
 
+  const monthlyPathD = useMemo(() => {
+    if (!data || !('monthly' in data) || !(data.monthly?.length)) return ''
+    const monthly = data.monthly
+    const W = 720, H = 180, P = 8
+    const max = Math.max(1, ...monthly.map((d) => d.sum))
+    const dx = (W - 2 * P) / Math.max(1, monthly.length - 1)
+    const normY = (v: number) => H - P - (v / max) * (H - 2 * P)
+    const pts = monthly.map((d, i) => [P + i * dx, normY(d.sum)] as const)
+    return pts.map((p, i) => (i === 0 ? `M${p[0]},${p[1]}` : `L${p[0]},${p[1]}`)).join(' ')
+  }, [data])
+
   const totals = data && data.ok ? data.totals : null
+  const resolvedMode: RevenueMode = data && data.ok && data.revenue_mode ? data.revenue_mode : mode
 
   return (
     <section className={classCard()}>
+      <div className="flex flex-wrap items-start gap-3">
         <div>
           <h2 className="text-lg font-semibold">Revenue</h2>
-          <p className="text-xs text-gray-500">Totals by period, by plan, and daily curve</p>
+          <p className="text-xs text-gray-500">
+            {resolvedMode === 'recognized'
+              ? 'Monthly recognition view for subscriptions, with freeze-aware spreading.'
+              : 'Cash collected by period, by plan, and daily curve.'}
+          </p>
         </div>
         <div className="ml-auto flex flex-wrap items-end gap-2">
           <label className="grid gap-1">
+            <span className="text-xs text-gray-600">View</span>
+            <select value={mode} onChange={(e) => setMode(e.target.value as RevenueMode)} className="px-2 py-1 border rounded">
+              <option value="cash">Cash basis</option>
+              <option value="recognized">Monthly recognition</option>
+            </select>
+          </label>
+          <label className="grid gap-1">
             <span className="text-xs text-gray-600">From</span>
-            <input
-              type="date"
-              value={from}
-              onChange={(e) => setFrom(e.target.value)}
-              className="px-2 py-1 border rounded"
-            />
+            <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="px-2 py-1 border rounded" />
           </label>
           <label className="grid gap-1">
             <span className="text-xs text-gray-600">To</span>
-            <input
-              type="date"
-              value={to}
-              onChange={(e) => setTo(e.target.value)}
-              className="px-2 py-1 border rounded"
-            />
+            <input type="date" value={to} onChange={(e) => setTo(e.target.value)} className="px-2 py-1 border rounded" />
           </label>
           <button
             onClick={load}
             disabled={!valid || loading}
-            className={`px-3 py-2 rounded border ${
-              !valid || loading ? 'bg-gray-200 text-gray-500' : 'hover:bg-gray-50'
-            }`}
+            className={`px-3 py-2 rounded border ${!valid || loading ? 'bg-gray-200 text-gray-500' : 'hover:bg-gray-50'}`}
           >
             {loading ? 'Loading…' : 'Refresh'}
           </button>
         </div>
+      </div>
 
-      {/* Totals */}
+      {data && data.ok && data.note ? (
+        <div className="mt-3 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-xs text-sky-800">{data.note}</div>
+      ) : null}
+
       <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         <div className="rounded-lg border p-3">
-          <div className="text-xs text-gray-500">Total revenue</div>
+          <div className="text-xs text-gray-500">{resolvedMode === 'recognized' ? 'Recognized revenue' : 'Total revenue'}</div>
           <div className="text-xl font-semibold">{totals ? fmtCurrency(totals.sum) : '—'}</div>
         </div>
         {(['1m', '3m', '6m', '12m', 'sessions'] as Plan[]).map((p) => (
           <div key={p} className="rounded-lg border p-3">
             <div className="text-xs text-gray-500">Plan {p}</div>
-            <div className="text-lg font-medium">
-              {totals ? fmtCurrency(totals.by_plan[p] || 0) : '—'}
-            </div>
+            <div className="text-lg font-medium">{totals ? fmtCurrency(totals.by_plan[p] || 0) : '—'}</div>
           </div>
         ))}
       </div>
 
-      {/* Chart */}
       <div className="mt-4">
-        {data && data.ok && data.daily.length > 0 ? (
+        {data && data.ok && resolvedMode === 'recognized' && data.monthly && data.monthly.length > 0 ? (
           <div className="rounded-lg border p-3">
-            <div className="text-xs text-gray-500 mb-2">
-              Daily totals ({data.range.from} → {data.range.to})
-            </div>
+            <div className="text-xs text-gray-500 mb-2">Monthly recognition ({data.range.from} → {data.range.to})</div>
             <svg viewBox="0 0 720 200" className="w-full h-48">
               <rect x="0" y="0" width="720" height="200" fill="white" />
-              {/* grid x (weekly) */}
+              <line x1="8" y1="180" x2="712" y2="180" stroke="#ddd" strokeWidth="1" />
+              <path d={monthlyPathD} fill="none" stroke="#111" strokeWidth="2" />
+            </svg>
+          </div>
+        ) : data && data.ok && data.daily.length > 0 ? (
+          <div className="rounded-lg border p-3">
+            <div className="text-xs text-gray-500 mb-2">Daily totals ({data.range.from} → {data.range.to})</div>
+            <svg viewBox="0 0 720 200" className="w-full h-48">
+              <rect x="0" y="0" width="720" height="200" fill="white" />
               {data.daily.map((d, i) =>
                 i % 7 === 0 ? (
                   <line
@@ -168,21 +193,35 @@ export default function AdminRevenue() {
                   />
                 ) : null
               )}
-              {/* axis */}
               <line x1="8" y1="180" x2="712" y2="180" stroke="#ddd" strokeWidth="1" />
-              {/* path */}
               <path d={pathD} fill="none" stroke="#111" strokeWidth="2" />
             </svg>
           </div>
         ) : (
-          <div className="rounded-lg border p-3 text-sm text-gray-500">
-            {loading ? 'Loading…' : 'No data.'}
-          </div>
+          <div className="rounded-lg border p-3 text-sm text-gray-500">{loading ? 'Loading…' : 'No data.'}</div>
         )}
       </div>
 
-      {/* Raw table (facultatif) */}
-      {data && data.ok && data.daily.length > 0 && (
+      {data && data.ok && resolvedMode === 'recognized' && data.monthly && data.monthly.length > 0 ? (
+        <div className="mt-4 overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="bg-gray-50 text-gray-600">
+              <tr>
+                <th className="text-left px-3 py-2">Month</th>
+                <th className="text-left px-3 py-2">Recognized revenue</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.monthly.map((row) => (
+                <tr key={row.month} className="border-t">
+                  <td className="px-3 py-2">{monthLabel(row.month)}</td>
+                  <td className="px-3 py-2">{fmtCurrency(row.sum)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : data && data.ok && data.daily.length > 0 ? (
         <div className="mt-4 overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="bg-gray-50 text-gray-600">
@@ -201,7 +240,7 @@ export default function AdminRevenue() {
             </tbody>
           </table>
         </div>
-      )}
+      ) : null}
     </section>
   )
 }

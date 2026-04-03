@@ -7,6 +7,7 @@ import Link from 'next/link'
 import Image from 'next/image'
 import { createSupabaseRSC } from '@/lib/supabaseServer'
 import { getSessionUser, type Role } from '@/lib/session'
+import { hasLifetimeGymAccess, isMemberLikeRole } from '@/lib/rbac'
 import { getSupabaseAdminClientCached } from '@/lib/requestCache'
 import { addDays, cairoToday, diffDays } from '@/lib/cairoDate'
 import HomeNotificationsTile from '@/components/HomeNotificationsTile'
@@ -20,7 +21,9 @@ import {
   CheckCircle2,
   Clock3,
   CreditCard,
+  FileText,
   Gift,
+  House,
   IdCard,
   LayoutDashboard,
   MessageSquare,
@@ -28,6 +31,7 @@ import {
   ScanLine,
   ShieldAlert,
   ShieldCheck,
+  ShoppingBag,
   UserCog,
   UserRoundSearch,
   Users,
@@ -108,6 +112,7 @@ type QuickAction = {
   icon: IconType
 }
 
+
 function humanizeRole(role: string) {
   const s = role.replace(/_/g, ' ')
   return s.charAt(0).toUpperCase() + s.slice(1)
@@ -156,7 +161,17 @@ function isFrozenNow(sub: Pick<SubscriptionLite, 'subscription_type' | 'frozen_f
   return from ? today >= from && today < until : today < until
 }
 
-function buildMembershipSnapshot(subs: SubscriptionLite[], today: string): MembershipSnapshot {
+function buildMembershipSnapshot(role: Role, subs: SubscriptionLite[], today: string): MembershipSnapshot {
+  if (hasLifetimeGymAccess(role)) {
+    return {
+      tone: 'success',
+      eyebrow: 'Always active access',
+      title: 'Role-based access',
+      meta: 'Your access is active in the gym without a standard renewal flow.',
+      extra: null,
+    }
+  }
+
   const activeTime = subs.find((s) => {
     if (s.status !== 'active') return false
     if ((s.subscription_type ?? 'time') !== 'time') return false
@@ -458,7 +473,7 @@ function buildMemberPriorities(snapshot: MembershipSnapshot, unreadCount: number
   ]
 }
 
-function buildStaffPriorities(role: 'coach' | 'assistant_coach', unreadCount: number, hasQr: boolean): PriorityItem[] {
+function buildStaffPriorities(role: 'coach' | 'assistant_coach' | 'head_coach', unreadCount: number, hasQr: boolean): PriorityItem[] {
   return [
     {
       href: '/profile',
@@ -477,14 +492,14 @@ function buildStaffPriorities(role: 'coach' | 'assistant_coach', unreadCount: nu
       tone: unreadCount > 0 ? 'warning' : 'neutral',
     },
     {
-      href: role === 'coach' ? '/members' : '/schedule',
-      eyebrow: role === 'coach' ? 'Lookup today' : 'Training useful',
-      title: role === 'coach' ? 'Open member lookup' : 'Open the schedule',
+      href: role === 'assistant_coach' ? '/schedule' : '/members',
+      eyebrow: role === 'assistant_coach' ? 'Training useful' : 'Lookup today',
+      title: role === 'assistant_coach' ? 'Open the schedule' : 'Open member lookup',
       desc:
-        role === 'coach'
-          ? 'Search a member quickly with read-only access when you need to help on the mat.'
-          : 'Keep the day moving with fast access to your schedule and staff shortcuts.',
-      icon: role === 'coach' ? UserRoundSearch : CalendarDays,
+        role === 'assistant_coach'
+          ? 'Keep the day moving with fast access to your schedule and staff shortcuts.'
+          : 'Search a member quickly with read-only access when you need to help on the mat.',
+      icon: role === 'assistant_coach' ? CalendarDays : UserRoundSearch,
       tone: 'neutral',
     },
     {
@@ -501,14 +516,11 @@ function buildStaffPriorities(role: 'coach' | 'assistant_coach', unreadCount: nu
 function buildReceptionPriorities(ops: OpsKpis): PriorityItem[] {
   return [
     {
-      href: '/reception',
-      eyebrow: 'Front desk now',
-      title: 'Open the front desk center',
-      desc:
-        ops.scansToday > 0
-          ? `${ops.scansToday} scan(s) recorded today. Use the command center for the next actions.`
-          : 'No scan recorded yet today. Start from the front desk center and keep the queue moving.',
-      icon: LayoutDashboard,
+      href: '/scan',
+      eyebrow: 'Entrance flow',
+      title: ops.scansToday > 0 ? `${ops.scansToday} scan(s) today` : 'Open scan now',
+      desc: ops.scansToday > 0 ? 'Keep the entrance moving with the scan and kiosk flow.' : 'No scan recorded yet today. Start with the scanner.',
+      icon: ScanLine,
       tone: ops.scansToday > 0 ? 'success' : 'warning',
     },
     {
@@ -576,6 +588,14 @@ function buildAdminPriorities(ops: OpsKpis, health: HealthLite | null, role: 'ad
       eyebrow: role === 'super_admin' ? 'Control' : 'Review',
       title: 'Open personal funds',
       desc: 'Review partner advances, reimbursements and related proof quickly.',
+      icon: Wallet,
+      tone: 'neutral',
+    },
+    {
+      href: '/admin/external-income',
+      eyebrow: 'Other income',
+      title: 'Track bar and store sales',
+      desc: 'Log extra income outside subscriptions with note and attachment.',
       icon: Wallet,
       tone: 'neutral',
     },
@@ -687,9 +707,12 @@ function HeroCard({
 }) {
   const roleCopy: Record<Role, string> = {
     member: 'Everything important at a glance: membership, QR code and useful updates.',
+    champion: 'Member tools with always-active gym access.',
+    vip: 'Member tools with always-active gym access.',
     coach: 'Fast access to your staff tools, QR code and a read-only member lookup.',
     assistant_coach: 'Fast access to your staff tools, QR code and useful updates.',
-    reception: 'Built for quick actions at the front desk: scan, member creation, follow-up queues and a live command center.',
+    head_coach: 'Coach shortcuts plus notification control and a read-only member lookup.',
+    reception: 'Built for quick actions at the front desk: scan, member creation and daily queues.',
     admin: 'Daily operations first: members, finance, reporting and control.',
     super_admin: 'Full operational overview with direct access to all critical areas.',
   }
@@ -744,7 +767,7 @@ function MembershipCard({ snapshot }: { snapshot: MembershipSnapshot }) {
   )
 }
 
-function StaffAccessCard({ role }: { role: 'coach' | 'assistant_coach' }) {
+function StaffAccessCard({ role }: { role: 'coach' | 'assistant_coach' | 'head_coach' }) {
   return (
     <Surface className="p-4 sm:p-5">
       <div className="inline-flex rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold text-emerald-700">
@@ -754,7 +777,9 @@ function StaffAccessCard({ role }: { role: 'coach' | 'assistant_coach' }) {
       <p className="mt-2 text-sm text-[hsl(var(--muted))]">
         {role === 'coach'
           ? 'Your coach access is designed for daily training operations.'
-          : 'Your assistant coach access is designed for daily training operations.'}
+          : role === 'head_coach'
+            ? 'Your head coach access is designed for daily training operations.'
+            : 'Your assistant coach access is designed for daily training operations.'}
       </p>
       <div className="mt-4 flex items-center gap-2 text-sm font-medium">
         <Link href="/profile" className="inline-flex items-center gap-1 hover:underline">
@@ -790,6 +815,7 @@ async function QrCard({ qrCode }: { qrCode?: string | null }) {
   )
 }
 
+
 function QuickActions({ title, subtitle, items }: { title: string; subtitle?: string; items: QuickAction[] }) {
   return (
     <Surface className="p-4 sm:p-5">
@@ -824,7 +850,6 @@ function coachActions(): QuickAction[] {
 
 function receptionActions(): QuickAction[] {
   return [
-    { href: '/reception', label: 'Front desk center', desc: "Open today's command center for scan, renewals and follow-up.", icon: LayoutDashboard },
     { href: '/scan', label: 'Scan', desc: 'Fast attendance and QR validation.', icon: ScanLine },
     { href: '/kiosk', label: 'Create member', desc: 'Open the front-desk member creation flow.', icon: IdCard },
     { href: '/members', label: 'Members', desc: 'Search and manage members quickly.', icon: Users },
@@ -838,7 +863,6 @@ function receptionActions(): QuickAction[] {
 function adminActions(role: 'admin' | 'super_admin'): QuickAction[] {
   const base: QuickAction[] = [
     { href: '/admin', label: 'Dashboard', desc: 'Operational KPIs and admin overview.', icon: LayoutDashboard },
-    { href: '/reception', label: 'Front desk center', desc: 'Open the live desk command center used at reception.', icon: LayoutDashboard },
     { href: '/admin/crm', label: 'CRM queue', desc: 'Review follow-ups and daily contact priorities.', icon: MessageSquare },
     { href: '/scan', label: 'Scan', desc: 'QR check-in and validation flow.', icon: ScanLine },
     { href: '/members', label: 'Members', desc: 'Open the members workspace.', icon: Users },
@@ -846,6 +870,7 @@ function adminActions(role: 'admin' | 'super_admin'): QuickAction[] {
     { href: '/admin/cash-report', label: 'Cash report', desc: 'Review daily payment summaries.', icon: Wallet },
     { href: '/expenses', label: 'Expenses', desc: 'Open expenses and categories.', icon: Receipt },
     { href: '/admin/personal-funds', label: 'Personal funds', desc: 'Review advances, reimbursements and proof.', icon: Wallet },
+    { href: '/admin/external-income', label: 'Other income', desc: 'Track money coming from bar, store or other sources.', icon: Wallet },
     { href: '/admin/health-monitor', label: 'Health Monitor', desc: 'Open the latest health status and reports.', icon: ShieldCheck },
     { href: '/admin/outstanding-dues', label: 'Outstanding dues', desc: 'Focus on unpaid balances.', icon: Wallet },
     { href: '/admin/expiring-soon', label: 'Expiring soon', desc: 'Review urgent renewals.', icon: Bell },
@@ -892,7 +917,7 @@ export default async function HomePage() {
   ])
 
   const avatarPath = user.id_photo_path ?? profile?.id_photo_path ?? null
-  const avatarUrl = ['member', 'coach', 'assistant_coach'].includes(user.role) ? await getSignedAvatar(avatarPath) : ''
+  const avatarUrl = ['member', 'champion', 'vip', 'coach', 'assistant_coach', 'head_coach'].includes(user.role) ? await getSignedAvatar(avatarPath) : ''
   const memberId = user.member_id ?? profile?.member_id ?? null
   const qrCode = user.qr_code ?? profile?.qr_code ?? null
 
@@ -900,9 +925,9 @@ export default async function HomePage() {
   let opsKpis: OpsKpis | null = null
   let healthSnapshot: HealthLite | null = null
 
-  if (user.role === 'member') {
+  if (isMemberLikeRole(user.role) || hasLifetimeGymAccess(user.role)) {
     const subs = await getSubscriptionsLite(user.id)
-    memberSnapshot = buildMembershipSnapshot(subs, cairoToday())
+    memberSnapshot = buildMembershipSnapshot(user.role, subs, cairoToday())
   }
 
   if (['reception', 'admin', 'super_admin'].includes(user.role)) {
@@ -924,11 +949,11 @@ export default async function HomePage() {
           joinedAt={profile?.created_at ?? null}
         />
 
-        {user.role === 'member' ? (
+        {isMemberLikeRole(user.role) ? (
           <>
             <PriorityGrid
               title="Your access today"
-              subtitle="The essentials only, so you know what matters right now."
+              subtitle="The essentials only. Open what matters next."
               items={buildMemberPriorities(memberSnapshot!, unreadNotificationsCount, Boolean(qrCode))}
             />
 
@@ -937,70 +962,35 @@ export default async function HomePage() {
               <QrCard qrCode={qrCode} />
             </div>
 
-            <div className="grid gap-4 lg:grid-cols-[1fr_1fr]">
-              <HomeNotificationsTile
-                href="/notifications"
-                label="Notifications"
-                desc="Open your inbox and see unread updates."
-                initialCount={unreadNotificationsCount}
-              />
-              <SummaryCard
-                label="Useful next step"
-                value="Check your profile"
-                hint="See your subscription history, QR code and identity details."
-                href="/profile"
-              />
-            </div>
-
             <QuickActions
               title="Quick actions"
-              subtitle="The essentials only, with no extra steps on mobile."
-              items={memberActions()}
+              subtitle="Keep the next step simple."
+              items={memberActions().slice(0, 3)}
             />
           </>
         ) : null}
 
-        {(user.role === 'coach' || user.role === 'assistant_coach') ? (
+        {(user.role === 'coach' || user.role === 'assistant_coach' || user.role === 'head_coach') ? (
           <>
             <PriorityGrid
               title="Training useful today"
-              subtitle="Fast access cues built for the training floor."
+              subtitle="Useful only, with less repetition."
               items={buildStaffPriorities(user.role, unreadNotificationsCount, Boolean(qrCode))}
             />
 
-            <div className="grid gap-4 lg:grid-cols-[1.05fr_0.95fr]">
-              <StaffAccessCard role={user.role} />
+            <div className="grid gap-4 lg:grid-cols-[0.9fr_1.1fr]">
               <QrCard qrCode={qrCode} />
-            </div>
-
-            <div className="grid gap-4 lg:grid-cols-[1fr_1fr]">
-              <HomeNotificationsTile
-                href="/notifications"
-                label="Notifications"
-                desc="Open your staff updates and unread messages."
-                initialCount={unreadNotificationsCount}
-              />
-              <SummaryCard
-                label="Role focus"
-                value={user.role === 'coach' ? 'Read-only member view' : 'Fast field access'}
-                hint={
-                  user.role === 'coach'
-                    ? 'Coach lookup opens a limited member profile with no financial or private contact data.'
-                    : 'Your home is optimized for QR, schedule, profile and useful staff shortcuts.'
-                }
+              <QuickActions
+                title="Coach shortcuts"
+                subtitle="The most useful staff actions first."
+                items={coachActions().slice(0, 3)}
               />
             </div>
 
-            <QuickActions
-              title="Staff quick actions"
-              subtitle="Shortcuts built for training-floor usage on phone or tablet."
-              items={coachActions()}
-            />
-
-            {user.role === 'coach' ? (
+            {(user.role === 'coach' || user.role === 'head_coach') ? (
               <HomeMemberLookup
                 title="Quick member lookup"
-                subtitle="Coach access is read-only. Search by first name, last name or member ID."
+                subtitle="Coach access is read-only. Search fast when you need help on the mat."
                 canOpenProfile
                 showSensitiveFields={false}
               />
@@ -1012,44 +1002,27 @@ export default async function HomePage() {
           <>
             <PriorityGrid
               title="Today’s priorities"
-              subtitle="The front-desk queue in the order you are most likely to need it."
+              subtitle="Overview first, then your next desk action."
               items={buildReceptionPriorities(opsKpis!)}
             />
 
-            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-              <SummaryCard label="Scans today" value={opsKpis?.scansToday ?? 0} hint={`Attendance today · ${cairoToday()}`} href="/scan" />
-              <SummaryCard label="Expiring in 7 days" value={opsKpis?.expiring7Count ?? 0} hint="Members to contact soon." href="/admin/expiring-soon" />
+            <div className="grid gap-4 sm:grid-cols-3">
+              <SummaryCard label="Scans today" value={opsKpis?.scansToday ?? 0} hint={`Attendance · ${cairoToday()}`} href="/scan" />
+              <SummaryCard label="Expiring soon" value={opsKpis?.expiring7Count ?? 0} hint="Members to renew soon." href="/admin/expiring-soon" />
               <SummaryCard label="Outstanding dues" value={opsKpis?.outstandingCount ?? 0} hint={fmtMoneyEGP(opsKpis?.outstandingTotal ?? 0)} href="/admin/outstanding-dues" />
-              <SummaryCard label="Active members" value={opsKpis?.activeCount ?? 0} hint="Current active subscriptions." href="/members" />
             </div>
 
             <QuickActions
-              title="Front desk actions"
-              subtitle="The most common tasks first, optimized for speed."
-              items={receptionActions()}
+              title="Quick actions"
+              subtitle="The desk tools used most often."
+              items={receptionActions().slice(0, 5)}
             />
 
-            <div className="grid gap-4 lg:grid-cols-[1.15fr_0.85fr]">
-              <HomeMemberLookup
-                title="Member lookup"
-                subtitle="Search fast and open the member page when you need to act."
-                canOpenProfile
-              />
-              <div className="space-y-4">
-                <HomeNotificationsTile
-                  href="/notifications"
-                  label="Notifications"
-                  desc="Keep reception updates visible and easy to open."
-                  initialCount={unreadNotificationsCount}
-                />
-                <SummaryCard
-                  label="Kiosk"
-                  value="Create member quickly"
-                  hint="Open the kiosk flow for new members at the desk."
-                  href="/kiosk"
-                />
-              </div>
-            </div>
+            <HomeMemberLookup
+              title="Member lookup"
+              subtitle="Open a member fast when the desk needs action."
+              canOpenProfile
+            />
           </>
         ) : null}
 
@@ -1057,47 +1030,40 @@ export default async function HomePage() {
           <>
             <PriorityGrid
               title="Operations today"
-              subtitle="Your highest-value admin shortcuts, with cues that match today’s situation."
+              subtitle="Priorities first, then your main admin tools."
               items={buildAdminPriorities(opsKpis!, healthSnapshot, user.role)}
             />
 
-            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-              <SummaryCard label="Active members" value={opsKpis?.activeCount ?? 0} hint="Subscriptions currently active." href="/members" />
-              <SummaryCard label="Expiring in 7 days" value={opsKpis?.expiring7Count ?? 0} hint="Renewals needing attention." href="/admin/expiring-soon" />
+            <div className="grid gap-4 sm:grid-cols-3">
+              <SummaryCard label="Expiring soon" value={opsKpis?.expiring7Count ?? 0} hint="Renewals needing attention." href="/admin/expiring-soon" />
               <SummaryCard label="Outstanding total" value={fmtMoneyEGP(opsKpis?.outstandingTotal ?? 0)} hint={`${opsKpis?.outstandingCount ?? 0} member(s) with dues`} href="/admin/outstanding-dues" />
               <SummaryCard label="Scans today" value={opsKpis?.scansToday ?? 0} hint={`Kiosk attendance · ${cairoToday()}`} href="/admin/scan-audit" />
             </div>
 
             <QuickActions
-              title="Operations shortcuts"
-              subtitle="Jump directly to the pages that matter most in daily admin work."
-              items={adminActions(user.role)}
+              title="Admin shortcuts"
+              subtitle="Keep the main operations close."
+              items={adminActions(user.role).slice(0, user.role === 'super_admin' ? 7 : 6)}
             />
 
             <div className="grid gap-4 lg:grid-cols-[1.15fr_0.85fr]">
               <HomeMemberLookup
                 title="Member lookup"
-                subtitle="Search and open member pages without leaving the dashboard flow."
+                subtitle="Search and open member pages without leaving the dashboard."
                 canOpenProfile
               />
               <div className="space-y-4">
                 <HomeNotificationsTile
                   href="/notifications"
                   label="Notifications"
-                  desc="Keep unread operational updates visible."
+                  desc="Unread operational updates, without extra dashboard noise."
                   initialCount={unreadNotificationsCount}
                 />
                 <SummaryCard
-                  label="Admin dashboard"
-                  value="Open full reporting"
-                  hint="Revenue, exports and detailed operational controls."
+                  label="Full admin view"
+                  value="Open admin dashboard"
+                  hint="Reporting, exports and extended operational controls."
                   href="/admin"
-                />
-                <SummaryCard
-                  label="Finance"
-                  value="Payments + expenses"
-                  hint="Move quickly between payments, cash report and expenses."
-                  href="/admin/payments"
                 />
               </div>
             </div>

@@ -6,8 +6,11 @@ export const revalidate = 0 // no ISR
 import { NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { requireAdmin } from '@/lib/apiAuth'
+import { cairoRangeBoundsUTC, cairoTodayDateOnly } from '@/lib/cairoTime'
+import { computeRecognizedSubscriptionRevenue } from '@/lib/subscriptionRevenue'
 
 type Plan = '1m' | '3m' | '6m' | '12m' | 'sessions'
+type RevenueMode = 'cash' | 'recognized'
 
 function noStore(res: NextResponse) {
   res.headers.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate')
@@ -17,7 +20,7 @@ function isISODateOnly(s?: string | null) {
   return !!s && /^\d{4}-\d{2}-\d{2}$/.test(s)
 }
 function todayUTC() {
-  return new Date().toISOString().slice(0, 10) // YYYY-MM-DD
+  return cairoTodayDateOnly()
 }
 function addDays(dateOnly: string, days: number) {
   const [y, m, d] = dateOnly.split('-').map(Number)
@@ -87,65 +90,110 @@ export async function GET(req: Request) {
     if (type === 'revenue') {
       let from = searchParams.get('from')
       let to = searchParams.get('to')
+      const revenueMode = (searchParams.get('mode') ?? 'cash').toLowerCase() === 'recognized' ? 'recognized' : 'cash'
 
       if (!isISODateOnly(from) || !isISODateOnly(to) || (from! > to!)) {
         to = todayUTC()
         from = addDays(to, -29)
       }
 
-      const toExclusive = addDays(to!, +1)
-
-      // Récupère toutes les souscriptions payées dans l’intervalle (paid_at)
-      const { data: rows, error: qErr } = await admin
-        .from('subscriptions')
-        .select('plan, amount, paid_at')
-        .gte('paid_at', from!)
-        .lt('paid_at', toExclusive)
-        .limit(100000)
-
-      if (qErr) {
-        return noStore(NextResponse.json({ ok: false, error: 'QUERY_FAILED', details: qErr.message }, { status: 500 }))
-      }
-
       const plans: Plan[] = ['1m', '3m', '6m', '12m', 'sessions']
-      const byPlan: Record<Plan, number> = { '1m': 0, '3m': 0, '6m': 0, '12m': 0, 'sessions': 0 }
 
-      const dailyMap = new Map<string, number>()
-      // init toutes les dates à 0 (pour un graphe continu)
-      for (let d = from!; d < toExclusive; d = addDays(d, 1)) {
-        dailyMap.set(d, 0)
-      }
+      if (revenueMode === 'cash') {
+        const { startISO, endISO } = cairoRangeBoundsUTC(from!, to!)
 
-      let sum = 0
-      for (const r of rows ?? []) {
-        const amt = Number((r as any).amount || 0)
-        sum += amt
-        const p = (r as any).plan as Plan | null
-        if (p && plans.includes(p)) byPlan[p] += amt
+        const { data: rows, error: qErr } = await admin
+          .from('subscriptions')
+          .select('plan, amount, paid_at')
+          .gte('paid_at', startISO)
+          .lt('paid_at', endISO)
+          .limit(100000)
 
-        const paidAt = (r as any).paid_at as string | null
-        if (paidAt) {
-          const day = new Date(paidAt).toISOString().slice(0, 10)
-          if (dailyMap.has(day)) {
-            dailyMap.set(day, (dailyMap.get(day) || 0) + amt)
+        if (qErr) {
+          return noStore(NextResponse.json({ ok: false, error: 'QUERY_FAILED', details: qErr.message }, { status: 500 }))
+        }
+
+        const byPlan: Record<Plan, number> = { '1m': 0, '3m': 0, '6m': 0, '12m': 0, 'sessions': 0 }
+        const dailyMap = new Map<string, number>()
+        for (let d = from!; d < addDays(to!, 1); d = addDays(d, 1)) dailyMap.set(d, 0)
+
+        let sum = 0
+        for (const r of rows ?? []) {
+          const amt = Number((r as any).amount || 0)
+          sum += amt
+          const p = (r as any).plan as Plan | null
+          if (p && plans.includes(p)) byPlan[p] += amt
+
+          const paidAt = (r as any).paid_at as string | null
+          if (paidAt) {
+            const day = new Date(paidAt).toLocaleDateString('en-CA', { timeZone: 'Africa/Cairo' })
+            if (dailyMap.has(day)) dailyMap.set(day, (dailyMap.get(day) || 0) + amt)
           }
         }
+
+        const daily = Array.from(dailyMap.entries())
+          .filter(([d]) => d >= from! && d <= to!)
+          .sort((a, b) => (a[0] < b[0] ? -1 : 1))
+          .map(([date, val]) => ({ date, sum: Number(val.toFixed(2)) }))
+
+        const monthMap = new Map<string, number>()
+        for (const row of daily) monthMap.set(row.date.slice(0, 7), (monthMap.get(row.date.slice(0, 7)) || 0) + row.sum)
+        const monthly = Array.from(monthMap.entries()).sort((a,b)=>a[0]<b[0]?-1:1).map(([month,val])=>({ month, sum: Number(val.toFixed(2)) }))
+
+        const resp = NextResponse.json({
+          ok: true,
+          mode: 'revenue',
+          revenue_mode: revenueMode as RevenueMode,
+          range: { from, to, days: daily.length },
+          totals: {
+            sum: Number(sum.toFixed(2)),
+            by_plan: byPlan,
+          },
+          daily,
+          monthly,
+        })
+        return noStore(resp)
       }
 
-      const daily = Array.from(dailyMap.entries())
-        .filter(([d]) => d >= from! && d <= to!)
-        .sort((a, b) => (a[0] < b[0] ? -1 : 1))
-        .map(([date, val]) => ({ date, sum: Number(val.toFixed(2)) }))
+      const { data: timeRows, error: timeErr } = await admin
+        .from('subscriptions')
+        .select('plan, amount, amount_due, start_date, end_date, frozen_from, frozen_until')
+        .neq('plan', 'sessions')
+        .lte('start_date', to!)
+        .gt('end_date', from!)
+        .limit(100000)
 
+      if (timeErr) {
+        return noStore(NextResponse.json({ ok: false, error: 'QUERY_FAILED', details: timeErr.message }, { status: 500 }))
+      }
+
+      const { startISO, endISO } = cairoRangeBoundsUTC(from!, to!)
+      const { data: sessionRows, error: sessionErr } = await admin
+        .from('subscriptions')
+        .select('plan, amount, amount_due, paid_at')
+        .eq('plan', 'sessions')
+        .gte('paid_at', startISO)
+        .lt('paid_at', endISO)
+        .limit(100000)
+
+      if (sessionErr) {
+        return noStore(NextResponse.json({ ok: false, error: 'QUERY_FAILED', details: sessionErr.message }, { status: 500 }))
+      }
+
+      const recognized = computeRecognizedSubscriptionRevenue([...(timeRows ?? []), ...(sessionRows ?? [])] as any[], from!, to!)
+      const monthly = recognized.monthly
       const resp = NextResponse.json({
         ok: true,
         mode: 'revenue',
-        range: { from, to, days: daily.length },
+        revenue_mode: revenueMode as RevenueMode,
+        range: { from, to, days: monthly.length },
         totals: {
-          sum: Number(sum.toFixed(2)),
-          by_plan: byPlan,
+          sum: recognized.sum,
+          by_plan: recognized.totalsByPlan,
         },
-        daily,
+        daily: [],
+        monthly,
+        note: 'Time plans are spread across active service days. Freeze days pause recognition and shift revenue forward.',
       })
       return noStore(resp)
     }

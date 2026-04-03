@@ -11,6 +11,7 @@ import {
   CalendarDays,
   CreditCard,
   Mail,
+  MessageCircle,
   Phone,
   QrCode,
   ScanLine,
@@ -31,6 +32,9 @@ import SubscriptionManageRowActions from '@/components/SubscriptionManageRowActi
 import ResendInviteButton from '@/components/ResendInviteButton'
 import DeleteUserButton from '@/components/DeleteUserButton'
 import SettleDueDialog from '@/components/SettleDueDialog'
+import AthleteProfileSection from '@/components/member-detail/AthleteProfileSection'
+import MemberNotifyButton from '@/components/member-detail/MemberNotifyButton'
+import { canManageNotifications as canManageMemberNotifications, hasLifetimeGymAccess } from '@/lib/rbac'
 
 type ProfileRow = {
   user_id: string
@@ -148,10 +152,16 @@ function humanRole(role?: Role | null) {
   switch (role) {
     case 'assistant_coach':
       return 'Assistant coach'
+    case 'head_coach':
+      return 'Head coach'
     case 'super_admin':
       return 'Super admin'
     case 'coach':
       return 'Coach'
+    case 'champion':
+      return 'Champion'
+    case 'vip':
+      return 'VIP'
     case 'reception':
       return 'Reception'
     case 'admin':
@@ -178,6 +188,24 @@ function humanPayment(method?: string | null) {
 
 function isUuid(v: string) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(v)
+}
+
+function toWhatsAppHref(phone?: string | null) {
+  if (!phone) return null
+  const digits = String(phone).replace(/\D/g, '')
+  if (!digits) return null
+  if (digits.startsWith('00')) return `https://wa.me/${digits.slice(2)}`
+  if (digits.startsWith('0')) return `https://wa.me/20${digits.slice(1)}`
+  return `https://wa.me/${digits}`
+}
+
+function canReceiveDirectNotification(role?: Role | null) {
+  return ['member', 'coach', 'assistant_coach', 'head_coach', 'champion', 'vip'].includes(String(role ?? ''))
+}
+
+function shouldShowAthleteProfileOnMemberDetail(viewerRole?: Role | null, targetRole?: Role | null) {
+  if (viewerRole !== 'head_coach' && viewerRole !== 'super_admin') return false
+  return targetRole === 'member' || targetRole === 'coach' || targetRole === 'assistant_coach' || targetRole === 'vip' || targetRole === 'champion'
 }
 
 function ageYears(dob?: string | null) {
@@ -260,12 +288,15 @@ function buildMembershipSummary(
   subs: SubscriptionRow[],
   today: string,
 ): MembershipSummary {
-  if (isSelf && (viewedRole === 'coach' || viewedRole === 'assistant_coach')) {
+  if (viewedRole && hasLifetimeGymAccess(viewedRole)) {
+    const isStaffRole = viewedRole === 'assistant_coach' || viewedRole === 'coach' || viewedRole === 'head_coach'
     return {
       tone: 'success',
-      label: 'Staff access',
+      label: isStaffRole ? 'Staff access' : 'Special access',
       title: 'Always active',
-      hint: 'Your staff access is active in the app.',
+      hint: isStaffRole
+        ? (isSelf ? 'Your staff access is active in the app.' : 'Staff access is active in the app.')
+        : 'This profile has lifetime gym access.',
     }
   }
 
@@ -730,7 +761,7 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
 
   const STAFF: Role[] = ['reception', 'admin', 'super_admin']
   const canViewMembersList = STAFF.includes(me.role)
-  const canOpenOtherProfiles = canViewMembersList || me.role === 'coach'
+  const canOpenOtherProfiles = canViewMembersList || me.role === 'coach' || me.role === 'head_coach'
   const canManageSubscriptions = ['admin', 'super_admin'].includes(me.role)
   const canCreateSubscription = STAFF.includes(me.role)
   const canResendInvite = STAFF.includes(me.role)
@@ -747,8 +778,8 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
         title="Member"
         subtitle="Access restricted."
         signedInAs={me.email}
-        message="Only Reception / Admin / Super Admin can view other members. Coaches can only open a read-only member profile from the home lookup."
-        allowed="coach (read-only members only), reception, admin, super_admin"
+        message="Only Reception / Admin / Super Admin can view other members freely. Coaches and Head coaches can only open read-only member-like profiles from the home lookup."
+        allowed="coach/head_coach (read-only member-like profiles only), reception, admin, super_admin"
         nextPath={nextPath}
         showBackHome
         showProfile
@@ -766,7 +797,7 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
 
   const isSelf = me.id === profile.user_id
   const canDeleteUser = me.role === 'super_admin' && !isSelf
-  const isCoachViewingOtherMember = me.role === 'coach' && !isSelf
+  const isCoachViewingOtherMember = (me.role === 'coach' || me.role === 'head_coach') && !isSelf
   const receptionDeskView = me.role === 'reception' && !isSelf
 
   if (!canOpenOtherProfiles && !isSelf) {
@@ -775,8 +806,8 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
         title="Member"
         subtitle="Access restricted."
         signedInAs={me.email}
-        message="Only Reception / Admin / Super Admin can view other members. Coaches can only open a read-only member profile from the home lookup."
-        allowed="coach (read-only members only), reception, admin, super_admin"
+        message="Only Reception / Admin / Super Admin can view other members freely. Coaches can only open read-only member-like profiles. Head coaches can open read-only athlete profiles for members, champions, VIPs, coaches, and assistant coaches."
+        allowed="coach (member-like only), head_coach (athlete profiles), reception, admin, super_admin"
         nextPath={nextPath}
         showBackHome
         showProfile
@@ -784,14 +815,26 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
     )
   }
 
-  if (isCoachViewingOtherMember && profile.role !== 'member') {
+  const coachAllowedReadOnlyRoles: Role[] = me.role === 'head_coach'
+    ? ['member', 'champion', 'vip', 'coach', 'assistant_coach']
+    : ['member', 'champion', 'vip']
+
+  if (isCoachViewingOtherMember && !(profile.role && coachAllowedReadOnlyRoles.includes(profile.role))) {
     return (
       <AccessDeniedPage
         title="Member"
         subtitle="Access restricted."
         signedInAs={me.email}
-        message="Coach access is limited to read-only member profiles only."
-        allowed="member profiles only"
+        message={
+          me.role === 'head_coach'
+            ? "Head coach access is limited to read-only athlete profiles for members, champions, VIPs, coaches, and assistant coaches."
+            : "Coach access is limited to read-only member-like profiles only."
+        }
+        allowed={
+          me.role === 'head_coach'
+            ? "member, champion, VIP, coach, and assistant coach profiles"
+            : "member, champion, and VIP profiles only"
+        }
         nextPath={nextPath}
         showBackHome
         showProfile
@@ -878,36 +921,41 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
   return (state.remaining ?? 0) > 0
 })
 
+  const latestSubscriptionForAlerts = [...subs].sort((a, b) => {
+    const aKey = a.paid_at ?? a.start_date ?? a.end_date ?? ''
+    const bKey = b.paid_at ?? b.start_date ?? b.end_date ?? ''
+    return bKey.localeCompare(aKey)
+  })[0] ?? null
+
   const alerts: Array<{ kind: SummaryTone; text: string }> = []
-  for (const s of subs) {
+  if (latestSubscriptionForAlerts) {
+    const s = latestSubscriptionForAlerts
     const rawStatus = String(s.status ?? '').toLowerCase()
-    if (rawStatus !== 'active') continue
 
-    const state = getSubscriptionDisplayState(s, today)
+    if (rawStatus === 'active') {
+      const state = getSubscriptionDisplayState(s, today)
 
-    if (state.type === 'time') {
-      if (state.frozen) {
-        alerts.push({ kind: 'warning', text: `${humanPlan(s.plan)} is frozen until ${fmtDate(s.frozen_until)}` })
-        continue
+      if (state.type === 'time') {
+        if (state.frozen) {
+          alerts.push({ kind: 'warning', text: `${humanPlan(s.plan)} is frozen until ${fmtDate(s.frozen_until)}` })
+        } else {
+          if (state.left !== null && state.left <= 7 && state.left >= 0) {
+            alerts.push({ kind: 'warning', text: `${humanPlan(s.plan)} expires in ${state.left} day(s)` })
+          }
+
+          if (state.expired && !hasAnyCurrentPlanNow) {
+            alerts.push({ kind: 'danger', text: `${humanPlan(s.plan)} is expired.` })
+          }
+        }
+      } else {
+        const remaining = state.remaining ?? 0
+        if (remaining <= 2) {
+          alerts.push({
+            kind: remaining === 0 ? 'danger' : 'warning',
+            text: `Sessions plan has ${remaining} session(s) left.`,
+          })
+        }
       }
-
-      if (state.left !== null && state.left <= 7 && state.left >= 0) {
-        alerts.push({ kind: 'warning', text: `${humanPlan(s.plan)} expires in ${state.left} day(s)` })
-      }
-
-      if (state.expired && !hasAnyCurrentPlanNow) {
-        alerts.push({ kind: 'danger', text: `${humanPlan(s.plan)} is expired.` })
-      }
-
-      continue
-    }
-
-    const remaining = state.remaining ?? 0
-    if (remaining <= 2) {
-      alerts.push({
-        kind: remaining === 0 ? 'danger' : 'warning',
-        text: `Sessions plan has ${remaining} session(s) left.`,
-      })
     }
   }
 
@@ -929,16 +977,21 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
   const fullName = `${profile.first_name ?? ''} ${profile.last_name ?? ''}`.trim() || '—'
   const age = ageYears(profile.date_of_birth)
   const showSubscriptionActions = canCreateSubscription && viewedRole === 'member' && !coachSafeView
+  const whatsappHref = !coachSafeView && !isSelf ? toWhatsAppHref(profile.phone) : null
+  const showContactActions = !coachSafeView && !isSelf && !!(profile.phone || profile.email)
+  const canSendDirectNotification = !coachSafeView && !isSelf && canManageMemberNotifications(me.role) && canReceiveDirectNotification(profile.role)
 
   const subtitle = coachSafeView
-    ? 'Read-only coach view with only safe member information.'
+    ? 'Read-only coach view.'
     : receptionDeskView
-      ? 'Front-desk member view focused on renewal, due, contact and check-in readiness.'
+      ? 'Front-desk member view.'
       : isSelf
-        ? viewedRole === 'member'
-          ? 'Your profile, QR code and membership details.'
-          : 'Your profile, QR code and staff access overview.'
-        : 'Fast member overview built for field usage on mobile and tablet.'
+        ? hasLifetimeGymAccess(viewedRole)
+          ? viewedRole === 'champion' || viewedRole === 'vip'
+            ? 'Profile and lifetime access.'
+            : 'Profile and staff access.'
+          : 'Profile and membership.'
+        : 'Member overview.'
 
   const right = canViewMembersList ? (
     <Link
@@ -980,15 +1033,6 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
 
             <div>
               <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">{fullName}</h1>
-              <p className="mt-2 max-w-3xl text-sm text-[hsl(var(--muted))] sm:text-base">
-                {coachSafeView
-                  ? 'Only training-useful information is shown here. No private contact data, finance data or member QR is displayed.'
-                  : receptionDeskView
-                    ? 'This view is optimized for front-desk usage: contact, due, renewal, check-in readiness and fast actions.'
-                    : isSelf
-                      ? 'Everything important is grouped here for quick reading on mobile.'
-                      : 'Identity, subscription status, QR code and operational info grouped in one clear mobile-first page.'}
-              </p>
             </div>
           </div>
         </Surface>
@@ -1018,7 +1062,7 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
               <SummaryCard
                 label="Coach access"
                 value="Read-only"
-                hint="Private contact and financial data are hidden in this view."
+                hint="Private data hidden."
                 icon={<UserRound size={18} strokeWidth={2.1} />}
               />
             </>
@@ -1027,13 +1071,13 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
               <SummaryCard
                 label="Outstanding due"
                 value={outstandingTotal > 0 ? fmtMoneyEGP(outstandingTotal) : 'No due'}
-                hint={outstandingTotal > 0 ? 'Collect or follow up at the desk.' : 'Nothing due at the moment.'}
+                hint={outstandingTotal > 0 ? 'Collect at desk.' : undefined}
                 icon={<Wallet size={18} strokeWidth={2.1} />}
               />
               <SummaryCard
                 label="Last payment"
                 value={latestPayment ? fmtDate(latestPayment) : '—'}
-                hint="Most recent recorded payment date."
+                hint={undefined}
                 icon={<CreditCard size={18} strokeWidth={2.1} />}
               />
               <SummaryCard
@@ -1048,19 +1092,19 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
               <SummaryCard
                 label="Outstanding due"
                 value={outstandingTotal > 0 ? fmtMoneyEGP(outstandingTotal) : 'No due'}
-                hint={outstandingTotal > 0 ? 'Unpaid balance on subscriptions.' : 'Nothing due at the moment.'}
+                hint={outstandingTotal > 0 ? 'Unpaid balance.' : undefined}
                 icon={<Wallet size={18} strokeWidth={2.1} />}
               />
               <SummaryCard
                 label={canViewAttendance ? 'Attendance · 30 days' : 'Last payment'}
                 value={canViewAttendance ? recentAttendanceValid : latestPayment ? fmtDate(latestPayment) : '—'}
-                hint={canViewAttendance ? (lastAttendance ? `Last check-in ${fmtDate(lastAttendance)}` : 'No recent attendance.') : 'Latest recorded payment date.'}
+                hint={canViewAttendance ? (lastAttendance ? `Last check-in ${fmtDate(lastAttendance)}` : 'No recent attendance.') : undefined}
                 icon={canViewAttendance ? <ScanLine size={18} strokeWidth={2.1} /> : <CreditCard size={18} strokeWidth={2.1} />}
               />
               <SummaryCard
                 label="Joined"
                 value={fmtDate(profile.created_at)}
-                hint={profile.email ?? profile.phone ?? 'No extra contact info.'}
+                hint={undefined}
                 icon={<CalendarDays size={18} strokeWidth={2.1} />}
               />
             </>
@@ -1073,9 +1117,6 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
               <ScanLine size={18} className="text-black" />
               <h2 className="text-base font-semibold tracking-tight">Reception desk summary</h2>
             </div>
-            <p className="mt-1 text-sm text-[hsl(var(--muted))]">
-              The most useful front-desk information at a glance.
-            </p>
 
             <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
               <SummaryCard
@@ -1112,9 +1153,6 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
               <ShieldCheck size={18} className="text-black" />
               <h2 className="text-base font-semibold tracking-tight">Training useful</h2>
             </div>
-            <p className="mt-1 text-sm text-[hsl(var(--muted))]">
-              Quick coach-only reading for what matters around the mat.
-            </p>
 
             <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
               <SummaryCard
@@ -1145,7 +1183,7 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
           </Surface>
         ) : null}
 
-        {(showSubscriptionActions || canResendInvite || receptionDeskView) ? (
+        {(showSubscriptionActions || canResendInvite || receptionDeskView || showContactActions || canSendDirectNotification) ? (
           <Surface className="p-4 sm:p-5">
             <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
               <div className="min-w-0 flex-1">
@@ -1153,18 +1191,22 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
                   {receptionDeskView ? 'Reception quick actions' : 'Quick actions'}
                 </div>
                 <p className="mt-1 text-sm text-[hsl(var(--muted))]">
-                  {receptionDeskView
-                    ? (deskWorkflow ? `${deskWorkflow.nextStep} — ${deskWorkflow.nextHint}` : 'Keep the most common desk actions visible and fast on mobile.')
-                    : (deskWorkflow ? `${deskWorkflow.nextStep} — ${deskWorkflow.nextHint}` : 'Keep high-frequency actions visible without opening extra screens.')}
+                  {deskWorkflow ? deskWorkflow.nextStep : receptionDeskView ? 'Front-desk actions.' : 'Fast actions.'}
                 </p>
               </div>
 
               <div className="flex flex-wrap gap-2">
-                {receptionDeskView && profile.phone ? (
-                  <QuickLink href={`tel:${profile.phone}`} label="Call member" icon={<Phone size={16} />} external />
+                {showContactActions && whatsappHref ? (
+                  <QuickLink href={whatsappHref} label="WhatsApp" icon={<MessageCircle size={16} />} external />
                 ) : null}
-                {receptionDeskView && profile.email ? (
-                  <QuickLink href={`mailto:${profile.email}`} label="Email member" icon={<Mail size={16} />} external />
+                {showContactActions && profile.phone ? (
+                  <QuickLink href={`tel:${profile.phone}`} label="Call" icon={<Phone size={16} />} external />
+                ) : null}
+                {showContactActions && profile.email ? (
+                  <QuickLink href={`mailto:${profile.email}`} label="Email" icon={<Mail size={16} />} external />
+                ) : null}
+                {canSendDirectNotification ? (
+                  <MemberNotifyButton userId={profile.user_id} fullName={fullName} memberId={profile.member_id} />
                 ) : null}
                 {receptionDeskView ? (
                   <QuickLink href="/scan" label="Open scan" icon={<ScanLine size={16} />} />
@@ -1232,19 +1274,12 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
               <Wallet size={18} className="text-black" />
               <h2 className="text-base font-semibold tracking-tight">Desk workflow</h2>
             </div>
-            <p className="mt-1 text-sm text-[hsl(var(--muted))]">
-              Recommended order for the current member before moving to the next desk action.
-            </p>
-
             {deskTriageSignals.length ? (
               <div className="mt-3 space-y-2">
                 <div className="flex flex-wrap gap-2">
                   {deskTriageSignals.map((item, idx) => (
                     <TinyBadge key={`${item.label}-${idx}`} tone={item.tone}>{item.label}</TinyBadge>
                   ))}
-                </div>
-                <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] px-3 py-2 text-xs text-[hsl(var(--muted))]">
-                  Handle the member in this order: overdue / today, then any due amount, then missing paid date review.
                 </div>
               </div>
             ) : null}
@@ -1347,13 +1382,10 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
                 <QrCode size={18} className="text-black" />
                 <h2 className="text-base font-semibold tracking-tight">QR code</h2>
               </div>
-              <p className="mt-1 text-sm text-[hsl(var(--muted))]">Show this code at reception for attendance scanning.</p>
-
               <div className="mt-4 flex min-h-[220px] items-center justify-center rounded-2xl border border-dashed border-[hsl(var(--border))] bg-[hsl(var(--bg))] p-4">
                 {profile.qr_code ? (
                   <div className="text-center">
                     <QrImage value={profile.qr_code} size={180} />
-                    <div className="mt-3 text-xs text-[hsl(var(--muted))]">Ready for kiosk or front-desk scan.</div>
                   </div>
                 ) : (
                   <div className="text-sm text-[hsl(var(--muted))]">No QR code.</div>
@@ -1363,17 +1395,21 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
           ) : null}
         </div>
 
+        {shouldShowAthleteProfileOnMemberDetail(me.role, profile.role) ? (
+          <AthleteProfileSection
+            memberUserId={profile.user_id}
+            targetRole={profile.role}
+            viewerRole={me.role}
+            isSelf={isSelf}
+            age={age}
+            nextPath={nextPath}
+          />
+        ) : null}
+
         <Surface className="p-4 sm:p-5">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <h2 className="text-base font-semibold tracking-tight">Subscriptions</h2>
-              <p className="mt-1 text-sm text-[hsl(var(--muted))]">
-                {coachSafeView
-                  ? 'Only training-useful subscription status is visible here.'
-                  : receptionDeskView
-                    ? 'Clean front-desk reading of status now, dues and payment details.'
-                    : 'Status now, billing and quick actions grouped in one clean card view.'}
-              </p>
             </div>
             <TinyBadge>{subs.length} record(s)</TinyBadge>
           </div>

@@ -84,11 +84,12 @@ export async function POST(req: Request) {
 
   const { data: current, error: readErr } = await admin
     .from('subscriptions')
-    .select('id, subscription_type, end_date, frozen_from, frozen_until')
+    .select('id, subscription_type, plan, end_date, frozen_from, frozen_until')
     .eq('id', id)
     .maybeSingle<{
       id: string
       subscription_type: 'time' | 'sessions' | null
+      plan: string | null
       end_date: string | null
       frozen_from: string | null
       frozen_until: string | null
@@ -101,6 +102,25 @@ export async function POST(req: Request) {
   if (stype !== 'time') {
     return json(400, { ok: false, error: 'Freeze is only available for time subscriptions.' })
   }
+
+  const plan = String((current as any).plan || '')
+  const freezeTokensByPlan: Record<string, number> = { '3m': 1, '6m': 2, '12m': 3 }
+  const maxFreezeTokens = freezeTokensByPlan[plan] ?? 0
+  if (maxFreezeTokens < 1) {
+    return json(400, { ok: false, error: 'Freeze is only available for 3, 6, or 12 month subscriptions.' })
+  }
+
+  const { data: freezeRows, error: freezeReadErr } = await admin
+    .from('subscription_freezes')
+    .select('id, freeze_from, freeze_until, days, cleared_at')
+    .eq('subscription_id', id)
+    .order('created_at', { ascending: false })
+
+  if (freezeReadErr) return json(500, { ok: false, error: freezeReadErr.message })
+
+  const freezeHistory = Array.isArray(freezeRows) ? freezeRows : []
+  const activeFreezeRow = freezeHistory.find((row: any) => row && !row.cleared_at) ?? null
+  const usedFreezeTokens = freezeHistory.length
 
   const oldFrom = isISODateOnly((current as any).frozen_from) ? (current as any).frozen_from : null
   const oldUntil = isISODateOnly((current as any).frozen_until) ? (current as any).frozen_until : null
@@ -137,6 +157,9 @@ export async function POST(req: Request) {
     newFrom = from
     newUntil = untilExclusive
     newDays = Math.max(0, daysBetweenUTC(from, untilExclusive))
+    if (newDays > 30) {
+      return json(400, { ok: false, error: 'Each freeze is limited to 30 days maximum.' })
+    }
   } else if (Number.isFinite(Number(days)) && Number(days) > 0) {
     const add = Math.floor(Number(days))
     // Legacy behavior: extend from later of today or current frozen_until (if in the future)
@@ -160,6 +183,41 @@ export async function POST(req: Request) {
     newEndDate = addDays(current.end_date as string, deltaDays)
   }
 
+  if (!clear && !activeFreezeRow && usedFreezeTokens >= maxFreezeTokens) {
+    return json(400, {
+      ok: false,
+      error:
+        maxFreezeTokens === 1
+          ? 'This subscription has already used its only freeze token.'
+          : `This subscription has already used all ${maxFreezeTokens} freeze tokens.`,
+    })
+  }
+
+  if (clear && activeFreezeRow) {
+    const { error: clearFreezeErr } = await admin
+      .from('subscription_freezes')
+      .update({ cleared_at: new Date().toISOString() })
+      .eq('id', (activeFreezeRow as any).id)
+    if (clearFreezeErr) return json(500, { ok: false, error: clearFreezeErr.message })
+  } else if (!clear && activeFreezeRow) {
+    const { error: updateFreezeErr } = await admin
+      .from('subscription_freezes')
+      .update({ freeze_from: newFrom, freeze_until: newUntil, days: newDays })
+      .eq('id', (activeFreezeRow as any).id)
+    if (updateFreezeErr) return json(500, { ok: false, error: updateFreezeErr.message })
+  } else if (!clear) {
+    const { error: insertFreezeErr } = await admin
+      .from('subscription_freezes')
+      .insert({
+        subscription_id: id,
+        freeze_from: newFrom,
+        freeze_until: newUntil,
+        days: newDays,
+        created_by: me.data.user.id,
+      })
+    if (insertFreezeErr) return json(500, { ok: false, error: insertFreezeErr.message })
+  }
+
   const patch: any = {
     frozen_from: newFrom,
     frozen_until: newUntil,
@@ -170,7 +228,7 @@ export async function POST(req: Request) {
     .from('subscriptions')
     .update(patch)
     .eq('id', id)
-    .select('id, subscription_type, end_date, frozen_from, frozen_until')
+    .select('id, subscription_type, plan, end_date, frozen_from, frozen_until')
     .maybeSingle()
 
   if (updErr) return json(500, { ok: false, error: updErr.message })
@@ -183,5 +241,7 @@ export async function POST(req: Request) {
     frozen_until: (updated as any)?.frozen_until ?? newUntil,
     end_date: (updated as any)?.end_date ?? newEndDate,
     delta_days: deltaDays,
+    freeze_tokens_used: clear && activeFreezeRow ? usedFreezeTokens : activeFreezeRow ? usedFreezeTokens : usedFreezeTokens + (clear ? 0 : 1),
+    freeze_tokens_allowed: maxFreezeTokens,
   })
 }

@@ -1,19 +1,23 @@
-// src/app/api/kiosk/verify-exit-pin/route.ts
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
-import { NextResponse } from 'next/server'
 import { getSessionUser, type Role } from '@/lib/session'
+import { jsonWithApiRuntime, logApiError, startApiRuntime } from '@/lib/apiRuntime'
 
 type Body = { pin?: string }
+
+type VerifyBody = { ok: boolean; message?: string }
 
 function canAccess(role: Role) {
   return role === 'reception' || role === 'admin' || role === 'super_admin'
 }
 
+function json(meta: ReturnType<typeof startApiRuntime>, status: number, body: VerifyBody) {
+  return jsonWithApiRuntime(meta, status, body, 'no-store')
+}
+
 function timingSafeEqual(a: string, b: string) {
-  // tiny constant-time-ish compare for short strings
   const aa = new TextEncoder().encode(a)
   const bb = new TextEncoder().encode(b)
   const len = Math.max(aa.length, bb.length)
@@ -25,13 +29,13 @@ function timingSafeEqual(a: string, b: string) {
 }
 
 export async function POST(req: Request) {
+  const meta = startApiRuntime('/api/kiosk/verify-exit-pin')
   const user = await getSessionUser()
-  if (!user) return NextResponse.json({ ok: false, message: 'Unauthorized' }, { status: 401 })
-  if (!canAccess(user.role)) return NextResponse.json({ ok: false, message: 'Forbidden' }, { status: 403 })
+  if (!user) return json(meta, 401, { ok: false, message: 'Unauthorized' })
+  if (!canAccess(user.role)) return json(meta, 403, { ok: false, message: 'Forbidden' })
 
-  // Super admin can always exit without PIN
   if (user.role === 'super_admin') {
-    return NextResponse.json({ ok: true }, { status: 200 })
+    return json(meta, 200, { ok: true })
   }
 
   let body: Body = {}
@@ -42,17 +46,18 @@ export async function POST(req: Request) {
   }
 
   const pin = String(body.pin ?? '').trim()
-  if (!pin) return NextResponse.json({ ok: false, message: 'Missing PIN' }, { status: 400 })
+  if (!pin) return json(meta, 400, { ok: false, message: 'Missing PIN' })
+  if (pin.length > 32) return json(meta, 400, { ok: false, message: 'Invalid PIN' })
 
   const expected = String(process.env.KIOSK_EXIT_PIN ?? '').trim()
   if (!expected) {
-    // Misconfigured environment
-    return NextResponse.json({ ok: false, message: 'Kiosk PIN not configured' }, { status: 500 })
+    logApiError(meta, 'env', 'KIOSK_EXIT_PIN not configured')
+    return json(meta, 500, { ok: false, message: 'Kiosk PIN not configured' })
   }
 
   if (!timingSafeEqual(pin, expected)) {
-    return NextResponse.json({ ok: false, message: 'Invalid PIN' }, { status: 401 })
+    return json(meta, 401, { ok: false, message: 'Invalid PIN' })
   }
 
-  return NextResponse.json({ ok: true }, { status: 200 })
+  return json(meta, 200, { ok: true })
 }

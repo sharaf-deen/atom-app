@@ -7,9 +7,11 @@ import PageHeader from '@/components/layout/PageHeader'
 import Section from '@/components/layout/Section'
 import QrImage from '@/components/QrImage'
 import ProfileIdPhoto from '@/components/ProfileIdPhoto'
+import AthleteProfileSection from '@/components/member-detail/AthleteProfileSection'
 import type { Plan } from '@/components/SubscribeDialog'
 import { createSupabaseRSC } from '@/lib/supabaseServer'
 import { getSessionUser, type Role } from '@/lib/session'
+import { cairoToday, diffDays } from '@/lib/cairoDate'
 
 type ProfileRow = {
   user_id: string
@@ -62,8 +64,8 @@ function ageYears(dob?: string | null) {
   const born = new Date(Date.UTC(y, m - 1, d))
   if (isNaN(born.getTime())) return null
 
-  const now = new Date()
-  const today = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()))
+  const [ty, tm, td] = cairoToday().split('-').map(Number)
+  const today = new Date(Date.UTC(ty, tm - 1, td))
   let age = today.getUTCFullYear() - born.getUTCFullYear()
   const mm = today.getUTCMonth() - born.getUTCMonth()
   if (mm < 0 || (mm === 0 && today.getUTCDate() < born.getUTCDate())) age--
@@ -77,10 +79,6 @@ function ageGroup(dob?: string | null) {
   return age < 17 ? 'Kid' : 'Adult'
 }
 
-function todayDateOnlyUTC() {
-  return new Date().toISOString().slice(0, 10) // YYYY-MM-DD (UTC)
-}
-
 function fmtDate(dateStr?: string | null) {
   if (!dateStr) return '—'
   const dt = new Date(dateStr.length === 10 ? `${dateStr}T00:00:00Z` : dateStr)
@@ -90,9 +88,11 @@ function fmtDate(dateStr?: string | null) {
 
 function daysLeft(endDate?: string | null) {
   if (!endDate) return null
-  const t = todayDateOnlyUTC()
-  const ms = new Date(`${endDate}T00:00:00Z`).getTime() - new Date(`${t}T00:00:00Z`).getTime()
-  return Math.floor(ms / 86400000)
+  return diffDays(cairoToday(), endDate)
+}
+
+function shouldShowAthleteProfileOnSelfProfile(role?: Role | null) {
+  return role === 'member' || role === 'coach' || role === 'assistant_coach' || role === 'vip' || role === 'champion'
 }
 
 function humanPlan(p?: Plan | null) {
@@ -149,7 +149,7 @@ export default async function ProfilePage() {
 
   return (
     <main>
-      <PageHeader title="Profile" subtitle="Your account info" />
+      <PageHeader title="Profile" subtitle="Your details" />
 
       <Section className="space-y-6">
         
@@ -158,7 +158,7 @@ export default async function ProfilePage() {
           <section className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-5 shadow-soft">
             <h2 className="font-semibold">Profile photo</h2>
             <p className="mt-1 text-sm text-[hsl(var(--muted))]">
-              Upload a square photo (JPG/PNG/WEBP). Max 5 MB.
+              Square JPG, PNG or WEBP up to 5 MB.
             </p>
             <div className="mt-4">
               <ProfileIdPhoto userId={me.id} idPhotoPath={p.id_photo_path} />
@@ -208,13 +208,25 @@ export default async function ProfilePage() {
             {p.qr_code ? (
               <div className="text-center">
                 <QrImage value={p.qr_code} size={180} />
-                <div className="text-xs text-[hsl(var(--muted))] mt-2">Show this code at reception</div>
+                <div className="mt-2 text-xs text-[hsl(var(--muted))]">Show this code at reception.</div>
               </div>
             ) : (
-              <div className="text-sm text-[hsl(var(--muted))]">No QR code.</div>
+              <div className="text-sm text-[hsl(var(--muted))]">No QR code yet.</div>
             )}
           </div>
         </section>
+
+        {shouldShowAthleteProfileOnSelfProfile(p.role ?? me.role ?? 'member') ? (
+          <AthleteProfileSection
+            memberUserId={me.id}
+            targetRole={p.role ?? me.role ?? 'member'}
+            viewerRole={me.role}
+            isSelf
+            age={ageYears(p.date_of_birth)}
+            nextPath="/profile"
+            allowEdit={false}
+          />
+        ) : null}
 
         {/* Subscriptions (no attendance for member/coach/assistant coach) */}
         <section className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-5 shadow-soft space-y-3">

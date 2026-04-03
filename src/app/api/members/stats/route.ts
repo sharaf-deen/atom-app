@@ -1,6 +1,8 @@
 // src/app/api/members/stats/route.ts
 import { NextResponse } from 'next/server'
 import { createSupabaseRSC } from '@/lib/supabaseServer'
+import { cairoTodayDateOnly } from '@/lib/cairoTime'
+import { MEMBER_LIKE_ROLES, hasLifetimeGymAccess, normalizeRole } from '@/lib/rbac'
 
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
@@ -36,15 +38,15 @@ function isFrozenNow(sub: {
 export async function GET() {
   try {
     const supabase = createSupabaseRSC()
-    const today = new Date().toISOString().slice(0, 10) // 'YYYY-MM-DD'
+    const today = cairoTodayDateOnly()
 
     //
     // 1) Total de membres : table "profiles"
     //
     const { data: profiles, error: profilesError } = await supabase
       .from('profiles') // members profiles
-      .select('user_id')
-      .eq('role', 'member')
+      .select('user_id, role')
+      .in('role', [...MEMBER_LIKE_ROLES])
 
     if (profilesError) {
       console.error('Error fetching profiles:', profilesError)
@@ -63,6 +65,14 @@ export async function GET() {
 
     // Only count subscriptions that belong to a real member profile
     const memberIds = new Set<string>((profiles ?? []).map((p: any) => p.user_id as string).filter(Boolean))
+    const activeMemberIds = new Set<string>()
+    for (const profile of profiles ?? []) {
+      const role = normalizeRole((profile as any)?.role)
+      if (hasLifetimeGymAccess(role)) {
+        const id = (profile as any)?.user_id as string | undefined
+        if (id) activeMemberIds.add(id)
+      }
+    }
 
     //
     // 2) Membres avec un abonnement ACTIF
@@ -87,7 +97,6 @@ export async function GET() {
     }
 
     // On compte les member_id DISTINCTS avec au moins une sub active
-    const activeMemberIds = new Set<string>()
     for (const row of subs ?? []) {
       if (row?.member_id) {
         const mid = row.member_id as string

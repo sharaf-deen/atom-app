@@ -389,8 +389,8 @@ export default async function ExpensesPage({
 
       <Card>
         <CardHeader>
-          <CardTitle>Quick filters</CardTitle>
-          <div className="text-sm text-[hsl(var(--muted))]">Use a preset, then refine below if needed.</div>
+          <CardTitle>Filters</CardTitle>
+          <div className="text-sm text-[hsl(var(--muted))]">Refine the view, then export exactly this selection.</div>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="flex flex-wrap gap-2">
@@ -398,7 +398,7 @@ export default async function ExpensesPage({
             <a href={quickLinks.seven} className="inline-flex items-center justify-center rounded-2xl shadow-soft border border-[hsl(var(--border))] bg-white px-4 py-2 text-sm font-medium hover:bg-[hsl(var(--bg))]/80">Last 7 days</a>
             <a href={quickLinks.month} className="inline-flex items-center justify-center rounded-2xl shadow-soft border border-[hsl(var(--border))] bg-white px-4 py-2 text-sm font-medium hover:bg-[hsl(var(--bg))]/80">This month</a>
             <a href={quickLinks.custom} className="inline-flex items-center justify-center rounded-2xl shadow-soft border border-[hsl(var(--border))] bg-white px-4 py-2 text-sm font-medium hover:bg-[hsl(var(--bg))]/80">Custom</a>
-            <a href="/expenses" className="inline-flex items-center justify-center rounded-2xl shadow-soft border border-[hsl(var(--border))] bg-white px-4 py-2 text-sm font-medium hover:bg-[hsl(var(--bg))]/80">Reset all</a>
+            <a href="/expenses" className="inline-flex items-center justify-center rounded-2xl shadow-soft border border-[hsl(var(--border))] bg-white px-4 py-2 text-sm font-medium hover:bg-[hsl(var(--bg))]/80">Reset filters</a>
           </div>
 
           <form method="get" className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
@@ -472,21 +472,25 @@ export default async function ExpensesPage({
                 Apply filters
               </button>
               <a href={`/api/expenses/export?${exportQS}`} className="inline-flex items-center justify-center rounded-2xl shadow-soft border border-[hsl(var(--border))] bg-white px-4 py-2 text-sm font-medium hover:bg-[hsl(var(--bg))]/80">
-                Export current CSV
+                Export CSV
               </a>
               <a href={`/api/expenses/export-pdf?${exportQS}`} className="inline-flex items-center justify-center rounded-2xl shadow-soft border border-[hsl(var(--border))] bg-white px-4 py-2 text-sm font-medium hover:bg-[hsl(var(--bg))]/80">
-                Export current PDF
+                Export PDF
               </a>
+              <span className="text-xs text-[hsl(var(--muted))]">Uses current filters</span>
             </div>
           </form>
 
           {activeFilters.length ? (
-            <div className="flex flex-wrap gap-2">
+            <div className="space-y-2">
+              <div className="text-xs font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Current view</div>
+              <div className="flex flex-wrap gap-2">
               {activeFilters.map((label) => (
                 <span key={label} className="inline-flex items-center rounded-full border border-[hsl(var(--border))] bg-[hsl(var(--bg))] px-3 py-1 text-xs font-medium text-[hsl(var(--muted))]">
                   {label}
                 </span>
               ))}
+              </div>
             </div>
           ) : null}
         </CardContent>

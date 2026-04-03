@@ -14,17 +14,7 @@ import { Table } from '@/components/ui/Table'
 import { getSessionUserCached, getSupabaseAdminClientCached } from '@/lib/requestCache'
 import { addDays, cairoToday, diffDays, CAIRO_TZ } from '@/lib/cairoDate'
 import { canAccessReceptionDesk, canManageNotifications } from '@/lib/rbac'
-import {
-  Bell,
-  CalendarDays,
-  CreditCard,
-  IdCard,
-  MessageSquare,
-  Phone,
-  ScanLine,
-  Users,
-  Wallet,
-} from 'lucide-react'
+import { CalendarDays, IdCard, MessageSquare, Phone, ScanLine, Wallet } from 'lucide-react'
 
 type SearchParams = Record<string, string | string[] | undefined>
 
@@ -62,7 +52,7 @@ type AttendanceRow = {
   scanned_at: string | null
 }
 
-type Focus = 'now' | 'all' | 'renewals' | 'dues' | 'no_attendance'
+type Focus = 'now' | 'renewals' | 'dues' | 'no_attendance' | 'all'
 
 type QueueItem = {
   memberId: string
@@ -90,7 +80,7 @@ function firstParam(v: string | string[] | undefined) {
 }
 
 function isFocus(v: unknown): v is Focus {
-  return v === 'now' || v === 'all' || v === 'renewals' || v === 'dues' || v === 'no_attendance'
+  return v === 'now' || v === 'renewals' || v === 'dues' || v === 'no_attendance' || v === 'all'
 }
 
 function buildQS(params: Record<string, string | undefined>) {
@@ -118,7 +108,7 @@ function fmtMoneyEGP(value: unknown) {
   const n = Number(value ?? 0)
   if (!Number.isFinite(n)) return '0 EGP'
   try {
-    return new Intl.NumberFormat('en-EG', { style: 'currency', currency: 'EGP' }).format(n)
+    return new Intl.NumberFormat('en-EG', { style: 'currency', currency: 'EGP', maximumFractionDigits: 0 }).format(n)
   } catch {
     return `${n.toFixed(0)} EGP`
   }
@@ -131,22 +121,6 @@ function humanPlan(plan: string | null | undefined, sessionsTotal?: number | nul
   }
   if (!plan) return 'Membership'
   return plan.replace(/_/g, ' ').toUpperCase()
-}
-
-function humanPayment(value?: string | null) {
-  switch (String(value ?? '').toLowerCase()) {
-    case 'cash':
-      return 'Cash'
-    case 'instapay':
-      return 'InstaPay'
-    case 'card':
-    case 'visa':
-      return 'Card'
-    case 'bank_transfer':
-      return 'Bank transfer'
-    default:
-      return value ? String(value) : '—'
-  }
 }
 
 function displayName(profile?: ProfileLite | null) {
@@ -179,7 +153,11 @@ function toneClasses(kind: 'neutral' | 'warning' | 'danger' | 'success') {
 }
 
 function TinyBadge({ children, tone = 'neutral' }: { children: ReactNode; tone?: 'neutral' | 'warning' | 'danger' | 'success' }) {
-  return <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold ${toneClasses(tone)}`}>{children}</span>
+  return (
+    <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold ${toneClasses(tone)}`}>
+      {children}
+    </span>
+  )
 }
 
 function SummaryCard({ label, value, hint, href }: { label: string; value: string; hint: string; href?: string }) {
@@ -276,6 +254,14 @@ function focusMatches(item: QueueItem, focus: Focus) {
 
 function compareQueue(a: QueueItem, b: QueueItem) {
   return b.priority - a.priority || b.dueAmount - a.dueAmount || (a.daysLeft ?? 999) - (b.daysLeft ?? 999) || a.name.localeCompare(b.name)
+}
+
+function focusLabel(focus: Focus) {
+  if (focus === 'now') return 'Action now'
+  if (focus === 'renewals') return 'Renewals'
+  if (focus === 'dues') return 'Dues'
+  if (focus === 'no_attendance') return 'Follow-up'
+  return 'All rows'
 }
 
 export default async function ReceptionPage({ searchParams }: { searchParams?: SearchParams }) {
@@ -401,9 +387,7 @@ export default async function ReceptionPage({ searchParams }: { searchParams?: S
         priority += 20
       }
 
-      if (!reasons.length) {
-        reasons.push({ label: statusLabel(subscription, today), tone: 'success' })
-      }
+      if (!reasons.length) reasons.push({ label: statusLabel(subscription, today), tone: 'success' })
 
       const nextStep =
         dueAmount > 0
@@ -453,9 +437,7 @@ export default async function ReceptionPage({ searchParams }: { searchParams?: S
   const urgentCount = queue.filter((item) => item.priority >= 80 || item.dueAmount > 0 || ((item.daysLeft ?? 999) <= 3)).length
   const dueCount = queue.filter((item) => item.dueAmount > 0).length
   const noAttendanceCount = queue.filter((item) => item.noAttendance14d).length
-  const topQueue = filtered.slice(0, 5)
-
-  const rowParamsBase = { focus, q: q || undefined, page: String(safePage) }
+  const queueValue = fmtMoneyEGP(queue.reduce((sum, item) => sum + item.dueAmount, 0))
 
   const rows = visible.map((item) => {
     const whatsapp = normalizeWhatsappPhone(item.phone)
@@ -472,40 +454,32 @@ export default async function ReceptionPage({ searchParams }: { searchParams?: S
           <div className="mt-1 text-xs text-[hsl(var(--muted))]">{item.memberCode || item.email || 'No member code yet'}</div>
         </div>
       ),
-      priority: (
-        <div className="flex flex-wrap gap-1">
-          {item.reasons.map((reason) => (
-            <TinyBadge key={`${item.memberId}-${reason.label}`} tone={reason.tone}>
-              {reason.label}
-            </TinyBadge>
-          ))}
+      why_now: (
+        <div className="min-w-0 space-y-1">
+          <div className="flex flex-wrap gap-1">
+            {item.reasons.map((reason) => (
+              <TinyBadge key={`${item.memberId}-${reason.label}`} tone={reason.tone}>
+                {reason.label}
+              </TinyBadge>
+            ))}
+          </div>
+          <div className="text-xs text-[hsl(var(--muted))]">{item.nextStep}</div>
         </div>
       ),
-      membership: (
+      coverage: (
         <div className="min-w-0">
           <div className="font-medium text-black">{humanPlan(item.subscription.plan, item.subscription.sessions_total)}</div>
           <div className="mt-1 text-xs text-[hsl(var(--muted))]">
             {statusLabel(item.subscription, today)}
             {item.daysLeft !== null ? ` · ${item.daysLeft < 0 ? 'Expired' : `${item.daysLeft} day(s) left`}` : ''}
           </div>
+          <div className="mt-1 text-xs text-[hsl(var(--muted))]">{item.dueAmount > 0 ? `Due ${fmtMoneyEGP(item.dueAmount)}` : 'No due balance'}</div>
         </div>
       ),
-      billing: (
-        <div className="min-w-0">
-          <div className="font-medium text-black">{item.dueAmount > 0 ? fmtMoneyEGP(item.dueAmount) : 'Clear'}</div>
-          <div className="mt-1 text-xs text-[hsl(var(--muted))]">{humanPayment(item.subscription.payment_method)}</div>
-        </div>
-      ),
-      attendance: (
+      last_seen: (
         <div className="min-w-0">
           <div className="font-medium text-black">{item.lastValidAttendanceDate ? fmtDate(item.lastValidAttendanceDate) : 'No recent valid attendance'}</div>
           <div className="mt-1 text-xs text-[hsl(var(--muted))]">{item.validAttendance7d} valid · 7d • {item.validAttendance30d} valid · 30d</div>
-        </div>
-      ),
-      next_step: (
-        <div className="min-w-0">
-          <div className="font-medium text-black">{item.nextStep}</div>
-          <div className="mt-1 text-xs text-[hsl(var(--muted))]">{item.dueAmount > 0 ? 'Collect payment or confirm payment date first.' : item.noAttendance14d ? 'Use CRM or direct contact if the member is not showing up.' : 'Open the member profile for the full desk workflow.'}</div>
         </div>
       ),
       actions: (
@@ -523,6 +497,11 @@ export default async function ReceptionPage({ searchParams }: { searchParams?: S
               WhatsApp
             </Button>
           ) : null}
+          {item.phone ? (
+            <Button asChild size="sm" variant="ghost" href={`tel:${item.phone}`}>
+              Call
+            </Button>
+          ) : null}
         </div>
       ),
     }
@@ -532,7 +511,7 @@ export default async function ReceptionPage({ searchParams }: { searchParams?: S
     <main>
       <PageHeader
         title="Front desk"
-        subtitle={`Live reception workflow — Cairo time (${CAIRO_TZ}). Keep the next action obvious.`}
+        subtitle={`Cairo time (${CAIRO_TZ}). Keep the next desk action visible.`}
         right={
           <div className="flex flex-wrap gap-2">
             <Button asChild variant="outline" href="/scan">
@@ -541,185 +520,97 @@ export default async function ReceptionPage({ searchParams }: { searchParams?: S
             <Button asChild variant="outline" href="/kiosk">
               Create member
             </Button>
-            <Button asChild variant="outline" href="/admin/crm">
-              CRM
-            </Button>
           </div>
         }
       />
 
       <Section className="space-y-4">
         <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 xl:grid-cols-4">
-          <SummaryCard label="Scans today" value={String(scansTodayRes.count ?? 0)} hint="Entrance flow already recorded today." href="/scan" />
-          <SummaryCard label="Action needed" value={String(urgentCount)} hint="Dues, urgent renewals and desk-first cases." href={buildQS({ focus: 'now' })} />
-          <SummaryCard label="Expiring in 7d" value={String(expiringCountRes.count ?? 0)} hint="Members who likely need renewal attention soon." href="/admin/expiring-soon" />
-          <SummaryCard label="Outstanding dues" value={String(dueCount)} hint={`${fmtMoneyEGP(queue.reduce((sum, item) => sum + item.dueAmount, 0))} still open.`} href="/admin/outstanding-dues" />
+          <SummaryCard label="Scans today" value={String(scansTodayRes.count ?? 0)} hint="Attendance recorded today." href="/scan" />
+          <SummaryCard label="Action now" value={String(urgentCount)} hint="Urgent renewals, dues and desk-first cases." href={buildQS({ focus: 'now' })} />
+          <SummaryCard label="Expiring in 7d" value={String(expiringCountRes.count ?? 0)} hint="Renewals likely needed soon." href="/admin/expiring-soon" />
+          <SummaryCard label="Outstanding dues" value={queueValue} hint={`${dueCount} member(s) with money due.`} href="/admin/outstanding-dues" />
         </div>
       </Section>
 
       <Section className="space-y-4">
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-          <ActionTile href="/scan" title="Scan" desc="Fast attendance and QR validation at the entrance." icon={ScanLine} />
-          <ActionTile href="/kiosk" title="Create member" desc="Open the desk flow to create a member or start a membership." icon={IdCard} />
-          <ActionTile href="/admin/expiring-soon" title="Renewals" desc="Open expiring memberships and settle renewals fast." icon={CalendarDays} />
-          <ActionTile href="/admin/outstanding-dues" title="Outstanding dues" desc="Jump straight into money collection and payment follow-up." icon={Wallet} />
-          <ActionTile href="/members" title="Members" desc="Search a member quickly when you need the full detail page." icon={Users} />
-          <ActionTile href="/admin/crm" title="CRM queue" desc="Open today’s contact queue for calls, WhatsApp and email follow-up." icon={MessageSquare} />
-          <ActionTile href="/notifications" title="Notifications" desc="Open the operational inbox or send a quick update when allowed." icon={Bell} />
-          <ActionTile href="/schedule" title="Schedule" desc="Keep today’s class times close to the desk." icon={CalendarDays} />
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+          <ActionTile href="/scan" title="Scan" desc="Entrance validation and attendance." icon={ScanLine} />
+          <ActionTile href="/admin/expiring-soon" title="Renewals" desc="Open memberships ending soon." icon={CalendarDays} />
+          <ActionTile href="/admin/outstanding-dues" title="Outstanding dues" desc="Payment collection and due follow-up." icon={Wallet} />
+          <ActionTile href="/admin/crm" title="CRM queue" desc="Open the live contact queue." icon={MessageSquare} />
+          <ActionTile href="/kiosk" title="Create member" desc="Start a new member flow." icon={IdCard} />
+          <ActionTile href="/schedule" title="Schedule" desc="Keep today’s class times close." icon={CalendarDays} />
         </div>
       </Section>
 
       <Section className="space-y-4">
-        <div className="flex flex-col gap-3 rounded-2xl border border-[hsl(var(--border))] bg-white p-4 shadow-soft md:flex-row md:items-end md:justify-between">
-          <div>
-            <div className="text-sm font-semibold tracking-tight">Front desk queue</div>
-            <p className="mt-1 text-sm text-[hsl(var(--muted))]">Who needs action now, and what should reception do next?</p>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-2 text-sm">
-            {([
-              ['now', 'Action now'],
-              ['all', 'All rows'],
-              ['renewals', 'Renewals'],
-              ['dues', 'Dues'],
-              ['no_attendance', 'No attendance'],
-            ] as Array<[Focus, string]>).map(([value, label]) => {
-              const active = focus === value
-              return (
-                <Link
-                  key={value}
-                  href={buildQS({ focus: value, q: q || undefined })}
-                  className={`inline-flex items-center rounded-full border px-3 py-1.5 text-xs font-semibold ${active ? 'border-black bg-black text-white' : 'border-[hsl(var(--border))] bg-white text-black'}`}
-                >
-                  {label}
-                </Link>
-              )
-            })}
-          </div>
-        </div>
-
-        <form method="get" className="flex flex-col gap-2 sm:flex-row sm:items-center">
-          <input type="hidden" name="focus" value={focus} />
-          <div className="flex-1">
-            <input
-              type="text"
-              name="q"
-              defaultValue={q}
-              placeholder="Search name, email, phone or member ID"
-              className="h-11 w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-4 text-sm outline-none focus:ring-2 focus:ring-ring"
-            />
-          </div>
-          <Button type="submit" variant="outline">
-            Search
-          </Button>
-          {q ? (
-            <Button asChild variant="ghost" href={buildQS({ focus })}>
-              Reset
-            </Button>
-          ) : null}
-        </form>
-
-        <div className="grid gap-4 xl:grid-cols-[1.05fr_0.95fr]">
-          <div className="space-y-3 rounded-2xl border border-[hsl(var(--border))] bg-white p-4 shadow-soft">
+        <div className="rounded-2xl border border-[hsl(var(--border))] bg-white p-4 shadow-soft">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
             <div>
-              <div className="text-sm font-semibold tracking-tight">Action now</div>
-              <p className="mt-1 text-sm text-[hsl(var(--muted))]">Top desk cases sorted by urgency, due balance and renewal pressure.</p>
+              <div className="text-sm font-semibold tracking-tight">Action queue</div>
+              <p className="mt-1 text-sm text-[hsl(var(--muted))]">
+                Start with <span className="font-medium text-black">Action now</span>, then narrow to <span className="font-medium text-black">Renewals</span>, <span className="font-medium text-black">Dues</span> or <span className="font-medium text-black">Follow-up</span>.
+              </p>
             </div>
+            <div className="flex flex-wrap items-center gap-2 text-sm">
+              {([
+                ['now', 'Action now'],
+                ['renewals', 'Renewals'],
+                ['dues', 'Dues'],
+                ['no_attendance', 'Follow-up'],
+                ['all', 'All rows'],
+              ] as Array<[Focus, string]>).map(([value, label]) => {
+                const active = focus === value
+                return (
+                  <Link
+                    key={value}
+                    href={buildQS({ focus: value, q: q || undefined })}
+                    className={`inline-flex items-center rounded-full border px-3 py-1.5 text-xs font-semibold ${active ? 'border-black bg-black text-white' : 'border-[hsl(var(--border))] bg-white text-black'}`}
+                  >
+                    {label}
+                  </Link>
+                )
+              })}
+            </div>
+          </div>
 
-            {topQueue.length ? (
-              <div className="space-y-3">
-                {topQueue.map((item) => {
-                  const whatsapp = normalizeWhatsappPhone(item.phone)
-                  const memberHref = `/members/${item.memberId}`
-                  const notifyHref = canManageNotifications(me.role) ? `/notifications${buildQS({ memberId: item.memberId })}` : '/notifications'
-                  return (
-                    <div key={`top-${item.memberId}`} className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] p-3">
-                      <div className="flex flex-wrap items-start justify-between gap-3">
-                        <div className="min-w-0">
-                          <div className="text-sm font-semibold tracking-tight">{item.name}</div>
-                          <div className="mt-1 text-xs text-[hsl(var(--muted))]">{item.memberCode || item.email || 'No member code yet'}</div>
-                          <div className="mt-2 flex flex-wrap gap-1">
-                            {item.reasons.map((reason) => (
-                              <TinyBadge key={`top-reason-${item.memberId}-${reason.label}`} tone={reason.tone}>
-                                {reason.label}
-                              </TinyBadge>
-                            ))}
-                          </div>
-                        </div>
-                        <TinyBadge tone={item.dueAmount > 0 || ((item.daysLeft ?? 999) <= 3) ? 'danger' : 'warning'}>{item.nextStep}</TinyBadge>
-                      </div>
-
-                      <div className="mt-3 grid gap-2 text-xs text-[hsl(var(--muted))] sm:grid-cols-3">
-                        <div>
-                          <span className="font-medium text-black">Membership:</span> {humanPlan(item.subscription.plan, item.subscription.sessions_total)}
-                        </div>
-                        <div>
-                          <span className="font-medium text-black">Due:</span> {item.dueAmount > 0 ? fmtMoneyEGP(item.dueAmount) : 'Clear'}
-                        </div>
-                        <div>
-                          <span className="font-medium text-black">Attendance:</span> {item.lastValidAttendanceDate ? fmtDate(item.lastValidAttendanceDate) : 'No recent valid attendance'}
-                        </div>
-                      </div>
-
-                      <div className="mt-3 flex flex-wrap gap-2">
-                        <Button asChild size="sm" href={memberHref}>
-                          {item.dueAmount > 0 ? 'Settle due' : (item.daysLeft ?? 999) <= 7 ? 'Renew' : 'Open member'}
-                        </Button>
-                        {canManageNotifications(me.role) ? (
-                          <Button asChild size="sm" variant="outline" href={notifyHref}>
-                            Notify
-                          </Button>
-                        ) : null}
-                        {whatsapp ? (
-                          <Button asChild size="sm" variant="outline" href={`https://wa.me/${whatsapp}`}>
-                            WhatsApp
-                          </Button>
-                        ) : null}
-                        {item.phone ? (
-                          <Button asChild size="sm" variant="ghost" href={`tel:${item.phone}`}>
-                            Call
-                          </Button>
-                        ) : null}
-                      </div>
-                    </div>
-                  )
-                })}
+          <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1fr)_260px]">
+            <form method="get" className="flex flex-col gap-2 sm:flex-row sm:items-center">
+              <input type="hidden" name="focus" value={focus} />
+              <div className="flex-1">
+                <input
+                  type="text"
+                  name="q"
+                  defaultValue={q}
+                  placeholder="Search name, email, phone or member ID"
+                  className="h-11 w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-4 text-sm outline-none focus:ring-2 focus:ring-ring"
+                />
               </div>
-            ) : (
-              <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] p-4 text-sm text-[hsl(var(--muted))]">
-                No desk case matches the current focus.
+              <Button type="submit" variant="outline">
+                Search
+              </Button>
+              {q ? (
+                <Button asChild variant="ghost" href={buildQS({ focus })}>
+                  Reset
+                </Button>
+              ) : null}
+            </form>
+
+            <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-1">
+              <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] p-3">
+                <div className="text-xs text-[hsl(var(--muted))]">Current queue</div>
+                <div className="mt-1 text-lg font-semibold tracking-tight">{focusLabel(focus)}</div>
               </div>
-            )}
-          </div>
-
-          <div className="space-y-4">
-            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-1">
-              <SummaryCard label="No attendance 14d" value={String(noAttendanceCount)} hint="Members who may need a follow-up touch soon." href={buildQS({ focus: 'no_attendance', q: q || undefined })} />
-              <SummaryCard label="Visible now" value={String(total)} hint="Rows matching the current desk focus and search." />
+              <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] p-3">
+                <div className="text-xs text-[hsl(var(--muted))]">Visible now</div>
+                <div className="mt-1 text-lg font-semibold tracking-tight">{total}</div>
+              </div>
+              <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] p-3">
+                <div className="text-xs text-[hsl(var(--muted))]">Follow-up</div>
+                <div className="mt-1 text-lg font-semibold tracking-tight">{noAttendanceCount}</div>
+              </div>
             </div>
-
-            <div className="rounded-2xl border border-[hsl(var(--border))] bg-white p-4 shadow-soft">
-              <div className="text-sm font-semibold tracking-tight">How to use this page</div>
-              <ul className="mt-3 space-y-2 text-sm text-[hsl(var(--muted))]">
-                <li>Start with <span className="font-medium text-black">Action now</span> when the desk is busy.</li>
-                <li>Use <span className="font-medium text-black">Renewals</span> when you want to clear expiring memberships first.</li>
-                <li>Use <span className="font-medium text-black">Dues</span> when you need to collect money before anything else.</li>
-                <li>Use <span className="font-medium text-black">No attendance</span> when reception is doing follow-up work between desk rushes.</li>
-              </ul>
-            </div>
-          </div>
-        </div>
-      </Section>
-
-      <Section className="space-y-4">
-        <div className="flex items-center justify-between gap-3">
-          <div>
-            <h2 className="text-lg font-semibold tracking-tight">Queue details</h2>
-            <p className="mt-1 text-sm text-[hsl(var(--muted))]">Full front-desk queue with the next action and direct shortcuts.</p>
-          </div>
-          <div className="text-xs text-[hsl(var(--muted))]">
-            Page {safePage} of {totalPages}
           </div>
         </div>
 
@@ -728,11 +619,9 @@ export default async function ReceptionPage({ searchParams }: { searchParams?: S
           keyField="id"
           columns={[
             { key: 'member', header: 'Member' },
-            { key: 'priority', header: 'Priority', tdClassName: 'whitespace-normal' },
-            { key: 'membership', header: 'Membership', tdClassName: 'whitespace-normal' },
-            { key: 'billing', header: 'Billing', tdClassName: 'whitespace-normal' },
-            { key: 'attendance', header: 'Attendance', tdClassName: 'whitespace-normal' },
-            { key: 'next_step', header: 'Next step', tdClassName: 'whitespace-normal' },
+            { key: 'why_now', header: 'Why now', tdClassName: 'whitespace-normal' },
+            { key: 'coverage', header: 'Membership', tdClassName: 'whitespace-normal' },
+            { key: 'last_seen', header: 'Last seen', tdClassName: 'whitespace-normal' },
             { key: 'actions', header: '', thClassName: 'w-[1%]', tdClassName: 'whitespace-normal' },
           ]}
           rows={rows}

@@ -2,23 +2,17 @@
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
-import { NextResponse } from 'next/server'
 import { revalidateTag, revalidatePath } from 'next/cache'
 import { createSupabaseServerActionClient } from '@/lib/supabaseServer'
-
-
-function json(status: number, body: any) {
-  const res = NextResponse.json(body, { status })
-  res.headers.set('Cache-Control', 'no-store')
-  return res
-}
+import { jsonWithApiRuntime, logApiError, startApiRuntime } from '@/lib/apiRuntime'
 
 async function handle() {
+  const meta = startApiRuntime('/api/admin/expire')
   const supa = createSupabaseServerActionClient()
 
   // Auth
   const { data: auth } = await supa.auth.getUser()
-  if (!auth.user) return json(401, { ok: false, error: 'NOT_AUTHENTICATED' })
+  if (!auth.user) return jsonWithApiRuntime(meta, 401, { ok: false, error: 'NOT_AUTHENTICATED' })
 
   // Only admin / super_admin
   const { data: me, error: meErr } = await supa
@@ -26,16 +20,22 @@ async function handle() {
     .select('role')
     .eq('user_id', auth.user.id)
     .maybeSingle<{ role: string | null }>()
-  if (meErr) return json(500, { ok: false, error: 'PROFILE_LOOKUP_FAILED', details: meErr.message })
+  if (meErr) {
+    logApiError(meta, 'profile_lookup', meErr)
+    return jsonWithApiRuntime(meta, 500, { ok: false, error: 'PROFILE_LOOKUP_FAILED', details: meErr.message })
+  }
 
   const role = me?.role ?? 'member'
   if (!['admin', 'super_admin'].includes(role)) {
-    return json(403, { ok: false, error: 'FORBIDDEN' })
+    return jsonWithApiRuntime(meta, 403, { ok: false, error: 'FORBIDDEN' })
   }
 
   // Run the expiration function
   const { data, error } = await supa.rpc('expire_subscriptions')
-  if (error) return json(500, { ok: false, error: 'RPC_FAILED', details: error.message })
+  if (error) {
+    logApiError(meta, 'expire_subscriptions_rpc', error)
+    return jsonWithApiRuntime(meta, 500, { ok: false, error: 'RPC_FAILED', details: error.message })
+  }
 
 
 // Invalidate members cache after batch expiration
@@ -43,7 +43,7 @@ try { revalidateTag('members') } catch {}
 try { revalidatePath('/members') } catch {}
 try { revalidatePath('/invoices') } catch {}
 
-  return json(200, data ?? { ok: true })
+  return jsonWithApiRuntime(meta, 200, data ?? { ok: true })
 }
 
 export async function POST() { return handle() }

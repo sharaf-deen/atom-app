@@ -149,21 +149,32 @@ function displayName(p?: ProfileLite | null) {
   return name || p?.email || p?.member_id || 'Member'
 }
 
+function isFrozenNow(s: Pick<SubscriptionRow, 'frozen_until'>, today: string) {
+  return !!s.frozen_until && s.frozen_until >= today
+}
+
+function isCurrentMembership(s: Pick<SubscriptionRow, 'status' | 'end_date' | 'frozen_until'>, today: string) {
+  if (isFrozenNow(s, today)) return s.status === 'active' || s.status === 'paused'
+  if (s.status !== 'active') return false
+  return !s.end_date || s.end_date >= today
+}
+
 function statusLabel(s: SubscriptionRow, today: string) {
-  const frozen = !!s.frozen_until && s.frozen_until >= today
+  const frozen = isFrozenNow(s, today)
   if (frozen) return 'Frozen'
-  if (s.status === 'active') return 'Active'
+  if (isCurrentMembership(s, today)) return 'Active'
   if (s.status === 'expired') return 'Expired'
   if (s.status === 'paused') return 'Paused'
   if (s.status === 'cancelled') return 'Cancelled'
+  if (s.status === 'active' && !!s.end_date && s.end_date < today) return 'Expired'
   return s.status ? s.status[0].toUpperCase() + s.status.slice(1) : 'Membership'
 }
 
 function statusTone(s: SubscriptionRow, today: string): 'neutral' | 'warning' | 'danger' | 'success' {
-  const frozen = !!s.frozen_until && s.frozen_until >= today
+  const frozen = isFrozenNow(s, today)
   if (frozen) return 'warning'
-  if (s.status === 'active') return 'success'
-  if (s.status === 'expired' || s.status === 'cancelled') return 'danger'
+  if (isCurrentMembership(s, today)) return 'success'
+  if (s.status === 'expired' || s.status === 'cancelled' || (s.status === 'active' && !!s.end_date && s.end_date < today)) return 'danger'
   if (s.status === 'paused') return 'warning'
   return 'neutral'
 }
@@ -197,16 +208,27 @@ function subscriptionRank(s: SubscriptionRow, today: string) {
   const due = Math.max(Number(s.amount_due ?? 0), 0)
   const daysLeft = s.end_date ? diffDays(today, s.end_date) : 999
   let score = 0
-  if (s.status === 'active') score += 100
-  if (!!s.frozen_until && s.frozen_until >= today) score -= 20
+  if (isCurrentMembership(s, today)) score += 1000
+  else if (s.status === 'active') score += 200
+  else if (due > 0) score += 100
+  if (isFrozenNow(s, today)) score -= 20
   score += Math.min(due, 5000) / 100
   score += Math.max(0, 15 - Math.abs(daysLeft))
   return score
 }
 
-function chooseSubscription(current: SubscriptionRow | undefined, incoming: SubscriptionRow, today: string) {
-  if (!current) return incoming
-  return subscriptionRank(incoming, today) > subscriptionRank(current, today) ? incoming : current
+function chooseMemberSubscription(rows: SubscriptionRow[], today: string) {
+  if (!rows.length) return undefined
+
+  const deduped = Array.from(new Map(rows.map((row) => [row.id, row] as const)).values())
+  const currentRows = deduped.filter((row) => isCurrentMembership(row, today))
+  const pool = currentRows.length ? currentRows : deduped
+
+  let best = pool[0]
+  for (const row of pool.slice(1)) {
+    if (subscriptionRank(row, today) > subscriptionRank(best, today)) best = row
+  }
+  return best
 }
 
 function normalizeWhatsappPhone(phone: string | null | undefined) {
@@ -235,7 +257,7 @@ async function getAttendanceRows(memberIds: string[], sinceDate: string) {
       .order('date', { ascending: false })
       .order('scanned_at', { ascending: false })
       .limit(5000)
-    out.push(...(((data ?? []) as AttendanceRow[]) ?? []))
+    out.push(...((data ?? []) as AttendanceRow[]))
   }
   return out
 }
@@ -318,15 +340,23 @@ export default async function AdminCrmPage({
     if (activeRes.error) throw new Error(activeRes.error.message)
     if (dueRes.error) throw new Error(dueRes.error.message)
 
-    const subsByMember = new Map<string, SubscriptionRow>()
+    const rowsByMember = new Map<string, SubscriptionRow[]>()
     const allRows = [
-      ...(((activeRes.data ?? []) as RawSubscriptionRow[]) ?? []),
-      ...(((dueRes.data ?? []) as RawSubscriptionRow[]) ?? []),
+      ...((activeRes.data ?? []) as RawSubscriptionRow[]),
+      ...((dueRes.data ?? []) as RawSubscriptionRow[]),
     ].map(normalizeSubscriptionRow)
 
     for (const row of allRows) {
       if (!row?.member_id) continue
-      subsByMember.set(row.member_id, chooseSubscription(subsByMember.get(row.member_id), row, today))
+      const current = rowsByMember.get(row.member_id) ?? []
+      current.push(row)
+      rowsByMember.set(row.member_id, current)
+    }
+
+    const subsByMember = new Map<string, SubscriptionRow>()
+    for (const [memberId, rows] of rowsByMember) {
+      const chosen = chooseMemberSubscription(rows, today)
+      if (chosen) subsByMember.set(memberId, chosen)
     }
 
     const attendanceRows = await getAttendanceRows([...subsByMember.keys()], since30)
@@ -345,9 +375,6 @@ export default async function AdminCrmPage({
       if (!cur.lastAttendanceDate || row.date > cur.lastAttendanceDate) cur.lastAttendanceDate = row.date
       if (row.valid) {
         cur.valid30d += 1
-        if (row.date >= since14) {
-          // kept only for scoring through lastValidAttendanceDate
-        }
         if (row.date >= addDays(today, -7)) cur.valid7d += 1
         if (!cur.lastValidAttendanceDate || row.date > cur.lastValidAttendanceDate) cur.lastValidAttendanceDate = row.date
       }
@@ -398,9 +425,7 @@ export default async function AdminCrmPage({
         reasons.push({ label: 'Inactive 30d', tone: 'danger' })
         priority += 2
       }
-      if (!reasons.length) {
-        reasons.push({ label: 'Monitor', tone: 'neutral' })
-      }
+      if (!reasons.length) reasons.push({ label: 'Monitor', tone: 'neutral' })
 
       return {
         memberId: sub.member_id,
@@ -451,10 +476,9 @@ export default async function AdminCrmPage({
   const hasPrev = page > 1
   const hasNext = start + PER_PAGE < filtered.length
 
-  const actionCount = queue.filter((i) => i.isActionNeeded).length
-  const expiringCount = queue.filter((i) => i.daysLeft !== null && i.daysLeft >= 0 && i.daysLeft <= 7).length
-  const dueCount = queue.filter((i) => i.dueAmount > 0).length
-  const noAttendanceCount = queue.filter((i) => i.noAttendance14d).length
+  const actionCount = filtered.filter((i) => i.isActionNeeded).length
+  const dueCount = filtered.filter((i) => i.dueAmount > 0).length
+  const expiringCount = filtered.filter((i) => i.daysLeft !== null && i.daysLeft >= 0 && i.daysLeft <= 7).length
 
   const subtitle = `Who should be contacted today — Cairo time (${CAIRO_TZ}).`
 
@@ -466,19 +490,23 @@ export default async function AdminCrmPage({
     const waDigits = normalizeWhatsappPhone(item.phone)
     const callHref = item.phone ? `tel:${item.phone}` : ''
     const mailHref = item.email ? `mailto:${item.email}` : ''
-    const notifyHref = `/notifications`
+
+    let nextStep = 'Monitor'
+    if (item.dueAmount > 0) nextStep = `Collect ${fmtMoneyEGP(item.dueAmount)}`
+    else if (item.daysLeft !== null && item.daysLeft <= 3) nextStep = 'Renew membership'
+    else if (item.noAttendance14d) nextStep = 'Follow up attendance'
 
     let coverage = 'No end date'
     if (item.subscription.frozen_until && item.subscription.frozen_until >= today) {
       coverage = `Frozen until ${fmtDate(item.subscription.frozen_until)}`
     } else if (item.daysLeft !== null) {
-      if (item.daysLeft < 0) coverage = `Expired ${Math.abs(item.daysLeft)}d ago · ${fmtDate(item.subscription.end_date)}`
-      else if (item.daysLeft === 0) coverage = `Expires today · ${fmtDate(item.subscription.end_date)}`
-      else coverage = `Ends in ${item.daysLeft}d · ${fmtDate(item.subscription.end_date)}`
+      if (item.daysLeft < 0) coverage = `Expired ${Math.abs(item.daysLeft)}d ago`
+      else if (item.daysLeft === 0) coverage = 'Expires today'
+      else coverage = `Ends in ${item.daysLeft}d`
     }
 
     const lastSeen = item.lastValidAttendanceDate
-      ? `${fmtDate(item.lastValidAttendanceDate)}${item.validAttendance7d > 0 ? ` · ${item.validAttendance7d} valid / 7d` : ''}`
+      ? `${fmtDate(item.lastValidAttendanceDate)}${item.validAttendance7d > 0 ? ` · ${item.validAttendance7d}/7d` : ''}`
       : 'No valid attendance in 30d'
 
     return {
@@ -490,42 +518,31 @@ export default async function AdminCrmPage({
           </Link>
           <div className="text-xs text-[hsl(var(--muted))]">
             {item.memberCode ? `ID ${item.memberCode}` : 'No member code'}
-            {item.email ? ` · ${item.email}` : ''}
+            {item.phone ? ` · ${item.phone}` : ''}
           </div>
-          {item.phone ? <div className="text-xs text-[hsl(var(--muted))]">{item.phone}</div> : null}
         </div>
       ),
-      follow_up: (
+      next_step: (
         <div className="space-y-2">
+          <div className="font-medium">{nextStep}</div>
           <div className="flex flex-wrap gap-1.5">
-            {item.reasons.map((reason) => (
+            {item.reasons.slice(0, 2).map((reason) => (
               <TinyBadge key={reason.label} tone={reason.tone}>
                 {reason.label}
               </TinyBadge>
             ))}
           </div>
-          <div className="text-xs text-[hsl(var(--muted))]">
-            Priority {item.priority}
-            {item.isActionNeeded ? ' · Contact today' : ' · Monitor'}
-          </div>
         </div>
       ),
-      subscription: (
+      status: (
         <div className="space-y-1">
           <div className="flex flex-wrap items-center gap-2">
             <TinyBadge tone={statusToneKind}>{status}</TinyBadge>
             <span className="text-sm font-medium">{plan}</span>
           </div>
           <div className="text-xs text-[hsl(var(--muted))]">{coverage}</div>
-        </div>
-      ),
-      due: (
-        <div className="space-y-1">
-          <div className={`font-semibold ${item.dueAmount > 0 ? 'text-rose-700' : ''}`}>
-            {item.dueAmount > 0 ? fmtMoneyEGP(item.dueAmount) : 'No due'}
-          </div>
           <div className="text-xs text-[hsl(var(--muted))]">
-            {humanPayment(item.subscription.payment_method)}
+            {item.dueAmount > 0 ? `${fmtMoneyEGP(item.dueAmount)} due` : 'No due'}
             {item.subscription.paid_at ? ` · Paid ${fmtDate(item.subscription.paid_at)}` : ''}
           </div>
         </div>
@@ -543,6 +560,11 @@ export default async function AdminCrmPage({
           <Button asChild size="sm" variant="outline" href={memberHref}>
             Open member
           </Button>
+          {canManageNotifications(me.role) ? (
+            <Button asChild size="sm" variant="ghost" href="/notifications">
+              Notify
+            </Button>
+          ) : null}
           {waDigits ? (
             <a
               href={`https://wa.me/${waDigits}`}
@@ -568,11 +590,6 @@ export default async function AdminCrmPage({
             >
               Email
             </a>
-          ) : null}
-          {canManageNotifications(me.role) ? (
-            <Button asChild size="sm" variant="ghost" href={notifyHref}>
-              Notify
-            </Button>
           ) : null}
         </div>
       ),
@@ -602,11 +619,39 @@ export default async function AdminCrmPage({
             <Button asChild variant="outline" href="/members">
               Members
             </Button>
+            <Button asChild variant="outline" href="/admin/outstanding-dues">
+              Outstanding
+            </Button>
             <Button asChild variant="outline" href="/admin/expiring-soon">
               Expiring
             </Button>
+          </div>
+        }
+      />
+
+      <Section className="space-y-4">
+        {loadError ? (
+          <InlineAlert variant="error" title="Could not load CRM queue">
+            {loadError}
+          </InlineAlert>
+        ) : null}
+
+        <div className="grid gap-4 grid-cols-1 sm:grid-cols-3">
+          <SummaryCard label="Overview" value={String(totalVisible)} hint={segmentLabel} />
+          <SummaryCard label="Contact today" value={String(actionCount)} hint="Rows to treat first" />
+          <SummaryCard label="High priority" value={`${dueCount} due · ${expiringCount} expiring`} hint={`${today} → ${next7}`} />
+        </div>
+
+        <div className="rounded-2xl border border-[hsl(var(--border))] bg-white p-4 shadow-soft">
+          <div className="mb-3 flex flex-wrap gap-2">
             <Button asChild variant="outline" href="/admin/outstanding-dues">
-              Outstanding
+              Outstanding dues
+            </Button>
+            <Button asChild variant="outline" href="/admin/expiring-soon">
+              Expiring soon
+            </Button>
+            <Button asChild variant="outline" href="/members">
+              Open members
             </Button>
             {canManageNotifications(me.role) ? (
               <Button asChild variant="outline" href="/notifications">
@@ -614,29 +659,6 @@ export default async function AdminCrmPage({
               </Button>
             ) : null}
           </div>
-        }
-      />
-
-      <Section className="space-y-4">
-        <InlineAlert variant="info" title="CRM V1.1">
-          This queue highlights who should be contacted today. It does not store contacted history yet — it is a live desk
-          view built from subscriptions, dues, and recent attendance.
-        </InlineAlert>
-
-        {loadError ? (
-          <InlineAlert variant="error" title="Could not load CRM queue">
-            {loadError}
-          </InlineAlert>
-        ) : null}
-
-        <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-4">
-          <SummaryCard label="Visible queue" value={String(totalVisible)} hint={segmentLabel} />
-          <SummaryCard label="Action needed" value={String(actionCount)} hint="Rows to contact first" />
-          <SummaryCard label="Expiring 7d" value={String(expiringCount)} hint={`${today} → ${next7}`} />
-          <SummaryCard label="No attendance 14d" value={String(noAttendanceCount)} hint={`Last valid attendance before ${fmtDate(since14)}`} />
-        </div>
-
-        <div className="rounded-2xl border border-[hsl(var(--border))] bg-white p-4 shadow-soft">
           <form className="grid gap-3 md:grid-cols-[180px_minmax(0,1fr)_auto] md:items-end" method="get">
             <Select label="Queue" name="segment" defaultValue={segment}>
               <option value="action">Action needed first</option>
@@ -646,12 +668,7 @@ export default async function AdminCrmPage({
               <option value="no_attendance">No recent attendance</option>
               <option value="inactive">Inactive recently</option>
             </Select>
-            <Input
-              label="Search"
-              name="q"
-              defaultValue={q}
-              placeholder="Name, email, phone, member ID, reason"
-            />
+            <Input label="Search" name="q" defaultValue={q} placeholder="Name, email, phone, member ID" />
             <div className="flex flex-wrap gap-2">
               <Button type="submit" variant="outline">
                 Apply
@@ -663,21 +680,13 @@ export default async function AdminCrmPage({
           </form>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2 text-xs text-[hsl(var(--muted))]">
-          <TinyBadge tone="danger">High due</TinyBadge>
-          <TinyBadge tone="warning">No attendance 14d</TinyBadge>
-          <TinyBadge tone="neutral">Expiring soon</TinyBadge>
-          <span>Use this queue to decide who should be contacted first today.</span>
-        </div>
-
         <Table
           keyField="id"
           stickyTopClassName="top-0"
           columns={[
             { key: 'member', header: 'Member' },
-            { key: 'follow_up', header: 'Follow-up' },
-            { key: 'subscription', header: 'Subscription' },
-            { key: 'due', header: 'Due now' },
+            { key: 'next_step', header: 'Next step' },
+            { key: 'status', header: 'Status' },
             { key: 'last_seen', header: 'Last seen' },
             { key: 'actions', header: 'Actions' },
           ]}
@@ -695,7 +704,6 @@ export default async function AdminCrmPage({
             <div className="text-sm text-[hsl(var(--muted))]">
               Page {page}
               {totalVisible ? ` · Showing ${start + 1}-${Math.min(start + PER_PAGE, totalVisible)} of ${totalVisible}` : ''}
-              {dueCount ? ` · ${dueCount} with dues` : ''}
             </div>
             <div className="flex items-center gap-2">
               <Button

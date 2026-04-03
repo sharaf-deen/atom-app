@@ -13,6 +13,7 @@ import Select from '@/components/ui/Select'
 import Button from '@/components/ui/Button'
 import Badge from '@/components/ui/Badge'
 import Forbidden from '@/components/Forbidden'
+import { formatDateTimeInCairo } from '@/lib/cairoTime'
 import { getSessionUser, type Role } from '@/lib/session'
 
 type AuditRow = {
@@ -74,10 +75,8 @@ function displayName(p?: ProfileMini | null) {
 
 function fmtWhen(ts: string | null) {
   if (!ts) return '—'
-  const d = new Date(ts)
-  // Use a stable, readable format (server locale may vary)
-  const iso = d.toISOString().replace('T', ' ').slice(0, 16)
-  return iso + ' UTC'
+  const formatted = formatDateTimeInCairo(ts)
+  return formatted === '—' ? '—' : `${formatted.slice(0, 16)} Cairo`
 }
 
 function shortJSON(v: any) {
@@ -333,7 +332,7 @@ export default async function MembershipActivityLogPage({
     <main>
       <PageHeader
         title="Membership Activity Log"
-        subtitle="Track key actions on memberships (subscriptions, invites, status changes)."
+        subtitle="Subscriptions, invites and status changes."
         showReload={false}
         right={
           <div className="flex items-center gap-2">
@@ -351,13 +350,13 @@ export default async function MembershipActivityLogPage({
             <form className="grid gap-3 md:grid-cols-6" action="/admin/membership-activity" method="get">
               <Input
                 label="Member search"
-                placeholder="name, email, phone, member id…"
+                placeholder="name, email, phone or member ID"
                 name="q"
                 defaultValue={q}
                 className="md:col-span-2"
               />
-              <Input label="Action" placeholder="subscription, invite, freeze…" name="action" defaultValue={action} className="md:col-span-1" />
-              <Input label="Actor" placeholder="admin name/email…" name="actor" defaultValue={actor} className="md:col-span-1" />
+              <Input label="Action" placeholder="subscription, invite, freeze" name="action" defaultValue={action} className="md:col-span-1" />
+              <Input label="Actor" placeholder="admin name or email" name="actor" defaultValue={actor} className="md:col-span-1" />
               <Input label="From" type="date" name="from" defaultValue={from} className="md:col-span-1" />
               <Input label="To" type="date" name="to" defaultValue={to} className="md:col-span-1" />
 
