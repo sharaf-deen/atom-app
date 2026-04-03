@@ -257,7 +257,7 @@ async function getAttendanceRows(memberIds: string[], sinceDate: string) {
       .order('date', { ascending: false })
       .order('scanned_at', { ascending: false })
       .limit(5000)
-    out.push(...(((data ?? []) as AttendanceRow[]) ?? []))
+    out.push(...((data ?? []) as AttendanceRow[]))
   }
   return out
 }
@@ -342,8 +342,8 @@ export default async function AdminCrmPage({
 
     const rowsByMember = new Map<string, SubscriptionRow[]>()
     const allRows = [
-      ...(((activeRes.data ?? []) as RawSubscriptionRow[]) ?? []),
-      ...(((dueRes.data ?? []) as RawSubscriptionRow[]) ?? []),
+      ...((activeRes.data ?? []) as RawSubscriptionRow[]),
+      ...((dueRes.data ?? []) as RawSubscriptionRow[]),
     ].map(normalizeSubscriptionRow)
 
     for (const row of allRows) {
