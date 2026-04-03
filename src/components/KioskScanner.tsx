@@ -20,7 +20,8 @@ import Button from '@/components/ui/Button'
 import Badge from '@/components/ui/Badge'
 import { formatRequestRef } from '@/lib/requestRef'
 
-function buildDeviceTag() {
+function buildDeviceTag(terminalLocked = false) {
+  if (terminalLocked) return 'scan-terminal-front'
   if (typeof window === 'undefined') return 'web-kiosk'
 
   const storageKey = 'atom:kiosk:device-tag'
@@ -208,6 +209,9 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className, te
   const [online, setOnline] = useState(true)
   const [facingMode, setFacingMode] = useState<FacingMode>(terminalLocked ? 'user' : 'environment')
   const [fullScreen, setFullScreen] = useState(false)
+  const [deviceLabel, setDeviceLabel] = useState(terminalLocked ? 'scan-terminal-front' : 'web-kiosk')
+  const [cameraRecoveryHint, setCameraRecoveryHint] = useState<string | null>(null)
+  const [scannerReloadKey, setScannerReloadKey] = useState(0)
 
   const wakeLockRef = useRef<WakeLockSentinelLike | null>(null)
   const wakeLockListenerRef = useRef<(() => void) | null>(null)
@@ -279,8 +283,20 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className, te
     clearResumeTimer()
     setPaused(false)
     setStatus('idle')
+    setCameraRecoveryHint(null)
     setMsg(kioskMode ? 'Ready for next member' : 'Ready')
   }, [abortActiveRequest, clearResumeTimer, kioskMode])
+
+  const reloadCameraStack = useCallback(() => {
+    abortActiveRequest()
+    clearResumeTimer()
+    setPaused(false)
+    setStatus('idle')
+    setScannerComponent(null)
+    setCameraRecoveryHint('Camera stack restarted. If the browser still blocks access, allow camera permission and retry.')
+    setMsg(terminalLocked ? 'Restarting front camera…' : 'Restarting camera…')
+    setScannerReloadKey((value) => value + 1)
+  }, [abortActiveRequest, clearResumeTimer, terminalLocked])
 
   useEffect(() => {
     mountedRef.current = true
@@ -370,8 +386,10 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className, te
   }, [abortActiveRequest, clearResumeTimer, manualRescan, online])
 
   useEffect(() => {
-    deviceTagRef.current = buildDeviceTag()
-  }, [])
+    const tag = buildDeviceTag(terminalLocked)
+    deviceTagRef.current = tag
+    setDeviceLabel(tag)
+  }, [terminalLocked])
 
   useEffect(() => {
     if (!fullScreen) return
@@ -397,10 +415,15 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className, te
         const mod: any = await import('@yudiel/react-qr-scanner')
         const Comp = mod?.Scanner
         if (!Comp) throw new Error('Scanner export not found in @yudiel/react-qr-scanner')
-        if (!cancelled && mountedRef.current) setScannerComponent(() => Comp)
+        if (!cancelled && mountedRef.current) {
+          setScannerComponent(() => Comp)
+          setCameraRecoveryHint(null)
+          setMsg((current) => (current === 'Failed to load camera scanner' ? 'Ready' : current))
+        }
       } catch (e) {
         if (cancelled || !mountedRef.current) return
         setStatus('error')
+        setCameraRecoveryHint('Try Retry first. If the browser still refuses the camera, use Restart camera or refresh the page.')
         setMsg(classifyCameraError(e))
         console.error(e)
       }
@@ -409,7 +432,7 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className, te
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [scannerReloadKey])
 
   function enterKioskMode() {
     if (terminalLocked) return
@@ -574,7 +597,7 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className, te
 
   const containerWidth = size === 'lg' ? 480 : size === 'md' ? 360 : 280
   const aspect = ratio === '1:1' ? '1 / 1' : '4 / 3'
-  const scannerKey = `${facingMode}-${fullScreen ? 'fs' : 'normal'}`
+  const scannerKey = `${scannerReloadKey}-${facingMode}-${fullScreen ? 'fs' : 'normal'}`
 
   const scannerEl = ScannerComponent ? (
     <ScannerComponent
@@ -583,6 +606,7 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className, te
       onScan={handleScan}
       onError={(err: unknown) => {
         setStatus('error')
+        setCameraRecoveryHint('Camera access needs attention. Retry first, then restart the camera if needed.')
         setMsg(classifyCameraError(err))
       }}
       components={{ finder: false }}
@@ -702,7 +726,7 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className, te
                 {kioskMode ? <Badge>Kiosk</Badge> : null}
               </div>
               <p className="mt-1 text-sm text-[hsl(var(--muted))]">
-                {terminalLocked ? 'Front camera is locked for this door terminal. The scanner restarts automatically after each result.' : 'Flip camera, open full screen manually, or keep kiosk mode active inside this page.'}
+                {terminalLocked ? 'Front camera is locked for this door terminal. Result screen returns automatically after 7 seconds.' : 'Flip camera, open full screen manually, or keep kiosk mode active inside this page.'}
               </p>
             </div>
 
@@ -711,7 +735,7 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className, te
             </div>
           </div>
 
-          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
             <ActionChip
               icon={<ScanLine size={16} strokeWidth={2.1} />}
               label={paused ? 'Paused until rescan' : kioskMode ? 'Ready for next member' : 'Ready for next QR'}
@@ -728,6 +752,10 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className, te
               icon={online ? <ShieldCheck size={16} strokeWidth={2.1} /> : <WifiOff size={16} strokeWidth={2.1} />}
               label={online ? (kioskMode ? 'Auto-return active' : 'Decision cues ready') : 'Internet required'}
             />
+            <ActionChip
+              icon={<Smartphone size={16} strokeWidth={2.1} />}
+              label={`Device: ${deviceLabel}`}
+            />
           </div>
 
           {!online ? (
@@ -742,6 +770,27 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className, te
                 </Button>
                 <Button variant="outline" onClick={() => window.location.reload()}>
                   Reload
+                </Button>
+              </div>
+            </div>
+          ) : null}
+
+
+          {status === 'error' ? (
+            <div className="rounded-2xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+              <div className="font-semibold">Scanner recovery</div>
+              <div className="mt-1 text-xs">
+                {cameraRecoveryHint || 'Tap Retry first. If the camera still does not recover, restart the camera stack or refresh the page.'}
+              </div>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <Button variant="outline" onClick={retryNow}>
+                  Retry
+                </Button>
+                <Button variant="outline" onClick={reloadCameraStack}>
+                  Restart camera
+                </Button>
+                <Button variant="outline" onClick={() => window.location.reload()}>
+                  Reload page
                 </Button>
               </div>
             </div>
@@ -810,6 +859,15 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className, te
                 >
                   {msg}
                 </p>
+              </div>
+
+              <div className="rounded-3xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] p-4">
+                <div className="text-sm font-semibold tracking-tight">Terminal health</div>
+                <div className="mt-2 space-y-2 text-sm text-[hsl(var(--muted))]">
+                  <div><span className="font-medium text-black">Device label:</span> {deviceLabel}</div>
+                  <div><span className="font-medium text-black">Camera mode:</span> {terminalLocked ? 'Front camera locked' : facingMode === 'environment' ? 'Back camera active' : 'Front camera active'}</div>
+                  <div><span className="font-medium text-black">Recovery:</span> Retry first, then restart the camera if needed.</div>
+                </div>
               </div>
 
               <div className="rounded-3xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] p-4">

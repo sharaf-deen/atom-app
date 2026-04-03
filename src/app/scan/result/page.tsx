@@ -499,6 +499,14 @@ export default async function ScanResultPage({ searchParams }: { searchParams: S
                 <KeyFact label="Subscription detail" value={summary.detailLabel} icon={<CircleCheckBig size={18} strokeWidth={2.1} />} />
               </div>
 
+              {isTerminal ? (
+                <div className="rounded-2xl border border-sky-200 bg-sky-50 p-4 text-sm text-sky-900">
+                  <div className="font-semibold">Door terminal mode</div>
+                  <div className="mt-1">Front camera stays locked on the tablet. This screen returns automatically to scan after 7 seconds.</div>
+                  <div className="mt-2 text-xs text-sky-700">Device label: scan-terminal-front</div>
+                </div>
+              ) : null}
+
               <div className="flex flex-col gap-3 sm:flex-row">
                 {isTerminal ? (
                   <Link href={returnHref} className="sm:flex-1">
