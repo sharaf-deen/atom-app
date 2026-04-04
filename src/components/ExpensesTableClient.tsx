@@ -4,6 +4,8 @@ import { useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import Modal from '@/components/ui/Modal'
+import SaveButton from '@/components/forms/SaveButton'
+import { useSafeSubmit } from '@/lib/forms/useSafeSubmit'
 
 export type ExpenseRow = {
   id: string
@@ -104,8 +106,55 @@ export default function ExpensesTableClient({ expenses, labelByKey, returnQueryS
   >(null)
   const [editing, setEditing] = useState<EditableExpense | null>(null)
   const [deletingExpense, setDeletingExpense] = useState<ExpenseRow | null>(null)
-  const [saving, setSaving] = useState(false)
   const [deleting, setDeleting] = useState(false)
+
+  const { submit: submitEdit, isPending: saving } = useSafeSubmit({
+    action: async () => {
+      if (!editing) return { ok: false as const, message: 'No expense selected.' }
+
+      const amount = Number(editing.amount)
+      if (!editing.category_key) {
+        return { ok: false as const, message: 'Please choose a category.' }
+      }
+      if (!Number.isFinite(amount)) {
+        return { ok: false as const, message: 'Invalid amount.' }
+      }
+
+      const res = await fetch(`/api/expenses/${editing.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          date: editing.date,
+          category_key: editing.category_key,
+          description: editing.description.trim() || null,
+          amount,
+          payment_method: editing.payment_method,
+        }),
+      })
+
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        return {
+          ok: false as const,
+          message: parseErrorMessage(data, 'Update failed.'),
+        }
+      }
+
+      return {
+        ok: true as const,
+        message: 'Expense updated',
+        refresh: false,
+      }
+    },
+    defaultSuccessMessage: 'Expense updated',
+    defaultErrorMessage: 'Update failed.',
+    onSuccess: async () => {
+      const href = redirectHref(returnQueryString, { updated: '1', deleted: '', saved: '' })
+      setEditOpen(false)
+      router.replace(href)
+      router.refresh()
+    },
+  })
 
   const activeIsImage = useMemo(() => {
     if (!active) return false
@@ -141,45 +190,7 @@ export default function ExpensesTableClient({ expenses, labelByKey, returnQueryS
   }
 
   async function onSaveEdit() {
-    if (!editing) return
-
-    const amount = Number(editing.amount)
-    if (!editing.category_key) {
-      toast.error('Please choose a category.')
-      return
-    }
-    if (!Number.isFinite(amount)) {
-      toast.error('Invalid amount.')
-      return
-    }
-
-    try {
-      setSaving(true)
-      const res = await fetch(`/api/expenses/${editing.id}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          date: editing.date,
-          category_key: editing.category_key,
-          description: editing.description.trim() || null,
-          amount,
-          payment_method: editing.payment_method,
-        }),
-      })
-
-      const data = await res.json().catch(() => ({}))
-      if (!res.ok) throw new Error(parseErrorMessage(data, 'Update failed.'))
-
-      toast.success('Expense updated')
-      const href = redirectHref(returnQueryString, { updated: '1', deleted: '', saved: '' })
-      router.push(href)
-      router.refresh()
-      setEditOpen(false)
-    } catch (error: any) {
-      toast.error(error?.message || 'Update failed.')
-    } finally {
-      setSaving(false)
-    }
+    await submitEdit()
   }
 
   async function onDeleteExpense() {
@@ -488,14 +499,13 @@ export default function ExpensesTableClient({ expenses, labelByKey, returnQueryS
               >
                 Cancel
               </button>
-              <button
+              <SaveButton
                 type="button"
                 onClick={onSaveEdit}
-                disabled={saving}
-                className="rounded-xl bg-black px-4 py-2 text-sm font-medium text-white hover:opacity-95 disabled:opacity-60"
-              >
-                {saving ? 'Saving…' : 'Save changes'}
-              </button>
+                loading={saving}
+                idleLabel="Save changes"
+                pendingLabel="Saving..."
+              />
             </div>
           </div>
         )}
