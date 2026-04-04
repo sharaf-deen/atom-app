@@ -10,6 +10,7 @@ import Section from '@/components/layout/Section'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card'
 import Button from '@/components/ui/Button'
 import Input from '@/components/ui/Input'
+import SaveButton from '@/components/forms/SaveButton'
 import Select from '@/components/ui/Select'
 import InlineAlert from '@/components/ui/InlineAlert'
 import { getSessionUserCached, getSupabaseAdminClientCached } from '@/lib/requestCache'
@@ -1080,7 +1081,7 @@ export default async function PersonalFundsPage({
                 </label>
 
                 <div className="flex flex-wrap items-center gap-2">
-                  <Button type="submit" disabled={people.length === 0}>Add entry</Button>
+                  <SaveButton idleLabel="Add entry" pendingLabel="Saving..." disabled={people.length === 0} />
                   <div className="text-xs text-[hsl(var(--muted))]">Editing and receipt replacement stay inside Personal Funds.</div>
                 </div>
               </form>
@@ -1097,7 +1098,7 @@ export default async function PersonalFundsPage({
                 <div className="min-w-0 flex-1">
                   <Input name="label" placeholder="e.g. Shawki" />
                 </div>
-                <Button type="submit">Add person</Button>
+                <SaveButton idleLabel="Add person" pendingLabel="Saving..." />
               </form>
 
               {personCards.length === 0 ? (
