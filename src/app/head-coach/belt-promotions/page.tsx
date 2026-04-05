@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 import AccessDeniedPage from '@/components/AccessDeniedPage'
 import PageHeader from '@/components/PageHeader'
+import SaveButton from '@/components/forms/SaveButton'
 import { getSessionUserCached, getSupabaseAdminClientCached } from '@/lib/requestCache'
 import {
   BELT_PROMOTION_AUDIENCES,
@@ -864,7 +865,7 @@ export default async function BeltPromotionEventsPage({ searchParams }: { search
               </div>
               <label className="block text-sm"><span className="mb-2 block text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Audience</span><select name="audience" defaultValue="mixed" className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none transition focus:border-black">{BELT_PROMOTION_AUDIENCES.map((option) => <option key={option} value={option}>{eventAudienceLabel(option)}</option>)}</select></label>
               <label className="block text-sm"><span className="mb-2 block text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Notes</span><textarea name="notes" rows={3} className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none transition focus:border-black" /></label>
-              <button type="submit" className="inline-flex items-center justify-center rounded-2xl border border-black bg-black px-4 py-2 text-sm font-medium text-white transition hover:opacity-90">Create event</button>
+              <SaveButton idleLabel="Create event" pendingLabel="Creating..." className="w-full" />
             </form>
           </section>
 
@@ -923,7 +924,7 @@ export default async function BeltPromotionEventsPage({ searchParams }: { search
                     <form action={duplicateEventAction}>
                       <input type="hidden" name="eventId" value={selectedEvent.id} />
                       <input type="hidden" name="nextHref" value={nextPrepHref} />
-                      <button type="submit" className="inline-flex items-center justify-center rounded-2xl border border-[hsl(var(--border))] bg-white px-4 py-2 text-sm font-medium text-black transition hover:bg-[hsl(var(--bg))]">Duplicate event</button>
+                      <SaveButton idleLabel="Duplicate event" pendingLabel="Duplicating..." variant="outline" />
                     </form>
                   </div>
                 </div>
@@ -1035,7 +1036,7 @@ export default async function BeltPromotionEventsPage({ searchParams }: { search
                         <label className="block text-sm"><span className="mb-2 block text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Audience</span><select name="audience" defaultValue={selectedEvent.audience} className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none transition focus:border-black">{BELT_PROMOTION_AUDIENCES.map((option) => <option key={option} value={option}>{eventAudienceLabel(option)}</option>)}</select></label>
                       </div>
                       <label className="block text-sm"><span className="mb-2 block text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Internal notes</span><textarea name="notes" rows={3} defaultValue={selectedEvent.notes ?? ''} className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none transition focus:border-black" /></label>
-                      <div className="flex justify-end"><button type="submit" className="inline-flex items-center justify-center rounded-2xl border border-black bg-black px-4 py-2 text-sm font-medium text-white transition hover:opacity-90">Save event</button></div>
+                      <div className="flex justify-end"><SaveButton idleLabel="Save event" pendingLabel="Saving..." /></div>
                     </form>
                   </section>
 
@@ -1050,7 +1051,7 @@ export default async function BeltPromotionEventsPage({ searchParams }: { search
                           <form action={addSuggestedCandidatesAction}>
                             <input type="hidden" name="eventId" value={selectedEvent.id} />
                             <input type="hidden" name="nextHref" value={nextPrepHref} />
-                            <button type="submit" className="inline-flex items-center justify-center rounded-2xl border border-black bg-black px-4 py-2 text-sm font-medium text-white transition hover:opacity-90">Add top suggestions</button>
+                            <SaveButton idleLabel="Add top suggestions" pendingLabel="Adding..." />
                           </form>
                         </div>
                         <div className="mt-4 grid gap-3">
@@ -1103,7 +1104,7 @@ export default async function BeltPromotionEventsPage({ searchParams }: { search
                               </div>
                               <label className="block text-sm"><span className="mb-2 block text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Head coach note</span><textarea name="head_coach_note" rows={3} defaultValue={row.head_coach_note ?? ''} className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none transition focus:border-black" /></label>
                               <div className="flex flex-wrap justify-between gap-2">
-                                <button type="submit" className="inline-flex items-center justify-center rounded-2xl border border-black bg-black px-4 py-2 text-sm font-medium text-white transition hover:opacity-90">Save candidate</button>
+                                <SaveButton idleLabel="Save candidate" pendingLabel="Saving..." />
                                 <button type="submit" formAction={removeCandidateAction} className="inline-flex items-center justify-center rounded-2xl border border-rose-200 bg-rose-50 px-4 py-2 text-sm font-medium text-rose-700 transition hover:bg-rose-100">Remove</button>
                               </div>
                             </form>
@@ -1150,7 +1151,7 @@ export default async function BeltPromotionEventsPage({ searchParams }: { search
                               </div>
                               <input type="hidden" name="reference_coach_user_id" value={row.reference_coach_user_id ?? ''} />
                               <input type="hidden" name="head_coach_note" value={row.head_coach_note ?? ''} />
-                              <button type="submit" className="inline-flex items-center justify-center rounded-2xl border border-black bg-black px-4 py-2 text-sm font-medium text-white transition hover:opacity-90">Add candidate</button>
+                              <SaveButton idleLabel="Add candidate" pendingLabel="Adding..." />
                             </form>
                           ))}
                         </div>
@@ -1261,7 +1262,7 @@ export default async function BeltPromotionEventsPage({ searchParams }: { search
                                   <label className="inline-flex items-center gap-2 rounded-2xl border border-[hsl(var(--border))] px-3 py-2 text-sm"><input type="checkbox" name="belt_delivered" defaultChecked={row.belt_delivered} /> Belt delivered</label>
                                   <label className="inline-flex items-center gap-2 rounded-2xl border border-[hsl(var(--border))] px-3 py-2 text-sm"><input type="checkbox" name="certificate_delivered" defaultChecked={row.certificate_delivered} /> Certificate delivered</label>
                                 </div>
-                                <div className="flex justify-end"><button type="submit" className="inline-flex items-center justify-center rounded-2xl border border-black bg-black px-4 py-2 text-sm font-medium text-white transition hover:opacity-90">Save live state</button></div>
+                                <div className="flex justify-end"><SaveButton idleLabel="Save live state" pendingLabel="Saving..." /></div>
                               </form>
                             </details>
                           </div>
