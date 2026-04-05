@@ -1,5 +1,3 @@
-
-
 // src/components/SubscribeDialog.tsx
 'use client'
 
@@ -12,6 +10,7 @@ import Input from '@/components/ui/Input'
 import Select from '@/components/ui/Select'
 import { Card, CardContent } from '@/components/ui/Card'
 import InlineAlert from '@/components/ui/InlineAlert'
+import SaveButton from '@/components/forms/SaveButton'
 
 export type Plan = '1m' | '3m' | '6m' | '12m' | 'sessions'
 export type SubscriptionPaymentMethod = 'cash' | 'instapay' | 'card' | 'bank_transfer'
@@ -34,7 +33,7 @@ function todayLocalDateStr() {
   const y = d.getFullYear()
   const m = String(d.getMonth() + 1).padStart(2, '0')
   const day = String(d.getDate()).padStart(2, '0')
-  return `${y}-${m}-${day}` // YYYY-MM-DD (local)
+  return `${y}-${m}-${day}`
 }
 
 function isISODateOnly(s?: string | null) {
@@ -48,13 +47,12 @@ function addDays(dateOnly: string, days: number) {
   return dt.toISOString().slice(0, 10)
 }
 
-// addMonths "safe": clamp to last day of target month if needed (handles 31st)
 function addMonthsSafe(dateOnly: string, months: number) {
   const [y, m, d] = dateOnly.split('-').map(Number)
   const base = new Date(Date.UTC(y, m - 1, d))
   const targetMonth = base.getUTCMonth() + months
   const tmp = new Date(Date.UTC(y, m - 1, 1))
-  tmp.setUTCMonth(targetMonth + 1, 0) // last day of target month
+  tmp.setUTCMonth(targetMonth + 1, 0)
   const lastDay = tmp.getUTCDate()
   const clampedDay = Math.min(d, lastDay)
   const out = new Date(Date.UTC(y, m - 1, clampedDay))
@@ -93,8 +91,8 @@ export default function SubscribeDialog({
 }: {
   member: { user_id: string; email: string | null; first_name: string | null; last_name: string | null }
   defaultPlan?: Plan
-  defaultStartDate?: string // YYYY-MM-DD
-  defaultSessions?: number // 1..10
+  defaultStartDate?: string
+  defaultSessions?: number
   buttonLabel?: string
   onCreated?: (payload: any) => void
   disabled?: boolean
@@ -113,10 +111,8 @@ export default function SubscribeDialog({
   const [amountDue, setAmountDue] = useState<string>('0')
   const [startDate, setStartDate] = useState<string>(defaultStartDate ?? todayLocalDateStr())
   const [busy, setBusy] = useState(false)
-
   const [status, setStatus] = useState<{ kind: StatusKind; msg: string }>({ kind: '', msg: '' })
 
-  // Reset à l'ouverture
   useEffect(() => {
     if (!open) return
     setPlan(defaultPlan ?? '1m')
@@ -128,10 +124,8 @@ export default function SubscribeDialog({
     setAmountDue('0')
     setBusy(false)
     setStatus({ kind: '', msg: '' })
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open])
+  }, [defaultPlan, defaultSessions, defaultStartDate, open])
 
-  // Lock scroll + ESC
   useEffect(() => {
     if (!open) return
     const prev = document.body.style.overflow
@@ -155,17 +149,13 @@ export default function SubscribeDialog({
 
   useEffect(() => {
     if (isTimePlan && !startDate) setStartDate(todayLocalDateStr())
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [plan])
+  }, [isTimePlan, startDate])
 
   const amountNum = Number(amount)
   const amountOk = amount !== '' && Number.isFinite(amountNum) && amountNum >= 0
 
   const amountDueNum = Number(amountDue)
-  const amountDueOk =
-    amountDue !== '' &&
-    Number.isFinite(amountDueNum) &&
-    amountDueNum >= 0
+  const amountDueOk = amountDue !== '' && Number.isFinite(amountDueNum) && amountDueNum >= 0
 
   const dateOk = isISODateOnly(startDate)
   const sessionsOk = Number.isFinite(sessions) && sessions >= 1 && sessions <= 10
@@ -178,21 +168,14 @@ export default function SubscribeDialog({
     if (!dateOk) return null
     const months = plan === '1m' ? 1 : plan === '3m' ? 3 : plan === '6m' ? 6 : 12
     return addMonthsSafe(startDate, months)
-  }, [plan, startDate, dateOk])
+  }, [dateOk, plan, startDate])
 
-  const canSubmit =
-    !busy &&
-    amountOk &&
-    amountDueOk &&
-    (isTimePlan ? dateOk : sessionsOk)
+  const canSubmit = !busy && amountOk && amountDueOk && (isTimePlan ? dateOk : sessionsOk)
 
   function explainServerError(j: any) {
     const raw = `${j?.details || ''} ${j?.error || ''} ${j?.hint || ''}`.toLowerCase()
 
-    if (
-      j?.error === 'OUTDATED_DUE_CONSTRAINT' ||
-      raw.includes('subscriptions_amount_due_le_amount')
-    ) {
+    if (j?.error === 'OUTDATED_DUE_CONSTRAINT' || raw.includes('subscriptions_amount_due_le_amount')) {
       return 'This database still uses an old due rule. Apply the latest subscription due migration, then try again.'
     }
 
@@ -202,6 +185,8 @@ export default function SubscribeDialog({
   }
 
   async function submit() {
+    if (busy) return
+
     if (!canSubmit) {
       setStatus({ kind: 'error', msg: 'Please check fields (plan, start date / sessions, amount).' })
       toast.error('Please check fields')
@@ -209,7 +194,7 @@ export default function SubscribeDialog({
     }
 
     setBusy(true)
-    setStatus({ kind: 'info', msg: 'Saving…' })
+    setStatus({ kind: 'info', msg: 'Saving...' })
 
     try {
       const body: any = {
@@ -220,15 +205,14 @@ export default function SubscribeDialog({
         payment_date: paymentDate,
         amount_due: amountDueNum,
       }
-      if (isTimePlan) body.start_date = startDate
-      else {
+      if (isTimePlan) {
+        body.start_date = startDate
+      } else {
         body.sessions_total = Math.floor(sessions)
-        // optionnel : on envoie aussi start_date pour sessions (utile pour preview identique côté serveur)
         body.start_date = dateOk ? startDate : todayLocalDateStr()
       }
 
       const endpoint = mode === 'renew' ? '/api/subscriptions/renew' : '/api/subscriptions/create'
-
       const r = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -240,7 +224,7 @@ export default function SubscribeDialog({
       if (!r.ok || !j?.ok) {
         const message = explainServerError(j)
         setStatus({ kind: 'error', msg: message })
-        toast.error('Save failed')
+        toast.error('Save failed', { description: message })
         return
       }
 
@@ -251,18 +235,20 @@ export default function SubscribeDialog({
           : `Subscription created: ${humanPlan(plan)} · ${startDate} → ${end || '—'}.`
 
       setStatus({ kind: 'success', msg })
-      toast.success('Subscription created')
+      toast.success(mode === 'renew' ? 'Subscription renewed' : 'Subscription created', {
+        description: fullName,
+      })
 
       onCreated?.(j)
 
       setTimeout(() => {
         setOpen(false)
         router.refresh()
-      }, 650)
+      }, 450)
     } catch (e: any) {
       const message = String(e?.message || e)
       setStatus({ kind: 'error', msg: message })
-      toast.error('Unexpected error')
+      toast.error('Unexpected error', { description: message })
     } finally {
       setBusy(false)
     }
@@ -270,7 +256,12 @@ export default function SubscribeDialog({
 
   return (
     <>
-      <Button variant="outline" onClick={() => !disabled && setOpen(true)} disabled={disabled} title={disabled ? (disabledReason ?? "Disabled") : undefined}>
+      <Button
+        variant="outline"
+        onClick={() => !disabled && setOpen(true)}
+        disabled={disabled}
+        title={disabled ? (disabledReason ?? 'Disabled') : undefined}
+      >
         {buttonLabel}
       </Button>
       {disabled && disabledReason ? (
@@ -281,11 +272,7 @@ export default function SubscribeDialog({
 
       {open && (
         <>
-          <div
-            className="fixed inset-0 z-[100] bg-black/60"
-            onClick={() => !busy && setOpen(false)}
-            aria-hidden="true"
-          />
+          <div className="fixed inset-0 z-[100] bg-black/60" onClick={() => !busy && setOpen(false)} aria-hidden="true" />
 
           <div className="fixed inset-0 z-[101] flex items-center justify-center p-4">
             <Card className="w-[92vw] max-w-md">
@@ -307,11 +294,7 @@ export default function SubscribeDialog({
                   <div className="mt-3">
                     <InlineAlert
                       variant={
-                        status.kind === 'error'
-                          ? 'error'
-                          : status.kind === 'success'
-                          ? 'success'
-                          : 'info'
+                        status.kind === 'error' ? 'error' : status.kind === 'success' ? 'success' : 'info'
                       }
                     >
                       {status.msg}
@@ -334,27 +317,27 @@ export default function SubscribeDialog({
                     <option value="sessions">Per sessions (45 days)</option>
                   </Select>
 
-                  {plan !== 'sessions' && (
+                  {plan !== 'sessions' ? (
                     <>
                       <Input
-                        label={lockStartDate ? "Start date (auto)" : "Start date (required)"}
+                        label={lockStartDate ? 'Start date (auto)' : 'Start date (required)'}
                         type="date"
                         value={startDate}
                         onChange={(e) => setStartDate(e.target.value)}
                         disabled={busy || status.kind === 'success' || lockStartDate}
                       />
                       {lockStartDate ? (
-                        <p className="text-xs text-[hsl(var(--muted))] -mt-2">
+                        <p className="-mt-2 text-xs text-[hsl(var(--muted))]">
                           This renewal will start automatically on this date (after the current plan ends).
                         </p>
                       ) : null}
-                      <p className="text-xs text-[hsl(var(--muted))] -mt-2">
+                      <p className="-mt-2 text-xs text-[hsl(var(--muted))]">
                         End date preview: <span className="font-medium">{previewEnd ?? '—'}</span>
                       </p>
                     </>
-                  )}
+                  ) : null}
 
-                  {plan === 'sessions' && (
+                  {plan === 'sessions' ? (
                     <>
                       <Input
                         label="Number of sessions (max 10)"
@@ -363,16 +346,14 @@ export default function SubscribeDialog({
                         max={10}
                         step={1}
                         value={sessions}
-                        onChange={(e) =>
-                          setSessions(Math.max(1, Math.min(10, Number(e.target.value || 1))))
-                        }
+                        onChange={(e) => setSessions(Math.max(1, Math.min(10, Number(e.target.value || 1))))}
                         disabled={busy || status.kind === 'success'}
                       />
-                      <p className="text-xs text-[hsl(var(--muted))] -mt-2">
+                      <p className="-mt-2 text-xs text-[hsl(var(--muted))]">
                         Validity preview (45 days): <span className="font-medium">{previewEnd ?? '—'}</span>
                       </p>
                     </>
-                  )}
+                  ) : null}
 
                   <Input
                     label="Paid now (EGP)"
@@ -404,7 +385,7 @@ export default function SubscribeDialog({
                     onChange={(e) => setPaymentDate(e.target.value)}
                     disabled={busy || status.kind === 'success'}
                   />
-                  <p className="text-xs text-[hsl(var(--muted))] -mt-2">
+                  <p className="-mt-2 text-xs text-[hsl(var(--muted))]">
                     Use the real payment date for historical imports. This does not change the technical record creation time.
                   </p>
 
@@ -417,7 +398,7 @@ export default function SubscribeDialog({
                     onChange={(e) => setAmountDue(e.target.value)}
                     disabled={busy || status.kind === 'success'}
                   />
-                  <p className="text-xs text-[hsl(var(--muted))] -mt-2">
+                  <p className="-mt-2 text-xs text-[hsl(var(--muted))]">
                     Total will be <b>Paid + Due</b>. If the member paid in full, set <b>0</b>.
                   </p>
                 </div>
@@ -426,9 +407,14 @@ export default function SubscribeDialog({
                   <Button variant="outline" onClick={() => setOpen(false)} disabled={busy}>
                     Cancel
                   </Button>
-                  <Button onClick={submit} disabled={!canSubmit || status.kind === 'success'}>
-                    {busy ? 'Saving…' : mode === 'renew' ? 'Renew / Extend' : 'Create subscription'}
-                  </Button>
+                  <SaveButton
+                    type="button"
+                    onClick={submit}
+                    loading={busy}
+                    disabled={!canSubmit || status.kind === 'success'}
+                    idleLabel={mode === 'renew' ? 'Renew / Extend' : 'Create subscription'}
+                    pendingLabel="Saving..."
+                  />
                 </div>
               </CardContent>
             </Card>
