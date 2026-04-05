@@ -120,5 +120,8 @@ export function useSafeSubmit<TData = void>({
     isSaving,
     isRefreshing,
     isPending: isSaving || isRefreshing,
+    busy: isSaving || isRefreshing,
   }
 }
+
+export default useSafeSubmit
