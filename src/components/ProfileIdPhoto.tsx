@@ -1,11 +1,13 @@
 // src/components/ProfileIdPhoto.tsx
 'use client'
 
-import { useEffect, useMemo, useState, useTransition } from 'react'
+import { useEffect, useMemo, useRef, useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import Image from 'next/image'
+import { Camera, Trash2, X } from 'lucide-react'
+
+import Button from '@/components/ui/Button'
 import { createSupabaseBrowserClient } from '@/lib/supabaseBrowser'
-import { Camera, Trash2, Save, X } from 'lucide-react'
 
 type Props = { userId: string; idPhotoPath?: string | null }
 
@@ -16,6 +18,7 @@ export default function ProfileIdPhoto({ userId, idPhotoPath }: Props) {
   const supabase = createSupabaseBrowserClient()
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
 
   const [file, setFile] = useState<File | null>(null)
   const [busy, setBusy] = useState(false)
@@ -26,6 +29,7 @@ export default function ProfileIdPhoto({ userId, idPhotoPath }: Props) {
 
   useEffect(() => {
     let mounted = true
+
     ;(async () => {
       if (!idPhotoPath) {
         setSignedUrl('')
@@ -33,9 +37,7 @@ export default function ProfileIdPhoto({ userId, idPhotoPath }: Props) {
         return
       }
 
-      const { data, error } = await supabase.storage
-        .from('id-photos')
-        .createSignedUrl(idPhotoPath, 60 * 10)
+      const { data, error } = await supabase.storage.from('id-photos').createSignedUrl(idPhotoPath, 60 * 10)
 
       if (!mounted) return
 
@@ -55,6 +57,11 @@ export default function ProfileIdPhoto({ userId, idPhotoPath }: Props) {
 
   const preview = useMemo(() => (file ? URL.createObjectURL(file) : ''), [file])
 
+  function clearLocalSelection() {
+    setFile(null)
+    if (fileInputRef.current) fileInputRef.current.value = ''
+  }
+
   function onPick(e: React.ChangeEvent<HTMLInputElement>) {
     setMsg('')
     const f = e.target.files?.[0]
@@ -65,7 +72,8 @@ export default function ProfileIdPhoto({ userId, idPhotoPath }: Props) {
   }
 
   async function onUpload() {
-    if (!file) return
+    if (!file || busy || isPending) return
+
     setBusyAction('upload')
     setBusy(true)
     setMsg('')
@@ -79,14 +87,11 @@ export default function ProfileIdPhoto({ userId, idPhotoPath }: Props) {
         .upload(objectPath, file, { cacheControl: '3600', upsert: true, contentType: file.type })
       if (upErr1) throw upErr1
 
-      const { error: upErr2 } = await supabase
-        .from('profiles')
-        .update({ id_photo_path: objectPath })
-        .eq('user_id', userId)
+      const { error: upErr2 } = await supabase.from('profiles').update({ id_photo_path: objectPath }).eq('user_id', userId)
       if (upErr2) throw upErr2
 
       setMsg('Profile photo saved ✅')
-      setFile(null)
+      clearLocalSelection()
       startTransition(() => router.refresh())
     } catch (e: any) {
       setMsg(e?.message || 'Upload failed')
@@ -97,7 +102,8 @@ export default function ProfileIdPhoto({ userId, idPhotoPath }: Props) {
   }
 
   async function onDelete() {
-    if (!idPhotoPath) return
+    if (!idPhotoPath || busy || isPending) return
+
     setBusyAction('delete')
     setBusy(true)
     setMsg('')
@@ -106,12 +112,10 @@ export default function ProfileIdPhoto({ userId, idPhotoPath }: Props) {
       const { error: delErr } = await supabase.storage.from('id-photos').remove([idPhotoPath])
       if (delErr) throw delErr
 
-      const { error: upErr } = await supabase
-        .from('profiles')
-        .update({ id_photo_path: null })
-        .eq('user_id', userId)
+      const { error: upErr } = await supabase.from('profiles').update({ id_photo_path: null }).eq('user_id', userId)
       if (upErr) throw upErr
 
+      clearLocalSelection()
       setMsg('Photo removed.')
       startTransition(() => router.refresh())
     } catch (e: any) {
@@ -122,16 +126,23 @@ export default function ProfileIdPhoto({ userId, idPhotoPath }: Props) {
     }
   }
 
+  function closeEditor() {
+    if (busy || isPending) return
+    clearLocalSelection()
+    setEditing(false)
+    setMsg('')
+  }
+
   return (
     <div className="space-y-4">
       <div className="flex items-center gap-4">
-        <div className="relative w-28 h-28 rounded-xl overflow-hidden border bg-white">
+        <div className="relative h-28 w-28 overflow-hidden rounded-xl border bg-white">
           {preview ? (
             <Image src={preview} alt="Preview" fill className="object-cover" unoptimized />
           ) : signedUrl ? (
             <Image src={signedUrl} alt="Profile photo" fill className="object-cover" unoptimized />
           ) : (
-            <div className="w-full h-full grid place-items-center text-sm text-gray-500">No photo</div>
+            <div className="grid h-full w-full place-items-center text-sm text-gray-500">No photo</div>
           )}
         </div>
 
@@ -139,6 +150,7 @@ export default function ProfileIdPhoto({ userId, idPhotoPath }: Props) {
           {editing ? (
             <>
               <input
+                ref={fileInputRef}
                 type="file"
                 accept={ALLOWED.join(',')}
                 onChange={onPick}
@@ -148,66 +160,50 @@ export default function ProfileIdPhoto({ userId, idPhotoPath }: Props) {
               <div className="text-xs text-muted-foreground">
                 Formats: JPG / PNG / WEBP — Max size: {MAX_MB} MB — Recommended ratio: 1:1
               </div>
-              <div className="flex gap-2">
-                {/* SAVE (icon-only) */}
-                <button
-                  onClick={onUpload}
-                  disabled={!file || busy || isPending}
-                  aria-label="Save photo"
-                  title="Save photo"
-                  className="p-2 h-9 w-9 flex items-center justify-center rounded-md bg-black text-white hover:opacity-90 disabled:opacity-50"
-                >
-                  <Save size={18} strokeWidth={2} color="#ffffff" />
-                </button>
+              <div className="flex flex-wrap gap-2">
+                <Button onClick={onUpload} disabled={!file || busy || isPending} loading={busyAction === 'upload'} loadingText="Saving...">
+                  Save photo
+                </Button>
 
-                {(signedUrl || idPhotoPath) && (
-                  <button
-                    onClick={() => setEditing(false)}
-                    disabled={busy || isPending}
-                    aria-label="Cancel"
-                    title="Cancel"
-                    className="p-2 h-9 w-9 flex items-center justify-center rounded-md border border-gray-300 text-gray-700 hover:bg-gray-50 disabled:opacity-50"
-                  >
-                    <X size={18} strokeWidth={2} color="#374151" />
-                  </button>
-                )}
+                {(signedUrl || idPhotoPath) ? (
+                  <Button variant="outline" onClick={closeEditor} disabled={busy || isPending}>
+                    <X size={16} strokeWidth={2} />
+                    Cancel
+                  </Button>
+                ) : null}
               </div>
             </>
           ) : (
-            <div className="flex gap-2">
-              {/* CHANGE (icon-only) */}
-              <button
-                onClick={() => setEditing(true)}
-                disabled={busy || isPending}
-                aria-label="Change photo"
-                title="Change photo"
-                className="p-2 h-9 w-9 flex items-center justify-center rounded-md border border-gray-300 text-gray-700 hover:bg-gray-50 disabled:opacity-50"
-              >
-                <Camera size={18} strokeWidth={2} color="#374151" />
-              </button>
+            <div className="flex flex-wrap gap-2">
+              <Button variant="outline" onClick={() => setEditing(true)} disabled={busy || isPending}>
+                <Camera size={16} strokeWidth={2} />
+                Change photo
+              </Button>
 
-              {(signedUrl || idPhotoPath) && (
-                <button
+              {(signedUrl || idPhotoPath) ? (
+                <Button
+                  variant="outline"
                   onClick={onDelete}
                   disabled={busy || isPending}
-                  aria-label="Remove photo"
-                  title="Remove photo"
-                  className="p-2 h-9 w-9 flex items-center justify-center rounded-md border border-red-500 text-red-600 hover:bg-red-50 disabled:opacity-50"
+                  loading={busyAction === 'delete'}
+                  loadingText="Saving..."
+                  className="border-red-500 text-red-600 hover:bg-red-50"
                 >
-                  <Trash2 size={18} strokeWidth={2} color="#dc2626" />
-                </button>
-              )}
+                  <Trash2 size={16} strokeWidth={2} />
+                  Remove photo
+                </Button>
+              ) : null}
             </div>
           )}
 
           {busy ? (
-            <div className="text-sm text-[hsl(var(--muted))] flex items-center gap-2">
-              <span className="inline-block h-2 w-2 rounded-full bg-[hsl(var(--muted))] animate-pulse" />
-              {busyAction === 'delete' ? 'Removing photo…' : 'Uploading photo…'}
+            <div className="flex items-center gap-2 text-sm text-[hsl(var(--muted))]">
+              <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-[hsl(var(--muted))]" />
+              {busyAction === 'delete' ? 'Saving...' : 'Saving...'}
             </div>
           ) : null}
 
-          {!!msg && !busy && <div className="text-sm">{msg}</div>}
+          {!!msg && !busy ? <div className="text-sm">{msg}</div> : null}
         </div>
       </div>
     </div>
