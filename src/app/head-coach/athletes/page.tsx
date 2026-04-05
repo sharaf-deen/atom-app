@@ -5,6 +5,7 @@ import { redirect } from 'next/navigation'
 import AccessDeniedPage from '@/components/AccessDeniedPage'
 import PageHeader from '@/components/PageHeader'
 import { getSessionUserCached, getSupabaseAdminClientCached } from '@/lib/requestCache'
+import SaveButton from '@/components/forms/SaveButton'
 import type { Role } from '@/lib/session'
 import {
   PROGRAM_OPTIONS,
@@ -1109,7 +1110,7 @@ export default async function HeadCoachAthletesPage({ searchParams }: { searchPa
                   <label className="block text-sm"><span className="mb-2 block text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Reference coach</span><select name="reference_coach_user_id" defaultValue={focusAthlete.reference_coach_user_id ?? ''} className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none transition focus:border-black"><option value="">No reference coach</option>{(coachesRes.data ?? []).map((coach) => <option key={coach.user_id} value={coach.user_id}>{fullName(coach.first_name, coach.last_name, coach.role ? titleCase(coach.role) : 'Coach')}</option>)}</select></label>
                 </div>
                 <label className="block text-sm"><span className="mb-2 block text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Coach note</span><textarea name="notes" rows={4} defaultValue={focusAthlete.coach_note ?? ''} className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none transition focus:border-black" /></label>
-                <div className="flex flex-wrap items-center justify-between gap-3"><div className="text-xs text-[hsl(var(--muted))]">Kimono eligibility: <span className="font-medium text-black">{focusAthlete.kimono_eligible ? 'Eligible' : 'Blocked'}</span></div><button type="submit" className="inline-flex items-center justify-center rounded-2xl border border-black bg-black px-4 py-2 text-sm font-medium text-white transition hover:opacity-90">Save athlete profile</button></div>
+                <div className="flex flex-wrap items-center justify-between gap-3"><div className="text-xs text-[hsl(var(--muted))]">Kimono eligibility: <span className="font-medium text-black">{focusAthlete.kimono_eligible ? 'Eligible' : 'Blocked'}</span></div><SaveButton idleLabel="Save athlete profile" pendingLabel="Saving..." className="w-full sm:w-auto" /></div>
               </form>
 
               <div className="grid gap-3 xl:grid-cols-3">
@@ -1143,7 +1144,7 @@ export default async function HeadCoachAthletesPage({ searchParams }: { searchPa
                   <label className="block text-sm"><span className="mb-2 block text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Next program</span><select name="next_program_level" defaultValue={focusAthlete.program_level ?? ''} className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none transition focus:border-black">{PROGRAM_OPTIONS.map((program) => <option key={program} value={program}>{titleCase(program)}</option>)}</select></label>
                   <label className="block text-sm"><span className="mb-2 block text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Effective date</span><input type="date" name="effective_date" defaultValue={new Date().toISOString().slice(0, 10)} className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none transition focus:border-black" /></label>
                   <label className="block text-sm"><span className="mb-2 block text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Reason</span><textarea name="notes" rows={2} className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none transition focus:border-black" /></label>
-                  <button type="submit" className="inline-flex items-center justify-center rounded-2xl border border-black bg-black px-4 py-2 text-sm font-medium text-white transition hover:opacity-90">Save program move</button>
+                  <SaveButton idleLabel="Save program move" pendingLabel="Saving..." className="w-full sm:w-auto" />
                 </form>
               </div>
 
@@ -1182,7 +1183,7 @@ export default async function HeadCoachAthletesPage({ searchParams }: { searchPa
                       <label className="block text-sm sm:col-span-2"><span className="mb-2 block text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Deferred until</span><input type="date" name="snoozed_until" defaultValue={focusAthlete.latest_review_action?.action_status === 'deferred' ? focusAthlete.latest_review_action.snoozed_until ?? '' : ''} className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none transition focus:border-black" /></label>
                     </div>
                     <label className="block text-sm"><span className="mb-2 block text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Review note</span><textarea name="notes" rows={3} defaultValue={focusAthlete.latest_review_action?.notes ?? ''} className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none transition focus:border-black" /></label>
-                    <button type="submit" className="inline-flex items-center justify-center rounded-2xl border border-black bg-black px-4 py-2 text-sm font-medium text-white transition hover:opacity-90">Log review action</button>
+                    <SaveButton idleLabel="Log review action" pendingLabel="Saving..." className="w-full sm:w-auto" />
                   </form>
                 </div>
 
@@ -1235,7 +1236,7 @@ export default async function HeadCoachAthletesPage({ searchParams }: { searchPa
                     </div>
                     <label className="block text-sm"><span className="mb-2 block text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Result</span><select name="result" defaultValue="gold" className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none transition focus:border-black">{COMPETITION_RESULTS.map((option) => <option key={option} value={option}>{titleCase(option)}</option>)}</select></label>
                     <label className="block text-sm"><span className="mb-2 block text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Notes</span><textarea name="notes" rows={3} className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none transition focus:border-black" /></label>
-                    <button type="submit" className="inline-flex items-center justify-center rounded-2xl border border-black bg-black px-4 py-2 text-sm font-medium text-white transition hover:opacity-90">Add result</button>
+                    <SaveButton idleLabel="Add result" pendingLabel="Saving..." className="w-full sm:w-auto" />
                   </form>
 
                   <div className="mt-4 grid gap-3">
@@ -1254,7 +1255,7 @@ export default async function HeadCoachAthletesPage({ searchParams }: { searchPa
                         <label className="block text-sm"><span className="mb-2 block text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Result</span><select name="result" defaultValue={row.result} className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none transition focus:border-black">{COMPETITION_RESULTS.map((option) => <option key={option} value={option}>{titleCase(option)}</option>)}</select></label>
                         <label className="block text-sm"><span className="mb-2 block text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Notes</span><textarea name="notes" rows={2} defaultValue={row.notes ?? ''} className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none transition focus:border-black" /></label>
                         <div className="flex flex-wrap justify-between gap-2">
-                          <button type="submit" className="inline-flex items-center justify-center rounded-2xl border border-black bg-black px-4 py-2 text-sm font-medium text-white transition hover:opacity-90">Save result</button>
+                          <SaveButton idleLabel="Save result" pendingLabel="Saving..." className="w-full sm:w-auto" />
                           <button type="submit" formAction={deleteCompetitionResultAction} className="inline-flex items-center justify-center rounded-2xl border border-rose-200 bg-rose-50 px-4 py-2 text-sm font-medium text-rose-700 transition hover:bg-rose-100">Remove result</button>
                         </div>
                       </form>
