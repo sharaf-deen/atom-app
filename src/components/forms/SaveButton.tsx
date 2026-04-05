@@ -7,22 +7,24 @@ import Button from '@/components/ui/Button'
 
 type ButtonProps = React.ComponentProps<typeof Button>
 
-type Props = Omit<ButtonProps, 'children' | 'loading' | 'loadingText'> & {
-  idleLabel?: string
+type SaveButtonProps = Omit<ButtonProps, 'loading' | 'loadingText'> & {
+  idleLabel?: React.ReactNode
   pendingLabel?: string
   loading?: boolean
 }
 
-export default function SaveButton({
-  idleLabel = 'Save',
+export function SaveButton({
+  idleLabel,
   pendingLabel = 'Saving...',
   loading,
+  children,
   type = 'submit',
   disabled,
   ...props
-}: Props) {
+}: SaveButtonProps) {
   const { pending } = useFormStatus()
   const isLoading = loading ?? pending
+  const idleContent = idleLabel ?? children ?? 'Save'
 
   return (
     <Button
@@ -32,8 +34,11 @@ export default function SaveButton({
       loading={isLoading}
       loadingText={pendingLabel}
       aria-disabled={disabled || isLoading}
+      aria-busy={isLoading ? true : undefined}
     >
-      {idleLabel}
+      {idleContent}
     </Button>
   )
 }
+
+export default SaveButton
