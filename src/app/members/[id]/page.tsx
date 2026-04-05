@@ -34,6 +34,7 @@ import DeleteUserButton from '@/components/DeleteUserButton'
 import SettleDueDialog from '@/components/SettleDueDialog'
 import AthleteProfileSection from '@/components/member-detail/AthleteProfileSection'
 import MemberNotifyButton from '@/components/member-detail/MemberNotifyButton'
+import MemberBasicProfileEditButton from '@/components/member-detail/MemberBasicProfileEditButton'
 import { canManageNotifications as canManageMemberNotifications, hasLifetimeGymAccess } from '@/lib/rbac'
 
 type ProfileRow = {
@@ -980,6 +981,7 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
   const whatsappHref = !coachSafeView && !isSelf ? toWhatsAppHref(profile.phone) : null
   const showContactActions = !coachSafeView && !isSelf && !!(profile.phone || profile.email)
   const canSendDirectNotification = !coachSafeView && !isSelf && canManageMemberNotifications(me.role) && canReceiveDirectNotification(profile.role)
+  const canEditBasicProfile = !coachSafeView && (me.role === 'reception' || me.role === 'admin' || me.role === 'super_admin')
 
   const subtitle = coachSafeView
     ? 'Read-only coach view.'
@@ -1325,9 +1327,20 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
 
         <div className={`grid gap-4 ${coachSafeView ? '' : 'xl:grid-cols-[1.15fr_0.85fr]'}`}>
           <Surface className="p-4 sm:p-5">
-            <div className="flex items-center gap-2">
-              <UserRound size={18} className="text-black" />
-              <h2 className="text-base font-semibold tracking-tight">Identity</h2>
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex items-center gap-2">
+                <UserRound size={18} className="text-black" />
+                <h2 className="text-base font-semibold tracking-tight">Identity</h2>
+              </div>
+              {canEditBasicProfile ? (
+                <MemberBasicProfileEditButton
+                  userId={profile.user_id}
+                  firstName={profile.first_name}
+                  lastName={profile.last_name}
+                  phone={profile.phone}
+                  dateOfBirth={profile.date_of_birth}
+                />
+              ) : null}
             </div>
 
             <div className="mt-4 grid gap-3 text-sm">
