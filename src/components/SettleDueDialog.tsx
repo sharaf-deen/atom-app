@@ -10,6 +10,7 @@ import Input from '@/components/ui/Input'
 import Select from '@/components/ui/Select'
 import { Card, CardContent } from '@/components/ui/Card'
 import InlineAlert from '@/components/ui/InlineAlert'
+import SaveButton from '@/components/forms/SaveButton'
 
 type PaymentMethod = 'cash' | 'instapay' | 'card' | 'bank_transfer'
 
@@ -50,9 +51,6 @@ export default function SettleDueDialog({
 }) {
   const router = useRouter()
 
-  // NOTE:
-  // Hooks must be called unconditionally. Some callers may pass no subscription
-  // (or a settled one), so we compute safe defaults and return null *after* hooks.
   const subId = sub?.id ?? ''
   const initialMethod = (sub?.payment_method as PaymentMethod) || 'cash'
 
@@ -62,7 +60,6 @@ export default function SettleDueDialog({
 
   const [open, setOpen] = useState(false)
   const [busy, setBusy] = useState(false)
-
   const [amountPaid, setAmountPaid] = useState<string>(String(due))
   const [method, setMethod] = useState<PaymentMethod>(initialMethod)
   const [paymentDate, setPaymentDate] = useState<string>(() => {
@@ -76,7 +73,6 @@ export default function SettleDueDialog({
   const [emailInvoice, setEmailInvoice] = useState(false)
   const [status, setStatus] = useState<{ kind: StatusKind; msg: string }>({ kind: '', msg: '' })
 
-  // Reset on open
   useEffect(() => {
     if (!open) return
     setBusy(false)
@@ -90,10 +86,8 @@ export default function SettleDueDialog({
     setGenInvoice(true)
     setEmailInvoice(false)
     setStatus({ kind: '', msg: '' })
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, subId])
+  }, [due, initialMethod, open, subId])
 
-  // Lock scroll + ESC
   useEffect(() => {
     if (!open) return
     const prev = document.body.style.overflow
@@ -114,15 +108,15 @@ export default function SettleDueDialog({
   const nextDue = useMemo(() => {
     if (!paidOk) return null
     return Math.max(0, due - paidNum)
-  }, [paidOk, due, paidNum])
+  }, [due, paidNum, paidOk])
 
-  // Safety: if caller passed nothing, or due is already settled, do not render.
-  // (Must be after hooks.)
   if (!sub) return null
   const show = Number.isFinite(due) && due > 0
   if (!show) return null
 
   async function submit() {
+    if (busy) return
+
     if (!paidOk) {
       setStatus({ kind: 'error', msg: `Amount paid must be between 1 and ${due}.` })
       toast.error('Please check the amount')
@@ -130,7 +124,7 @@ export default function SettleDueDialog({
     }
 
     setBusy(true)
-    setStatus({ kind: 'info', msg: 'Saving…' })
+    setStatus({ kind: 'info', msg: 'Saving...' })
 
     try {
       const payload: any = {
@@ -151,7 +145,7 @@ export default function SettleDueDialog({
       if (!r.ok || !j?.ok) {
         const msg = j?.details || j?.error || 'Update failed'
         setStatus({ kind: 'error', msg: String(msg) })
-        toast.error('Save failed')
+        toast.error('Save failed', { description: String(msg) })
         return
       }
 
@@ -172,10 +166,11 @@ export default function SettleDueDialog({
       setTimeout(() => {
         setOpen(false)
         router.refresh()
-      }, 450)
+      }, 350)
     } catch (e: any) {
-      setStatus({ kind: 'error', msg: String(e?.message || e) })
-      toast.error('Unexpected error')
+      const message = String(e?.message || e)
+      setStatus({ kind: 'error', msg: message })
+      toast.error('Unexpected error', { description: message })
     } finally {
       setBusy(false)
     }
@@ -191,15 +186,14 @@ export default function SettleDueDialog({
         <>
           <div className="fixed inset-0 z-[100] bg-black/60" onClick={() => !busy && setOpen(false)} aria-hidden="true" />
           <div className="fixed inset-0 z-[101] flex items-center justify-center p-4">
-            <Card className="w-full max-w-lg rounded-3xl border border-[hsl(var(--border))] shadow-soft bg-white">
+            <Card className="w-full max-w-lg rounded-3xl border border-[hsl(var(--border))] bg-white shadow-soft">
               <CardContent className="p-6">
                 <div className="flex items-start justify-between gap-4">
                   <div>
                     <h3 className="text-lg font-semibold">Settle remaining due</h3>
-                    <p className="text-xs text-[hsl(var(--muted))] mt-1">
+                    <p className="mt-1 text-xs text-[hsl(var(--muted))]">
                       Paid so far: <span className="font-medium">{paidSoFar}</span> · Current due:{' '}
-                      <span className="font-medium">{due}</span> · Total:{' '}
-                      <span className="font-medium">{totalNow}</span>
+                      <span className="font-medium">{due}</span> · Total: <span className="font-medium">{totalNow}</span>
                     </p>
                   </div>
                   <Button variant="ghost" onClick={() => !busy && setOpen(false)}>
@@ -218,7 +212,7 @@ export default function SettleDueDialog({
                 <div className="mt-5 grid gap-4">
                   <div className="grid gap-4 md:grid-cols-2">
                     <div>
-                      <div className="text-sm font-medium mb-1">Amount paid now</div>
+                      <div className="mb-1 text-sm font-medium">Amount paid now</div>
                       <Input
                         value={amountPaid}
                         onChange={(e) => setAmountPaid(e.target.value)}
@@ -230,7 +224,7 @@ export default function SettleDueDialog({
                     </div>
 
                     <div>
-                      <div className="text-sm font-medium mb-1">Payment method</div>
+                      <div className="mb-1 text-sm font-medium">Payment method</div>
                       <Select value={method} onChange={(e) => setMethod(e.target.value as PaymentMethod)} disabled={busy}>
                         <option value="cash">Cash</option>
                         <option value="instapay">InstaPay</option>
@@ -242,13 +236,8 @@ export default function SettleDueDialog({
                   </div>
 
                   <div>
-                    <div className="text-sm font-medium mb-1">Payment date</div>
-                    <Input
-                      type="date"
-                      value={paymentDate}
-                      onChange={(e) => setPaymentDate(e.target.value)}
-                      disabled={busy}
-                    />
+                    <div className="mb-1 text-sm font-medium">Payment date</div>
+                    <Input type="date" value={paymentDate} onChange={(e) => setPaymentDate(e.target.value)} disabled={busy} />
                     <div className="mt-1 text-[11px] text-[hsl(var(--muted))]">Use the real payment date for historical imports.</div>
                   </div>
 
@@ -263,7 +252,7 @@ export default function SettleDueDialog({
                       />
                       <div>
                         <div className="text-sm font-medium">Generate updated invoice</div>
-                        <div className="text-xs text-[hsl(var(--muted))] mt-0.5">Overwrites the previous PDF for this invoice number.</div>
+                        <div className="mt-0.5 text-xs text-[hsl(var(--muted))]">Overwrites the previous PDF for this invoice number.</div>
                       </div>
                     </label>
 
@@ -293,9 +282,14 @@ export default function SettleDueDialog({
                     <Button variant="outline" onClick={() => setOpen(false)} disabled={busy}>
                       Cancel
                     </Button>
-                    <Button onClick={submit} disabled={busy || !paidOk}>
-                      Confirm
-                    </Button>
+                    <SaveButton
+                      type="button"
+                      onClick={submit}
+                      loading={busy}
+                      disabled={busy || !paidOk}
+                      idleLabel="Confirm"
+                      pendingLabel="Saving..."
+                    />
                   </div>
                 </div>
               </CardContent>

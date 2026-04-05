@@ -8,6 +8,7 @@ import Button from '@/components/ui/Button'
 import Input from '@/components/ui/Input'
 import Select from '@/components/ui/Select'
 import SettleDueDialog from '@/components/SettleDueDialog'
+import SaveButton from '@/components/forms/SaveButton'
 // Note: we intentionally avoid depending on a specific Alert component API here.
 // We'll render a lightweight inline message box to prevent TS prop mismatches.
 
@@ -172,6 +173,8 @@ export default function SubscriptionManageRowActions({
   const canEdit = !busy
 
   async function doUpdate() {
+    if (busy) return
+
     setBusy(true)
     setStatus({ kind: 'info', msg: 'Saving…' })
 
@@ -246,6 +249,8 @@ export default function SubscriptionManageRowActions({
   }
 
   async function doFreezeSave() {
+    if (busy) return
+
     setBusy(true)
     setStatus({ kind: 'info', msg: 'Saving freeze…' })
 
@@ -303,6 +308,8 @@ export default function SubscriptionManageRowActions({
   }
 
   async function doFreezeClear() {
+    if (busy) return
+
     setBusy(true)
     setStatus({ kind: 'info', msg: 'Clearing freeze…' })
 
@@ -335,6 +342,7 @@ export default function SubscriptionManageRowActions({
   }
 
   async function doDelete() {
+    if (busy) return
     if (!confirm('Delete this subscription?')) return
 
     setBusy(true)
@@ -507,9 +515,7 @@ export default function SubscriptionManageRowActions({
                 <Button variant="outline" onClick={() => setOpenEdit(false)} disabled={busy}>
                   Cancel
                 </Button>
-                <Button onClick={doUpdate} disabled={busy}>
-                  Save
-                </Button>
+                <SaveButton onClick={doUpdate} type="button" loading={busy} disabled={busy} idleLabel="Save" pendingLabel="Saving..." />
               </div>
             </div>
           </div>
@@ -575,9 +581,7 @@ export default function SubscriptionManageRowActions({
                   <Button variant="outline" onClick={() => setOpenFreeze(false)} disabled={busy}>
                     Cancel
                   </Button>
-                  <Button onClick={doFreezeSave} disabled={busy || freezeDurationDays === null}>
-                    Save
-                  </Button>
+                  <SaveButton onClick={doFreezeSave} type="button" loading={busy} disabled={busy || freezeDurationDays === null} idleLabel="Save" pendingLabel="Saving..." />
                 </div>
               </div>
             </div>
