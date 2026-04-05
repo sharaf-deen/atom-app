@@ -3,13 +3,11 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
+import { toast } from 'sonner'
 
-import SaveButton from '@/components/forms/SaveButton'
 import Button from '@/components/ui/Button'
 import InlineAlert from '@/components/ui/InlineAlert'
-import Modal from '@/components/ui/Modal'
 import { cairoToday } from '@/lib/cairoDate'
-import { useSafeSubmit } from '@/lib/forms/useSafeSubmit'
 
 type NewMemberPayload = {
   email: string
@@ -85,12 +83,17 @@ export default function CreateMemberForm({
 }) {
   const router = useRouter()
   const emailRef = useRef<HTMLInputElement>(null)
+  const submitLockRef = useRef(false)
 
   const initialForm = useMemo(() => buildInitialForm(initialValues), [initialValues])
 
   const [form, setForm] = useState<NewMemberPayload>(initialForm)
-
-  const [dobParts, setDobParts] = useState<{ day: string; month: string; year: string }>(() => dobPartsFromIso(initialForm.date_of_birth))
+  const [dobParts, setDobParts] = useState<{ day: string; month: string; year: string }>(() =>
+    dobPartsFromIso(initialForm.date_of_birth),
+  )
+  const [busy, setBusy] = useState(false)
+  const [status, setStatus] = useState<Status>({ kind: '', msg: '' })
+  const [existingMember, setExistingMember] = useState<ExistingMemberRef | null>(null)
 
   function setDobPart(part: 'day' | 'month' | 'year', value: string) {
     setDobParts((prev) => {
@@ -100,23 +103,14 @@ export default function CreateMemberForm({
       return next
     })
   }
-  const [status, setStatus] = useState<Status>({ kind: '', msg: '' })
-  const [createdId, setCreatedId] = useState<string | null>(null)
-  const [postCreateOpen, setPostCreateOpen] = useState(false)
-  const [createdEmail, setCreatedEmail] = useState<string | null>(null)
-  const [createOutcome, setCreateOutcome] = useState<CreateOutcome | null>(null)
-  const [inviteMode, setInviteMode] = useState<InviteMode>('none')
-  const [existingMember, setExistingMember] = useState<ExistingMemberRef | null>(null)
 
   useEffect(() => {
     setForm(initialForm)
     setDobParts(dobPartsFromIso(initialForm.date_of_birth))
     setStatus({ kind: '', msg: '' })
-    setCreatedId(null)
-    setCreatedEmail(null)
-    setCreateOutcome(null)
-    setInviteMode('none')
     setExistingMember(null)
+    submitLockRef.current = false
+    setBusy(false)
   }, [initialForm])
 
   function update<K extends keyof NewMemberPayload>(k: K, v: NewMemberPayload[K]) {
@@ -128,38 +122,38 @@ export default function CreateMemberForm({
     setForm(initialForm)
     setDobParts(dobPartsFromIso(initialForm.date_of_birth))
     setStatus({ kind: '', msg: '' })
-    setCreatedId(null)
-    setCreatedEmail(null)
-    setCreateOutcome(null)
-    setInviteMode('none')
     setExistingMember(null)
   }
 
   const emailOk = !!(form.email || '').trim()
-
   const age = useMemo(() => ageFromDob(form.date_of_birth || ''), [form.date_of_birth])
   const ageGroup = age === null ? null : age < 17 ? 'Kid' : 'Adult'
   const dobOk = age !== null // valid + not in future
 
-  const { submit, isPending } = useSafeSubmit<{ id: string | null }>({
-    defaultSuccessMessage: 'Member created',
-    defaultErrorMessage: 'Create failed',
-    action: async () => {
-      const email = (form.email || '').trim().toLowerCase()
+  async function onSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    if (submitLockRef.current || busy) return
 
-      const payload = {
-        email,
-        first_name: (form.first_name || '').trim() || undefined,
-        last_name: (form.last_name || '').trim() || undefined,
-        phone: (form.phone || '').trim() || undefined,
-        date_of_birth: (form.date_of_birth || '').trim() || undefined,
-        visitor_trial_id: (form.visitor_trial_id || '').trim() || undefined,
-        // aliases camelCase (au cas où on les supporte côté API)
-        firstName: (form.first_name || '').trim() || undefined,
-        lastName: (form.last_name || '').trim() || undefined,
-        dateOfBirth: (form.date_of_birth || '').trim() || undefined,
-      }
+    submitLockRef.current = true
+    setBusy(true)
+    setStatus({ kind: 'info', msg: 'Creating member…' })
+    setExistingMember(null)
 
+    const email = (form.email || '').trim().toLowerCase()
+    const payload = {
+      email,
+      first_name: (form.first_name || '').trim() || undefined,
+      last_name: (form.last_name || '').trim() || undefined,
+      phone: (form.phone || '').trim() || undefined,
+      date_of_birth: (form.date_of_birth || '').trim() || undefined,
+      visitor_trial_id: (form.visitor_trial_id || '').trim() || undefined,
+      // aliases camelCase (au cas où on les supporte côté API)
+      firstName: (form.first_name || '').trim() || undefined,
+      lastName: (form.last_name || '').trim() || undefined,
+      dateOfBirth: (form.date_of_birth || '').trim() || undefined,
+    }
+
+    try {
       const r = await fetch('/api/members/create', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -173,12 +167,12 @@ export default function CreateMemberForm({
         const duplicateMember = j?.existing_member?.user_id ? (j.existing_member as ExistingMemberRef) : null
         setExistingMember(duplicateMember)
         setStatus({ kind: 'error', msg })
-
-        return {
-          ok: false as const,
-          message: duplicateMember ? 'Email already used' : 'Create failed',
-          description: duplicateMember ? 'Open the existing member instead of creating a new one.' : msg,
-        }
+        toast.error(duplicateMember ? 'Email already used' : 'Create failed', {
+          description: duplicateMember
+            ? 'Open the existing member instead of creating a new one.'
+            : undefined,
+        })
+        return
       }
 
       const id: string = j.user?.id || j.id || j.user_id
@@ -186,77 +180,50 @@ export default function CreateMemberForm({
       const inviteSent = !!j?.invite_sent
       const nextInviteMode = (j?.invite_mode || 'none') as InviteMode
 
-      setCreatedId(id || null)
-      setCreatedEmail(email)
-      setCreateOutcome(outcome)
-      setInviteMode(nextInviteMode)
-
       if (outcome === 'invited_new_user' && inviteSent) {
         const description = nextInviteMode === 'custom_qr' ? 'Invite email with QR code sent.' : 'Invite email sent.'
         setStatus({ kind: 'success', msg: `Member created. ${description}` })
-        return {
-          ok: true as const,
-          message: 'Member created',
-          description,
-          data: { id: id || null },
-        }
-      }
-
-      if (outcome === 'invited_new_user' && !inviteSent && nextInviteMode === 'custom_qr_failed') {
+        toast.success('Member created', { description })
+      } else if (outcome === 'invited_new_user' && !inviteSent && nextInviteMode === 'custom_qr_failed') {
         setStatus({
           kind: 'warning',
           msg: 'Member created, but the custom invite email with QR code could not be sent.',
         })
-        return {
-          ok: true as const,
-          message: 'Member created',
+        toast.success('Member created', {
           description: 'Open the member profile and use Resend invite if needed.',
-          data: { id: id || null },
-        }
-      }
-
-      if (outcome === 'existing_profile') {
+        })
+      } else if (outcome === 'existing_profile') {
         setStatus({
           kind: 'warning',
           msg: 'This email already belongs to an existing member. Profile updated. No invite email was sent.',
         })
-        return {
-          ok: true as const,
-          message: 'Existing member updated',
+        toast.success('Existing member updated', {
           description: 'No new invite email was sent.',
-          data: { id: id || null },
-        }
+        })
+      } else {
+        setStatus({
+          kind: 'warning',
+          msg: 'Member profile saved, but no new invite email was sent because the auth account already exists.',
+        })
+        toast.success('Member profile saved', {
+          description: 'Use Resend invite from the member profile if needed.',
+        })
       }
 
-      setStatus({
-        kind: 'warning',
-        msg: 'Member profile saved, but no new invite email was sent because the auth account already exists.',
-      })
-      return {
-        ok: true as const,
-        message: 'Member profile saved',
-        description: 'Use Resend invite from the member profile if needed.',
-        data: { id: id || null },
+      if (id) {
+        router.push(`/members/${id}`)
+        return
       }
-    },
-    onSuccess: async () => {
-      setForm(initialForm)
-      setDobParts(dobPartsFromIso(initialForm.date_of_birth))
-      setPostCreateOpen(true)
-    },
-  })
 
-  async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
-    e.preventDefault()
-
-    setStatus({ kind: 'info', msg: 'Creating member…' })
-    setCreatedId(null)
-    setCreatedEmail(null)
-    setCreateOutcome(null)
-    setInviteMode('none')
-    setExistingMember(null)
-
-    await submit({ form: e.currentTarget })
+      router.refresh()
+    } catch (e: any) {
+      const msg = String(e?.message || e)
+      setStatus({ kind: 'error', msg })
+      toast.error('Network error')
+    } finally {
+      submitLockRef.current = false
+      setBusy(false)
+    }
   }
 
   return (
@@ -288,11 +255,7 @@ export default function CreateMemberForm({
               <span>{status.msg}</span>
               {existingMember?.user_id ? (
                 <div className="flex flex-wrap gap-2">
-                  <Button
-                    type="button"
-                    size="sm"
-                    onClick={() => router.push(`/members/${existingMember.user_id}`)}
-                  >
+                  <Button type="button" size="sm" onClick={() => router.push(`/members/${existingMember.user_id}`)}>
                     Open existing member
                   </Button>
                   <Button
@@ -324,7 +287,7 @@ export default function CreateMemberForm({
             onChange={(e) => update('email', e.target.value)}
             className="rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2"
             placeholder="name@example.com"
-            disabled={isPending}
+            disabled={busy}
           />
           <span className="text-[11px] text-[hsl(var(--muted))]">
             Reception / kiosk safety: if this email already exists, creation is blocked and you can open the existing member.
@@ -339,7 +302,7 @@ export default function CreateMemberForm({
             onChange={(e) => update('phone', e.target.value)}
             className="rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2"
             placeholder="+201…"
-            disabled={isPending}
+            disabled={busy}
           />
         </label>
 
@@ -352,7 +315,7 @@ export default function CreateMemberForm({
               value={dobParts.day}
               onChange={(e) => setDobPart('day', e.target.value)}
               className="rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2"
-              disabled={isPending}
+              disabled={busy}
             >
               <option value="" disabled>
                 DD
@@ -369,7 +332,7 @@ export default function CreateMemberForm({
               value={dobParts.month}
               onChange={(e) => setDobPart('month', e.target.value)}
               className="rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2"
-              disabled={isPending}
+              disabled={busy}
             >
               <option value="" disabled>
                 MM
@@ -386,7 +349,7 @@ export default function CreateMemberForm({
               value={dobParts.year}
               onChange={(e) => setDobPart('year', e.target.value)}
               className="rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2"
-              disabled={isPending}
+              disabled={busy}
             >
               <option value="" disabled>
                 YYYY
@@ -415,7 +378,7 @@ export default function CreateMemberForm({
             onChange={(e) => update('first_name', e.target.value)}
             className="rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2"
             placeholder="Ahmed"
-            disabled={isPending}
+            disabled={busy}
           />
         </label>
 
@@ -426,98 +389,20 @@ export default function CreateMemberForm({
             onChange={(e) => update('last_name', e.target.value)}
             className="rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2"
             placeholder="Mohamed"
-            disabled={isPending}
+            disabled={busy}
           />
         </label>
 
         <div className="mt-2 flex flex-wrap gap-2 sm:col-span-2">
-          <SaveButton
-            idleLabel="Create member"
-            pendingLabel="Saving..."
-            loading={isPending}
-            disabled={!emailOk || !dobOk}
-          />
+          <Button type="submit" disabled={busy || !emailOk || !dobOk}>
+            {busy ? 'Creating…' : 'Create member'}
+          </Button>
 
-          <Button type="button" variant="outline" onClick={resetForm} disabled={isPending}>
+          <Button type="button" variant="outline" onClick={resetForm} disabled={busy}>
             Reset
           </Button>
         </div>
       </form>
-
-      <Modal
-        open={postCreateOpen}
-        onClose={() => {
-          setPostCreateOpen(false)
-        }}
-        title={
-          createOutcome === 'invited_new_user'
-            ? 'Member created'
-            : createOutcome === 'existing_profile'
-              ? 'Existing member found'
-              : 'Member profile saved'
-        }
-      >
-        <div className="grid gap-3">
-          <p className="text-sm text-[hsl(var(--muted))]">
-            {createOutcome === 'invited_new_user' ? (
-              createdEmail ? (
-                <>
-                  {inviteMode === 'custom_qr' ? 'Invite email with QR code sent to ' : 'Invite email sent to '}<span className="font-medium text-black">{createdEmail}</span>.
-                </>
-              ) : (
-                <>{inviteMode === 'custom_qr' ? 'Invite email with QR code has been sent.' : 'Invite email has been sent.'}</>
-              )
-            ) : createOutcome === 'existing_profile' ? (
-              <>This email already belongs to an existing member. No new invite email was sent.</>
-            ) : (
-              <>
-                The auth account already exists. No new invite email was sent. Open the member profile to use{' '}
-                <span className="font-medium text-black">Resend invite</span> if needed.
-              </>
-            )}
-          </p>
-
-          <div className="flex flex-wrap gap-2">
-            <Button
-              type="button"
-              onClick={() => {
-                setPostCreateOpen(false)
-                setStatus({ kind: '', msg: '' })
-                setCreatedId(null)
-                setCreatedEmail(null)
-                setCreateOutcome(null)
-                setInviteMode('none')
-                setTimeout(() => emailRef.current?.focus(), 50)
-              }}
-            >
-              Create another
-            </Button>
-
-            <Button
-              type="button"
-              variant="outline"
-              disabled={!createdId}
-              onClick={() => {
-                if (!createdId) return
-                setPostCreateOpen(false)
-                router.push(`/members/${createdId}`)
-              }}
-            >
-              Go to member profile
-            </Button>
-
-            <Button
-              type="button"
-              variant="ghost"
-              onClick={() => {
-                setPostCreateOpen(false)
-              }}
-            >
-              Close
-            </Button>
-          </div>
-        </div>
-      </Modal>
     </div>
   )
 }
