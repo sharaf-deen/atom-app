@@ -111,6 +111,46 @@ function TinyBadge({ children, tone = 'neutral' }: { children: ReactNode; tone?:
   return <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold ${toneClass(tone)}`}>{children}</span>
 }
 
+function quickLiveActionIdleLabel(kind: string) {
+  return kind === 'present'
+    ? 'Mark present'
+    : kind === 'confirm'
+      ? 'Confirm'
+      : kind === 'defer'
+        ? 'Defer'
+        : kind === 'paid'
+          ? 'Paid'
+          : kind === 'waived'
+            ? 'Waived'
+            : kind === 'belt_delivered'
+              ? 'Belt delivered'
+              : kind === 'certificate_delivered'
+                ? 'Certificate delivered'
+                : 'Absent'
+}
+
+function quickLiveActionPendingLabel(kind: string) {
+  return kind === 'present'
+    ? 'Saving...'
+    : kind === 'confirm'
+      ? 'Confirming...'
+      : kind === 'defer'
+        ? 'Deferring...'
+        : kind === 'paid'
+          ? 'Saving...'
+          : kind === 'waived'
+            ? 'Saving...'
+            : kind === 'belt_delivered'
+              ? 'Saving...'
+              : kind === 'certificate_delivered'
+                ? 'Saving...'
+                : 'Saving...'
+}
+
+function quickLiveActionVariant(kind: string): 'solid' | 'outline' {
+  return kind === 'confirm' || kind === 'paid' ? 'solid' : 'outline'
+}
+
 async function requireAccess(nextPath: string) {
   const me = await getSessionUserCached()
   if (!me || (me.role !== 'head_coach' && me.role !== 'super_admin')) redirect(nextPath)
@@ -982,9 +1022,12 @@ export default async function BeltPromotionEventsPage({ searchParams }: { search
                     </label>
                     <div className="text-xs text-[hsl(var(--muted))]">Confirmed candidates already applied will be skipped automatically.</div>
                     <div className="flex justify-end">
-                      <button type="submit" disabled={summary.pendingApply === 0} className={`inline-flex items-center justify-center rounded-2xl border px-4 py-2 text-sm font-medium transition ${summary.pendingApply === 0 ? 'border-[hsl(var(--border))] bg-[hsl(var(--bg))] text-[hsl(var(--muted))]' : 'border-black bg-black text-white hover:opacity-90'}`}>
-                        Apply confirmed results
-                      </button>
+                      <SaveButton
+                        idleLabel="Apply confirmed results"
+                        pendingLabel="Applying..."
+                        disabled={summary.pendingApply === 0}
+                        className="shadow-none"
+                      />
                     </div>
                   </form>
                 </section>
@@ -1239,9 +1282,13 @@ export default async function BeltPromotionEventsPage({ searchParams }: { search
                                   <input type="hidden" name="candidateId" value={row.id} />
                                   <input type="hidden" name="kind" value={kind} />
                                   <input type="hidden" name="nextHref" value={nextLiveHref} />
-                                  <button type="submit" className={`inline-flex items-center justify-center rounded-2xl border px-3 py-2 text-xs font-medium transition ${kind === 'confirm' || kind === 'paid' ? 'border-black bg-black text-white hover:opacity-90' : 'border-[hsl(var(--border))] bg-white text-black hover:bg-[hsl(var(--bg))]'}`}>
-                                    {kind === 'present' ? 'Mark present' : kind === 'confirm' ? 'Confirm' : kind === 'defer' ? 'Defer' : kind === 'paid' ? 'Paid' : kind === 'waived' ? 'Waived' : kind === 'belt_delivered' ? 'Belt delivered' : kind === 'certificate_delivered' ? 'Certificate delivered' : 'Absent'}
-                                  </button>
+                                  <SaveButton
+                                    idleLabel={quickLiveActionIdleLabel(kind)}
+                                    pendingLabel={quickLiveActionPendingLabel(kind)}
+                                    variant={quickLiveActionVariant(kind)}
+                                    size="sm"
+                                    className="text-xs shadow-none"
+                                  />
                                 </form>
                               ))}
                             </div>
