@@ -26,6 +26,7 @@ import {
   House,
   IdCard,
   LayoutDashboard,
+  LogOut,
   MessageSquare,
   Receipt,
   ScanLine,
@@ -852,6 +853,28 @@ function HomeScanShortcut() {
 }
 
 
+function HomeLogoutShortcut() {
+  return (
+    <Surface className="p-4 sm:p-5">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[hsl(var(--muted))]">Session</p>
+          <h2 className="mt-1 text-lg font-semibold tracking-tight">Sign out from Home</h2>
+          <p className="mt-1 text-sm text-[hsl(var(--muted))]">Leave the app safely without opening another page first.</p>
+        </div>
+        <Link
+          href="/logout"
+          className="inline-flex items-center justify-center gap-2 rounded-2xl border border-[hsl(var(--border))] bg-white px-4 py-2 text-sm font-semibold text-black shadow-soft transition hover:bg-[hsl(var(--surface-2))]"
+        >
+          <LogOut size={16} />
+          Logout
+        </Link>
+      </div>
+    </Surface>
+  )
+}
+
+
 function memberActions(): QuickAction[] {
   return [
     { href: '/profile', label: 'My profile', desc: 'Identity, subscription details and QR code.', icon: IdCard },
@@ -971,6 +994,8 @@ export default async function HomePage() {
           memberId={memberId}
           joinedAt={profile?.created_at ?? null}
         />
+
+        <HomeLogoutShortcut />
 
         {canAccessScan(user.role) ? <HomeScanShortcut /> : null}
 
