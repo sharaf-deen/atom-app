@@ -9,6 +9,7 @@ import AccessDeniedPage from '@/components/AccessDeniedPage'
 import AccountActivationBadge from '@/components/account/AccountActivationBadge'
 import PageHeader from '@/components/layout/PageHeader'
 import Section from '@/components/layout/Section'
+import ResendInviteButton from '@/components/ResendInviteButton'
 import { Card, CardContent } from '@/components/ui/Card'
 import Button from '@/components/ui/Button'
 import { Table } from '@/components/ui/Table'
@@ -152,7 +153,8 @@ export default async function AccountActivationPage({ searchParams }: { searchPa
     { key: 'status', header: 'Account status' },
     { key: 'invited_at', header: 'Invited at', hideOnMobile: true },
     { key: 'last_sign_in', header: 'Last sign in', hideOnMobile: true },
-    { key: 'invite_age', header: 'Invite age' },
+    { key: 'invite_age', header: 'Invite age', hideOnMobile: true },
+    { key: 'actions', header: 'Actions' },
     { key: 'open', header: 'Open' },
   ]
 
@@ -170,6 +172,11 @@ export default async function AccountActivationPage({ searchParams }: { searchPa
     invited_at: fmtDateTime(row.invited_at),
     last_sign_in: fmtDateTime(row.last_sign_in_at),
     invite_age: fmtAge(row.invite_age_days),
+    actions: row.user_id ? (
+      <ResendInviteButton userId={row.user_id} email={row.email} hideStatusBadge className="justify-end" />
+    ) : (
+      '—'
+    ),
     open: row.user_id ? (
       <Button asChild variant="outline" size="sm" href={`/members/${row.user_id}`}>
         Open member
@@ -183,7 +190,7 @@ export default async function AccountActivationPage({ searchParams }: { searchPa
     <main>
       <PageHeader
         title="Account Activation"
-        subtitle="Read-only overview of who already activated the app account and who is still invite pending."
+        subtitle="Admin overview of app account activation, with resend invite and reset password actions."
         right={
           <Button asChild variant="outline" href="/admin">
             Back to Admin
@@ -220,8 +227,13 @@ export default async function AccountActivationPage({ searchParams }: { searchPa
         </div>
 
         <Card>
-          <CardContent className="text-sm text-[hsl(var(--muted))]">
-            Read-only for now. This page helps you identify members who still need follow-up before they open the invite email and set their password.
+          <CardContent className="space-y-2 text-sm text-[hsl(var(--muted))]">
+            <p>Admins can now follow up directly from this page.</p>
+            <ul className="space-y-1 pl-5 list-disc">
+              <li><span className="font-medium text-black">Invite pending</span> → Resend invite</li>
+              <li><span className="font-medium text-black">Active</span> → Send reset password email</li>
+              <li><span className="font-medium text-black">No account / Auth issue</span> → review the member profile first</li>
+            </ul>
           </CardContent>
         </Card>
 

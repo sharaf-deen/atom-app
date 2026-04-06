@@ -7,6 +7,7 @@ type Props = {
   userId: string
   email?: string | null
   className?: string
+  hideStatusBadge?: boolean
 }
 
 type Status =
@@ -48,7 +49,7 @@ function isFiniteNumber(n: unknown): n is number {
   return typeof n === 'number' && Number.isFinite(n)
 }
 
-export default function ResendInviteButton({ userId, email, className }: Props) {
+export default function ResendInviteButton({ userId, email, className, hideStatusBadge = false }: Props) {
   const [busy, setBusy] = useState(false)
   const [confirming, setConfirming] = useState(false)
 
@@ -419,14 +420,19 @@ export default function ResendInviteButton({ userId, email, className }: Props) 
   const badgeTitle = lastSentAt ? `Last invite: ${lastSentAt}` : undefined
   const badgeExtra = lastSentAt ? ` • ${fmtRelative(lastSentAt)}` : ''
 
+  const badgeNode = hideStatusBadge ? null : (
+    <span className={`text-[11px] px-2 py-1 rounded-2xl border ${badge.cls}`} title={badgeTitle}>
+      {badge.text}
+      {badgeExtra}
+    </span>
+  )
+
   if (status === 'active') {
     if (inResetCooldown) {
       const left = isFiniteNumber(resetCooldownLeft) ? resetCooldownLeft : 0
       return (
         <div className={`flex items-center gap-2 ${className ?? ''}`}>
-          <span className={`text-[11px] px-2 py-1 rounded-2xl border ${badge.cls}`} title={badgeTitle}>
-            {badge.text}
-          </span>
+          {badgeNode}
           <button
             disabled
             className="rounded-xl px-4 py-2 text-sm font-medium bg-gray-200 text-gray-500 cursor-not-allowed"
@@ -441,9 +447,7 @@ export default function ResendInviteButton({ userId, email, className }: Props) 
     if (resetConfirming) {
       return (
         <div className={`flex items-center gap-2 ${className ?? ''}`}>
-          <span className={`text-[11px] px-2 py-1 rounded-2xl border ${badge.cls}`} title={badgeTitle}>
-            {badge.text}
-          </span>
+          {badgeNode}
 
           <button
             onClick={() => setResetConfirming(false)}
@@ -469,9 +473,7 @@ export default function ResendInviteButton({ userId, email, className }: Props) 
 
     return (
       <div className={`flex items-center gap-2 ${className ?? ''}`}>
-        <span className={`text-[11px] px-2 py-1 rounded-2xl border ${badge.cls}`} title={badgeTitle}>
-          {badge.text}
-        </span>
+        {badgeNode}
 
         <button
           onClick={() => setResetConfirming(true)}
@@ -490,9 +492,7 @@ export default function ResendInviteButton({ userId, email, className }: Props) 
   if (!hasEmail) {
     return (
       <div className={`flex items-center gap-2 ${className ?? ''}`}>
-        <span className={`text-[11px] px-2 py-1 rounded-2xl border ${badge.cls}`} title={badgeTitle}>
-          {badge.text}
-        </span>
+        {badgeNode}
         <button
           disabled
           className="rounded-xl px-4 py-2 text-sm font-medium bg-gray-200 text-gray-500 cursor-not-allowed"
@@ -508,10 +508,7 @@ export default function ResendInviteButton({ userId, email, className }: Props) 
     const left = isFiniteNumber(cooldownLeft) ? cooldownLeft : 0
     return (
       <div className={`flex items-center gap-2 ${className ?? ''}`}>
-        <span className={`text-[11px] px-2 py-1 rounded-2xl border ${badge.cls}`} title={badgeTitle}>
-          {badge.text}
-          {badgeExtra}
-        </span>
+        {badgeNode}
         <button
           disabled
           className="rounded-xl px-4 py-2 text-sm font-medium bg-gray-200 text-gray-500 cursor-not-allowed"
@@ -526,10 +523,7 @@ export default function ResendInviteButton({ userId, email, className }: Props) 
   if (confirming) {
     return (
       <div className={`flex items-center gap-2 ${className ?? ''}`}>
-        <span className={`text-[11px] px-2 py-1 rounded-2xl border ${badge.cls}`} title={badgeTitle}>
-          {badge.text}
-          {badgeExtra}
-        </span>
+        {badgeNode}
 
         <button
           onClick={() => setConfirming(false)}
@@ -557,10 +551,7 @@ export default function ResendInviteButton({ userId, email, className }: Props) 
 
   return (
     <div className={`flex items-center gap-2 ${className ?? ''}`}>
-      <span className={`text-[11px] px-2 py-1 rounded-2xl border ${badge.cls}`} title={badgeTitle}>
-        {badge.text}
-        {badgeExtra}
-      </span>
+      {badgeNode}
 
       <button
         onClick={() => setConfirming(true)}
