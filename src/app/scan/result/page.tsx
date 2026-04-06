@@ -23,9 +23,6 @@ import Button from '@/components/ui/Button'
 import AccessDeniedPage from '@/components/AccessDeniedPage'
 import { getSessionUserCached, getSupabaseAdminClientCached } from '@/lib/requestCache'
 import { canAccessScan } from '@/lib/rbac'
-import AccountActivationBadge from '@/components/account/AccountActivationBadge'
-import { accountActivationDescription, accountActivationTone, type AccountActivationStatus } from '@/lib/accountActivation'
-import { getAccountActivationForMemberUserId } from '@/lib/accountActivationServer'
 import AutoReturn from './AutoReturn'
 import ResultSound from './ResultSound'
 
@@ -43,6 +40,7 @@ type SearchParams = {
   message?: string
   repeat?: string
   repeatSeconds?: string
+  fullscreen?: string
 }
 
 type SubRow = {
@@ -68,12 +66,6 @@ type SubscriptionSummary = {
   detailLabel: string
 }
 
-function accountStatusInfoTone(status: AccountActivationStatus): 'success' | 'warning' | 'danger' {
-  const tone = accountActivationTone(status)
-  if (tone === 'success') return 'success'
-  if (tone === 'danger') return 'danger'
-  return 'warning'
-}
 
 function isUuid(v?: string | null) {
   return !!v && /^[0-9a-f-]{36}$/i.test(v)
@@ -342,8 +334,9 @@ export default async function ScanResultPage({ searchParams }: { searchParams: S
   const frozen = searchParams.frozen === '1'
   const valid = searchParams.valid === '1'
   const isTerminal = me.role === 'scan_terminal'
+  const terminalFullScreen = isTerminal && searchParams.fullscreen === '1'
   const kioskMode = isTerminal || searchParams.kiosk === '1'
-  const returnHref = '/scan'
+  const returnHref = terminalFullScreen ? '/scan?fullscreen=1' : '/scan'
   const apiMessage = safeMessage(searchParams.message)
   const memberId = isUuid(searchParams.memberId) ? (searchParams.memberId as string) : null
 
@@ -361,7 +354,6 @@ export default async function ScanResultPage({ searchParams }: { searchParams: S
   let signedPhoto = ''
   let subscriptions: SubRow[] = []
   let attendanceTodayScannedAt: string | null = null
-  let accountStatus: AccountActivationStatus | null = null
 
   if (memberId) {
     try {
@@ -383,7 +375,7 @@ export default async function ScanResultPage({ searchParams }: { searchParams: S
       const today = todayDateOnlyCairo()
       const since7 = dateDaysAgoCairo(7)
 
-      const [{ data: subRows }, { data: attendanceRows }, activationStatus] = await Promise.all([
+      const [{ data: subRows }, { data: attendanceRows }] = await Promise.all([
         admin
           .from('subscriptions')
           .select('id, plan, subscription_type, status, start_date, end_date, sessions_total, sessions_used, paid_at, frozen_from, frozen_until')
@@ -399,13 +391,11 @@ export default async function ScanResultPage({ searchParams }: { searchParams: S
           .order('date', { ascending: false })
           .order('scanned_at', { ascending: false })
           .limit(10),
-        getAccountActivationForMemberUserId(memberId),
       ])
 
       subscriptions = (subRows ?? []) as SubRow[]
       const todayRow = ((attendanceRows ?? []) as Array<{ date: string; scanned_at: string | null }>).find((row) => row.date === today) ?? null
       attendanceTodayScannedAt = todayRow?.scanned_at ?? null
-      accountStatus = activationStatus
     } catch {
       // ignore
     }
@@ -462,10 +452,10 @@ export default async function ScanResultPage({ searchParams }: { searchParams: S
   const primaryIcon = valid ? <ScanLine size={16} className="mr-2" /> : <QrCode size={16} className="mr-2" />
 
   return (
-    <main className="min-h-[calc(100vh-3rem)] bg-[hsl(var(--bg))] p-4 sm:p-6">
+    <main className={terminalFullScreen ? 'fixed inset-0 z-40 overflow-auto bg-black p-4 sm:p-6' : 'min-h-[calc(100vh-3rem)] bg-[hsl(var(--bg))] p-4 sm:p-6'}>
       <ResultSound kind={soundKind} />
 
-      <div className="mx-auto max-w-5xl space-y-4">
+      <div className={terminalFullScreen ? 'mx-auto max-w-6xl space-y-4' : 'mx-auto max-w-5xl space-y-4'}>
         <Card className="rounded-3xl border border-[hsl(var(--border))]">
           <CardContent>
             <div className="flex flex-col gap-5">
@@ -511,25 +501,10 @@ export default async function ScanResultPage({ searchParams }: { searchParams: S
                 <KeyFact label="Subscription detail" value={summary.detailLabel} icon={<CircleCheckBig size={18} strokeWidth={2.1} />} />
               </div>
 
-              {accountStatus ? (
-                <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_240px]">
-                  <InlineInfo
-                    tone={accountStatusInfoTone(accountStatus)}
-                    title="App account status"
-                    body={accountActivationDescription(accountStatus)}
-                  />
-                  <KeyFact
-                    label="App account"
-                    value={<AccountActivationBadge status={accountStatus} compact />}
-                    icon={<UserRound size={18} strokeWidth={2.1} />}
-                  />
-                </div>
-              ) : null}
-
               {isTerminal ? (
                 <div className="rounded-2xl border border-sky-200 bg-sky-50 p-4 text-sm text-sky-900">
                   <div className="font-semibold">Door terminal mode</div>
-                  <div className="mt-1">Front camera stays locked on the tablet. This screen returns automatically to scan after 7 seconds.</div>
+                  <div className="mt-1">Front camera stays locked on the tablet. This screen returns automatically to scan after 5 seconds and can stay in full screen.</div>
                   <div className="mt-2 text-xs text-sky-700">Device label: scan-terminal-front</div>
                 </div>
               ) : null}
@@ -574,7 +549,7 @@ export default async function ScanResultPage({ searchParams }: { searchParams: S
         </Card>
       </div>
 
-      {kioskMode ? <AutoReturn href={returnHref} seconds={7} /> : null}
+      {kioskMode ? <AutoReturn href={returnHref} seconds={isTerminal ? 5 : 7} terminalLocked={isTerminal} terminalFullScreen={terminalFullScreen} /> : null}
     </main>
   )
 }
