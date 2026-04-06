@@ -1,8 +1,15 @@
 import type { Role } from '@/lib/rbac'
 
 export type AccountActivationStatus = 'active' | 'invite_pending' | 'no_account' | 'auth_issue'
-
 export type AccountActivationTone = 'success' | 'warning' | 'neutral' | 'danger'
+export type AccountActivationAgeFilter = '' | 'pending_3_plus' | 'pending_7_plus' | 'pending_30_plus' | 'no_invite_age'
+export type AccountActivationSort =
+  | 'priority'
+  | 'member_az'
+  | 'member_za'
+  | 'invite_oldest'
+  | 'invite_newest'
+  | 'sign_in_recent'
 
 export type AccountActivationProfile = {
   user_id: string | null
@@ -33,6 +40,12 @@ export type AccountActivationRow = AccountActivationProfile & {
 
 function normalizeEmail(value?: string | null) {
   return String(value ?? '').trim().toLowerCase()
+}
+
+function timeValue(value?: string | null) {
+  if (!value) return null
+  const ts = new Date(value).getTime()
+  return Number.isFinite(ts) ? ts : null
 }
 
 export function accountActivationLabel(status: AccountActivationStatus) {
@@ -95,6 +108,44 @@ export function accountActivationSortValue(status: AccountActivationStatus) {
   }
 }
 
+export function accountActivationAgeFilterLabel(filter: AccountActivationAgeFilter) {
+  switch (filter) {
+    case 'pending_3_plus':
+      return 'Pending 3+ days'
+    case 'pending_7_plus':
+      return 'Pending 7+ days'
+    case 'pending_30_plus':
+      return 'Pending 30+ days'
+    case 'no_invite_age':
+      return 'No invite age'
+    default:
+      return 'All invite ages'
+  }
+}
+
+export function accountActivationSortLabel(sort: AccountActivationSort) {
+  switch (sort) {
+    case 'member_az':
+      return 'Member A → Z'
+    case 'member_za':
+      return 'Member Z → A'
+    case 'invite_oldest':
+      return 'Oldest invite first'
+    case 'invite_newest':
+      return 'Newest invite first'
+    case 'sign_in_recent':
+      return 'Recent sign-in first'
+    case 'priority':
+    default:
+      return 'Priority'
+  }
+}
+
+export function accountActivationFullName(row: Pick<AccountActivationRow, 'first_name' | 'last_name' | 'email'>) {
+  const name = [row.first_name ?? '', row.last_name ?? ''].join(' ').trim()
+  return name || row.email || 'Unknown member'
+}
+
 export function deriveAccountActivationStatus(args: {
   profileUserId?: string | null
   profileEmail?: string | null
@@ -121,4 +172,153 @@ export function deriveAccountActivationStatus(args: {
   if (invitedAt) return 'invite_pending'
 
   return 'auth_issue'
+}
+
+export function statusCount(rows: AccountActivationRow[], status: AccountActivationStatus) {
+  return rows.filter((row) => row.account_status === status).length
+}
+
+export function countPendingAged(rows: AccountActivationRow[], minDays: number) {
+  return rows.filter(
+    (row) => row.account_status === 'invite_pending' && Number(row.invite_age_days ?? -1) >= minDays,
+  ).length
+}
+
+export function matchesAccountActivationSearch(row: AccountActivationRow, q: string) {
+  if (!q) return true
+  const hay = [
+    row.member_id ?? '',
+    row.email ?? '',
+    row.first_name ?? '',
+    row.last_name ?? '',
+    row.role ?? '',
+    accountActivationLabel(row.account_status),
+  ]
+    .join(' ')
+    .toLowerCase()
+
+  return hay.includes(q.trim().toLowerCase())
+}
+
+export function matchesAccountActivationAgeFilter(
+  row: AccountActivationRow,
+  filter: AccountActivationAgeFilter,
+) {
+  if (!filter) return true
+
+  if (filter === 'no_invite_age') {
+    return row.invite_age_days === null || row.invited_at === null
+  }
+
+  if (row.account_status !== 'invite_pending') return false
+
+  const age = row.invite_age_days ?? -1
+  if (filter === 'pending_3_plus') return age >= 3
+  if (filter === 'pending_7_plus') return age >= 7
+  if (filter === 'pending_30_plus') return age >= 30
+  return true
+}
+
+export function filterAccountActivationRows(
+  rows: AccountActivationRow[],
+  args: { q?: string; status?: string; age?: AccountActivationAgeFilter },
+) {
+  const q = String(args.q ?? '').trim().toLowerCase()
+  const status = String(args.status ?? '').trim() as '' | AccountActivationStatus
+  const age = (args.age ?? '') as AccountActivationAgeFilter
+
+  return rows
+    .filter((row) => (status ? row.account_status === status : true))
+    .filter((row) => matchesAccountActivationSearch(row, q))
+    .filter((row) => matchesAccountActivationAgeFilter(row, age))
+}
+
+export function sortAccountActivationRows(rows: AccountActivationRow[], sort: AccountActivationSort) {
+  const out = [...rows]
+
+  out.sort((a, b) => {
+    if (sort === 'member_az') {
+      return accountActivationFullName(a).localeCompare(accountActivationFullName(b))
+    }
+
+    if (sort === 'member_za') {
+      return accountActivationFullName(b).localeCompare(accountActivationFullName(a))
+    }
+
+    if (sort === 'invite_oldest') {
+      const aAge = a.invite_age_days ?? -1
+      const bAge = b.invite_age_days ?? -1
+      if (aAge !== bAge) return bAge - aAge
+      return accountActivationFullName(a).localeCompare(accountActivationFullName(b))
+    }
+
+    if (sort === 'invite_newest') {
+      const aTs = timeValue(a.invited_at) ?? -1
+      const bTs = timeValue(b.invited_at) ?? -1
+      if (aTs !== bTs) return bTs - aTs
+      return accountActivationFullName(a).localeCompare(accountActivationFullName(b))
+    }
+
+    if (sort === 'sign_in_recent') {
+      const aTs = timeValue(a.last_sign_in_at) ?? -1
+      const bTs = timeValue(b.last_sign_in_at) ?? -1
+      if (aTs !== bTs) return bTs - aTs
+      return accountActivationFullName(a).localeCompare(accountActivationFullName(b))
+    }
+
+    const byStatus = accountActivationSortValue(a.account_status) - accountActivationSortValue(b.account_status)
+    if (byStatus !== 0) return byStatus
+    const byAge = (b.invite_age_days ?? -1) - (a.invite_age_days ?? -1)
+    if (byAge !== 0) return byAge
+    return accountActivationFullName(a).localeCompare(accountActivationFullName(b))
+  })
+
+  return out
+}
+
+function csvEscape(v: unknown): string {
+  const s = (v ?? '').toString()
+  const escaped = s.replace(/"/g, '""')
+  if (/[",\n\r]/.test(escaped)) return `"${escaped}"`
+  return escaped
+}
+
+export function accountActivationRowsToCsv(rows: AccountActivationRow[]) {
+  const header = [
+    'member_id',
+    'first_name',
+    'last_name',
+    'full_name',
+    'email',
+    'role',
+    'account_status',
+    'invited_at',
+    'email_confirmed_at',
+    'last_sign_in_at',
+    'invite_age_days',
+  ]
+
+  const lines = [header.map(csvEscape).join(',')]
+
+  for (const row of rows) {
+    lines.push(
+      [
+        row.member_id ?? '',
+        row.first_name ?? '',
+        row.last_name ?? '',
+        accountActivationFullName(row),
+        row.email ?? '',
+        row.role ?? '',
+        accountActivationLabel(row.account_status),
+        row.invited_at ?? '',
+        row.email_confirmed_at ?? '',
+        row.last_sign_in_at ?? '',
+        row.invite_age_days ?? '',
+      ]
+        .map(csvEscape)
+        .join(',')
+    )
+  }
+
+  return lines.join('\n')
 }
