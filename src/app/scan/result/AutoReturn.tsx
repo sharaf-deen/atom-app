@@ -9,9 +9,11 @@ type AutoReturnProps = {
   seconds?: number
   href?: string
   hideText?: boolean
+  terminalLocked?: boolean
+  terminalFullScreen?: boolean
 }
 
-type VerifyRes = { ok: boolean; message?: string; request_id?: string }
+type VerifyRes = { ok: boolean; message?: string; request_id?: string; error?: string }
 
 type WakeLockSentinel = {
   release?: () => Promise<void>
@@ -19,6 +21,7 @@ type WakeLockSentinel = {
   removeEventListener?: (type: string, listener: () => void) => void
 }
 
+const TERMINAL_FULLSCREEN_STORAGE_KEY = 'atom:scan-terminal:fullscreen'
 
 function isKioskUrl(): boolean {
   try {
@@ -37,7 +40,19 @@ function isKioskStored(): boolean {
   }
 }
 
-export default function AutoReturn({ seconds = 7, href = '/scan', hideText }: AutoReturnProps) {
+function writeTerminalFullscreenPreference(enabled: boolean) {
+  try {
+    window.localStorage.setItem(TERMINAL_FULLSCREEN_STORAGE_KEY, enabled ? '1' : '0')
+  } catch {}
+}
+
+export default function AutoReturn({
+  seconds = 7,
+  href = '/scan',
+  hideText,
+  terminalLocked = false,
+  terminalFullScreen = false,
+}: AutoReturnProps) {
   const router = useRouter()
   const [left, setLeft] = useState<number>(seconds)
   const [online, setOnline] = useState(true)
@@ -50,7 +65,8 @@ export default function AutoReturn({ seconds = 7, href = '/scan', hideText }: Au
   const exitHoldRef = useRef<number | null>(null)
   const verifyAbortRef = useRef<AbortController | null>(null)
 
-  const kiosk = typeof window !== 'undefined' ? isKioskUrl() || isKioskStored() : false
+  const kiosk = !terminalLocked && (typeof window !== 'undefined' ? isKioskUrl() || isKioskStored() : false)
+  const fullScreenMode = terminalLocked && terminalFullScreen
   const hrefFinal = kiosk && href === '/scan' ? '/scan?kiosk=1' : href
 
   useEffect(() => {
@@ -65,12 +81,17 @@ export default function AutoReturn({ seconds = 7, href = '/scan', hideText }: Au
   }, [])
 
   useEffect(() => {
-    if (!kiosk) return
+    if (!kiosk && !fullScreenMode) return
 
     document.body.classList.add('kiosk-mode')
-    try {
-      window.localStorage.setItem('atom:kiosk', '1')
-    } catch {}
+    if (kiosk) {
+      try {
+        window.localStorage.setItem('atom:kiosk', '1')
+      } catch {}
+    }
+    if (fullScreenMode) {
+      writeTerminalFullscreenPreference(true)
+    }
 
     const releaseWakeLock = async () => {
       const listener = wakeLockListenerRef.current
@@ -109,13 +130,26 @@ export default function AutoReturn({ seconds = 7, href = '/scan', hideText }: Au
       }
     }
 
+    const requestBrowserFullscreen = async () => {
+      if (!fullScreenMode) return
+      const target = document.documentElement as any
+      if (document.fullscreenElement || !target?.requestFullscreen) return
+      try {
+        await target.requestFullscreen()
+      } catch {
+        // ignore
+      }
+    }
+
     const onVisibilityChange = () => {
       if (document.visibilityState === 'visible') {
         requestWake().catch(() => {})
+        requestBrowserFullscreen().catch(() => {})
       }
     }
 
     requestWake().catch(() => {})
+    requestBrowserFullscreen().catch(() => {})
     document.addEventListener('visibilitychange', onVisibilityChange)
 
     return () => {
@@ -123,7 +157,7 @@ export default function AutoReturn({ seconds = 7, href = '/scan', hideText }: Au
       document.removeEventListener('visibilitychange', onVisibilityChange)
       releaseWakeLock().catch(() => {})
     }
-  }, [kiosk])
+  }, [fullScreenMode, kiosk])
 
   useEffect(() => {
     if (exitOpen) return
@@ -168,6 +202,13 @@ export default function AutoReturn({ seconds = 7, href = '/scan', hideText }: Au
     }, 2000)
   }
 
+  function openTerminalExit() {
+    setExitHolding(false)
+    setExitError(null)
+    setExitPin('')
+    setExitOpen(true)
+  }
+
   function closeExitModal() {
     cancelExitHold()
     verifyAbortRef.current?.abort()
@@ -176,11 +217,11 @@ export default function AutoReturn({ seconds = 7, href = '/scan', hideText }: Au
     setExitPin('')
   }
 
-  async function confirmExitKiosk() {
+  async function confirmProtectedExit() {
     setExitError(null)
 
     if (!online || (typeof navigator !== 'undefined' && !navigator.onLine)) {
-      setExitError('Offline — reconnect to verify PIN')
+      setExitError(fullScreenMode ? 'Offline — reconnect to verify PIN' : 'Offline — reconnect to verify PIN')
       return
     }
 
@@ -189,7 +230,8 @@ export default function AutoReturn({ seconds = 7, href = '/scan', hideText }: Au
     verifyAbortRef.current = controller
 
     try {
-      const r = await fetch('/api/kiosk/verify-exit-pin', {
+      const endpoint = fullScreenMode ? '/api/scan-terminal/verify-pin' : '/api/kiosk/verify-exit-pin'
+      const r = await fetch(endpoint, {
         method: 'POST',
         cache: 'no-store',
         headers: { 'Content-Type': 'application/json' },
@@ -199,7 +241,19 @@ export default function AutoReturn({ seconds = 7, href = '/scan', hideText }: Au
       const j: VerifyRes = await r.json().catch(() => ({ ok: false }))
       const requestId = String(j.request_id || r.headers.get('x-request-id') || '').trim() || null
       if (!r.ok || !j.ok) {
-        setExitError(formatRequestRef(j.message || 'Invalid PIN', requestId, 'paren'))
+        const message = typeof j.error === 'string' ? j.error : j.message || 'Invalid PIN'
+        setExitError(formatRequestRef(message, requestId, 'paren'))
+        return
+      }
+
+      if (fullScreenMode) {
+        writeTerminalFullscreenPreference(false)
+        document.body.classList.remove('kiosk-mode')
+        try {
+          ;(document as any).exitFullscreen?.()
+        } catch {}
+        closeExitModal()
+        router.replace('/scan')
         return
       }
 
@@ -219,7 +273,9 @@ export default function AutoReturn({ seconds = 7, href = '/scan', hideText }: Au
       setExitError(
         !online || (typeof navigator !== 'undefined' && !navigator.onLine)
           ? 'Offline — reconnect to verify PIN'
-          : 'Failed to verify PIN'
+          : fullScreenMode
+            ? 'Failed to verify terminal PIN'
+            : 'Failed to verify PIN'
       )
     } finally {
       if (verifyAbortRef.current === controller) verifyAbortRef.current = null
@@ -227,7 +283,7 @@ export default function AutoReturn({ seconds = 7, href = '/scan', hideText }: Au
   }
 
   return (
-    <div className={kiosk ? 'relative' : ''}>
+    <div className={kiosk || fullScreenMode ? 'relative' : ''}>
       {kiosk ? (
         <button
           type="button"
@@ -243,13 +299,24 @@ export default function AutoReturn({ seconds = 7, href = '/scan', hideText }: Au
         >
           {exitHolding ? 'Holding…' : 'Hold to exit'}
         </button>
+      ) : fullScreenMode ? (
+        <button
+          type="button"
+          onClick={openTerminalExit}
+          className="fixed right-4 top-4 z-50 rounded-2xl border border-[hsl(var(--border))] bg-white px-4 py-2 text-sm font-medium text-gray-900 shadow-soft"
+          title="Exit full screen"
+        >
+          Exit full screen
+        </button>
       ) : null}
 
       {exitOpen ? (
         <div className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/60 p-4">
           <div className="w-full max-w-sm rounded-2xl border border-[hsl(var(--border))] bg-white p-4 text-gray-900 shadow-soft">
-            <div className="text-base font-semibold">Exit kiosk</div>
-            <p className="mt-1 text-sm text-gray-600">Hold confirmed. Enter PIN to exit kiosk mode.</p>
+            <div className="text-base font-semibold">{fullScreenMode ? 'Exit terminal full screen' : 'Exit kiosk'}</div>
+            <p className="mt-1 text-sm text-gray-600">
+              {fullScreenMode ? 'Enter the terminal PIN to leave full screen and keep the scanner on this tablet.' : 'Hold confirmed. Enter PIN to exit kiosk mode.'}
+            </p>
             {!online ? <p className="mt-2 text-sm text-rose-700">Offline — reconnect to verify PIN.</p> : null}
 
             <input
@@ -262,7 +329,7 @@ export default function AutoReturn({ seconds = 7, href = '/scan', hideText }: Au
               onKeyDown={(e) => {
                 if (e.key === 'Enter') {
                   e.preventDefault()
-                  confirmExitKiosk()
+                  confirmProtectedExit()
                 }
                 if (e.key === 'Escape') {
                   e.preventDefault()
@@ -284,10 +351,10 @@ export default function AutoReturn({ seconds = 7, href = '/scan', hideText }: Au
               </button>
               <button
                 type="button"
-                onClick={confirmExitKiosk}
+                onClick={confirmProtectedExit}
                 className="rounded-xl bg-black px-3 py-2 text-sm font-medium text-white"
               >
-                Exit kiosk
+                {fullScreenMode ? 'Exit full screen' : 'Exit kiosk'}
               </button>
             </div>
           </div>

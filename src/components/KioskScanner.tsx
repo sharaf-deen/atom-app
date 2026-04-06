@@ -50,6 +50,24 @@ function buildDeviceTag(terminalLocked = false) {
   }
 }
 
+const TERMINAL_FULLSCREEN_STORAGE_KEY = 'atom:scan-terminal:fullscreen'
+
+function readTerminalFullscreenPreference() {
+  if (typeof window === 'undefined') return false
+  try {
+    return window.localStorage.getItem(TERMINAL_FULLSCREEN_STORAGE_KEY) === '1'
+  } catch {
+    return false
+  }
+}
+
+function writeTerminalFullscreenPreference(enabled: boolean) {
+  if (typeof window === 'undefined') return
+  try {
+    window.localStorage.setItem(TERMINAL_FULLSCREEN_STORAGE_KEY, enabled ? '1' : '0')
+  } catch {}
+}
+
 type ScanResponse = {
   ok: boolean
   request_id?: string
@@ -135,9 +153,10 @@ function classifyCameraError(err: unknown) {
 }
 
 
-function buildResultParams(j: ScanResponse, kioskMode: boolean) {
+function buildResultParams(j: ScanResponse, kioskMode: boolean, fullScreenEnabled = false) {
   const sp = new URLSearchParams()
   if (kioskMode) sp.set('kiosk', '1')
+  if (fullScreenEnabled) sp.set('fullscreen', '1')
   sp.set('valid', j.valid ? '1' : '0')
   if (j.member_id) sp.set('memberId', j.member_id)
   if (j.days_remaining !== undefined && j.days_remaining !== null) sp.set('daysRemaining', String(j.days_remaining))
@@ -200,6 +219,7 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className, te
   const router = useRouter()
   const searchParams = useSearchParams()
   const kioskRequested = searchParams?.get('kiosk') === '1'
+  const fullScreenRequested = searchParams?.get('fullscreen') === '1'
 
   const [kioskMode, setKioskMode] = useState(terminalLocked)
   const [ScannerComponent, setScannerComponent] = useState<ComponentType<any> | null>(null)
@@ -213,6 +233,7 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className, te
   const [cameraRecoveryHint, setCameraRecoveryHint] = useState<string | null>(null)
   const [scannerReloadKey, setScannerReloadKey] = useState(0)
   const [unlockOpen, setUnlockOpen] = useState(false)
+  const [unlockMode, setUnlockMode] = useState<'logout' | 'fullscreen'>('logout')
   const [unlockPin, setUnlockPin] = useState('')
   const [unlockError, setUnlockError] = useState<string | null>(null)
   const [unlockBusy, setUnlockBusy] = useState(false)
@@ -291,6 +312,28 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className, te
     }
   }, [kioskMode])
 
+  const requestBrowserFullscreen = useCallback(async () => {
+    if (typeof document === 'undefined') return
+    const target = document.documentElement as any
+    if (document.fullscreenElement || !target?.requestFullscreen) return
+    try {
+      await target.requestFullscreen()
+    } catch {
+      // ignore
+    }
+  }, [])
+
+  const exitBrowserFullscreen = useCallback(async () => {
+    if (typeof document === 'undefined') return
+    const doc = document as any
+    if (!doc.fullscreenElement || !doc.exitFullscreen) return
+    try {
+      await doc.exitFullscreen()
+    } catch {
+      // ignore
+    }
+  }, [])
+
   const manualRescan = useCallback(() => {
     abortActiveRequest()
     clearResumeTimer()
@@ -311,57 +354,72 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className, te
     setScannerReloadKey((value) => value + 1)
   }, [abortActiveRequest, clearResumeTimer, terminalLocked])
 
+  const openUnlockDialog = useCallback((mode: 'logout' | 'fullscreen') => {
+    if (unlockBusy) return
+    setUnlockMode(mode)
+    setUnlockPin('')
+    setUnlockError(null)
+    setUnlockOpen(true)
+  }, [unlockBusy])
 
   const beginUnlockHold = useCallback(() => {
     if (!terminalLocked || unlockBusy || unlockOpen) return
     clearUnlockHoldTimer()
     unlockHoldTimerRef.current = window.setTimeout(() => {
-      setUnlockPin('')
-      setUnlockError(null)
-      setUnlockOpen(true)
+      openUnlockDialog('logout')
       unlockHoldTimerRef.current = null
     }, 4000)
-  }, [clearUnlockHoldTimer, terminalLocked, unlockBusy, unlockOpen])
+  }, [clearUnlockHoldTimer, openUnlockDialog, terminalLocked, unlockBusy, unlockOpen])
 
   const endUnlockHold = useCallback(() => {
     clearUnlockHoldTimer()
   }, [clearUnlockHoldTimer])
 
-  const openUnlockDialog = useCallback(() => {
-    if (!terminalLocked || unlockBusy) return
-    clearUnlockHoldTimer()
-    setUnlockPin('')
-    setUnlockError(null)
-    setUnlockOpen(true)
-  }, [clearUnlockHoldTimer, terminalLocked, unlockBusy])
-
   const submitUnlock = useCallback(async () => {
     if (!terminalLocked || unlockBusy) return
     const pin = unlockPin.trim()
     if (!pin) {
-      setUnlockError('Enter the admin PIN to exit terminal mode.')
+      setUnlockError(unlockMode === 'fullscreen' ? 'Enter the admin PIN to exit full screen.' : 'Enter the admin PIN to exit terminal mode.')
       return
     }
     setUnlockBusy(true)
     setUnlockError(null)
     try {
-      const response = await fetch('/api/scan-terminal/unlock', {
+      const endpoint = unlockMode === 'fullscreen' ? '/api/scan-terminal/verify-pin' : '/api/scan-terminal/unlock'
+      const response = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ pin }),
       })
       const payload = await response.json().catch(() => ({ ok: false, error: 'unlock_failed' }))
       if (!response.ok || !payload?.ok) {
-        setUnlockError(typeof payload?.error === 'string' ? payload.error : 'Terminal unlock failed.')
+        setUnlockError(typeof payload?.error === 'string' ? payload.error : 'Terminal PIN verification failed.')
         return
       }
+
+      if (unlockMode === 'fullscreen') {
+        writeTerminalFullscreenPreference(false)
+        setUnlockOpen(false)
+        setUnlockPin('')
+        setUnlockError(null)
+        setFullScreen(false)
+        await exitBrowserFullscreen()
+        router.replace('/scan')
+        return
+      }
+
       router.push('/logout')
     } catch {
-      setUnlockError('Terminal unlock failed. Check the network connection and try again.')
+      setUnlockError(
+        unlockMode === 'fullscreen'
+          ? 'Full screen exit failed. Check the network connection and try again.'
+          : 'Terminal unlock failed. Check the network connection and try again.'
+      )
     } finally {
       setUnlockBusy(false)
     }
-  }, [router, terminalLocked, unlockBusy, unlockPin])
+  }, [exitBrowserFullscreen, router, terminalLocked, unlockBusy, unlockMode, unlockPin])
+
 
   useEffect(() => {
     mountedRef.current = true
@@ -397,6 +455,19 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className, te
       }
     }
   }, [kioskRequested, router, terminalLocked])
+
+  useEffect(() => {
+    if (!terminalLocked) return
+    const shouldOpenFullScreen = fullScreenRequested || readTerminalFullscreenPreference()
+    if (!shouldOpenFullScreen) return
+    setFullScreen(true)
+    requestBrowserFullscreen().catch(() => {})
+  }, [fullScreenRequested, requestBrowserFullscreen, terminalLocked])
+
+  useEffect(() => {
+    if (!terminalLocked) return
+    writeTerminalFullscreenPreference(fullScreen)
+  }, [fullScreen, terminalLocked])
 
   useEffect(() => {
     if (!kioskMode) {
@@ -520,6 +591,13 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className, te
     router.replace('/scan')
   }
 
+  function enterTerminalFullScreen() {
+    if (!terminalLocked) return
+    setFullScreen(true)
+    writeTerminalFullscreenPreference(true)
+    requestBrowserFullscreen().catch(() => {})
+  }
+
   const handleScan = useCallback(
     async (codes: Detected[]) => {
       if (!codes || codes.length === 0 || paused) return
@@ -551,6 +629,7 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className, te
           sp.set('repeat', '1')
           sp.set('repeatSeconds', String(Math.max(1, Math.round(repeatAgeMs / 1000))))
           if (kioskMode) sp.set('kiosk', '1')
+          if (terminalLocked && fullScreen) sp.set('fullscreen', '1')
           setStatus('ok')
           setMsg('Same member scanned again — latest decision reused.')
           router.push(`/scan/result?${sp.toString()}`)
@@ -595,7 +674,7 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className, te
           return
         }
 
-        const sp = buildResultParams(j, kioskMode)
+        const sp = buildResultParams(j, kioskMode, terminalLocked && fullScreen)
         lastScanRef.current = {
           scanKey,
           at: Date.now(),
@@ -639,7 +718,7 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className, te
         }, 1500)
       }
     },
-    [abortActiveRequest, clearResumeTimer, kioskMode, online, paused, repeatCooldownMs, router]
+    [abortActiveRequest, clearResumeTimer, fullScreen, kioskMode, online, paused, repeatCooldownMs, router, terminalLocked]
   )
 
   function retryNow() {
@@ -692,8 +771,8 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className, te
   const unlockDialog = unlockOpen ? (
     <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/45 p-4">
       <div className="w-full max-w-sm rounded-3xl border border-[hsl(var(--border))] bg-white p-5 shadow-soft">
-        <div className="text-sm font-semibold tracking-tight text-black">Admin exit unlock</div>
-        <p className="mt-2 text-sm text-[hsl(var(--muted))]">Enter the terminal PIN to unlock the logout route for this device.</p>
+        <div className="text-sm font-semibold tracking-tight text-black">{unlockMode === 'fullscreen' ? 'Exit full screen' : 'Admin exit unlock'}</div>
+        <p className="mt-2 text-sm text-[hsl(var(--muted))]">{unlockMode === 'fullscreen' ? 'Enter the terminal PIN to leave full screen and keep the scanner page open.' : 'Enter the terminal PIN to unlock the logout route for this device.'}</p>
         <label className="mt-4 block text-sm">
           <span className="mb-2 block text-[11px] font-semibold uppercase tracking-[0.18em] text-[hsl(var(--muted))]">Exit PIN</span>
           <input
@@ -725,7 +804,7 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className, te
             Cancel
           </Button>
           <Button onClick={() => void submitUnlock()} disabled={unlockBusy}>
-            {unlockBusy ? 'Checking PIN…' : 'Unlock exit'}
+            {unlockBusy ? 'Checking PIN…' : unlockMode === 'fullscreen' ? 'Exit full screen' : 'Unlock exit'}
           </Button>
         </div>
       </div>
@@ -793,10 +872,10 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className, te
                 <Button
                   variant="outline"
                   className="!bg-transparent !text-white !border-white/30 hover:!bg-white/10"
-                  onClick={openUnlockDialog}
-                  title="Admin exit"
+                  onClick={() => openUnlockDialog('fullscreen')}
+                  title="Exit full screen"
                 >
-                  Admin exit
+                  Exit full screen
                 </Button>
               ) : kioskMode ? (
                 <Button
@@ -849,7 +928,7 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className, te
                 {kioskMode ? <Badge>Kiosk</Badge> : null}
               </div>
               <p className="mt-1 text-sm text-[hsl(var(--muted))]">
-                {terminalLocked ? 'Front camera is locked for this door terminal. Result screen returns automatically after 7 seconds.' : 'Flip camera, open full screen manually, or keep kiosk mode active inside this page.'}
+                {terminalLocked ? 'Front camera is locked for this door terminal. Result screen returns automatically after 5 seconds and can stay in full screen.' : 'Flip camera, open full screen manually, or keep kiosk mode active inside this page.'}
               </p>
             </div>
 
@@ -861,7 +940,7 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className, te
               onTouchStart={terminalLocked ? beginUnlockHold : undefined}
               onTouchEnd={terminalLocked ? endUnlockHold : undefined}
               onTouchCancel={terminalLocked ? endUnlockHold : undefined}
-              title={terminalLocked ? 'Admin exit available' : undefined}
+              title={terminalLocked ? 'Hold 4 seconds for admin exit' : undefined}
             >
               {statusTitle(status, paused)}
             </div>
@@ -929,24 +1008,25 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className, te
           ) : null}
 
           <div className="flex flex-wrap gap-2">
-            {terminalLocked ? (
-              <Button variant="outline" onClick={openUnlockDialog} title="Open admin exit PIN prompt">
-                <ShieldCheck size={16} className="mr-2" />
-                Admin exit
-              </Button>
-            ) : null}
             {!terminalLocked ? (
               <Button variant="outline" onClick={toggleFacingMode} title="Switch camera">
                 <RotateCcw size={16} className="mr-2" />
                 Flip camera
               </Button>
             ) : null}
-            {!terminalLocked ? (
+            {terminalLocked ? (
+              !fullScreen ? (
+                <Button variant="outline" onClick={enterTerminalFullScreen} title="Open terminal in full screen">
+                  <Expand size={16} className="mr-2" />
+                  Enter full screen
+                </Button>
+              ) : null
+            ) : (
               <Button variant="outline" onClick={() => setFullScreen(true)} title="Open camera in full screen">
                 {fullScreen ? <Minimize2 size={16} className="mr-2" /> : <Expand size={16} className="mr-2" />}
                 Full screen
               </Button>
-            ) : null}
+            )}
             {!terminalLocked ? (
               kioskMode ? (
                 <Button variant="outline" onClick={exitKioskMode} title="Leave kiosk mode">
@@ -1005,7 +1085,7 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className, te
                   <div><span className="font-medium text-black">Device label:</span> {deviceLabel}</div>
                   <div><span className="font-medium text-black">Camera mode:</span> {terminalLocked ? 'Front camera locked' : facingMode === 'environment' ? 'Back camera active' : 'Front camera active'}</div>
                   <div><span className="font-medium text-black">Recovery:</span> Retry first, then restart the camera if needed.</div>
-                  <div><span className="font-medium text-black">Admin exit:</span> Use the Admin exit button, then enter the PIN.</div>
+                  <div><span className="font-medium text-black">Admin exit:</span> Hold the status badge 4 seconds, then enter the PIN.</div>
                 </div>
               </div>
 
@@ -1014,8 +1094,8 @@ export default function KioskScanner({ size = 'sm', ratio = '1:1', className, te
                 <ul className="mt-2 space-y-2 text-sm text-[hsl(var(--muted))]">
                   <li>Keep one QR code in the frame.</li>
                   <li>{terminalLocked ? 'Front camera stays locked for this terminal account.' : 'Use the back camera when possible.'}</li>
-                  <li>{terminalLocked ? 'Result screen returns automatically after 7 seconds.' : 'Kiosk mode stays inside this page.'}</li>
-                  <li>{terminalLocked ? 'Use Admin exit, then enter the PIN to leave this terminal.' : 'Use Full screen only when needed.'}</li>
+                  <li>{terminalLocked ? 'Result screen returns automatically after 5 seconds and reopens in full screen if enabled.' : 'Kiosk mode stays inside this page.'}</li>
+                  <li>{terminalLocked ? 'Exiting full screen or logout stays locked until the admin PIN is validated.' : 'Use Full screen only when needed.'}</li>
                   <li>Tap Rescan after a blocked or invalid attempt.</li>
                 </ul>
               </div>
