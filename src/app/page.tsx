@@ -7,7 +7,7 @@ import Link from 'next/link'
 import Image from 'next/image'
 import { createSupabaseRSC } from '@/lib/supabaseServer'
 import { getSessionUser, type Role } from '@/lib/session'
-import { hasLifetimeGymAccess, isMemberLikeRole } from '@/lib/rbac'
+import { canAccessScan, hasLifetimeGymAccess, isMemberLikeRole } from '@/lib/rbac'
 import { getSupabaseAdminClientCached } from '@/lib/requestCache'
 import { addDays, cairoToday, diffDays } from '@/lib/cairoDate'
 import HomeNotificationsTile from '@/components/HomeNotificationsTile'
@@ -830,6 +830,28 @@ function QuickActions({ title, subtitle, items }: { title: string; subtitle?: st
   )
 }
 
+
+function HomeScanShortcut() {
+  return (
+    <Surface className="p-4 sm:p-5">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[hsl(var(--muted))]">Scan access</p>
+          <h2 className="mt-1 text-lg font-semibold tracking-tight">Open the scanner fast</h2>
+          <p className="mt-1 text-sm text-[hsl(var(--muted))]">Go directly to the QR scan flow from Home without opening another workspace first.</p>
+        </div>
+        <Link
+          href="/scan"
+          className="inline-flex items-center justify-center rounded-2xl bg-black px-4 py-2 text-sm font-semibold text-white shadow-soft transition hover:opacity-90"
+        >
+          Open scan
+        </Link>
+      </div>
+    </Surface>
+  )
+}
+
+
 function memberActions(): QuickAction[] {
   return [
     { href: '/profile', label: 'My profile', desc: 'Identity, subscription details and QR code.', icon: IdCard },
@@ -949,6 +971,8 @@ export default async function HomePage() {
           memberId={memberId}
           joinedAt={profile?.created_at ?? null}
         />
+
+        {canAccessScan(user.role) ? <HomeScanShortcut /> : null}
 
         {isMemberLikeRole(user.role) ? (
           <>
