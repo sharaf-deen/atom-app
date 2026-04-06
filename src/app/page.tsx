@@ -995,7 +995,7 @@ export default async function HomePage() {
           joinedAt={profile?.created_at ?? null}
         />
 
-        <HomeLogoutShortcut />
+        {user.role === 'scan_terminal' ? <HomeLogoutShortcut /> : null}
 
         {canAccessScan(user.role) ? <HomeScanShortcut /> : null}
 
