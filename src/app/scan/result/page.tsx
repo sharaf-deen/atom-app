@@ -23,6 +23,9 @@ import Button from '@/components/ui/Button'
 import AccessDeniedPage from '@/components/AccessDeniedPage'
 import { getSessionUserCached, getSupabaseAdminClientCached } from '@/lib/requestCache'
 import { canAccessScan } from '@/lib/rbac'
+import AccountActivationBadge from '@/components/account/AccountActivationBadge'
+import { accountActivationDescription, accountActivationTone, type AccountActivationStatus } from '@/lib/accountActivation'
+import { getAccountActivationForMemberUserId } from '@/lib/accountActivationServer'
 import AutoReturn from './AutoReturn'
 import ResultSound from './ResultSound'
 
@@ -65,6 +68,12 @@ type SubscriptionSummary = {
   detailLabel: string
 }
 
+function accountStatusInfoTone(status: AccountActivationStatus): 'success' | 'warning' | 'danger' {
+  const tone = accountActivationTone(status)
+  if (tone === 'success') return 'success'
+  if (tone === 'danger') return 'danger'
+  return 'warning'
+}
 
 function isUuid(v?: string | null) {
   return !!v && /^[0-9a-f-]{36}$/i.test(v)
@@ -352,6 +361,7 @@ export default async function ScanResultPage({ searchParams }: { searchParams: S
   let signedPhoto = ''
   let subscriptions: SubRow[] = []
   let attendanceTodayScannedAt: string | null = null
+  let accountStatus: AccountActivationStatus | null = null
 
   if (memberId) {
     try {
@@ -373,7 +383,7 @@ export default async function ScanResultPage({ searchParams }: { searchParams: S
       const today = todayDateOnlyCairo()
       const since7 = dateDaysAgoCairo(7)
 
-      const [{ data: subRows }, { data: attendanceRows }] = await Promise.all([
+      const [{ data: subRows }, { data: attendanceRows }, activationStatus] = await Promise.all([
         admin
           .from('subscriptions')
           .select('id, plan, subscription_type, status, start_date, end_date, sessions_total, sessions_used, paid_at, frozen_from, frozen_until')
@@ -389,11 +399,13 @@ export default async function ScanResultPage({ searchParams }: { searchParams: S
           .order('date', { ascending: false })
           .order('scanned_at', { ascending: false })
           .limit(10),
+        getAccountActivationForMemberUserId(memberId),
       ])
 
       subscriptions = (subRows ?? []) as SubRow[]
       const todayRow = ((attendanceRows ?? []) as Array<{ date: string; scanned_at: string | null }>).find((row) => row.date === today) ?? null
       attendanceTodayScannedAt = todayRow?.scanned_at ?? null
+      accountStatus = activationStatus
     } catch {
       // ignore
     }
@@ -498,6 +510,21 @@ export default async function ScanResultPage({ searchParams }: { searchParams: S
                 <InlineInfo tone={tone} title={infoTitle} body={infoBody} />
                 <KeyFact label="Subscription detail" value={summary.detailLabel} icon={<CircleCheckBig size={18} strokeWidth={2.1} />} />
               </div>
+
+              {accountStatus ? (
+                <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_240px]">
+                  <InlineInfo
+                    tone={accountStatusInfoTone(accountStatus)}
+                    title="App account status"
+                    body={accountActivationDescription(accountStatus)}
+                  />
+                  <KeyFact
+                    label="App account"
+                    value={<AccountActivationBadge status={accountStatus} compact />}
+                    icon={<UserRound size={18} strokeWidth={2.1} />}
+                  />
+                </div>
+              ) : null}
 
               {isTerminal ? (
                 <div className="rounded-2xl border border-sky-200 bg-sky-50 p-4 text-sm text-sky-900">

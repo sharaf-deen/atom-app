@@ -290,6 +290,9 @@ export default async function AdminPage() {
           <Button asChild variant="outline" href="/admin/health-monitor">
             Health Monitor
           </Button>
+          <Button asChild variant="outline" href="/admin/account-activation">
+            Account Activation
+          </Button>
           <Button asChild variant="outline" href="/admin/personal-funds">
             Personal Funds
           </Button>
