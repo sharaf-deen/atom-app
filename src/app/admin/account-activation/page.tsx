@@ -4,7 +4,7 @@ export const revalidate = 0
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import type { ReactNode } from 'react'
-import { CheckCircle2, MailQuestion, ShieldAlert, UserRound } from 'lucide-react'
+import { CheckCircle2, Download, MailQuestion, ShieldAlert, TimerReset, UserRound } from 'lucide-react'
 import AccessDeniedPage from '@/components/AccessDeniedPage'
 import AccountActivationBadge from '@/components/account/AccountActivationBadge'
 import PageHeader from '@/components/layout/PageHeader'
@@ -14,20 +14,22 @@ import { Card, CardContent } from '@/components/ui/Card'
 import Button from '@/components/ui/Button'
 import { Table } from '@/components/ui/Table'
 import {
-  accountActivationLabel,
-  accountActivationSortValue,
+  accountActivationAgeFilterLabel,
+  accountActivationFullName,
+  accountActivationRowsToCsv,
+  countPendingAged,
+  filterAccountActivationRows,
+  sortAccountActivationRows,
+  statusCount,
+  type AccountActivationAgeFilter,
   type AccountActivationRow,
-  type AccountActivationStatus,
+  type AccountActivationSort,
 } from '@/lib/accountActivation'
 import { listAccountActivationRows } from '@/lib/accountActivationServer'
 import { getSessionUserCached } from '@/lib/requestCache'
 import { canAccessAdminDashboard } from '@/lib/rbac'
 
 type SearchParams = Record<string, string | string[] | undefined>
-
-type ViewRow = AccountActivationRow & {
-  id: string
-}
 
 function spGet(sp: SearchParams, key: string): string {
   const v = sp[key]
@@ -56,29 +58,14 @@ function fmtAge(days?: number | null) {
   return `${days} days`
 }
 
-function fullName(row: Pick<AccountActivationRow, 'first_name' | 'last_name' | 'email'>) {
-  const name = [row.first_name ?? '', row.last_name ?? ''].join(' ').trim()
-  return name || row.email || 'Unknown member'
-}
-
-function statusCount(rows: ViewRow[], status: AccountActivationStatus) {
-  return rows.filter((row) => row.account_status === status).length
-}
-
-function matchesSearch(row: ViewRow, q: string) {
-  if (!q) return true
-  const hay = [
-    row.member_id ?? '',
-    row.email ?? '',
-    row.first_name ?? '',
-    row.last_name ?? '',
-    row.role ?? '',
-    accountActivationLabel(row.account_status),
-  ]
-    .join(' ')
-    .toLowerCase()
-
-  return hay.includes(q)
+function buildExportHref(args: { q: string; status: string; age: string; sort: string }) {
+  const params = new URLSearchParams()
+  if (args.q) params.set('q', args.q)
+  if (args.status) params.set('status', args.status)
+  if (args.age) params.set('age', args.age)
+  if (args.sort) params.set('sort', args.sort)
+  const query = params.toString()
+  return query ? `/api/admin/account-activation/export?${query}` : '/api/admin/account-activation/export'
 }
 
 function StatCard({
@@ -131,20 +118,18 @@ export default async function AccountActivationPage({ searchParams }: { searchPa
     )
   }
 
-  const q = spGet(searchParams, 'q').trim().toLowerCase()
+  const q = spGet(searchParams, 'q').trim()
   const status = spGet(searchParams, 'status').trim() as '' | 'active' | 'invite_pending' | 'no_account' | 'auth_issue'
-  const allRows = (await listAccountActivationRows()).map((row, index) => ({ ...row, id: row.user_id ?? row.email ?? `account-row-${index}` }))
+  const age = spGet(searchParams, 'age').trim() as AccountActivationAgeFilter
+  const sort = (spGet(searchParams, 'sort').trim() as AccountActivationSort) || 'priority'
 
-  const filteredRows = allRows
-    .filter((row) => (status ? row.account_status === status : true))
-    .filter((row) => matchesSearch(row, q))
-    .sort((a, b) => {
-      const byStatus = accountActivationSortValue(a.account_status) - accountActivationSortValue(b.account_status)
-      if (byStatus !== 0) return byStatus
-      const byAge = (b.invite_age_days ?? -1) - (a.invite_age_days ?? -1)
-      if (byAge !== 0) return byAge
-      return fullName(a).localeCompare(fullName(b))
-    })
+  const allRows = (await listAccountActivationRows()).map((row, index) => ({
+    ...row,
+    id: row.user_id ?? row.email ?? `account-row-${index}`,
+  }))
+
+  const filteredRows = sortAccountActivationRows(filterAccountActivationRows(allRows, { q, status, age }), sort)
+  const exportHref = buildExportHref({ q, status, age, sort })
 
   const columns = [
     { key: 'member', header: 'Member' },
@@ -152,17 +137,18 @@ export default async function AccountActivationPage({ searchParams }: { searchPa
     { key: 'role', header: 'Role' },
     { key: 'status', header: 'Account status' },
     { key: 'invited_at', header: 'Invited at', hideOnMobile: true },
+    { key: 'email_confirmed_at', header: 'Email confirmed', hideOnMobile: true },
     { key: 'last_sign_in', header: 'Last sign in', hideOnMobile: true },
     { key: 'invite_age', header: 'Invite age', hideOnMobile: true },
     { key: 'actions', header: 'Actions' },
     { key: 'open', header: 'Open' },
   ]
 
-  const rows = filteredRows.map((row) => ({
-    id: row.id,
+  const rows = filteredRows.map((row, index) => ({
+    id: row.user_id ?? row.email ?? `account-row-${index}`,
     member: (
       <div className="min-w-0">
-        <div className="font-semibold tracking-tight">{fullName(row)}</div>
+        <div className="font-semibold tracking-tight">{accountActivationFullName(row)}</div>
         <div className="mt-1 text-xs text-[hsl(var(--muted))]">{row.member_id || 'No member id'}</div>
       </div>
     ),
@@ -170,6 +156,7 @@ export default async function AccountActivationPage({ searchParams }: { searchPa
     role: row.role || 'member',
     status: <AccountActivationBadge status={row.account_status} />,
     invited_at: fmtDateTime(row.invited_at),
+    email_confirmed_at: fmtDateTime(row.email_confirmed_at),
     last_sign_in: fmtDateTime(row.last_sign_in_at),
     invite_age: fmtAge(row.invite_age_days),
     actions: row.user_id ? (
@@ -190,16 +177,24 @@ export default async function AccountActivationPage({ searchParams }: { searchPa
     <main>
       <PageHeader
         title="Account Activation"
-        subtitle="Admin overview of app account activation, with resend invite and reset password actions."
+        subtitle="Read-only reporting and follow-up overview for member app account activation."
         right={
-          <Button asChild variant="outline" href="/admin">
-            Back to Admin
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button asChild variant="outline" href={exportHref}>
+              <span>
+                <Download size={16} strokeWidth={2} />
+                Export CSV
+              </span>
+            </Button>
+            <Button asChild variant="outline" href="/admin">
+              Back to Admin
+            </Button>
+          </div>
         }
       />
 
       <Section className="space-y-4">
-        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-6">
           <StatCard
             label="Active"
             value={statusCount(allRows, 'active')}
@@ -211,6 +206,18 @@ export default async function AccountActivationPage({ searchParams }: { searchPa
             value={statusCount(allRows, 'invite_pending')}
             hint="Need follow-up"
             icon={<MailQuestion size={18} strokeWidth={2.1} />}
+          />
+          <StatCard
+            label="Pending 7+ days"
+            value={countPendingAged(allRows, 7)}
+            hint="Older invite backlog"
+            icon={<TimerReset size={18} strokeWidth={2.1} />}
+          />
+          <StatCard
+            label="Pending 30+ days"
+            value={countPendingAged(allRows, 30)}
+            hint="Long-standing pending"
+            icon={<TimerReset size={18} strokeWidth={2.1} />}
           />
           <StatCard
             label="No account"
@@ -228,11 +235,11 @@ export default async function AccountActivationPage({ searchParams }: { searchPa
 
         <Card>
           <CardContent className="space-y-2 text-sm text-[hsl(var(--muted))]">
-            <p>Admins can now follow up directly from this page.</p>
+            <p>Use filters, sorting, and CSV export to review the backlog more quickly.</p>
             <ul className="space-y-1 pl-5 list-disc">
-              <li><span className="font-medium text-black">Invite pending</span> → Resend invite</li>
-              <li><span className="font-medium text-black">Active</span> → Send reset password email</li>
-              <li><span className="font-medium text-black">No account / Auth issue</span> → review the member profile first</li>
+              <li><span className="font-medium text-black">Invite pending</span> → resend invite directly from this page</li>
+              <li><span className="font-medium text-black">Pending 7+ / 30+ days</span> → focus your follow-up priorities</li>
+              <li><span className="font-medium text-black">Export CSV</span> → exports the current filtered view</li>
             </ul>
           </CardContent>
         </Card>
@@ -240,7 +247,7 @@ export default async function AccountActivationPage({ searchParams }: { searchPa
         <form
           action="/admin/account-activation"
           method="get"
-          className="grid gap-3 rounded-2xl border border-[hsl(var(--border))] bg-white p-4 shadow-soft sm:grid-cols-2 lg:grid-cols-[minmax(0,1fr)_220px_auto]"
+          className="grid gap-3 rounded-2xl border border-[hsl(var(--border))] bg-white p-4 shadow-soft sm:grid-cols-2 xl:grid-cols-[minmax(0,1.2fr)_220px_220px_220px_auto]"
         >
           <input
             name="q"
@@ -261,14 +268,47 @@ export default async function AccountActivationPage({ searchParams }: { searchPa
             <option value="auth_issue">Auth issue</option>
           </select>
 
-          <div className="flex items-center gap-2">
+          <select
+            name="age"
+            defaultValue={age}
+            className="w-full rounded-xl border border-black/10 bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-black/50"
+          >
+            <option value="">All invite ages</option>
+            <option value="pending_3_plus">Pending 3+ days</option>
+            <option value="pending_7_plus">Pending 7+ days</option>
+            <option value="pending_30_plus">Pending 30+ days</option>
+            <option value="no_invite_age">No invite age</option>
+          </select>
+
+          <select
+            name="sort"
+            defaultValue={sort}
+            className="w-full rounded-xl border border-black/10 bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-black/50"
+          >
+            <option value="priority">Priority</option>
+            <option value="invite_oldest">Oldest invite first</option>
+            <option value="invite_newest">Newest invite first</option>
+            <option value="sign_in_recent">Recent sign-in first</option>
+            <option value="member_az">Member A → Z</option>
+            <option value="member_za">Member Z → A</option>
+          </select>
+
+          <div className="flex flex-wrap items-center gap-2">
             <button type="submit" className="rounded-xl bg-black px-4 py-2 text-sm font-semibold text-white hover:opacity-90">
               Apply
             </button>
             <Link href="/admin/account-activation" className="rounded-xl border px-4 py-2 text-sm font-semibold hover:bg-black/[0.03]">
               Reset
             </Link>
-            <span className="ml-auto text-sm text-[hsl(var(--muted))]">{filteredRows.length} result(s)</span>
+            <Button asChild variant="outline" size="sm" href={exportHref}>
+              <span>
+                <Download size={14} strokeWidth={2} />
+                CSV
+              </span>
+            </Button>
+            <span className="ml-auto text-sm text-[hsl(var(--muted))]">
+              {filteredRows.length} result(s) · {accountActivationAgeFilterLabel(age)}
+            </span>
           </div>
         </form>
 
