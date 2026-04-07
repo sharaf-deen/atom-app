@@ -13,8 +13,8 @@ import { formatCurrency } from '@/lib/money'
 import type { OrderStatus } from '@/lib/order'
 import { humanStatus } from '@/lib/order'
 import AccessDeniedPage from '@/components/AccessDeniedPage'
-
-const ALLOWED: Array<'member' | 'assistant_coach' | 'coach'> = ['member', 'assistant_coach', 'coach']
+import InlineAlert from '@/components/ui/InlineAlert'
+import { canAccessStore } from '@/lib/rbac'
 const ALLOWED_STATUSES = ['all', 'pending', 'confirmed', 'ready', 'delivered', 'canceled'] as const
 
 type Item = {
@@ -147,14 +147,14 @@ export default async function OrdersPage({
   const me = await getSessionUserCached()
   if (!me) redirect('/login?next=/orders')
 
-  if (!ALLOWED.includes(me.role as any)) {
+  if (!canAccessStore(me.role)) {
     return (
       <AccessDeniedPage
-        title="Orders"
+        title="Legacy store orders"
         subtitle="Access restricted."
         signedInAs={me.email}
-        message="This page is for members only."
-        allowed="member, assistant_coach, coach"
+        message="This archive is available only for store-access roles."
+        allowed="member, champion, vip, assistant_coach, coach, head_coach, super_admin"
         nextPath="/orders"
         actions={[{ href: '/store', label: 'Go to Store' }]}
         showBackHome
@@ -186,9 +186,23 @@ const baseParams = { status, from, to, page_size: String(pageSize) }
 
   return (
     <main>
-      <PageHeader title="My orders" subtitle="Your order history" />
+      <PageHeader title="Legacy store orders" subtitle="Read-only archive from the previous store flow" />
 
       <Section className="space-y-6">
+        <InlineAlert variant="info" title="Store V2 is now preorder-first">
+          <div className="space-y-3">
+            <p>New requests now go through /store preorders. This page is kept as a read-only archive for older legacy orders only.</p>
+            <div className="flex flex-wrap gap-2">
+              <Link
+                prefetch={false}
+                href="/store"
+                className="inline-flex items-center rounded-xl border px-3 py-2 text-sm font-medium hover:bg-gray-50"
+              >
+                Open Store V2
+              </Link>
+            </div>
+          </div>
+        </InlineAlert>
         <Card>
           <CardContent className="flex flex-wrap items-center gap-3">
             <div className="text-sm text-gray-600">

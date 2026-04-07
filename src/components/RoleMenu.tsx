@@ -137,10 +137,10 @@ export default function RoleMenu({ items }: { items: MenuItem[] }) {
 
   useBodyScrollLock(open)
 
-  // Normalize legacy routes: remove /store/admin from the menu (use /admin/store instead)
+  // Normalize legacy routes: remove /store/admin from the menu (use the Store V2 dashboard instead).
   // Also de-duplicate by href in case both exist.
   const menuItems = useMemo(() => {
-    const mapped = items.map((it) => (it.href === '/store/admin' ? { ...it, href: '/admin/store' } : it))
+    const mapped = items.map((it) => (it.href === '/store/admin' ? { ...it, href: '/admin/store/dashboard' } : it))
     return uniqByHref(mapped)
   }, [items])
 
