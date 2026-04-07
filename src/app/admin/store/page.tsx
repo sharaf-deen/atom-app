@@ -10,97 +10,117 @@ import { getSessionUserCached, getSupabaseAdminClientCached } from '@/lib/reques
 import PageHeader from '@/components/layout/PageHeader'
 import Section from '@/components/layout/Section'
 import AccessDeniedPage from '@/components/AccessDeniedPage'
-import { Card, CardContent } from '@/components/ui/Card'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card'
 import { formatCurrency } from '@/lib/money'
-import type { OrderStatus } from '@/lib/order'
-import { humanStatus } from '@/lib/order'
 import { canAccessStoreAdmin } from '@/lib/rbac'
 import AdminProductQuickEdit from '@/components/store/AdminProductQuickEdit'
 
 const StoreProductForm = dynamicImport(() => import('@/components/StoreProductForm'), {
   ssr: false,
-  loading: () => <div className="text-sm text-gray-500">Loading product form…</div>,
+  loading: () => <div className="text-sm text-gray-500">Loading catalog form…</div>,
 })
-
-const AdminOrderStatusEditor = dynamicImport(() => import('@/components/store/AdminOrderStatusEditor'), {
-  ssr: false,
-  loading: () => <div className="text-xs text-gray-500">Loading status editor…</div>,
-})
-
-
-const adminListStoreOrdersCached = unstable_cache(
-  async (q: string, status: string, from_date: string | null, to_date: string | null, page: number, page_size: number) => {
-    const supa = getSupabaseAdminClientCached()
-    const { data, error } = await supa.rpc('admin_list_store_orders_lite', {
-      _q: q,
-      _status: status,
-      _from_date: from_date,
-      _to_date: to_date,
-      _page: page,
-      _page_size: page_size,
-    } as any)
-    if (error) throw new Error(error.message)
-    return (data ?? []) as any[]
-  },
-  ['admin_list_store_orders_lite_v3'],
-  { revalidate: 20, tags: ['admin-store-orders', 'orders'] }
-)
-
-const adminSearchStoreProductsCached = unstable_cache(
-  async (q: string, category: string, active: string, page: number, page_size: number) => {
-    const supa = getSupabaseAdminClientCached()
-    const { data, error } = await supa.rpc('admin_search_store_products_lite', {
-      _q: q,
-      _category: category,
-      _active: active,
-      _page: page,
-      _page_size: page_size,
-    } as any)
-    if (error) throw new Error(error.message)
-    return (data ?? []) as any[]
-  },
-  ['admin_search_store_products_lite_v2'],
-  { revalidate: 120, tags: ['admin-store-products', 'store-products'] }
-)
-
-type OrderItemLite = {
-  id: string
-  product_id: string
-  name: string
-  qty: number
-  unit_price_cents: number
-  currency: string
-}
-
-type AdminOrderRow = {
-  id: string
-  status: OrderStatus
-  total_cents: number
-  discount_pct: number
-  payment: string
-  note: string | null
-  created_at: string
-  buyer_user_id: string | null
-  buyer_member_id: string | null
-  buyer_email: string | null
-  buyer_first_name: string | null
-  buyer_last_name: string | null
-  items: OrderItemLite[] | any
-  total_count: number
-}
 
 type Category = 'kimono' | 'rashguard' | 'short' | 'belt'
-const PRODUCT_CATS: Array<{ v: 'all' | Category; label: string }> = [
-  { v: 'all', label: 'All' },
-  { v: 'kimono', label: 'Kimono' },
-  { v: 'rashguard', label: 'Rashguard' },
-  { v: 'short', label: 'Short' },
-  { v: 'belt', label: 'Belt' },
-]
-const PRODUCT_ACTIVE = ['all', 'active', 'inactive'] as const
+type ActiveFilter = 'all' | 'active' | 'inactive'
+type StockFilter = 'all' | 'in' | 'out' | 'low'
+type PreorderFilter = 'all' | '1' | '0'
+type Tab = 'dashboard' | 'catalog'
 
-const ORDER_STATUSES = ['all', 'pending', 'confirmed', 'ready', 'delivered', 'canceled'] as const
-const TABS = ['orders', 'products'] as const
+type ProductRow = {
+  id: string
+  category: Category
+  name: string
+  color: string | null
+  size: string | null
+  price_cents: number
+  currency: string | null
+  inventory_qty: number
+  is_active: boolean
+  allow_preorder: boolean
+  low_stock_threshold: number
+  created_at: string | null
+}
+
+type DashboardMetrics = {
+  totalProducts: number
+  activeProducts: number
+  inactiveProducts: number
+  preorderEnabledProducts: number
+  lowStockProducts: number
+  outOfStockProducts: number
+  totalUnits: number
+  totalStockValueCents: number
+}
+
+const CATEGORIES: Array<{ value: 'all' | Category; label: string }> = [
+  { value: 'all', label: 'All' },
+  { value: 'kimono', label: 'Kimono' },
+  { value: 'rashguard', label: 'Rashguard' },
+  { value: 'short', label: 'Short' },
+  { value: 'belt', label: 'Belt' },
+]
+
+const ACTIVE_FILTERS: Array<{ value: ActiveFilter; label: string }> = [
+  { value: 'all', label: 'All' },
+  { value: 'active', label: 'Active' },
+  { value: 'inactive', label: 'Inactive' },
+]
+
+const STOCK_FILTERS: Array<{ value: StockFilter; label: string }> = [
+  { value: 'all', label: 'All stock' },
+  { value: 'in', label: 'In stock' },
+  { value: 'out', label: 'Out of stock' },
+  { value: 'low', label: 'Low stock' },
+]
+
+const PREORDER_FILTERS: Array<{ value: PreorderFilter; label: string }> = [
+  { value: 'all', label: 'All' },
+  { value: '1', label: 'Preorder enabled' },
+  { value: '0', label: 'Preorder disabled' },
+]
+
+const loadStoreCatalogRowsCached = unstable_cache(
+  async (category: string, active: ActiveFilter, preorder: PreorderFilter, q: string) => {
+    const supa = getSupabaseAdminClientCached()
+
+    let query = supa
+      .from('store_products')
+      .select(
+        'id, category, name, color, size, price_cents, currency, inventory_qty, is_active, allow_preorder, low_stock_threshold, created_at'
+      )
+      .order('created_at', { ascending: false })
+      .limit(1000)
+
+    if (category && category !== 'all') query = query.eq('category', category)
+    if (active === 'active') query = query.eq('is_active', true)
+    if (active === 'inactive') query = query.eq('is_active', false)
+    if (preorder === '1') query = query.eq('allow_preorder', true)
+    if (preorder === '0') query = query.eq('allow_preorder', false)
+
+    if (q) {
+      if (q.length >= 3) {
+        query = query.textSearch('search_tsv', q, { type: 'websearch', config: 'simple' })
+      } else {
+        const safe = q.replace(/,/g, ' ').trim()
+        query = query.or(
+          [
+            `name.ilike.%${safe}%`,
+            `color.ilike.%${safe}%`,
+            `size.ilike.%${safe}%`,
+            `category.ilike.%${safe}%`,
+          ].join(',')
+        )
+      }
+    }
+
+    const { data, error } = await query
+    if (error) throw new Error(error.message)
+
+    return (Array.isArray(data) ? data : []) as ProductRow[]
+  },
+  ['store_admin_catalog_v2'],
+  { revalidate: 30, tags: ['admin-store-catalog', 'store-products'] }
+)
 
 function clampInt(v: unknown, def: number, min: number, max: number) {
   const raw = Array.isArray(v) ? v[0] : v
@@ -108,20 +128,47 @@ function clampInt(v: unknown, def: number, min: number, max: number) {
   if (!Number.isFinite(n)) return def
   return Math.min(max, Math.max(min, Math.floor(n)))
 }
+
 function strParam(v: unknown) {
   const s = Array.isArray(v) ? v[0] : v
   return typeof s === 'string' ? s : ''
 }
-function isUuid(v: string) {
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(v)
+
+function normalizeCategory(v: string): 'all' | Category {
+  return v === 'kimono' || v === 'rashguard' || v === 'short' || v === 'belt' ? v : 'all'
 }
+
+function normalizeActive(v: string): ActiveFilter {
+  return v === 'active' || v === 'inactive' ? v : 'all'
+}
+
+function normalizeStock(v: string): StockFilter {
+  return v === 'in' || v === 'out' || v === 'low' ? v : 'all'
+}
+
+function normalizePreorder(v: string): PreorderFilter {
+  return v === '1' || v === '0' ? v : 'all'
+}
+
+function normalizeTab(v: string): Tab {
+  return v === 'catalog' ? 'catalog' : 'dashboard'
+}
+
+function buildUrl(base: string, params: Record<string, string>) {
+  const qs = new URLSearchParams()
+  for (const [k, v] of Object.entries(params)) if (v) qs.set(k, v)
+  const s = qs.toString()
+  return s ? `${base}?${s}` : base
+}
+
 function shortId(id: string) {
   return (id || '').slice(0, 8)
 }
-function fmtDateTime(iso?: string | null) {
-  if (!iso) return '—'
-  const d = new Date(iso)
-  if (Number.isNaN(d.getTime())) return iso
+
+function formatDateTime(value?: string | null) {
+  if (!value) return '—'
+  const d = new Date(value)
+  if (Number.isNaN(d.getTime())) return value
   return d.toLocaleString('en-GB', {
     year: 'numeric',
     month: 'short',
@@ -130,15 +177,59 @@ function fmtDateTime(iso?: string | null) {
     minute: '2-digit',
   })
 }
-function displayName(o: AdminOrderRow) {
-  const n = `${o.buyer_first_name ?? ''} ${o.buyer_last_name ?? ''}`.trim()
-  return n || o.buyer_email || '—'
+
+function isLowStock(product: Pick<ProductRow, 'inventory_qty' | 'low_stock_threshold'>) {
+  const qty = Number(product.inventory_qty ?? 0)
+  const threshold = Math.max(0, Number(product.low_stock_threshold ?? 0))
+  if (qty <= 0) return true
+  return threshold > 0 && qty <= threshold
 }
-function buildUrl(base: string, params: Record<string, string>) {
-  const qs = new URLSearchParams()
-  for (const [k, v] of Object.entries(params)) if (v) qs.set(k, v)
-  const s = qs.toString()
-  return s ? `${base}?${s}` : base
+
+function stockPill(product: Pick<ProductRow, 'inventory_qty' | 'low_stock_threshold'>) {
+  const qty = Number(product.inventory_qty ?? 0)
+  const threshold = Math.max(0, Number(product.low_stock_threshold ?? 0))
+
+  if (qty <= 0) {
+    return <span className="rounded-full border border-red-200 bg-red-50 px-2.5 py-1 text-xs font-medium text-red-700">Out of stock</span>
+  }
+
+  if (threshold > 0 && qty <= threshold) {
+    return <span className="rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-700">Low stock</span>
+  }
+
+  return <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-700">Healthy stock</span>
+}
+
+function computeMetrics(products: ProductRow[]): DashboardMetrics {
+  return products.reduce<DashboardMetrics>(
+    (acc, product) => {
+      const qty = Math.max(0, Number(product.inventory_qty ?? 0))
+      const active = Boolean(product.is_active)
+      const preorder = Boolean(product.allow_preorder)
+      const price = Math.max(0, Number(product.price_cents ?? 0))
+      const low = isLowStock(product)
+
+      acc.totalProducts += 1
+      if (active) acc.activeProducts += 1
+      else acc.inactiveProducts += 1
+      if (preorder) acc.preorderEnabledProducts += 1
+      if (low) acc.lowStockProducts += 1
+      if (qty <= 0) acc.outOfStockProducts += 1
+      acc.totalUnits += qty
+      acc.totalStockValueCents += qty * price
+      return acc
+    },
+    {
+      totalProducts: 0,
+      activeProducts: 0,
+      inactiveProducts: 0,
+      preorderEnabledProducts: 0,
+      lowStockProducts: 0,
+      outOfStockProducts: 0,
+      totalUnits: 0,
+      totalStockValueCents: 0,
+    }
+  )
 }
 
 export default async function AdminStorePage({
@@ -164,129 +255,199 @@ export default async function AdminStorePage({
     )
   }
 
-  const tabRaw = strParam(searchParams?.tab)
-  const tab = (TABS as readonly string[]).includes(tabRaw) ? (tabRaw as (typeof TABS)[number]) : 'orders'
-
-  const supa = getSupabaseAdminClientCached()
-
-  // ----- Orders tab params -----
+  const tab = normalizeTab(strParam(searchParams?.tab))
   const page = clampInt(searchParams?.page, 1, 1, 9999)
-  const pageSize = clampInt(searchParams?.page_size, 20, 10, 200)
-  const statusRaw = strParam(searchParams?.status)
-  const status = (ORDER_STATUSES as readonly string[]).includes(statusRaw) ? statusRaw : 'all'
+  const pageSize = clampInt(searchParams?.page_size, 12, 6, 60)
   const q = strParam(searchParams?.q).trim()
-  const from = strParam(searchParams?.from).trim() // YYYY-MM-DD
-  const to = strParam(searchParams?.to).trim() // YYYY-MM-DD
+  const category = normalizeCategory(strParam(searchParams?.category))
+  const active = normalizeActive(strParam(searchParams?.active))
+  const stock = normalizeStock(strParam(searchParams?.stock))
+  const preorder = normalizePreorder(strParam(searchParams?.preorder))
 
-  // ----- Products tab params -----
-  const pPage = clampInt(searchParams?.p_page, 1, 1, 9999)
-  const pPageSize = clampInt(searchParams?.p_page_size, 12, 6, 100)
-  const pQ = strParam(searchParams?.p_q).trim()
-  const pCatRaw = strParam(searchParams?.p_category)
-  const pCategory = (['all', 'kimono', 'rashguard', 'short', 'belt'] as const).includes(pCatRaw as any) ? (pCatRaw as any) : 'all'
-  const pActiveRaw = strParam(searchParams?.p_active)
-  const pActive = (PRODUCT_ACTIVE as readonly string[]).includes(pActiveRaw) ? pActiveRaw : 'all'
+  let allProducts: ProductRow[] = []
+  let errorMsg: string | null = null
 
-  // ----- Data -----
-  let orders: AdminOrderRow[] = []
-  let ordersError: string | null = null
-  let ordersHasMore = false
-
-  if (tab === 'orders') {
-    try {
-      const data = await adminListStoreOrdersCached(q, status, from || null, to || null, page, pageSize)
-      orders = Array.isArray(data) ? (data as any) : []
-      ordersHasMore = Boolean((orders[0] as any)?.has_more ?? false)
-} catch (e: any) {
-      ordersError = e?.message || String(e)
-    }
+  try {
+    allProducts = await loadStoreCatalogRowsCached(category, active, preorder, q)
+  } catch (e: any) {
+    errorMsg = e?.message || String(e)
   }
 
-  type ProductRow = {
-    id: string
-    category: any
-    name: string
-    color: string | null
-    size: string | null
-    price_cents: number
-    currency: string | null
-    inventory_qty: number
-    is_active: boolean
-    created_at: string
-  }
+  const filteredProducts = !errorMsg
+    ? allProducts.filter((product) => {
+        const qty = Math.max(0, Number(product.inventory_qty ?? 0))
+        if (stock === 'in' && qty <= 0) return false
+        if (stock === 'out' && qty > 0) return false
+        if (stock === 'low' && !isLowStock(product)) return false
+        return true
+      })
+    : []
 
-  let products: ProductRow[] = []
-  let productsError: string | null = null
-  let productsHasMore = false
+  const metrics = computeMetrics(allProducts)
+  const totalFiltered = filteredProducts.length
+  const totalPages = Math.max(1, Math.ceil(totalFiltered / pageSize))
+  const safePage = Math.min(page, totalPages)
+  const start = (safePage - 1) * pageSize
+  const pagedProducts = filteredProducts.slice(start, start + pageSize)
+  const hasMore = safePage < totalPages
 
-  if (tab === 'products') {
-    try {
-      const data = await adminSearchStoreProductsCached(pQ, pCategory, pActive, pPage, pPageSize)
-      products = Array.isArray(data) ? (data as any) : []
-      productsHasMore = Boolean((products[0] as any)?.has_more ?? false)
-} catch (e: any) {
-      productsError = e?.message || String(e)
-    }
-  }
-
-const ordersBaseParams = {
-    tab: 'orders',
+  const baseParams = {
+    tab: 'catalog',
     q,
-    status,
-    from,
-    to,
+    category: category === 'all' ? '' : category,
+    active: active === 'all' ? '' : active,
+    stock: stock === 'all' ? '' : stock,
+    preorder: preorder === 'all' ? '' : preorder,
     page_size: String(pageSize),
-  }
-
-  const productsBaseParams = {
-    tab: 'products',
-    p_q: pQ,
-    p_category: pCategory,
-    p_active: pActive,
-    p_page_size: String(pPageSize),
   }
 
   return (
     <main>
-      <PageHeader title="Store Admin" subtitle="Server-first (fast) admin + RPC orders list" />
+      <PageHeader
+        title="Store Admin"
+        subtitle="V2 — catalog and stock foundation"
+        right={
+          <div className="flex flex-wrap items-center gap-2">
+            <Link
+              prefetch={false}
+              href="/store"
+              className="inline-flex items-center rounded-xl border px-4 py-2 text-sm font-medium hover:bg-gray-50"
+            >
+              Open /store
+            </Link>
+          </div>
+        }
+      />
 
       <Section className="space-y-6">
-        {/* Tabs */}
         <Card>
           <CardContent className="flex flex-wrap items-center gap-2">
             <Link
               prefetch={false}
-              href={buildUrl('/admin/store', { tab: 'orders' })}
-              className={`rounded-xl border px-4 py-2 text-sm font-medium hover:bg-gray-50 ${tab === 'orders' ? 'bg-gray-50' : ''}`}
+              href={buildUrl('/admin/store', { tab: 'dashboard' })}
+              className={`rounded-xl border px-4 py-2 text-sm font-medium hover:bg-gray-50 ${tab === 'dashboard' ? 'bg-gray-50' : ''}`}
             >
-              Orders
+              Dashboard
             </Link>
             <Link
               prefetch={false}
-              href={buildUrl('/admin/store', { tab: 'products' })}
-              className={`rounded-xl border px-4 py-2 text-sm font-medium hover:bg-gray-50 ${tab === 'products' ? 'bg-gray-50' : ''}`}
+              href={buildUrl('/admin/store', { tab: 'catalog' })}
+              className={`rounded-xl border px-4 py-2 text-sm font-medium hover:bg-gray-50 ${tab === 'catalog' ? 'bg-gray-50' : ''}`}
             >
-              Products
+              Catalog & Stock
             </Link>
-
-            <div className="ml-auto flex items-center gap-2">
-              <Link
-                prefetch={false}
-                href="/store"
-                className="inline-flex items-center rounded-xl border px-4 py-2 text-sm font-medium hover:bg-gray-50"
-              >
-                Open /store
-              </Link>
-            </div>
           </CardContent>
         </Card>
 
-        {tab === 'orders' ? (
-          <section className="space-y-4">
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          <Card>
+            <CardContent className="space-y-1">
+              <div className="text-xs text-[hsl(var(--muted))]">Total products</div>
+              <div className="text-2xl font-semibold">{metrics.totalProducts}</div>
+              <div className="text-xs text-[hsl(var(--muted))]">
+                {metrics.activeProducts} active · {metrics.inactiveProducts} inactive
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardContent className="space-y-1">
+              <div className="text-xs text-[hsl(var(--muted))]">Units in stock</div>
+              <div className="text-2xl font-semibold">{metrics.totalUnits}</div>
+              <div className="text-xs text-[hsl(var(--muted))]">
+                {metrics.outOfStockProducts} out of stock
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardContent className="space-y-1">
+              <div className="text-xs text-[hsl(var(--muted))]">Low stock products</div>
+              <div className="text-2xl font-semibold">{metrics.lowStockProducts}</div>
+              <div className="text-xs text-[hsl(var(--muted))]">Threshold-based inventory watch</div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardContent className="space-y-1">
+              <div className="text-xs text-[hsl(var(--muted))]">Stock value</div>
+              <div className="text-2xl font-semibold">
+                {formatCurrency(metrics.totalStockValueCents, 'en-EG', 'EGP')}
+              </div>
+              <div className="text-xs text-[hsl(var(--muted))]">
+                {metrics.preorderEnabledProducts} preorder-enabled products
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+
+        {tab === 'dashboard' ? (
+          <div className="grid gap-4 xl:grid-cols-[1.3fr_1fr]">
+            <Card>
+              <CardHeader>
+                <CardTitle>Admin scope in this lot</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3 text-sm text-gray-700">
+                <p>
+                  This lot focuses only on the Store V2 admin catalog and stock foundation. It keeps the scope narrow to protect
+                  stability and avoid broad regressions.
+                </p>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="rounded-2xl border bg-gray-50 p-4">
+                    <div className="font-medium">Included now</div>
+                    <ul className="mt-2 space-y-1 text-sm text-gray-600">
+                      <li>• catalog search and filters</li>
+                      <li>• stock and low-stock visibility</li>
+                      <li>• product active/inactive state</li>
+                      <li>• preorder eligibility per product</li>
+                    </ul>
+                  </div>
+                  <div className="rounded-2xl border bg-gray-50 p-4">
+                    <div className="font-medium">Next store lots</div>
+                    <ul className="mt-2 space-y-1 text-sm text-gray-600">
+                      <li>• supplier orders</li>
+                      <li>• customer preorders</li>
+                      <li>• sales and debt tracking</li>
+                      <li>• store business dashboard expansion</li>
+                    </ul>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle>Inventory watch</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3 text-sm">
+                <div className="flex items-center justify-between rounded-xl border p-3">
+                  <span className="text-[hsl(var(--muted))]">Low stock products</span>
+                  <span className="font-semibold">{metrics.lowStockProducts}</span>
+                </div>
+                <div className="flex items-center justify-between rounded-xl border p-3">
+                  <span className="text-[hsl(var(--muted))]">Out of stock</span>
+                  <span className="font-semibold">{metrics.outOfStockProducts}</span>
+                </div>
+                <div className="flex items-center justify-between rounded-xl border p-3">
+                  <span className="text-[hsl(var(--muted))]">Preorder enabled</span>
+                  <span className="font-semibold">{metrics.preorderEnabledProducts}</span>
+                </div>
+                <Link
+                  prefetch={false}
+                  href={buildUrl('/admin/store', { ...baseParams, tab: 'catalog', stock: 'low', page: '1' })}
+                  className="inline-flex items-center rounded-xl border px-4 py-2 text-sm font-medium hover:bg-gray-50"
+                >
+                  Review low stock products
+                </Link>
+              </CardContent>
+            </Card>
+          </div>
+        ) : (
+          <>
             <Card>
               <CardContent>
                 <form action="/admin/store" method="get" className="flex flex-wrap items-end gap-3">
-                  <input type="hidden" name="tab" value="orders" />
+                  <input type="hidden" name="tab" value="catalog" />
 
                   <div className="flex flex-col gap-1">
                     <label className="text-xs text-[hsl(var(--muted))]">Search</label>
@@ -294,202 +455,49 @@ const ordersBaseParams = {
                       name="q"
                       defaultValue={q}
                       className="rounded-xl border px-3 py-2 text-sm bg-white"
-                      placeholder="Buyer / Order / Product (name/email/member code/UUID)"
-                    />
-                  </div>
-
-                  <div className="flex flex-col gap-1">
-                    <label className="text-xs text-[hsl(var(--muted))]">Status</label>
-                    <select name="status" defaultValue={status} className="rounded-xl border px-3 py-2 text-sm bg-white">
-                      {ORDER_STATUSES.map((s) => (
-                        <option key={s} value={s}>
-                          {s === 'all' ? 'all' : humanStatus(s as any)}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div className="flex flex-col gap-1">
-                    <label className="text-xs text-[hsl(var(--muted))]">From</label>
-                    <input name="from" type="date" defaultValue={from} className="rounded-xl border px-3 py-2 text-sm bg-white" />
-                  </div>
-
-                  <div className="flex flex-col gap-1">
-                    <label className="text-xs text-[hsl(var(--muted))]">To</label>
-                    <input name="to" type="date" defaultValue={to} className="rounded-xl border px-3 py-2 text-sm bg-white" />
-                  </div>
-
-                  <div className="flex flex-col gap-1">
-                    <label className="text-xs text-[hsl(var(--muted))]">Page size</label>
-                    <select name="page_size" defaultValue={String(pageSize)} className="rounded-xl border px-3 py-2 text-sm bg-white">
-                      {[10, 20, 50, 100, 200].map((n) => (
-                        <option key={n} value={n}>
-                          {n}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <button className="rounded-xl px-4 py-2 text-sm font-medium border hover:bg-gray-50" type="submit">
-                    Apply
-                  </button>
-
-                  <Link prefetch={false} href={buildUrl('/admin/store', { tab: 'orders' })} className="text-sm underline text-gray-700 hover:text-black">
-                    Clear
-                  </Link>
-
-                  <div className="ml-auto text-xs text-[hsl(var(--muted))]">
-                    {orders.length > 0 ? (
-                      <>
-                        Page <b>{page}</b>{ordersHasMore ? (<> · More</>) : null}
-                      </>
-                    ) : (
-                      <>No orders.</>
-                    )}
-                  </div>
-                </form>
-              </CardContent>
-            </Card>
-
-            {ordersError ? (
-              <Card>
-                <CardContent>
-                  <div className="text-sm text-red-600">Failed to load orders: {ordersError}</div>
-                </CardContent>
-              </Card>
-            ) : orders.length === 0 ? (
-              <Card>
-                <CardContent>
-                  <div className="text-sm text-[hsl(var(--muted))]">No orders found.</div>
-                </CardContent>
-              </Card>
-            ) : (
-              <div className="space-y-3">
-                {orders.map((o) => {
-                  const items: OrderItemLite[] = Array.isArray(o.items) ? (o.items as any) : []
-                  const totalTxt = formatCurrency(o.total_cents ?? 0, 'en-EG', 'EGP')
-                  const discount = Number(o.discount_pct ?? 0)
-
-                  return (
-                    <Card key={o.id} hover={true}>
-                      <CardContent className="py-4 space-y-2">
-                        <div className="flex flex-wrap items-center gap-3">
-                          <div className="font-semibold">#{shortId(o.id)}</div>
-                          <div className="text-sm text-gray-600">
-                            Status: <b>{humanStatus(o.status)}</b>
-                          </div>
-                          <div className="text-sm text-gray-600">
-                            Total: <b>{totalTxt}</b>
-                            {discount ? ` (−${discount}%)` : ''}
-                          </div>
-                          <div className="text-sm text-gray-600">Payment: {o.payment || 'cash'}</div>
-                          <div className="ml-auto text-xs text-[hsl(var(--muted))]">{fmtDateTime(o.created_at)}</div>
-                        </div>
-
-                        <div className="text-sm">
-                          <span className="font-medium">Buyer:</span> {displayName(o)}
-                          {o.buyer_member_id ? <span className="text-xs text-[hsl(var(--muted))]"> · {o.buyer_member_id}</span> : null}
-                        </div>
-
-                        {/* Status editor (tiny client component) */}
-                        <AdminOrderStatusEditor orderId={o.id} currentStatus={o.status} currentNote={o.note || ''} />
-
-                        {o.note ? <div className="text-sm">Note: {o.note}</div> : null}
-
-                        {items.length ? (
-                          <div className="text-sm">
-                            <div className="font-medium mb-1">Items</div>
-                            <ul className="list-disc ml-5 space-y-1">
-                              {items.map((it) => (
-                                <li key={it.id}>
-                                  {it.name || 'Item'} × {it.qty} — {formatCurrency(it.unit_price_cents, 'en-EG', it.currency || 'EGP')}
-                                </li>
-                              ))}
-                            </ul>
-                          </div>
-                        ) : (
-                          <div className="text-sm text-gray-500">No items.</div>
-                        )}
-                      </CardContent>
-                    </Card>
-                  )
-                })}
-              </div>
-            )}
-
-            {/* Pagination */}
-            {!ordersError && orders.length > 0 && (page > 1 || ordersHasMore) ? (
-              <div className="flex items-center gap-2">
-                <Link
-                  prefetch={false}
-                  href={buildUrl('/admin/store', { ...ordersBaseParams, page: String(Math.max(1, page - 1)) })}
-                  aria-disabled={page <= 1}
-                  className={`px-2 py-1 rounded border ${page <= 1 ? 'opacity-50 pointer-events-none' : 'hover:bg-gray-50'}`}
-                >
-                  Prev
-                </Link>
-                <div className="text-sm">
-                  Page <b>{page}</b>
-                </div>
-                <Link
-                  prefetch={false}
-                  href={buildUrl('/admin/store', { ...ordersBaseParams, page: String(page + 1) })}
-                  aria-disabled={!ordersHasMore}
-                  className={`px-2 py-1 rounded border ${!ordersHasMore ? 'opacity-50 pointer-events-none' : 'hover:bg-gray-50'}`}
-                >
-                  Next
-                </Link>
-              </div>
-            ) : null}
-          </section>
-        ) : null}
-
-        {tab === 'products' ? (
-          <section className="space-y-4">
-            <Card>
-              <CardContent className="space-y-3">
-                <div className="flex flex-wrap items-center gap-3">
-                  <div>
-                    <h2 className="text-base font-semibold">Add product</h2>
-                    <p className="text-sm text-gray-600">Client form is lazy-loaded. Listing below is server-first.</p>
-                  </div>
-                </div>
-                <StoreProductForm />
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardContent>
-                <form action="/admin/store" method="get" className="flex flex-wrap items-end gap-3">
-                  <input type="hidden" name="tab" value="products" />
-
-                  <div className="flex flex-col gap-1">
-                    <label className="text-xs text-[hsl(var(--muted))]">Search</label>
-                    <input
-                      name="p_q"
-                      defaultValue={pQ}
-                      className="rounded-xl border px-3 py-2 text-sm bg-white"
-                      placeholder="Name, color, size or UUID"
+                      placeholder="Model, color, size…"
                     />
                   </div>
 
                   <div className="flex flex-col gap-1">
                     <label className="text-xs text-[hsl(var(--muted))]">Category</label>
-                    <select name="p_category" defaultValue={pCategory} className="rounded-xl border px-3 py-2 text-sm bg-white">
-                      {PRODUCT_CATS.map((c) => (
-                        <option key={c.v} value={c.v}>
-                          {c.label}
+                    <select name="category" defaultValue={category} className="rounded-xl border px-3 py-2 text-sm bg-white">
+                      {CATEGORIES.map((item) => (
+                        <option key={item.value} value={item.value}>
+                          {item.label}
                         </option>
                       ))}
                     </select>
                   </div>
 
                   <div className="flex flex-col gap-1">
-                    <label className="text-xs text-[hsl(var(--muted))]">Active</label>
-                    <select name="p_active" defaultValue={pActive} className="rounded-xl border px-3 py-2 text-sm bg-white">
-                      {PRODUCT_ACTIVE.map((v) => (
-                        <option key={v} value={v}>
-                          {v}
+                    <label className="text-xs text-[hsl(var(--muted))]">Status</label>
+                    <select name="active" defaultValue={active} className="rounded-xl border px-3 py-2 text-sm bg-white">
+                      {ACTIVE_FILTERS.map((item) => (
+                        <option key={item.value} value={item.value}>
+                          {item.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="flex flex-col gap-1">
+                    <label className="text-xs text-[hsl(var(--muted))]">Stock</label>
+                    <select name="stock" defaultValue={stock} className="rounded-xl border px-3 py-2 text-sm bg-white">
+                      {STOCK_FILTERS.map((item) => (
+                        <option key={item.value} value={item.value}>
+                          {item.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="flex flex-col gap-1">
+                    <label className="text-xs text-[hsl(var(--muted))]">Preorder</label>
+                    <select name="preorder" defaultValue={preorder} className="rounded-xl border px-3 py-2 text-sm bg-white">
+                      {PREORDER_FILTERS.map((item) => (
+                        <option key={item.value} value={item.value}>
+                          {item.label}
                         </option>
                       ))}
                     </select>
@@ -497,8 +505,8 @@ const ordersBaseParams = {
 
                   <div className="flex flex-col gap-1">
                     <label className="text-xs text-[hsl(var(--muted))]">Page size</label>
-                    <select name="p_page_size" defaultValue={String(pPageSize)} className="rounded-xl border px-3 py-2 text-sm bg-white">
-                      {[12, 24, 48, 100].map((n) => (
+                    <select name="page_size" defaultValue={String(pageSize)} className="rounded-xl border px-3 py-2 text-sm bg-white">
+                      {[12, 24, 36, 60].map((n) => (
                         <option key={n} value={n}>
                           {n}
                         </option>
@@ -506,63 +514,87 @@ const ordersBaseParams = {
                     </select>
                   </div>
 
-                  <button className="rounded-xl px-4 py-2 text-sm font-medium border hover:bg-gray-50" type="submit">
+                  <button className="rounded-xl border px-4 py-2 text-sm font-medium hover:bg-gray-50" type="submit">
                     Apply
                   </button>
 
-                  <Link prefetch={false} href={buildUrl('/admin/store', { tab: 'products' })} className="text-sm underline text-gray-700 hover:text-black">
+                  <Link prefetch={false} href="/admin/store?tab=catalog" className="text-sm underline text-gray-700 hover:text-black">
                     Clear
                   </Link>
 
                   <div className="ml-auto text-xs text-[hsl(var(--muted))]">
-                    {products.length > 0 ? (
-                      <>
-                        Page <b>{pPage}</b>{productsHasMore ? (<> · More</>) : null}
-                      </>
-                    ) : (
-                      <>No products.</>
-                    )}
+                    {errorMsg ? 'Failed to load catalog.' : `Showing ${totalFiltered === 0 ? 0 : start + 1}–${start + pagedProducts.length} of ${totalFiltered}`}
                   </div>
                 </form>
               </CardContent>
             </Card>
 
-            {productsError ? (
+            {errorMsg ? (
               <Card>
                 <CardContent>
-                  <div className="text-sm text-red-600">Failed to load products: {productsError}</div>
+                  <div className="text-sm text-red-600">Failed to load store catalog: {errorMsg}</div>
                 </CardContent>
               </Card>
-            ) : products.length === 0 ? (
+            ) : pagedProducts.length === 0 ? (
               <Card>
                 <CardContent>
-                  <div className="text-sm text-[hsl(var(--muted))]">No products found.</div>
+                  <div className="text-sm text-[hsl(var(--muted))]">No products match your filters.</div>
                 </CardContent>
               </Card>
             ) : (
-              <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
-                {products.map((p) => {
-                  const price = formatCurrency(p.price_cents ?? 0, 'en-EG', p.currency ?? 'EGP')
+              <div className="grid gap-4 xl:grid-cols-2">
+                {pagedProducts.map((product) => {
+                  const price = formatCurrency(product.price_cents ?? 0, 'en-EG', product.currency ?? 'EGP')
+                  const qty = Math.max(0, Number(product.inventory_qty ?? 0))
+                  const threshold = Math.max(0, Number(product.low_stock_threshold ?? 0))
+
                   return (
-                    <Card key={p.id} hover>
-                      <CardContent className="py-4 space-y-2">
-                        <div className="flex items-start gap-2">
-                          <div className="flex-1">
-                            <div className="font-semibold">{p.name}</div>
-                            <div className="text-xs text-[hsl(var(--muted))]">
-                              {p.category}
-                              {p.color ? ` · ${p.color}` : ''}
-                              {p.size ? ` · ${p.size}` : ''}
+                    <Card key={product.id}>
+                      <CardContent className="space-y-4">
+                        <div className="flex flex-wrap items-start gap-3">
+                          <div className="flex-1 min-w-[220px]">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <div className="text-lg font-semibold">{product.name}</div>
+                              {stockPill(product)}
+                              {!product.is_active ? (
+                                <span className="rounded-full border border-red-200 bg-red-50 px-2.5 py-1 text-xs font-medium text-red-700">Inactive</span>
+                              ) : null}
+                            </div>
+                            <div className="mt-1 text-xs text-[hsl(var(--muted))]">
+                              Product ID: <span className="font-mono">{shortId(product.id)}</span> · {product.category}
+                              {product.color ? ` · ${product.color}` : ''}
+                              {product.size ? ` · ${product.size}` : ''}
                             </div>
                           </div>
-                          <div className="text-sm font-semibold">{price}</div>
+
+                          <div className="text-right">
+                            <div className="text-lg font-semibold">{price}</div>
+                            <div className="text-xs text-[hsl(var(--muted))]">Created {formatDateTime(product.created_at)}</div>
+                          </div>
                         </div>
 
-                        <div className="text-xs text-[hsl(var(--muted))]">
-                          Created: {fmtDateTime(p.created_at)} · ID: {shortId(p.id)}
+                        <div className="grid gap-3 sm:grid-cols-3">
+                          <div className="rounded-xl border p-3">
+                            <div className="text-[11px] uppercase tracking-wide text-[hsl(var(--muted))]">Stock</div>
+                            <div className="mt-1 text-lg font-semibold">{qty}</div>
+                          </div>
+                          <div className="rounded-xl border p-3">
+                            <div className="text-[11px] uppercase tracking-wide text-[hsl(var(--muted))]">Low stock threshold</div>
+                            <div className="mt-1 text-lg font-semibold">{threshold}</div>
+                          </div>
+                          <div className="rounded-xl border p-3">
+                            <div className="text-[11px] uppercase tracking-wide text-[hsl(var(--muted))]">Preorder</div>
+                            <div className="mt-1 text-lg font-semibold">{product.allow_preorder ? 'Enabled' : 'Disabled'}</div>
+                          </div>
                         </div>
 
-                        <AdminProductQuickEdit id={p.id} inventoryQty={p.inventory_qty ?? 0} isActive={!!p.is_active} />
+                        <AdminProductQuickEdit
+                          id={product.id}
+                          inventoryQty={qty}
+                          isActive={Boolean(product.is_active)}
+                          allowPreorder={Boolean(product.allow_preorder)}
+                          lowStockThreshold={threshold}
+                        />
                       </CardContent>
                     </Card>
                   )
@@ -570,32 +602,40 @@ const ordersBaseParams = {
               </div>
             )}
 
-            {/* Pagination */}
-            {!productsError && products.length > 0 && (pPage > 1 || productsHasMore) ? (
+            {!errorMsg && (safePage > 1 || hasMore) ? (
               <div className="flex items-center gap-2">
                 <Link
                   prefetch={false}
-                  href={buildUrl('/admin/store', { ...productsBaseParams, p_page: String(Math.max(1, pPage - 1)) })}
-                  aria-disabled={pPage <= 1}
-                  className={`px-2 py-1 rounded border ${pPage <= 1 ? 'opacity-50 pointer-events-none' : 'hover:bg-gray-50'}`}
+                  href={buildUrl('/admin/store', { ...baseParams, page: String(Math.max(1, safePage - 1)) })}
+                  aria-disabled={safePage <= 1}
+                  className={`rounded-xl border px-3 py-2 text-sm ${safePage <= 1 ? 'pointer-events-none opacity-50' : 'hover:bg-gray-50'}`}
                 >
                   Prev
                 </Link>
                 <div className="text-sm">
-                  Page <b>{pPage}</b>
+                  Page <b>{safePage}</b> / <b>{totalPages}</b>
                 </div>
                 <Link
                   prefetch={false}
-                  href={buildUrl('/admin/store', { ...productsBaseParams, p_page: String(pPage + 1) })}
-                  aria-disabled={!productsHasMore}
-                  className={`px-2 py-1 rounded border ${!productsHasMore ? 'opacity-50 pointer-events-none' : 'hover:bg-gray-50'}`}
+                  href={buildUrl('/admin/store', { ...baseParams, page: String(safePage + 1) })}
+                  aria-disabled={!hasMore}
+                  className={`rounded-xl border px-3 py-2 text-sm ${!hasMore ? 'pointer-events-none opacity-50' : 'hover:bg-gray-50'}`}
                 >
                   Next
                 </Link>
               </div>
             ) : null}
-          </section>
-        ) : null}
+
+            <Card>
+              <CardHeader>
+                <CardTitle>Add product to catalog</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <StoreProductForm />
+              </CardContent>
+            </Card>
+          </>
+        )}
       </Section>
     </main>
   )

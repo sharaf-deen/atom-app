@@ -25,7 +25,6 @@ export async function PATCH(req: NextRequest) {
   try {
     const supa = createSupabaseServerActionClient()
 
-    // 1) Auth
     const { data: auth, error: authErr } = await supa.auth.getUser()
     if (authErr) {
       return noStore(
@@ -37,7 +36,6 @@ export async function PATCH(req: NextRequest) {
       return noStore(NextResponse.json({ ok: false, error: 'NOT_AUTHENTICATED' }, { status: 401 }))
     }
 
-    // 2) Role check (super_admin only)
     const { data: me, error: meErr } = await supa
       .from('profiles')
       .select('role')
@@ -52,7 +50,6 @@ export async function PATCH(req: NextRequest) {
       return noStore(NextResponse.json({ ok: false, error: 'FORBIDDEN' }, { status: 403 }))
     }
 
-    // 3) Body
     const body = await req.json().catch(() => ({} as any))
     const id = isNonEmptyStr(body?.id) ? body.id.trim() : ''
     if (!id) return noStore(NextResponse.json({ ok: false, error: 'MISSING_ID' }, { status: 400 }))
@@ -81,15 +78,26 @@ export async function PATCH(req: NextRequest) {
       patch.inventory_qty = Math.floor(n)
     }
 
+    if (body?.low_stock_threshold !== undefined) {
+      const n = Number(body.low_stock_threshold)
+      if (!Number.isFinite(n) || n < 0) {
+        return noStore(NextResponse.json({ ok: false, error: 'INVALID_LOW_STOCK_THRESHOLD' }, { status: 400 }))
+      }
+      patch.low_stock_threshold = Math.floor(n)
+    }
+
     if (body?.is_active !== undefined) {
       patch.is_active = Boolean(body.is_active)
+    }
+
+    if (body?.allow_preorder !== undefined) {
+      patch.allow_preorder = Boolean(body.allow_preorder)
     }
 
     if (Object.keys(patch).length === 0) {
       return noStore(NextResponse.json({ ok: false, error: 'NO_FIELDS_TO_UPDATE' }, { status: 400 }))
     }
 
-    // 4) Update
     const { data, error } = await supa
       .from('store_products')
       .update(patch)
