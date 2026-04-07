@@ -923,7 +923,7 @@ function adminActions(role: 'admin' | 'super_admin'): QuickAction[] {
   ]
 
   if (role === 'super_admin') {
-    base.splice(8, 0, { href: '/store/admin', label: 'Store admin', desc: 'Manage products and store ops.', icon: LayoutDashboard })
+    base.splice(8, 0, { href: '/admin/store/dashboard', label: 'Store admin', desc: 'Open the store dashboard and operations hub.', icon: LayoutDashboard })
     base.push({ href: '/admin/permissions-audit', label: 'Permissions audit', desc: 'Review who can access what.', icon: UserCog })
   }
 
