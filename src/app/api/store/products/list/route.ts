@@ -35,142 +35,146 @@ function normActive(v: string | null): 'all' | '1' | '0' {
   return 'all'
 }
 
+function normPreorder(v: string | null): 'all' | '1' | '0' {
+  const s = (v || '').trim().toLowerCase()
+  if (s === 'all') return 'all'
+  if (s === '0' || s === 'false') return '0'
+  if (s === '1' || s === 'true') return '1'
+  return 'all'
+}
+
 function safeSearch(q: string | null) {
   if (!q) return ''
-  // évite les virgules (la syntaxe .or(...) est sensible)
   return q.trim().replace(/,/g, ' ').slice(0, 60)
 }
 
-function createSupabaseFromRoute(req: NextRequest) {
-  const cookieOps: Array<
-    | { type: 'set'; name: string; value: string; options: CookieOptions }
-    | { type: 'remove'; name: string; options: CookieOptions }
-  > = []
-
-  const supabase = createServerClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+function createSupabaseFromRoute(req: NextRequest, res: NextResponse) {
+  return createServerClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
     cookies: {
-      get: (name: string) => req.cookies.get(name)?.value,
-      set: (name: string, value: string, options: CookieOptions) => {
-        cookieOps.push({ type: 'set', name, value, options })
+      get(name: string) {
+        return req.cookies.get(name)?.value
       },
-      remove: (name: string, options: CookieOptions) => {
-        cookieOps.push({ type: 'remove', name, options })
+      set(name: string, value: string, options: CookieOptions) {
+        res.cookies.set({ name, value, ...options })
+      },
+      remove(name: string, options: CookieOptions) {
+        res.cookies.set({ name, value: '', ...options, maxAge: 0 })
       },
     },
   })
-
-  const applyCookies = (res: NextResponse) => {
-    for (const op of cookieOps) {
-      if (op.type === 'set') {
-        res.cookies.set({ name: op.name, value: op.value, ...op.options })
-      } else {
-        res.cookies.set({ name: op.name, value: '', ...op.options, maxAge: 0 })
-      }
-    }
-    return res
-  }
-
-  return { supabase, applyCookies }
 }
 
 export async function GET(req: NextRequest) {
-  const { supabase, applyCookies } = createSupabaseFromRoute(req)
-  const url = new URL(req.url)
+  const res = NextResponse.next()
 
-  // --- Auth (et refresh cookies si besoin)
-  const { data: auth, error: authErr } = await supabase.auth.getUser()
-  if (authErr || !auth?.user) {
-    return applyCookies(
-      json(401, { ok: false, error: 'AUTH_ERROR', details: authErr?.message || 'Not authenticated' })
-    )
-  }
+  try {
+    const supa = createSupabaseFromRoute(req, res)
 
-  // --- Role (pour autoriser l’affichage inactif)
-  const { data: me, error: meErr } = await supabase
-    .from('profiles')
-    .select('role')
-    .eq('user_id', auth.user.id)
-    .maybeSingle<{ role: string | null }>()
-  if (meErr) {
-    return applyCookies(json(500, { ok: false, error: 'PROFILE_ERROR', details: meErr.message }))
-  }
+    const {
+      data: { user },
+      error: userErr,
+    } = await supa.auth.getUser()
 
-  const role = (me?.role || 'member').toString()
-  const isSuperAdmin = role === 'super_admin'
+    if (userErr) return json(401, { ok: false, error: 'AUTH_ERROR', details: userErr.message })
+    if (!user) return json(401, { ok: false, error: 'NOT_AUTHENTICATED' })
 
-  // --- Params
-  const page = clampInt(url.searchParams.get('page'), 1, 9999, 1)
-  const limit = clampInt(url.searchParams.get('limit'), 1, 50, 8)
-  const from = (page - 1) * limit
-  const to = from + limit - 1
+    const { data: me, error: meErr } = await supa
+      .from('profiles')
+      .select('role')
+      .eq('user_id', user.id)
+      .maybeSingle<{ role: string | null }>()
 
-  const categoryRaw = (url.searchParams.get('category') || '').trim().toLowerCase()
-  const category = (CATEGORIES.has(categoryRaw as Category) ? (categoryRaw as Category) : null)
+    if (meErr) return json(500, { ok: false, error: 'PROFILE_ERROR', details: meErr.message })
 
-  const q = safeSearch(url.searchParams.get('q'))
-  const allFlag = url.searchParams.get('all') === '1'
-  const activeParam = normActive(url.searchParams.get('active'))
+    const role = (me?.role ?? 'member') as string
+    const allowedRoles = new Set([
+      'member',
+      'reception',
+      'coach',
+      'assistant_coach',
+      'head_coach',
+      'admin',
+      'super_admin',
+      'vip',
+      'champion',
+    ])
+    if (!allowedRoles.has(role)) return json(403, { ok: false, error: 'FORBIDDEN' })
 
-  // Règle: seul super_admin + all=1 peut voir inactif / filtrer active=0/all
-  const canSeeAll = isSuperAdmin && allFlag
+    const url = new URL(req.url)
+    const page = clampInt(url.searchParams.get('page'), 1, 1, 9999)
+    const limit = clampInt(url.searchParams.get('limit'), 10, 1, 100)
+    const from = (page - 1) * limit
+    const to = from + limit - 1
+    const category = (url.searchParams.get('category') || '').trim() as Category | ''
+    const all = url.searchParams.get('all') === '1'
+    const active = normActive(url.searchParams.get('active'))
+    const preorder = normPreorder(url.searchParams.get('preorder'))
+    const q = safeSearch(url.searchParams.get('q'))
 
-  // --- Base queries
-  let countQ = supabase.from('store_products').select('id', { count: 'exact', head: true })
-  let dataQ = supabase
-    .from('store_products')
-    .select('id,category,name,color,size,price_cents,currency,inventory_qty,is_active,created_at')
-    .order('created_at', { ascending: false })
-    .order('id', { ascending: false })
-    .range(from, to)
-
-  // --- Filters
-  if (category) {
-    countQ = countQ.eq('category', category)
-    dataQ = dataQ.eq('category', category)
-  }
-
-  if (!canSeeAll) {
-    // tout le monde voit uniquement actif
-    countQ = countQ.eq('is_active', true)
-    dataQ = dataQ.eq('is_active', true)
-  } else {
-    // super_admin + all=1 => active peut être 1/0/all
-    if (activeParam === '1') {
-      countQ = countQ.eq('is_active', true)
-      dataQ = dataQ.eq('is_active', true)
-    } else if (activeParam === '0') {
-      countQ = countQ.eq('is_active', false)
-      dataQ = dataQ.eq('is_active', false)
+    if (category && !CATEGORIES.has(category)) {
+      return json(400, { ok: false, error: 'INVALID_CATEGORY' })
     }
-  }
 
-  if (q) {
-    // recherche simple sur name/color/size
-    const like = `%${q}%`
-    const orExpr = `name.ilike.${like},color.ilike.${like},size.ilike.${like}`
-    countQ = countQ.or(orExpr)
-    dataQ = dataQ.or(orExpr)
-  }
+    const selectCols =
+      'id, category, name, color, size, price_cents, currency, inventory_qty, is_active, allow_preorder, low_stock_threshold, created_at'
 
-  // --- Count
-  const { count, error: countErr } = await countQ
-  if (countErr) {
-    return applyCookies(json(500, { ok: false, error: 'COUNT_FAILED', details: countErr.message }))
-  }
+    let dataQuery = supa
+      .from('store_products')
+      .select(selectCols)
+      .order('created_at', { ascending: false })
+      .range(from, to)
 
-  // --- Data
-  const { data, error } = await dataQ
-  if (error) {
-    return applyCookies(json(500, { ok: false, error: 'QUERY_FAILED', details: error.message }))
-  }
+    let countQuery = supa.from('store_products').select('id', { count: 'exact', head: true })
 
-  return applyCookies(
-    json(200, {
-      ok: true,
-      items: Array.isArray(data) ? data : [],
-      total: count ?? 0,
-      page,
-      pageSize: limit,
-    })
-  )
+    const isSuperAdmin = role === 'super_admin'
+    const shouldShowAll = isSuperAdmin && all
+
+    if (!shouldShowAll) {
+      dataQuery = dataQuery.eq('is_active', true)
+      countQuery = countQuery.eq('is_active', true)
+    } else if (active === '1') {
+      dataQuery = dataQuery.eq('is_active', true)
+      countQuery = countQuery.eq('is_active', true)
+    } else if (active === '0') {
+      dataQuery = dataQuery.eq('is_active', false)
+      countQuery = countQuery.eq('is_active', false)
+    }
+
+    if (preorder === '1') {
+      dataQuery = dataQuery.eq('allow_preorder', true)
+      countQuery = countQuery.eq('allow_preorder', true)
+    }
+    if (preorder === '0') {
+      dataQuery = dataQuery.eq('allow_preorder', false)
+      countQuery = countQuery.eq('allow_preorder', false)
+    }
+
+    if (category) {
+      dataQuery = dataQuery.eq('category', category)
+      countQuery = countQuery.eq('category', category)
+    }
+
+    if (q) {
+      const like = `%${q}%`
+      dataQuery = dataQuery.or(`name.ilike.${like},color.ilike.${like},size.ilike.${like}`)
+      countQuery = countQuery.or(`name.ilike.${like},color.ilike.${like},size.ilike.${like}`)
+    }
+
+    const [{ data, error: dataErr }, { count, error: countErr }] = await Promise.all([dataQuery, countQuery])
+
+    if (dataErr) return json(500, { ok: false, error: 'QUERY_FAILED', details: dataErr.message })
+    if (countErr) return json(500, { ok: false, error: 'COUNT_FAILED', details: countErr.message })
+
+    return noStore(
+      NextResponse.json({
+        ok: true,
+        items: Array.isArray(data) ? data : [],
+        total: Number(count ?? 0),
+        page,
+        pageSize: limit,
+      })
+    )
+  } catch (e: any) {
+    return json(500, { ok: false, error: 'SERVER_ERROR', details: e?.message ?? String(e) })
+  }
 }
