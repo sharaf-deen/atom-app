@@ -12,6 +12,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card'
 import { formatCurrency } from '@/lib/money'
 import { canAccessStoreAdmin } from '@/lib/rbac'
 import AdminProductQuickEdit from '@/components/store/AdminProductQuickEdit'
+import StoreAdminNav from '@/components/store/StoreAdminNav'
 
 const StoreProductForm = dynamicImport(() => import('@/components/StoreProductForm'), {
   ssr: false,
@@ -467,6 +468,10 @@ export default async function AdminStorePage({
           </div>
         }
       />
+
+      <Section className="space-y-4">
+        <StoreAdminNav current={tab === 'supplier-orders' ? '/admin/store?tab=supplier-orders' : '/admin/store'} />
+      </Section>
 
       <Section className="space-y-4">
         <Card>

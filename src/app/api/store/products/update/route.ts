@@ -4,6 +4,7 @@ export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
 import { NextRequest, NextResponse } from 'next/server'
+import { revalidatePath, revalidateTag } from 'next/cache'
 import { createSupabaseServerActionClient } from '@/lib/supabaseServer'
 
 type Category = 'kimono' | 'rashguard' | 'short' | 'belt'
@@ -110,6 +111,12 @@ export async function PATCH(req: NextRequest) {
         NextResponse.json({ ok: false, error: 'UPDATE_FAILED', details: error.message }, { status: 500 })
       )
     }
+
+    revalidateTag('store-products')
+    try { revalidatePath('/store') } catch {}
+    try { revalidatePath('/admin/store') } catch {}
+    try { revalidatePath('/admin/store/dashboard') } catch {}
+    try { revalidatePath('/admin/store/sales') } catch {}
 
     return noStore(NextResponse.json({ ok: true, item: data }))
   } catch (e: any) {

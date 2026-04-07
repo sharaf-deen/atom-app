@@ -149,6 +149,7 @@ export async function POST(req: Request) {
     }
 
     try { revalidatePath('/admin/store') } catch {}
+    try { revalidatePath('/admin/store/dashboard') } catch {}
     try { revalidatePath('/store') } catch {}
 
     return noStore(NextResponse.json({ ok: true, id: orderRow.id }))

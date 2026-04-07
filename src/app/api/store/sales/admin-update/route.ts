@@ -3,7 +3,7 @@ export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
 import { NextResponse } from 'next/server'
-import { revalidatePath } from 'next/cache'
+import { revalidatePath, revalidateTag } from 'next/cache'
 import { createSupabaseServerActionClient } from '@/lib/supabaseServer'
 import { createSupabaseAdminClient } from '@/lib/supabaseAdmin'
 
@@ -67,9 +67,12 @@ export async function PATCH(req: Request) {
       return noStore(NextResponse.json({ ok: false, error: 'UPDATE_FAILED', details: error.message }, { status: 500 }))
     }
 
+    revalidateTag('store-products')
     try {
       revalidatePath('/admin/store')
       revalidatePath('/admin/store/sales')
+      revalidatePath('/admin/store/dashboard')
+      revalidatePath('/store')
     } catch {}
 
     return noStore(NextResponse.json({ ok: true, item: Array.isArray(data) ? data[0] ?? null : data ?? null }))

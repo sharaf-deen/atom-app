@@ -4,6 +4,7 @@ export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
 import { NextResponse } from 'next/server'
+import { revalidatePath, revalidateTag } from 'next/cache'
 import { createSupabaseServerActionClient } from '@/lib/supabaseServer'
 
 type Category = 'kimono' | 'rashguard' | 'short' | 'belt'
@@ -54,6 +55,12 @@ export async function POST(req: Request) {
 
     const { data, error } = await supa.from('store_products').insert(payload).select('id').maybeSingle()
     if (error) return noStore(NextResponse.json({ ok: false, error: error.message }, { status: 500 }))
+
+    revalidateTag('store-products')
+    try { revalidatePath('/store') } catch {}
+    try { revalidatePath('/admin/store') } catch {}
+    try { revalidatePath('/admin/store/dashboard') } catch {}
+    try { revalidatePath('/admin/store/sales') } catch {}
 
     return noStore(NextResponse.json({ ok: true, id: data?.id }))
   } catch (e: any) {
