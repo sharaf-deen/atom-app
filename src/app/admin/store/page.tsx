@@ -38,7 +38,7 @@ type ActiveFilter = 'all' | 'active' | 'inactive'
 type StockFilter = 'all' | 'in' | 'out' | 'low'
 type PreorderFilter = 'all' | '1' | '0'
 type SupplierStatusFilter = 'all' | 'draft' | 'ordered' | 'partially_received' | 'received' | 'canceled'
-type Tab = 'dashboard' | 'catalog' | 'supplier-orders'
+type Tab = 'catalog' | 'supplier-orders'
 
 type ProductRow = {
   id: string
@@ -153,7 +153,7 @@ function strParam(v: unknown) {
 }
 
 function normalizeTab(v: string): Tab {
-  return v === 'catalog' || v === 'supplier-orders' ? v : 'dashboard'
+  return v === 'supplier-orders' ? 'supplier-orders' : 'catalog'
 }
 
 function normalizeCategory(v: string): 'all' | Category {
@@ -318,7 +318,9 @@ export default async function AdminStorePage({
     )
   }
 
-  const tab = normalizeTab(strParam(searchParams?.tab))
+  const requestedTab = strParam(searchParams?.tab)
+  if (requestedTab === 'dashboard') redirect('/admin/store/dashboard')
+  const tab = normalizeTab(requestedTab)
   const page = clampInt(searchParams?.page, 1, 1, 9999)
   const pageSize = clampInt(searchParams?.page_size, 12, 6, 60)
   const q = strParam(searchParams?.q).trim()
@@ -431,15 +433,29 @@ export default async function AdminStorePage({
     <main>
       <PageHeader
         title="Store Admin"
-        subtitle="V2 — catalog, stock, and supplier orders"
+        subtitle="V2 — catalog, supplier orders, and converged entry points"
         right={
           <div className="flex flex-wrap items-center gap-2">
+            <Link
+              prefetch={false}
+              href="/admin/store/dashboard"
+              className="inline-flex items-center rounded-xl border px-4 py-2 text-sm font-medium hover:bg-gray-50"
+            >
+              Open dashboard
+            </Link>
             <Link
               prefetch={false}
               href="/admin/store/preorders"
               className="inline-flex items-center rounded-xl border px-4 py-2 text-sm font-medium hover:bg-gray-50"
             >
               Open preorders
+            </Link>
+            <Link
+              prefetch={false}
+              href="/admin/store/sales"
+              className="inline-flex items-center rounded-xl border px-4 py-2 text-sm font-medium hover:bg-gray-50"
+            >
+              Open sales
             </Link>
             <Link
               prefetch={false}
@@ -452,80 +468,42 @@ export default async function AdminStorePage({
         }
       />
 
-      <Section>
-        <div className="mb-4 flex flex-wrap gap-2">
-          <Link href="/admin/store?tab=dashboard" className={`rounded-xl border px-4 py-2 text-sm font-medium ${tab === 'dashboard' ? 'bg-black text-white border-black' : 'hover:bg-gray-50'}`}>
-            Dashboard
-          </Link>
+      <Section className="space-y-4">
+        <Card>
+          <CardContent className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+            <Link href="/admin/store/dashboard" className="rounded-2xl border bg-white p-4 transition hover:bg-gray-50">
+              <div className="text-sm font-semibold">Dashboard</div>
+              <div className="mt-1 text-xs text-[hsl(var(--muted))]">Open the dedicated business summary.</div>
+            </Link>
+            <Link href="/admin/store?tab=catalog" className="rounded-2xl border bg-white p-4 transition hover:bg-gray-50">
+              <div className="text-sm font-semibold">Catalog & Stock</div>
+              <div className="mt-1 text-xs text-[hsl(var(--muted))]">Manage active products, stock, and preorder flags.</div>
+            </Link>
+            <Link href="/admin/store?tab=supplier-orders" className="rounded-2xl border bg-white p-4 transition hover:bg-gray-50">
+              <div className="text-sm font-semibold">Supplier Orders</div>
+              <div className="mt-1 text-xs text-[hsl(var(--muted))]">Create orders and receive stock by delta.</div>
+            </Link>
+            <div className="rounded-2xl border bg-white p-4">
+              <div className="text-sm font-semibold">Store V2 hub</div>
+              <div className="mt-1 text-xs text-[hsl(var(--muted))]">Legacy cart/order creation is retired. Use preorders and sales pages for new operations.</div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <div className="flex flex-wrap gap-2">
           <Link href="/admin/store?tab=catalog" className={`rounded-xl border px-4 py-2 text-sm font-medium ${tab === 'catalog' ? 'bg-black text-white border-black' : 'hover:bg-gray-50'}`}>
             Catalog & Stock
           </Link>
           <Link href="/admin/store?tab=supplier-orders" className={`rounded-xl border px-4 py-2 text-sm font-medium ${tab === 'supplier-orders' ? 'bg-black text-white border-black' : 'hover:bg-gray-50'}`}>
             Supplier Orders
           </Link>
+          <Link href="/admin/store/preorders" className="rounded-xl border px-4 py-2 text-sm font-medium hover:bg-gray-50">
+            Preorders
+          </Link>
+          <Link href="/admin/store/sales" className="rounded-xl border px-4 py-2 text-sm font-medium hover:bg-gray-50">
+            Sales & Debt
+          </Link>
         </div>
-
-        {tab === 'dashboard' && (
-          <div className="grid gap-4 lg:grid-cols-2 2xl:grid-cols-4">
-            <Card>
-              <CardHeader><CardTitle>Catalog</CardTitle></CardHeader>
-              <CardContent className="space-y-2 text-sm">
-                <div className="flex items-center justify-between"><span>Total products</span><span className="font-semibold">{metrics.totalProducts}</span></div>
-                <div className="flex items-center justify-between"><span>Active products</span><span className="font-semibold">{metrics.activeProducts}</span></div>
-                <div className="flex items-center justify-between"><span>Preorder enabled</span><span className="font-semibold">{metrics.preorderEnabledProducts}</span></div>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader><CardTitle>Stock</CardTitle></CardHeader>
-              <CardContent className="space-y-2 text-sm">
-                <div className="flex items-center justify-between"><span>Total units</span><span className="font-semibold">{metrics.totalUnits}</span></div>
-                <div className="flex items-center justify-between"><span>Low stock</span><span className="font-semibold">{metrics.lowStockProducts}</span></div>
-                <div className="flex items-center justify-between"><span>Out of stock</span><span className="font-semibold">{metrics.outOfStockProducts}</span></div>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader><CardTitle>Supplier Orders</CardTitle></CardHeader>
-              <CardContent className="space-y-2 text-sm">
-                <div className="flex items-center justify-between"><span>Open</span><span className="font-semibold">{metrics.supplierOpenOrders}</span></div>
-                <div className="flex items-center justify-between"><span>Partial</span><span className="font-semibold">{metrics.supplierPartialOrders}</span></div>
-                <div className="flex items-center justify-between"><span>Received</span><span className="font-semibold">{metrics.supplierReceivedOrders}</span></div>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader><CardTitle>Supplier Flow</CardTitle></CardHeader>
-              <CardContent className="space-y-2 text-sm">
-                <div className="flex items-center justify-between"><span>Pending units</span><span className="font-semibold">{metrics.supplierPendingUnits}</span></div>
-                <div className="flex items-center justify-between"><span>Received units</span><span className="font-semibold">{metrics.supplierReceivedUnits}</span></div>
-                <div className="flex items-center justify-between"><span>Ordered value</span><span className="font-semibold">{formatCurrency(metrics.supplierOrderedValueCents)}</span></div>
-              </CardContent>
-            </Card>
-
-            <Card className="lg:col-span-2 2xl:col-span-4">
-              <CardHeader><CardTitle>Business snapshot</CardTitle></CardHeader>
-              <CardContent className="grid gap-3 md:grid-cols-2 xl:grid-cols-4 text-sm">
-                <div className="rounded-2xl border bg-white p-4">
-                  <div className="text-xs text-[hsl(var(--muted))]">Stock value</div>
-                  <div className="mt-2 text-lg font-semibold">{formatCurrency(metrics.totalStockValueCents)}</div>
-                </div>
-                <div className="rounded-2xl border bg-white p-4">
-                  <div className="text-xs text-[hsl(var(--muted))]">Catalog health</div>
-                  <div className="mt-2 text-lg font-semibold">{metrics.totalProducts === 0 ? 'No products yet' : `${metrics.activeProducts}/${metrics.totalProducts} active`}</div>
-                </div>
-                <div className="rounded-2xl border bg-white p-4">
-                  <div className="text-xs text-[hsl(var(--muted))]">Supplier pressure</div>
-                  <div className="mt-2 text-lg font-semibold">{metrics.supplierPendingUnits} units pending</div>
-                </div>
-                <div className="rounded-2xl border bg-white p-4">
-                  <div className="text-xs text-[hsl(var(--muted))]">Receiving progress</div>
-                  <div className="mt-2 text-lg font-semibold">{metrics.supplierReceivedUnits} units received</div>
-                </div>
-              </CardContent>
-            </Card>
-          </div>
-        )}
 
         {tab === 'catalog' && (
           <div className="grid gap-4 xl:grid-cols-[minmax(0,420px)_minmax(0,1fr)]">

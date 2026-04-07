@@ -196,11 +196,20 @@ export default async function StorePage({
         {canPreorder ? (
           <Card>
             <CardContent className="space-y-3 py-4">
-              <div>
-                <div className="font-semibold">Pre-order from the catalog</div>
-                <div className="text-sm text-[hsl(var(--muted))]">
-                  Choose a product, set the quantity, and send your request. Deposit and payment are handled later by the store admin.
+              <div className="flex flex-wrap items-start gap-3">
+                <div className="min-w-0 flex-1">
+                  <div className="font-semibold">Pre-order from the catalog</div>
+                  <div className="text-sm text-[hsl(var(--muted))]">
+                    Choose a product, set the quantity, and send your request. Deposit and payment are handled later by the store admin.
+                  </div>
                 </div>
+                <Link
+                  prefetch={false}
+                  href="/orders"
+                  className="inline-flex items-center rounded-xl border px-3 py-2 text-sm font-medium hover:bg-gray-50"
+                >
+                  Legacy orders
+                </Link>
               </div>
               <StoreMyPreorders />
             </CardContent>

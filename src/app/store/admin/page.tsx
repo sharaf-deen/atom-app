@@ -15,5 +15,5 @@ export default async function LegacyStoreAdminPage({
     else if (Array.isArray(v) && typeof v[0] === 'string') qs.set(k, v[0])
   }
   const s = qs.toString()
-  redirect(s ? `/admin/store?${s}` : '/admin/store')
+  redirect(s ? `/admin/store/dashboard?${s}` : '/admin/store/dashboard')
 }

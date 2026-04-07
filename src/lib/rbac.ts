@@ -615,7 +615,7 @@ const CAPABILITY_BLUEPRINTS: CapabilityBlueprint[] = [
     category: 'Store',
     label: 'Store dashboard',
     description: 'Open store business overview reserved for super admin.',
-    href: '/admin/store',
+    href: '/admin/store/dashboard',
     check: (role) => canAccessStoreDashboard(role),
   },
   {
@@ -623,7 +623,7 @@ const CAPABILITY_BLUEPRINTS: CapabilityBlueprint[] = [
     category: 'Store',
     label: 'Manage store catalog',
     description: 'Manage products, stock visibility, and catalog state in store admin.',
-    href: '/admin/store',
+    href: '/admin/store?tab=catalog',
     check: (role) => canManageStoreCatalog(role),
   },
   {
@@ -631,7 +631,7 @@ const CAPABILITY_BLUEPRINTS: CapabilityBlueprint[] = [
     category: 'Store',
     label: 'Manage supplier orders',
     description: 'Create and track supplier purchase orders in store admin.',
-    href: '/admin/store',
+    href: '/admin/store?tab=supplier-orders',
     check: (role) => canManageStoreSupplierOrders(role),
   },
   {
@@ -639,7 +639,7 @@ const CAPABILITY_BLUEPRINTS: CapabilityBlueprint[] = [
     category: 'Store',
     label: 'Manage store preorders',
     description: 'Review customer preorders, deposits, and readiness workflow in store admin.',
-    href: '/admin/store',
+    href: '/admin/store/preorders',
     check: (role) => canManageStorePreorders(role),
   },
   {
@@ -647,7 +647,7 @@ const CAPABILITY_BLUEPRINTS: CapabilityBlueprint[] = [
     category: 'Store',
     label: 'Manage store sales',
     description: 'Record store sales, payment methods, and outstanding debts in store admin.',
-    href: '/admin/store',
+    href: '/admin/store/sales',
     check: (role) => canManageStoreSales(role),
   },
   {
