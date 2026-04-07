@@ -436,6 +436,13 @@ export default async function AdminStorePage({
           <div className="flex flex-wrap items-center gap-2">
             <Link
               prefetch={false}
+              href="/admin/store/preorders"
+              className="inline-flex items-center rounded-xl border px-4 py-2 text-sm font-medium hover:bg-gray-50"
+            >
+              Open preorders
+            </Link>
+            <Link
+              prefetch={false}
               href="/store"
               className="inline-flex items-center rounded-xl border px-4 py-2 text-sm font-medium hover:bg-gray-50"
             >
