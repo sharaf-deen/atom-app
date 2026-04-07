@@ -13,6 +13,7 @@ import { formatCurrency } from '@/lib/money'
 import { canAccessStoreAdmin } from '@/lib/rbac'
 import AdminSaleForm from '@/components/store/AdminSaleForm'
 import AdminSaleQuickEdit from '@/components/store/AdminSaleQuickEdit'
+import StoreAdminNav from '@/components/store/StoreAdminNav'
 
 type SearchParams = Record<string, string | string[] | undefined>
 
@@ -287,6 +288,10 @@ export default async function AdminStoreSalesPage({ searchParams }: { searchPara
           </>
         }
       />
+
+      <Section className="space-y-4">
+        <StoreAdminNav current="/admin/store/sales" />
+      </Section>
 
       <Section className="space-y-6">
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">

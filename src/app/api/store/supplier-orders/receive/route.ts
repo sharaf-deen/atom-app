@@ -3,7 +3,7 @@ export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
 import { NextResponse } from 'next/server'
-import { revalidatePath } from 'next/cache'
+import { revalidatePath, revalidateTag } from 'next/cache'
 import { createSupabaseServerActionClient } from '@/lib/supabaseServer'
 
 function noStore(res: NextResponse) {
@@ -50,8 +50,11 @@ export async function POST(req: Request) {
 
     const row = Array.isArray(data) ? data[0] : data
 
+    revalidateTag('store-products')
     try { revalidatePath('/admin/store') } catch {}
+    try { revalidatePath('/admin/store/dashboard') } catch {}
     try { revalidatePath('/store') } catch {}
+    try { revalidatePath('/admin/store/sales') } catch {}
 
     return noStore(
       NextResponse.json({

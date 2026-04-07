@@ -164,6 +164,7 @@ export async function POST(req: Request) {
     try {
       revalidatePath('/admin/store')
       revalidatePath('/admin/store/sales')
+      revalidatePath('/admin/store/dashboard')
     } catch {}
 
     return noStore(

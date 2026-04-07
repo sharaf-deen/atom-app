@@ -180,14 +180,14 @@ export default async function StorePage({
             <CardContent className="flex flex-wrap items-center gap-3">
               <div>
                 <div className="font-semibold">Admin management</div>
-                <div className="text-sm text-gray-600">Catalog, supplier orders, and store operations are managed from /admin/store.</div>
+                <div className="text-sm text-gray-600">Catalog, supplier orders, preorders, sales, and the dashboard are managed from Store Admin.</div>
               </div>
               <Link
                 prefetch={false}
-                href="/admin/store"
+                href="/admin/store/dashboard"
                 className="ml-auto inline-flex items-center rounded-xl border px-4 py-2 text-sm font-medium hover:bg-gray-50"
               >
-                Open /admin/store
+                Open Store Admin
               </Link>
             </CardContent>
           </Card>

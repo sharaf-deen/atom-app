@@ -148,6 +148,8 @@ export async function POST(req: Request) {
     revalidateTag('store-products')
     try { revalidatePath('/store') } catch {}
     try { revalidatePath('/admin/store') } catch {}
+    try { revalidatePath('/admin/store/preorders') } catch {}
+    try { revalidatePath('/admin/store/dashboard') } catch {}
 
     return noStore(
       NextResponse.json({
