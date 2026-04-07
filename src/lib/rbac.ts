@@ -12,6 +12,7 @@ export const COACH_ROLES = ['coach', 'assistant_coach', 'head_coach'] as const s
 export const LIFETIME_ACCESS_ROLES = ['assistant_coach', 'coach', 'head_coach', 'champion', 'vip'] as const satisfies readonly Role[]
 export const NOTIFICATION_MANAGER_ROLES = ['head_coach', 'admin', 'super_admin'] as const satisfies readonly Role[]
 export const NOTIFICATION_RECIPIENT_ROLES = ['member', 'champion', 'vip', 'assistant_coach', 'coach', 'head_coach'] as const satisfies readonly Role[]
+export const STORE_CUSTOMER_ROLES = ['member', 'champion', 'vip', 'assistant_coach', 'coach', 'head_coach'] as const satisfies readonly Role[]
 
 export type NavIconKey =
   | 'home'
@@ -50,6 +51,7 @@ const APP_NAV_BY_ROLE: MenuByRole = {
     { label: 'Schedule', href: '/schedule', icon: 'calendar' },
     { label: 'My Profile', href: '/profile', icon: 'id' },
     { label: 'Packages & Promos', href: '/packages-and-promos', icon: 'gift' },
+    { label: 'Store', href: '/store', icon: 'bag' },
     { label: 'Contact Admin', href: '/contact', icon: 'user-cog' },
   ],
   champion: [
@@ -57,6 +59,7 @@ const APP_NAV_BY_ROLE: MenuByRole = {
     { label: 'Schedule', href: '/schedule', icon: 'calendar' },
     { label: 'My Profile', href: '/profile', icon: 'id' },
     { label: 'Packages & Promos', href: '/packages-and-promos', icon: 'gift' },
+    { label: 'Store', href: '/store', icon: 'bag' },
     { label: 'Contact Admin', href: '/contact', icon: 'user-cog' },
   ],
   vip: [
@@ -64,6 +67,7 @@ const APP_NAV_BY_ROLE: MenuByRole = {
     { label: 'Schedule', href: '/schedule', icon: 'calendar' },
     { label: 'My Profile', href: '/profile', icon: 'id' },
     { label: 'Packages & Promos', href: '/packages-and-promos', icon: 'gift' },
+    { label: 'Store', href: '/store', icon: 'bag' },
     { label: 'Contact Admin', href: '/contact', icon: 'user-cog' },
   ],
   assistant_coach: [
@@ -72,6 +76,7 @@ const APP_NAV_BY_ROLE: MenuByRole = {
     { label: 'Schedule', href: '/schedule', icon: 'calendar' },
     { label: 'My Profile', href: '/profile', icon: 'id' },
     { label: 'Packages & Promos', href: '/packages-and-promos', icon: 'gift' },
+    { label: 'Store', href: '/store', icon: 'bag' },
   ],
   coach: [
     { label: 'Training Useful', href: '/training-useful', icon: 'dashboard' },
@@ -79,6 +84,7 @@ const APP_NAV_BY_ROLE: MenuByRole = {
     { label: 'Schedule', href: '/schedule', icon: 'calendar' },
     { label: 'My Profile', href: '/profile', icon: 'id' },
     { label: 'Packages & Promos', href: '/packages-and-promos', icon: 'gift' },
+    { label: 'Store', href: '/store', icon: 'bag' },
   ],
   head_coach: [
     { label: 'Training Useful', href: '/training-useful', icon: 'dashboard' },
@@ -87,6 +93,7 @@ const APP_NAV_BY_ROLE: MenuByRole = {
     { label: 'Schedule', href: '/schedule', icon: 'calendar' },
     { label: 'My Profile', href: '/profile', icon: 'id' },
     { label: 'Packages & Promos', href: '/packages-and-promos', icon: 'gift' },
+    { label: 'Store', href: '/store', icon: 'bag' },
   ],
   reception: [
     { label: 'Front Desk', href: '/reception', icon: 'dashboard' },
@@ -98,7 +105,6 @@ const APP_NAV_BY_ROLE: MenuByRole = {
     { label: 'CRM', href: '/admin/crm', icon: 'users' },
     { label: 'Visitors', href: '/admin/visitors', icon: 'users' },
     { label: 'Packages & Promos', href: '/packages-and-promos', icon: 'gift' },
-    { label: 'Store', href: '/store', icon: 'bag' },
   ],
   scan_terminal: [],
   admin: [
@@ -119,7 +125,6 @@ const APP_NAV_BY_ROLE: MenuByRole = {
     { label: 'Visitors', href: '/admin/visitors', icon: 'users' },
     { label: 'Coaches', href: '/coaches', icon: 'user-cog' },
     { label: 'Athletes', href: '/head-coach/athletes', icon: 'users' },
-    { label: 'Store', href: '/store', icon: 'bag' },
     { label: 'Invoices', href: '/invoices', icon: 'file-text' },
     { label: 'Payments', href: '/admin/payments', icon: 'file-text' },
     { label: 'Cash Report', href: '/admin/cash-report', icon: 'wallet' },
@@ -321,7 +326,31 @@ export function canManageCoaches(role: Role | null | undefined) {
 }
 
 export function canAccessStore(role: Role | null | undefined) {
-  return hasAnyRole(role, ['reception', 'admin', 'super_admin'])
+  return hasAnyRole(role, STORE_CUSTOMER_ROLES) || hasAnyRole(role, SUPER_ADMIN_ROLES)
+}
+
+export function canCreateStorePreorder(role: Role | null | undefined) {
+  return hasAnyRole(role, STORE_CUSTOMER_ROLES)
+}
+
+export function canAccessStoreDashboard(role: Role | null | undefined) {
+  return hasAnyRole(role, SUPER_ADMIN_ROLES)
+}
+
+export function canManageStoreCatalog(role: Role | null | undefined) {
+  return hasAnyRole(role, SUPER_ADMIN_ROLES)
+}
+
+export function canManageStoreSupplierOrders(role: Role | null | undefined) {
+  return hasAnyRole(role, SUPER_ADMIN_ROLES)
+}
+
+export function canManageStorePreorders(role: Role | null | undefined) {
+  return hasAnyRole(role, SUPER_ADMIN_ROLES)
+}
+
+export function canManageStoreSales(role: Role | null | undefined) {
+  return hasAnyRole(role, SUPER_ADMIN_ROLES)
 }
 
 export function canAccessStoreAdmin(role: Role | null | undefined) {
@@ -568,10 +597,58 @@ const CAPABILITY_BLUEPRINTS: CapabilityBlueprint[] = [
   {
     key: 'store',
     category: 'Store',
-    label: 'Store',
-    description: 'Open the store page for reception/admin roles only.',
+    label: 'Store catalog',
+    description: 'Open the store catalog and customer-facing preorder entry point.',
     href: '/store',
     check: (role) => canAccessStore(role),
+  },
+  {
+    key: 'store_preorder_create',
+    category: 'Store',
+    label: 'Create store preorder',
+    description: 'Submit a preorder from the store catalog as an eligible customer role.',
+    href: '/store',
+    check: (role) => canCreateStorePreorder(role),
+  },
+  {
+    key: 'store_dashboard',
+    category: 'Store',
+    label: 'Store dashboard',
+    description: 'Open store business overview reserved for super admin.',
+    href: '/admin/store',
+    check: (role) => canAccessStoreDashboard(role),
+  },
+  {
+    key: 'store_catalog_manage',
+    category: 'Store',
+    label: 'Manage store catalog',
+    description: 'Manage products, stock visibility, and catalog state in store admin.',
+    href: '/admin/store',
+    check: (role) => canManageStoreCatalog(role),
+  },
+  {
+    key: 'store_supplier_orders_manage',
+    category: 'Store',
+    label: 'Manage supplier orders',
+    description: 'Create and track supplier purchase orders in store admin.',
+    href: '/admin/store',
+    check: (role) => canManageStoreSupplierOrders(role),
+  },
+  {
+    key: 'store_preorders_manage',
+    category: 'Store',
+    label: 'Manage store preorders',
+    description: 'Review customer preorders, deposits, and readiness workflow in store admin.',
+    href: '/admin/store',
+    check: (role) => canManageStorePreorders(role),
+  },
+  {
+    key: 'store_sales_manage',
+    category: 'Store',
+    label: 'Manage store sales',
+    description: 'Record store sales, payment methods, and outstanding debts in store admin.',
+    href: '/admin/store',
+    check: (role) => canManageStoreSales(role),
   },
   {
     key: 'store_admin',
