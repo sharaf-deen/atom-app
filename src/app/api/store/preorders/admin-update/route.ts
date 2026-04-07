@@ -160,6 +160,7 @@ export async function PATCH(req: Request) {
     try { revalidatePath('/store') } catch {}
     try { revalidatePath('/admin/store') } catch {}
     try { revalidatePath('/admin/store/preorders') } catch {}
+    try { revalidatePath('/admin/store/dashboard') } catch {}
 
     return noStore(NextResponse.json({ ok: true, item: updated }))
   } catch (e: any) {

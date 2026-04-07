@@ -89,11 +89,9 @@ export async function GET(req: NextRequest) {
     const role = (me?.role ?? 'member') as string
     const allowedRoles = new Set([
       'member',
-      'reception',
       'coach',
       'assistant_coach',
       'head_coach',
-      'admin',
       'super_admin',
       'vip',
       'champion',

@@ -12,6 +12,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card'
 import { formatCurrency } from '@/lib/money'
 import { canAccessStoreAdmin } from '@/lib/rbac'
 import { getSessionUserCached, getSupabaseAdminClientCached } from '@/lib/requestCache'
+import StoreAdminNav from '@/components/store/StoreAdminNav'
 
 type SearchParams = Record<string, string | string[] | undefined>
 
@@ -346,6 +347,10 @@ export default async function StoreDashboardPage({ searchParams }: { searchParam
         }
         showReload
       />
+
+      <Section className="space-y-4">
+        <StoreAdminNav current="/admin/store/dashboard" />
+      </Section>
 
       <Section className="space-y-6">
         <Card>

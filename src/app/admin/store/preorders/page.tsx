@@ -11,6 +11,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card'
 import { formatCurrency } from '@/lib/money'
 import { canAccessStoreAdmin } from '@/lib/rbac'
 import AdminPreorderQuickEdit from '@/components/store/AdminPreorderQuickEdit'
+import StoreAdminNav from '@/components/store/StoreAdminNav'
 
 type PreorderStatus = 'pending' | 'confirmed' | 'ordered_from_supplier' | 'ready' | 'completed' | 'canceled'
 type PreorderStatusFilter = 'all' | PreorderStatus
@@ -249,6 +250,10 @@ export default async function AdminStorePreordersPage({
           </div>
         }
       />
+
+      <Section className="space-y-4">
+        <StoreAdminNav current="/admin/store/preorders" />
+      </Section>
 
       <Section className="space-y-4">
         <div className="grid gap-4 lg:grid-cols-2 2xl:grid-cols-4">

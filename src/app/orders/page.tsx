@@ -208,7 +208,7 @@ const baseParams = { status, from, to, page_size: String(pageSize) }
             <div className="text-sm text-gray-600">
               {orders.length > 0 ? (
                 <>
-                  Showing <b>{fromRow + 1}</b>–<b>{fromRow + orders.length}</b> of <b>{fromRow + orders.length}</b>
+                  Showing <b>{fromRow + 1}</b>–<b>{fromRow + orders.length}</b> on this page
                 </>
               ) : (
                 <>No orders yet.</>
