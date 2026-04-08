@@ -38,9 +38,7 @@ export default function AdminRoleEditor({ userId, currentRole, options, compact,
   const [isError, setIsError] = useState(false)
 
   const roleOptions = useMemo(() => {
-    // Ensure we never render invalid options.
-    const safe = (options ?? []).filter((o) => isRole(o?.id) && typeof o?.label === 'string')
-    return safe.length ? safe : ([
+    const fallback: RoleOption[] = [
       { id: 'member', label: 'Member' },
       { id: 'champion', label: 'Champion' },
       { id: 'vip', label: 'VIP' },
@@ -51,8 +49,21 @@ export default function AdminRoleEditor({ userId, currentRole, options, compact,
       { id: 'scan_terminal', label: 'Scan Terminal' },
       { id: 'admin', label: 'Admin' },
       { id: 'super_admin', label: 'Super Admin' },
-    ] as RoleOption[])
-  }, [options])
+    ]
+
+    const safe = (options ?? []).filter((o) => isRole(o?.id) && typeof o?.label === 'string')
+    const merged = [...safe]
+
+    for (const option of fallback) {
+      if (!merged.some((x) => x.id === option.id)) merged.push(option)
+    }
+
+    if (isRole(currentRole) && !merged.some((x) => x.id === currentRole)) {
+      merged.push({ id: currentRole, label: currentRole === 'scan_terminal' ? 'Scan Terminal' : currentRole })
+    }
+
+    return merged
+  }, [currentRole, options])
 
   const dirty = role !== savedRole
 
