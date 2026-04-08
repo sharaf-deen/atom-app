@@ -116,13 +116,19 @@ export default async function AdminMembersPage({
   try {
     const { data: rdata, error: rerr } = await admin.from('roles').select('id,label').order('label', { ascending: true })
     if (!rerr && Array.isArray(rdata)) {
-      const opts: RoleOption[] = []
+      const merged = new Map<Role, RoleOption>()
+
+      for (const option of FALLBACK_ROLE_OPTIONS) {
+        merged.set(option.id, option)
+      }
+
       for (const r of rdata as any[]) {
         const id = normalizeRole((r as any)?.id)
         const label = String((r as any)?.label ?? '').trim()
-        if (id) opts.push({ id, label: label || id })
+        if (id) merged.set(id, { id, label: label || merged.get(id)?.label || id })
       }
-      if (opts.length) roleOptions = opts
+
+      roleOptions = Array.from(merged.values())
     }
   } catch {
     // ignore
