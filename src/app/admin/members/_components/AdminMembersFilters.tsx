@@ -7,7 +7,7 @@ import Button from '@/components/ui/Button'
 import Input from '@/components/ui/Input'
 import Select from '@/components/ui/Select'
 
-type Role = 'member' | 'champion' | 'vip' | 'assistant_coach' | 'coach' | 'head_coach' | 'reception' | 'admin' | 'super_admin'
+type Role = 'member' | 'champion' | 'vip' | 'assistant_coach' | 'coach' | 'head_coach' | 'reception' | 'scan_terminal' | 'admin' | 'super_admin'
 
 function clampInt(v: number, min: number, max: number) {
   if (!Number.isFinite(v)) return min
@@ -15,7 +15,7 @@ function clampInt(v: number, min: number, max: number) {
 }
 
 function normalizeRole(v: string) {
-  const allowed: Role[] = ['member', 'champion', 'vip', 'assistant_coach', 'coach', 'head_coach', 'reception', 'admin', 'super_admin']
+  const allowed: Role[] = ['member', 'champion', 'vip', 'assistant_coach', 'coach', 'head_coach', 'reception', 'scan_terminal', 'admin', 'super_admin']
   return (allowed as string[]).includes(v) ? (v as Role) : ''
 }
 
@@ -108,6 +108,7 @@ export default function AdminMembersFilters({
           <option value="coach">Coach</option>
           <option value="head_coach">Head Coach</option>
           <option value="reception">Reception</option>
+          <option value="scan_terminal">Scan Terminal</option>
           <option value="admin">Admin</option>
           <option value="super_admin">Super Admin</option>
         </Select>
