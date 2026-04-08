@@ -29,12 +29,13 @@ export default async function RootLayout({ children }: { children: React.ReactNo
 
   if (isScanTerminalRole(user?.role) && pathname) {
     const wantsLogout = pathname === '/logout'
+    const wantsHome = pathname === '/'
 
-    if (wantsLogout && !unlockCookie) {
+    if ((wantsLogout || wantsHome) && !unlockCookie) {
       redirect('/scan')
     }
 
-    if (!wantsLogout && !isScanTerminalPathAllowed(pathname)) {
+    if (!wantsLogout && !wantsHome && !isScanTerminalPathAllowed(pathname)) {
       redirect('/scan')
     }
   }

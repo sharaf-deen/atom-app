@@ -32,6 +32,7 @@ const FALLBACK_ROLE_OPTIONS: RoleOption[] = [
   { id: 'coach', label: 'Coach' },
   { id: 'head_coach', label: 'Head Coach' },
   { id: 'reception', label: 'Reception' },
+  { id: 'scan_terminal', label: 'Scan Terminal' },
   { id: 'admin', label: 'Admin' },
   { id: 'super_admin', label: 'Super Admin' },
 ]
@@ -45,7 +46,7 @@ function clampInt(v: number, min: number, max: number) {
 
 function normalizeRole(v: unknown): Role | null {
   const s = typeof v === 'string' ? v : ''
-  const allowed: Role[] = ['member', 'champion', 'vip', 'assistant_coach', 'coach', 'head_coach', 'reception', 'admin', 'super_admin']
+  const allowed: Role[] = ['member', 'champion', 'vip', 'assistant_coach', 'coach', 'head_coach', 'reception', 'scan_terminal', 'admin', 'super_admin']
   return (allowed as string[]).includes(s) ? (s as Role) : null
 }
 
