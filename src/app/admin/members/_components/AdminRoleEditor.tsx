@@ -23,6 +23,7 @@ function isRole(v: unknown): v is Role {
     v === 'coach' ||
     v === 'head_coach' ||
     v === 'reception' ||
+    v === 'scan_terminal' ||
     v === 'admin' ||
     v === 'super_admin'
   )
@@ -47,6 +48,7 @@ export default function AdminRoleEditor({ userId, currentRole, options, compact,
       { id: 'coach', label: 'Coach' },
       { id: 'head_coach', label: 'Head Coach' },
       { id: 'reception', label: 'Reception' },
+      { id: 'scan_terminal', label: 'Scan Terminal' },
       { id: 'admin', label: 'Admin' },
       { id: 'super_admin', label: 'Super Admin' },
     ] as RoleOption[])
