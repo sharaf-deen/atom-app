@@ -5,7 +5,7 @@ export const revalidate = 0
 import Link from 'next/link'
 import Image from 'next/image'
 import { getSessionUserCached } from '@/lib/requestCache'
-import { getAppNavForRole, type NavIconKey as IconKey, type NavMenuItem as MenuItem } from '@/lib/rbac'
+import { getAppNavForRole, type NavIconKey as IconKey, type NavMenuItem as MenuItem, type Role } from '@/lib/rbac'
 import SignOutButton from '@/components/SignOutButton'
 import NavLoginLink from '@/components/NavLoginLink'
 import RoleMenu from '@/components/RoleMenu'
@@ -42,7 +42,7 @@ export default async function AppNav() {
         {/* Bouton Menu — visible sur Home, caché seulement sur les pages d’auth */}
         {user && (
           <HideMenuOnRoutes routes={AUTH_ROUTES}>
-            <RoleMenu items={items} />
+            <RoleMenu items={items} role={user.role as Role} />
           </HideMenuOnRoutes>
         )}
 
@@ -53,7 +53,15 @@ export default async function AppNav() {
             <div className="ml-auto flex items-center gap-3">
               {hasNotifications ? <NotificationsBell pollMs={5000} /> : null}
               <span className="hidden text-xs text-gray-600 dark:text-gray-300 sm:inline">
-                {user.full_name || user.email || 'User'} · <strong>{user.role}</strong>
+                {user.full_name || user.email || 'User'}
+                {user.role === 'member'
+                || user.role === 'champion'
+                || user.role === 'vip'
+                || user.role === 'assistant_coach'
+                || user.role === 'coach'
+                || user.role === 'head_coach' ? null : (
+                  <> · <strong>{user.role}</strong></>
+                )}
               </span>
               <SignOutButton />
             </div>
