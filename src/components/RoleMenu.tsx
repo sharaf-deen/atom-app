@@ -281,7 +281,7 @@ export default function RoleMenu({ items, role }: { items: MenuItem[]; role?: Ro
               onClick={close}
               className={
                 'flex items-center justify-between gap-3 px-3 ' +
-                (isLiteMenu ? 'py-3 text-[15px] rounded-2xl ' : 'py-2.5 text-[15px] ') +
+                (isLiteMenu ? 'rounded-2xl py-3 text-[15px] ' : 'rounded-2xl py-2.5 text-[15px] ') +
                 'hover:bg-black/[0.03] dark:hover:bg-white/[0.06] focus:bg-black/[0.04] dark:focus:bg-white/[0.08] outline-none ' +
                 (isNotifUnread ? 'text-red-700 font-semibold' : '')
               }
@@ -290,7 +290,7 @@ export default function RoleMenu({ items, role }: { items: MenuItem[]; role?: Ro
                 <span
                   className={
                     'inline-flex shrink-0 items-center justify-center border border-black/10 dark:border-white/10 ' +
-                    (isLiteMenu ? 'h-10 w-10 rounded-2xl ' : 'h-9 w-9 rounded-xl ') +
+                    (isLiteMenu ? 'h-10 w-10 rounded-2xl bg-[hsl(var(--bg))] ' : 'h-9 w-9 rounded-2xl bg-[hsl(var(--bg))] ') +
                     (isNotifUnread ? 'border-red-200 bg-red-50 dark:bg-white/10' : '')
                   }
                 >
@@ -330,7 +330,7 @@ export default function RoleMenu({ items, role }: { items: MenuItem[]; role?: Ro
             setQ('')
           }
         }}
-        className="relative rounded-full bg-black text-white dark:bg-white dark:text-black px-4 py-1.5 text-sm font-semibold shadow-soft hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-black/60 dark:focus:ring-white/60"
+        className="relative rounded-full border border-black bg-black px-4 py-2 text-sm font-semibold text-white shadow-soft transition hover:opacity-95 focus:outline-none focus:ring-2 focus:ring-black/60 dark:border-white dark:bg-white dark:text-black dark:focus:ring-white/60"
         aria-haspopup="menu"
         aria-expanded={open}
         aria-label="Menu"
@@ -348,7 +348,7 @@ export default function RoleMenu({ items, role }: { items: MenuItem[]; role?: Ro
         <div className="fixed inset-x-0 bottom-0 z-50 sm:hidden">
           <div
             ref={mobilePanelRef}
-            className="mx-auto w-full max-w-md rounded-t-3xl border border-black/10 bg-white dark:bg-black shadow-2xl"
+            className="mx-auto w-full max-w-md rounded-t-[28px] border border-black/10 bg-white dark:bg-black shadow-2xl"
           >
             {/* Handle */}
             <div className="flex items-center justify-center pt-2">
@@ -416,7 +416,7 @@ export default function RoleMenu({ items, role }: { items: MenuItem[]; role?: Ro
       {open && (
         <div
           ref={desktopPanelRef}
-          className="hidden sm:block absolute z-50 mt-3 w-72 rounded-2xl border border-black/10 bg-white dark:bg-black shadow-xl"
+          className="absolute z-50 mt-3 hidden w-72 rounded-3xl border border-black/10 bg-white dark:bg-black shadow-xl sm:block"
         >
           <div className="flex items-center justify-between gap-2 px-3 pt-3 pb-2">
             <div className="text-sm font-semibold">{isLiteMenu ? 'Menu' : showAll ? 'All tools' : 'Quick menu'}</div>

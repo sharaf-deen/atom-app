@@ -15,15 +15,15 @@ export default function PageHeader({
 }) {
   return (
     <div className="page-header border-b border-[hsl(var(--border))] bg-[hsl(var(--bg))]">
-      <Container className="py-6">
+      <Container className="py-5 sm:py-6">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-4">
-          <div className="flex-1 min-w-0">
-            <h1 className="text-2xl font-semibold tracking-tight">{title}</h1>
-            {subtitle && <p className="mt-1 text-[hsl(var(--muted))]">{subtitle}</p>}
+          <div className="min-w-0 flex-1">
+            <h1 className="text-2xl font-semibold tracking-tight sm:text-[28px]">{title}</h1>
+            {subtitle ? <p className="mt-1 max-w-2xl text-sm leading-6 text-[hsl(var(--muted))] sm:text-base">{subtitle}</p> : null}
           </div>
 
           {(right || showReload) && (
-            <div className="w-full sm:w-auto flex flex-wrap items-center gap-2 sm:ml-auto">
+            <div className="flex w-full flex-wrap items-center gap-2 sm:ml-auto sm:w-auto">
               {right}
               {showReload ? <ReloadButton /> : null}
             </div>
