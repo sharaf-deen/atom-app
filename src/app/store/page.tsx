@@ -190,7 +190,7 @@ export default async function StorePage({
           isSuperAdmin
             ? 'Browse the catalog or open Store Admin.'
             : canPreorder
-              ? 'Browse the catalog and send a preorder in a few taps.'
+              ? 'Browse the catalog and send a preorder quickly.'
               : 'Browse the catalog.'
         }
       />
@@ -221,7 +221,7 @@ export default async function StorePage({
                 <div className="min-w-0 flex-1">
                   <div className="font-semibold">Pre-order gear</div>
                   <div className="mt-1 text-sm text-[hsl(var(--muted))]">
-                    Choose your item, send your request, then confirm deposit and pickup later with the store admin.
+                    Choose your item, send your request, then confirm the rest later with the store admin.
                   </div>
                 </div>
                 <Link
@@ -278,7 +278,7 @@ export default async function StorePage({
               <div className="min-w-0 flex-1">
                 <div className="font-semibold">Browse catalog</div>
                 <div className="mt-1 text-sm text-[hsl(var(--muted))]">
-                  Clean catalog view with quick search and category shortcuts.
+                  Quick search, clean cards and simple category shortcuts.
                 </div>
               </div>
               <div className="rounded-full border border-[hsl(var(--border))] bg-white px-3 py-1 text-xs font-medium text-[hsl(var(--muted))]">
@@ -422,7 +422,7 @@ export default async function StorePage({
                       </div>
                     ) : (
                       <div className="rounded-2xl border border-[hsl(var(--border))] bg-white/70 px-3 py-3 text-sm text-[hsl(var(--muted))]">
-                        Send a preorder request now. Deposit and final payment are confirmed later by the store admin.
+                        Reserve this item now. Deposit and final payment are confirmed later by the store admin.
                       </div>
                     )}
 

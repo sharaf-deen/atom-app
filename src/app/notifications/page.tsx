@@ -46,8 +46,8 @@ export default async function NotificationsPage() {
         title="Notifications"
         subtitle={
           canManage
-            ? 'Send clearly. Read quickly. Keep only the useful updates visible.'
-            : 'Unread first. Open fast. Keep only what still matters.'
+            ? 'Send clearly. Read quickly. Keep only what matters visible.'
+            : 'Unread first. Open fast. Keep only what matters.'
         }
       />
 
@@ -61,7 +61,7 @@ export default async function NotificationsPage() {
                   <Badge>Admin tools</Badge>
                 </div>
                 <p className="mt-2 text-base leading-7 text-[hsl(var(--muted))]">
-                  This screen is now meant for 3 quick actions: check unread items, send one useful message, and remove what is no longer needed.
+                  This screen is built for 3 quick actions: check unread items, send one useful message, and remove what you no longer need.
                 </p>
               </div>
 
@@ -96,7 +96,7 @@ export default async function NotificationsPage() {
                   <Badge>Inbox</Badge>
                 </div>
                 <p className="mt-2 text-base leading-7 text-[hsl(var(--muted))]">
-                  Open the latest update, mark it read, or keep it for later. The page is focused on the messages that matter now.
+                  Open the latest update, mark it read, or keep it for later. The page stays focused on what matters now.
                 </p>
               </div>
 

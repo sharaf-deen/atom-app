@@ -707,12 +707,12 @@ function HeroCard({
   joinedAt?: string | null
 }) {
   const roleCopy: Record<Role, string> = {
-    member: 'Your membership, QR code and the next useful action.',
+    member: 'Your access, QR code and the essentials.',
     champion: 'Your access, QR code and the essentials only.',
     vip: 'Your access, QR code and the essentials only.',
-    coach: 'Your QR code, useful shortcuts and a fast member lookup.',
-    assistant_coach: 'Your QR code and the most useful staff shortcuts.',
-    head_coach: 'Your QR code, core staff shortcuts and fast member lookup.',
+    coach: 'Your QR code, key shortcuts and fast member lookup.',
+    assistant_coach: 'Your QR code and key staff shortcuts.',
+    head_coach: 'Your QR code, key staff shortcuts and fast member lookup.',
     reception: 'Built for quick actions at the front desk: scan, member creation and daily queues.',
     scan_terminal: 'Door tablet mode: scanner only, front camera locked, result screen and automatic restart.',
     admin: 'Daily operations first: members, finance, reporting and control.',
@@ -1013,8 +1013,8 @@ export default async function HomePage() {
             </div>
 
             <QuickActions
-              title="Quick actions"
-              subtitle="Profile, schedule and notifications only."
+              title="Essentials"
+              subtitle="Only the actions you use most."
               items={memberActions().slice(0, 3)}
             />
           </>
@@ -1028,15 +1028,15 @@ export default async function HomePage() {
             </div>
 
             <QuickActions
-              title="Coach shortcuts"
-              subtitle="Only the most useful staff actions."
+              title="Essentials"
+              subtitle="Only the staff actions you use most."
               items={coachActions(user.role).slice(0, 3)}
             />
 
             {(user.role === 'coach' || user.role === 'head_coach') ? (
               <HomeMemberLookup
                 title="Quick member lookup"
-                subtitle="Read-only access. Search fast when you need help on the mat."
+                subtitle="Read-only access when you need a quick lookup."
                 canOpenProfile
                 showSensitiveFields={false}
               />
@@ -1059,7 +1059,7 @@ export default async function HomePage() {
             </div>
 
             <QuickActions
-              title="Quick actions"
+              title="Essentials"
               subtitle="The desk tools used most often."
               items={receptionActions().slice(0, 5)}
             />
