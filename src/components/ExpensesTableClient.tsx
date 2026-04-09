@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import Modal from '@/components/ui/Modal'
@@ -23,6 +23,7 @@ type Props = {
   expenses: ExpenseRow[]
   labelByKey: Record<string, string>
   returnQueryString?: string
+  focusExpenseId?: string
 }
 
 type EditableExpense = {
@@ -89,7 +90,7 @@ function parseErrorMessage(data: any, fallback: string) {
   return data?.details || data?.error || fallback
 }
 
-export default function ExpensesTableClient({ expenses, labelByKey, returnQueryString = '' }: Props) {
+export default function ExpensesTableClient({ expenses, labelByKey, returnQueryString = '', focusExpenseId = '' }: Props) {
   const router = useRouter()
   const [previewOpen, setPreviewOpen] = useState(false)
   const [editOpen, setEditOpen] = useState(false)
@@ -155,6 +156,30 @@ export default function ExpensesTableClient({ expenses, labelByKey, returnQueryS
       router.refresh()
     },
   })
+
+
+  useEffect(() => {
+    const id = (focusExpenseId || '').trim()
+    if (!id) return
+
+    let attempts = 0
+    let timer: number | null = null
+
+    const run = () => {
+      attempts += 1
+      const el = document.getElementById(`expense-${id}`)
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+        return
+      }
+      if (attempts < 12) timer = window.setTimeout(run, 180)
+    }
+
+    timer = window.setTimeout(run, 500)
+    return () => {
+      if (timer) window.clearTimeout(timer)
+    }
+  }, [focusExpenseId, expenses])
 
   const activeIsImage = useMemo(() => {
     if (!active) return false
@@ -226,7 +251,7 @@ export default function ExpensesTableClient({ expenses, labelByKey, returnQueryS
               const categoryLabel = e.category_key ? labelByKey[e.category_key] ?? e.category_key : '—'
               const hasReceipt = Boolean(e.receipt_path)
               return (
-                <div key={e.id} className="rounded-2xl border border-[hsl(var(--border))] bg-white p-4 shadow-soft">
+                <div id={`expense-${e.id}`} key={e.id} className={`rounded-2xl border bg-white p-4 shadow-soft ${focusExpenseId === e.id ? 'border-emerald-300 ring-2 ring-emerald-200/70 bg-emerald-50/30' : 'border-[hsl(var(--border))]'}`}>
                   <div className="flex items-start justify-between gap-3">
                     <div>
                       <div className="text-xs text-[hsl(var(--muted))]">{e.date}</div>
@@ -309,7 +334,7 @@ export default function ExpensesTableClient({ expenses, labelByKey, returnQueryS
                   const categoryLabel = e.category_key ? labelByKey[e.category_key] ?? e.category_key : '—'
                   const hasReceipt = Boolean(e.receipt_path)
                   return (
-                    <tr key={e.id} className="border-b border-[hsl(var(--border))]/60 align-top">
+                    <tr id={`expense-${e.id}`} key={e.id} className={`border-b border-[hsl(var(--border))]/60 align-top ${focusExpenseId === e.id ? 'bg-emerald-50/70' : ''}`}>
                       <td className="py-3 pr-3 whitespace-nowrap">{e.date}</td>
                       <td className="py-3 pr-3 font-medium">{categoryLabel}</td>
                       <td className="py-3 pr-3 text-[hsl(var(--muted))] max-w-[24rem]">
