@@ -261,7 +261,7 @@ export default async function ProfilePage() {
 
   return (
     <main>
-      <PageHeader title="Profile" subtitle="Your card and membership" />
+      <PageHeader title="Profile" subtitle="Identity, access and QR." />
 
       <Section className="space-y-5">
         <section className="grid gap-4 lg:grid-cols-[1fr_320px]">
@@ -271,7 +271,7 @@ export default async function ProfilePage() {
                 <div className="flex items-start justify-between gap-3">
                   <div>
                     <h2 className="font-semibold">Profile photo</h2>
-                    <p className="mt-1 text-sm text-[hsl(var(--muted))]">Keep your member photo up to date.</p>
+                    <p className="mt-1 text-sm text-[hsl(var(--muted))]">Keep your photo clear and up to date.</p>
                   </div>
                 </div>
                 <div className="mt-4">
@@ -284,7 +284,7 @@ export default async function ProfilePage() {
               <div className="flex items-start justify-between gap-3">
                 <div>
                   <h2 className="font-semibold">Identity</h2>
-                  <p className="mt-1 text-sm text-[hsl(var(--muted))]">Your main account details.</p>
+                  <p className="mt-1 text-sm text-[hsl(var(--muted))]">Your main details at a glance.</p>
                 </div>
               </div>
 
@@ -350,7 +350,7 @@ export default async function ProfilePage() {
                 <div className="mt-3 inline-flex rounded-2xl border border-[hsl(var(--border))] bg-white p-3">
                   <QrImage value={p.qr_code} size={180} />
                 </div>
-                <div className="mt-3 text-sm text-[hsl(var(--muted))]">Show this code at reception.</div>
+                <div className="mt-3 text-sm text-[hsl(var(--muted))]">Show this code at reception when needed.</div>
               </div>
             ) : (
               <div className="text-center">
@@ -386,7 +386,7 @@ export default async function ProfilePage() {
         <section className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-5 shadow-soft space-y-4">
           <div>
             <h2 className="font-semibold">Membership history</h2>
-            <p className="mt-1 text-sm text-[hsl(var(--muted))]">Older subscriptions and renewals.</p>
+            <p className="mt-1 text-sm text-[hsl(var(--muted))]">Older plans and renewals.</p>
           </div>
 
           {historyRows.length === 0 ? (
