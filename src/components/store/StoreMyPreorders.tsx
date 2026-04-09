@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { formatCurrency } from '@/lib/money'
 import Button from '@/components/ui/Button'
 import InlineAlert from '@/components/ui/InlineAlert'
@@ -28,7 +28,7 @@ function preorderStatusPill(status: PreorderRow['status']) {
     case 'confirmed':
       return <span className="rounded-full border border-sky-200 bg-sky-50 px-2.5 py-1 text-[11px] font-medium text-sky-700">Confirmed</span>
     case 'ordered_from_supplier':
-      return <span className="rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-[11px] font-medium text-amber-700">Ordered from supplier</span>
+      return <span className="rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-[11px] font-medium text-amber-700">Ordered</span>
     case 'ready':
       return <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[11px] font-medium text-emerald-700">Ready</span>
     case 'completed':
@@ -36,6 +36,14 @@ function preorderStatusPill(status: PreorderRow['status']) {
     case 'canceled':
       return <span className="rounded-full border border-rose-200 bg-rose-50 px-2.5 py-1 text-[11px] font-medium text-rose-700">Canceled</span>
   }
+}
+
+function moneyChip(label: string, value: number) {
+  return (
+    <div className="rounded-full border border-[hsl(var(--border))] bg-white px-2.5 py-1 text-[11px] font-medium text-black">
+      {label}: {formatCurrency(value, 'en-EG', 'EGP')}
+    </div>
+  )
 }
 
 export default function StoreMyPreorders() {
@@ -88,11 +96,35 @@ export default function StoreMyPreorders() {
     return () => window.removeEventListener('store:preorder:created', onCreated)
   }, [load])
 
+  const summary = useMemo(() => {
+    const ready = items.filter((item) => item.status === 'ready').length
+    const pending = items.filter((item) => ['pending', 'confirmed', 'ordered_from_supplier'].includes(item.status)).length
+    return { total: items.length, ready, pending }
+  }, [items])
+
   return (
     <div className="space-y-3 rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-3">
       <div className="flex flex-wrap items-center gap-2">
         <div className="font-medium">My preorders</div>
-        <div className="text-xs text-[hsl(var(--muted))]">Track your requests here.</div>
+        {summary.total > 0 ? (
+          <>
+            <div className="rounded-full border border-[hsl(var(--border))] bg-white px-2.5 py-1 text-[11px] font-medium text-black">
+              {summary.total} recent
+            </div>
+            {summary.pending > 0 ? (
+              <div className="rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-[11px] font-medium text-amber-700">
+                {summary.pending} in progress
+              </div>
+            ) : null}
+            {summary.ready > 0 ? (
+              <div className="rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[11px] font-medium text-emerald-700">
+                {summary.ready} ready
+              </div>
+            ) : null}
+          </>
+        ) : (
+          <div className="text-xs text-[hsl(var(--muted))]">Your recent requests appear here.</div>
+        )}
         <div className="ml-auto flex items-center gap-2">
           <Button type="button" variant="outline" size="sm" onClick={() => void load(page)} loading={busy} loadingText="Refreshing…">
             Refresh
@@ -108,7 +140,9 @@ export default function StoreMyPreorders() {
 
       <div className="space-y-2">
         {!busy && items.length === 0 ? (
-          <div className="text-sm text-[hsl(var(--muted))]">No preorders yet.</div>
+          <div className="rounded-2xl border border-dashed border-[hsl(var(--border))] bg-white/70 px-3 py-4 text-sm text-[hsl(var(--muted))]">
+            No preorders yet.
+          </div>
         ) : null}
 
         {items.map((item) => (
@@ -126,22 +160,13 @@ export default function StoreMyPreorders() {
               {preorderStatusPill(item.status)}
             </div>
 
-            <div className="mt-2 grid gap-2 text-sm sm:grid-cols-3">
-              <div>
-                <div className="text-xs text-[hsl(var(--muted))]">Total</div>
-                <div className="font-medium">{formatCurrency(item.total_cents ?? 0, 'en-EG', 'EGP')}</div>
-              </div>
-              <div>
-                <div className="text-xs text-[hsl(var(--muted))]">Deposit</div>
-                <div className="font-medium">{formatCurrency(item.deposit_cents ?? 0, 'en-EG', 'EGP')}</div>
-              </div>
-              <div>
-                <div className="text-xs text-[hsl(var(--muted))]">Balance due</div>
-                <div className="font-medium">{formatCurrency(item.balance_due_cents ?? 0, 'en-EG', 'EGP')}</div>
-              </div>
+            <div className="mt-3 flex flex-wrap gap-2">
+              {moneyChip('Total', item.total_cents ?? 0)}
+              {(item.deposit_cents ?? 0) > 0 ? moneyChip('Deposit', item.deposit_cents ?? 0) : null}
+              {(item.balance_due_cents ?? 0) > 0 ? moneyChip('Due', item.balance_due_cents ?? 0) : null}
             </div>
 
-            <div className="mt-2 text-xs text-[hsl(var(--muted))]">
+            <div className="mt-3 text-xs text-[hsl(var(--muted))]">
               Created {new Date(item.created_at).toLocaleString('en-GB', {
                 year: 'numeric',
                 month: 'short',

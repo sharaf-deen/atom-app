@@ -131,6 +131,16 @@ function stockTone(stock: number) {
   return 'text-emerald-700'
 }
 
+function stockLabel(stock: number) {
+  if (stock <= 0) return 'No stock now'
+  if (stock <= 2) return 'Low stock'
+  return 'In stock'
+}
+
+function categoryLabel(category: Category | 'all') {
+  return CATEGORIES.find((item) => item.v === category)?.label ?? 'All'
+}
+
 export default async function StorePage({
   searchParams,
 }: {
@@ -170,9 +180,20 @@ export default async function StorePage({
     q,
   }
 
+  const searchLabel = q ? `Search: ${q}` : `Category: ${categoryLabel(category)}`
+
   return (
     <main>
-      <PageHeader title="Store" />
+      <PageHeader
+        title="Store"
+        subtitle={
+          isSuperAdmin
+            ? 'Browse the catalog or open Store Admin.'
+            : canPreorder
+              ? 'Browse the catalog and send a preorder in a few taps.'
+              : 'Browse the catalog.'
+        }
+      />
 
       <Section className="space-y-6">
         {isSuperAdmin ? (
@@ -195,62 +216,101 @@ export default async function StorePage({
 
         {canPreorder ? (
           <Card>
-            <CardContent className="space-y-3 py-4">
+            <CardContent className="space-y-4 py-4">
               <div className="flex flex-wrap items-start gap-3">
                 <div className="min-w-0 flex-1">
-                  <div className="font-semibold">Pre-order from the catalog</div>
-                  <div className="text-sm text-[hsl(var(--muted))]">
-                    Choose a product, set the quantity, and send your request. Deposit and payment are handled later by the store admin.
+                  <div className="font-semibold">Pre-order gear</div>
+                  <div className="mt-1 text-sm text-[hsl(var(--muted))]">
+                    Choose your item, send your request, then confirm deposit and pickup later with the store admin.
                   </div>
                 </div>
                 <Link
                   prefetch={false}
-                  href="/orders"
+                  href="#store-search"
                   className="inline-flex items-center rounded-xl border px-3 py-2 text-sm font-medium hover:bg-gray-50"
                 >
-                  Legacy orders
+                  Browse catalog
                 </Link>
               </div>
-              <StoreMyPreorders />
+
+              <div className="grid gap-2 text-sm sm:grid-cols-3">
+                <div className="rounded-2xl border border-[hsl(var(--border))] bg-white/70 px-3 py-3">
+                  <div className="font-medium">1. Choose</div>
+                  <div className="mt-1 text-xs text-[hsl(var(--muted))]">Pick the product, color and size that suit you.</div>
+                </div>
+                <div className="rounded-2xl border border-[hsl(var(--border))] bg-white/70 px-3 py-3">
+                  <div className="font-medium">2. Send request</div>
+                  <div className="mt-1 text-xs text-[hsl(var(--muted))]">Set the quantity and add an optional note.</div>
+                </div>
+                <div className="rounded-2xl border border-[hsl(var(--border))] bg-white/70 px-3 py-3">
+                  <div className="font-medium">3. Pay later</div>
+                  <div className="mt-1 text-xs text-[hsl(var(--muted))]">Deposit and final payment stay managed offline.</div>
+                </div>
+              </div>
+
+              <details className="group rounded-2xl border border-[hsl(var(--border))] bg-white/70 p-4">
+                <summary className="flex cursor-pointer list-none items-center gap-3">
+                  <div className="min-w-0 flex-1">
+                    <div className="font-medium">My preorders</div>
+                    <div className="text-xs text-[hsl(var(--muted))]">Track status, deposits and pickup readiness.</div>
+                  </div>
+                  <span className="text-xs font-medium text-[hsl(var(--muted))] transition group-open:rotate-180">⌄</span>
+                </summary>
+                <div className="pt-4">
+                  <StoreMyPreorders />
+                </div>
+              </details>
+
+              <div className="text-xs text-[hsl(var(--muted))]">
+                Need the old archive?{' '}
+                <Link prefetch={false} href="/orders" className="underline hover:text-black">
+                  Open legacy orders
+                </Link>
+                .
+              </div>
             </CardContent>
           </Card>
         ) : null}
 
         <Card>
-          <CardContent>
+          <CardContent className="space-y-4 py-4">
+            <div className="flex flex-wrap items-start gap-3">
+              <div className="min-w-0 flex-1">
+                <div className="font-semibold">Browse catalog</div>
+                <div className="mt-1 text-sm text-[hsl(var(--muted))]">
+                  Clean catalog view with quick search and category shortcuts.
+                </div>
+              </div>
+              <div className="rounded-full border border-[hsl(var(--border))] bg-white px-3 py-1 text-xs font-medium text-[hsl(var(--muted))]">
+                {searchLabel}
+              </div>
+            </div>
+
             <form action="/store" method="get" className="flex flex-wrap items-end gap-3">
+              <input type="hidden" name="category" value={category} />
+
               <div className="flex min-w-[220px] flex-1 flex-col gap-1">
-                <label className="text-xs text-[hsl(var(--muted))]">Search</label>
+                <label htmlFor="store-search" className="text-xs text-[hsl(var(--muted))]">
+                  Search
+                </label>
                 <input
+                  id="store-search"
                   name="q"
                   defaultValue={q}
                   className="rounded-xl border bg-white px-3 py-2 text-sm"
-                  placeholder="Model, color, size…"
+                  placeholder="Search by item, color or size"
                 />
               </div>
 
-              <div className="flex flex-col gap-1">
-                <label className="text-xs text-[hsl(var(--muted))]">Category</label>
-                <select
-                  name="category"
-                  defaultValue={category}
-                  className="rounded-xl border bg-white px-3 py-2 text-sm"
-                >
-                  {CATEGORIES.map((c) => (
-                    <option key={c.v} value={c.v}>
-                      {c.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
               <button className="rounded-xl border px-4 py-2 text-sm font-medium hover:bg-gray-50" type="submit">
-                Apply
+                Search
               </button>
 
-              <Link prefetch={false} href="/store" className="text-sm underline text-gray-700 hover:text-black">
-                Clear
-              </Link>
+              {(q || category !== 'all') ? (
+                <Link prefetch={false} href="/store" className="text-sm underline text-gray-700 hover:text-black">
+                  Clear
+                </Link>
+              ) : null}
 
               <div className="ml-auto text-xs text-[hsl(var(--muted))]">
                 {items.length > 0 ? (
@@ -262,6 +322,30 @@ export default async function StorePage({
                 )}
               </div>
             </form>
+
+            <div className="flex flex-wrap gap-2">
+              {CATEGORIES.map((item) => {
+                const href = buildUrl('/store', {
+                  q,
+                  category: item.v === 'all' ? '' : item.v,
+                })
+                const active = category === item.v
+                return (
+                  <Link
+                    key={item.v}
+                    prefetch={false}
+                    href={href}
+                    className={`inline-flex items-center rounded-full border px-3 py-1.5 text-sm font-medium transition ${
+                      active
+                        ? 'border-black bg-black text-white'
+                        : 'border-[hsl(var(--border))] bg-white text-black hover:bg-gray-50'
+                    }`}
+                  >
+                    {item.label}
+                  </Link>
+                )
+              })}
+            </div>
           </CardContent>
         </Card>
 
@@ -275,7 +359,7 @@ export default async function StorePage({
           <Card>
             <CardContent>
               <div className="text-sm text-[hsl(var(--muted))]">
-                {canPreorder ? 'No preorderable products match your filters.' : 'No products match your filters.'}
+                {canPreorder ? 'No preorderable products match your search right now.' : 'No products match your search right now.'}
               </div>
             </CardContent>
           </Card>
@@ -284,41 +368,63 @@ export default async function StorePage({
             {items.map((p) => {
               const price = formatCurrency(p.price_cents ?? 0, 'en-EG', p.currency ?? 'EGP')
               const stock = Math.max(0, Number(p.inventory_qty ?? 0))
+              const itemDetails = [p.color, p.size].filter(Boolean).join(' · ')
 
               return (
                 <Card key={p.id} hover>
-                  <CardContent className="space-y-3 py-4">
-                    <div className="flex items-start gap-2">
+                  <CardContent className="space-y-4 py-4">
+                    <div className="flex items-start gap-3">
                       <div className="min-w-0 flex-1">
-                        <div className="font-semibold">{p.name}</div>
-                        <div className="text-xs text-[hsl(var(--muted))]">
-                          {p.category}
-                          {p.color ? ` · ${p.color}` : ''}
-                          {p.size ? ` · ${p.size}` : ''}
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="rounded-full border border-[hsl(var(--border))] bg-white px-2.5 py-1 text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">
+                            {categoryLabel(p.category)}
+                          </span>
+                          {!isSuperAdmin ? (
+                            <span className="rounded-full border border-sky-200 bg-sky-50 px-2.5 py-1 text-[11px] font-medium text-sky-700">
+                              Pre-order open
+                            </span>
+                          ) : null}
                         </div>
+
+                        <div className="mt-3 text-base font-semibold leading-snug">{p.name}</div>
+                        {itemDetails ? (
+                          <div className="mt-1 text-sm text-[hsl(var(--muted))]">{itemDetails}</div>
+                        ) : (
+                          <div className="mt-1 text-sm text-[hsl(var(--muted))]">Store item</div>
+                        )}
                       </div>
-                      <div className="text-sm font-semibold">{price}</div>
+
+                      <div className="text-right">
+                        <div className="text-[11px] uppercase tracking-wide text-[hsl(var(--muted))]">Price</div>
+                        <div className="mt-1 text-base font-semibold">{price}</div>
+                      </div>
                     </div>
 
-                    <div className="flex flex-wrap items-center gap-2 text-xs">
-                      <span className={`font-medium ${stockTone(stock)}`}>
-                        Current stock: {stock}
-                      </span>
-                      {p.allow_preorder ? (
-                        <span className="rounded-full border border-sky-200 bg-sky-50 px-2.5 py-1 font-medium text-sky-700">
-                          Pre-order available
+                    {isSuperAdmin ? (
+                      <div className="flex flex-wrap items-center gap-2 text-xs">
+                        <span className={`font-medium ${stockTone(stock)}`}>
+                          {stockLabel(stock)}: {stock}
                         </span>
-                      ) : (
-                        <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 font-medium text-slate-600">
-                          Pre-order off
-                        </span>
-                      )}
-                      {!p.is_active ? (
-                        <span className="rounded-full border border-rose-200 bg-rose-50 px-2.5 py-1 font-medium text-rose-700">
-                          Inactive
-                        </span>
-                      ) : null}
-                    </div>
+                        {p.allow_preorder ? (
+                          <span className="rounded-full border border-sky-200 bg-sky-50 px-2.5 py-1 font-medium text-sky-700">
+                            Pre-order available
+                          </span>
+                        ) : (
+                          <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 font-medium text-slate-600">
+                            Pre-order off
+                          </span>
+                        )}
+                        {!p.is_active ? (
+                          <span className="rounded-full border border-rose-200 bg-rose-50 px-2.5 py-1 font-medium text-rose-700">
+                            Inactive
+                          </span>
+                        ) : null}
+                      </div>
+                    ) : (
+                      <div className="rounded-2xl border border-[hsl(var(--border))] bg-white/70 px-3 py-3 text-sm text-[hsl(var(--muted))]">
+                        Send a preorder request now. Deposit and final payment are confirmed later by the store admin.
+                      </div>
+                    )}
 
                     {canPreorder ? (
                       <StorePreorderAction
