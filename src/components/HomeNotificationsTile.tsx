@@ -127,7 +127,6 @@ export default function HomeNotificationsTile({
           <Bell size={18} strokeWidth={2.2} className={unread ? 'text-red-700' : 'text-black'} />
         </span>
       </div>
-      {desc ? <p className="mt-1 text-sm text-[hsl(var(--muted))]">{desc}</p> : null}
     </Link>
   )
 }
