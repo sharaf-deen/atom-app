@@ -38,49 +38,84 @@ export default async function NotificationsPage() {
   const role = me.role
   const canManage = canManageNotifications(role)
   const hasInbox = hasVisibleNotificationInbox(role)
+  const isUserInboxView = hasInbox && !canManage
 
   return (
     <main>
       <PageHeader
         title="Notifications"
-        subtitle={canManage ? 'Send clearly. Read quickly. Keep only the useful updates visible.' : 'Unread first, clear actions, and faster reading.'}
+        subtitle={
+          canManage
+            ? 'Send clearly. Read quickly. Keep only the useful updates visible.'
+            : 'Unread first. Open fast. Keep only what still matters.'
+        }
       />
 
       <Section className="space-y-6">
-        <div className="rounded-3xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-5 shadow-soft">
-          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-            <div className="max-w-2xl">
-              <div className="flex flex-wrap items-center gap-2">
-                <h2 className="text-xl font-semibold tracking-tight">Clearer notifications, less noise</h2>
-                {canManage ? <Badge>Admin tools</Badge> : <Badge>Inbox</Badge>}
+        {canManage ? (
+          <div className="rounded-3xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-5 shadow-soft">
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+              <div className="max-w-2xl">
+                <div className="flex flex-wrap items-center gap-2">
+                  <h2 className="text-xl font-semibold tracking-tight">Clearer notifications, less noise</h2>
+                  <Badge>Admin tools</Badge>
+                </div>
+                <p className="mt-2 text-base leading-7 text-[hsl(var(--muted))]">
+                  This screen is now meant for 3 quick actions: check unread items, send one useful message, and remove what is no longer needed.
+                </p>
               </div>
-              <p className="mt-2 text-base leading-7 text-[hsl(var(--muted))]">
-                This screen is now meant for 3 quick actions: check unread items, send one useful message, and remove what is no longer needed.
-              </p>
+
+              <div className="grid gap-3 sm:grid-cols-2 lg:min-w-[320px]">
+                <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] px-4 py-3">
+                  <div className="text-xs font-semibold uppercase tracking-[0.2em] text-[hsl(var(--muted))]">Priority</div>
+                  <div className="mt-1 text-base font-semibold">Unread first</div>
+                  <p className="mt-1 text-sm leading-6 text-[hsl(var(--muted))]">Read the newest important items before everything else.</p>
+                </div>
+
+                <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] px-4 py-3">
+                  <div className="text-xs font-semibold uppercase tracking-[0.2em] text-[hsl(var(--muted))]">Actions</div>
+                  <div className="mt-1 text-base font-semibold">Read, unread, delete</div>
+                  <p className="mt-1 text-sm leading-6 text-[hsl(var(--muted))]">The essential actions stay visible without extra noise.</p>
+                </div>
+              </div>
             </div>
 
-            <div className="grid gap-3 sm:grid-cols-2 lg:min-w-[320px]">
-              <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] px-4 py-3">
-                <div className="text-xs font-semibold uppercase tracking-[0.2em] text-[hsl(var(--muted))]">Priority</div>
-                <div className="mt-1 text-base font-semibold">Unread first</div>
-                <p className="mt-1 text-sm leading-6 text-[hsl(var(--muted))]">Read the newest important items before everything else.</p>
+            <div className="mt-4 flex flex-wrap gap-2 text-sm">
+              {hasInbox ? <Badge className="px-3 py-1">Personal inbox</Badge> : null}
+              <Badge className="px-3 py-1">Send notifications</Badge>
+              <Badge className="px-3 py-1">Sent history</Badge>
+              <Badge className="px-3 py-1">Member messages</Badge>
+            </div>
+          </div>
+        ) : isUserInboxView ? (
+          <div className="rounded-3xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-5 shadow-soft">
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+              <div className="max-w-2xl">
+                <div className="flex flex-wrap items-center gap-2">
+                  <h2 className="text-xl font-semibold tracking-tight">Simple inbox, faster reading</h2>
+                  <Badge>Inbox</Badge>
+                </div>
+                <p className="mt-2 text-base leading-7 text-[hsl(var(--muted))]">
+                  Open the latest update, mark it read, or keep it for later. The page is focused on the messages that matter now.
+                </p>
               </div>
 
-              <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] px-4 py-3">
-                <div className="text-xs font-semibold uppercase tracking-[0.2em] text-[hsl(var(--muted))]">Actions</div>
-                <div className="mt-1 text-base font-semibold">Read, unread, delete</div>
-                <p className="mt-1 text-sm leading-6 text-[hsl(var(--muted))]">The essential actions stay visible without extra noise.</p>
+              <div className="grid gap-3 sm:grid-cols-2 lg:min-w-[320px]">
+                <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] px-4 py-3">
+                  <div className="text-xs font-semibold uppercase tracking-[0.2em] text-[hsl(var(--muted))]">Focus</div>
+                  <div className="mt-1 text-base font-semibold">Unread first</div>
+                  <p className="mt-1 text-sm leading-6 text-[hsl(var(--muted))]">Start with the messages you have not opened yet.</p>
+                </div>
+
+                <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] px-4 py-3">
+                  <div className="text-xs font-semibold uppercase tracking-[0.2em] text-[hsl(var(--muted))]">Actions</div>
+                  <div className="mt-1 text-base font-semibold">Open, read, keep clean</div>
+                  <p className="mt-1 text-sm leading-6 text-[hsl(var(--muted))]">Only the essential actions stay visible.</p>
+                </div>
               </div>
             </div>
           </div>
-
-          <div className="mt-4 flex flex-wrap gap-2 text-sm">
-            {hasInbox ? <Badge className="px-3 py-1">Personal inbox</Badge> : null}
-            {canManage ? <Badge className="px-3 py-1">Send notifications</Badge> : null}
-            {canManage ? <Badge className="px-3 py-1">Sent history</Badge> : null}
-            {canManage ? <Badge className="px-3 py-1">Member messages</Badge> : null}
-          </div>
-        </div>
+        ) : null}
 
         {canManage ? (
           <div className="space-y-3">
@@ -95,8 +130,12 @@ export default async function NotificationsPage() {
         {hasInbox ? (
           <div className="space-y-3">
             <div>
-              <h2 className="text-lg font-semibold tracking-tight">Inbox</h2>
-              <p className="text-sm text-[hsl(var(--muted))]">Unread and important items stay easy to spot.</p>
+              <h2 className="text-lg font-semibold tracking-tight">{canManage ? 'Inbox' : 'My inbox'}</h2>
+              <p className="text-sm text-[hsl(var(--muted))]">
+                {canManage
+                  ? 'Unread and important items stay easy to spot.'
+                  : 'Unread items stay first so you can read what matters quickly.'}
+              </p>
             </div>
             <NotificationsList />
           </div>
