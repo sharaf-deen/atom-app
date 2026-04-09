@@ -201,7 +201,6 @@ export default function HomeMemberLookup({
     <section className="rounded-3xl border border-[hsl(var(--border))] bg-white p-4 shadow-soft sm:p-5">
       <div className="flex flex-col gap-1">
         <h2 className="text-base font-semibold tracking-tight">{title}</h2>
-        <p className="text-sm text-[hsl(var(--muted))]">{subtitle}</p>
       </div>
 
       <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:items-end">

@@ -630,11 +630,10 @@ function Surface({ children, className = '' }: React.PropsWithChildren<{ classNa
   return <section className={`rounded-3xl border border-[hsl(var(--border))] bg-white shadow-soft ${className}`}>{children}</section>
 }
 
-function SectionTitle({ title, subtitle }: { title: string; subtitle?: string }) {
+function SectionTitle({ title }: { title: string; subtitle?: string }) {
   return (
     <div className="flex flex-col gap-1">
       <h2 className="text-base font-semibold tracking-tight">{title}</h2>
-      {subtitle ? <p className="text-sm text-[hsl(var(--muted))]">{subtitle}</p> : null}
     </div>
   )
 }
@@ -662,7 +661,6 @@ function SummaryCard({
     <Surface className="p-4 sm:p-5">
       <div className="text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">{label}</div>
       <div className="mt-2 text-2xl font-semibold tracking-tight">{value}</div>
-      {hint ? <div className="mt-2 text-sm text-[hsl(var(--muted))]">{hint}</div> : null}
     </Surface>
   )
 
@@ -680,11 +678,8 @@ function ActionCard({ href, label, desc, icon: Icon }: QuickAction) {
       href={href}
       className="group block rounded-3xl border border-[hsl(var(--border))] bg-white p-4 shadow-soft transition hover:-translate-y-0.5 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
     >
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <div className="text-sm font-semibold tracking-tight">{label}</div>
-          <p className="mt-1 text-sm text-[hsl(var(--muted))]">{desc}</p>
-        </div>
+      <div className="flex items-center justify-between gap-3">
+        <div className="min-w-0 text-sm font-semibold tracking-tight">{label}</div>
         <span className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] transition group-hover:translate-x-0.5">
           <Icon size={18} strokeWidth={2.1} className="text-black" />
         </span>
@@ -706,18 +701,6 @@ function HeroCard({
   memberId?: string | null
   joinedAt?: string | null
 }) {
-  const roleCopy: Record<Role, string> = {
-    member: 'Your access, QR code and the essentials.',
-    champion: 'Your access, QR code and the essentials only.',
-    vip: 'Your access, QR code and the essentials only.',
-    coach: 'Your QR code, key shortcuts and fast member lookup.',
-    assistant_coach: 'Your QR code and key staff shortcuts.',
-    head_coach: 'Your QR code, key staff shortcuts and fast member lookup.',
-    reception: 'Built for quick actions at the front desk: scan, member creation and daily queues.',
-    scan_terminal: 'Door tablet mode: scanner only, front camera locked, result screen and automatic restart.',
-    admin: 'Daily operations first: members, finance, reporting and control.',
-    super_admin: 'Full operational overview with direct access to all critical areas.',
-  }
 
   return (
     <Surface className="overflow-hidden">
@@ -733,7 +716,6 @@ function HeroCard({
           </div>
 
           <h1 className="mt-3 text-2xl font-semibold tracking-tight sm:text-3xl">Welcome, {displayName}</h1>
-          <p className="mt-2 max-w-2xl text-sm text-[hsl(var(--muted))] sm:text-base">{roleCopy[role]}</p>
 
           {joinedAt ? (
             <div className="mt-3 text-xs text-[hsl(var(--muted))]">Joined {fmtDate(joinedAt)}</div>
@@ -757,7 +739,6 @@ function MembershipCard({ snapshot }: { snapshot: MembershipSnapshot }) {
     <Surface className="p-4 sm:p-5">
       <div className={`inline-flex rounded-full border px-2.5 py-1 text-[11px] font-semibold ${tone.badge}`}>{snapshot.eyebrow}</div>
       <div className={`mt-3 text-xl font-semibold tracking-tight ${tone.accent}`}>{snapshot.title}</div>
-      <p className="mt-2 text-sm text-[hsl(var(--muted))]">{snapshot.meta}</p>
       {snapshot.extra ? <p className="mt-2 text-sm font-medium text-black">{snapshot.extra}</p> : null}
       <div className="mt-4 flex items-center gap-2 text-sm font-medium">
         <Link href="/profile" className="inline-flex items-center gap-1 hover:underline">
@@ -776,13 +757,6 @@ function StaffAccessCard({ role }: { role: 'coach' | 'assistant_coach' | 'head_c
         Staff access
       </div>
       <div className="mt-3 text-xl font-semibold tracking-tight text-emerald-700">Always active</div>
-      <p className="mt-2 text-sm text-[hsl(var(--muted))]">
-        {role === 'coach'
-          ? 'Coach access is ready for daily training.'
-          : role === 'head_coach'
-            ? 'Head coach access is ready for daily training.'
-            : 'Assistant coach access is ready for daily training.'}
-      </p>
       <div className="mt-4 flex items-center gap-2 text-sm font-medium">
         <Link href="/profile" className="inline-flex items-center gap-1 hover:underline">
           Open profile
@@ -799,7 +773,6 @@ async function QrCard({ qrCode }: { qrCode?: string | null }) {
       <div className="flex items-start justify-between gap-3">
         <div>
           <div className="text-sm font-semibold tracking-tight">My QR code</div>
-          <p className="mt-1 text-sm text-[hsl(var(--muted))]">Show it at reception.</p>
         </div>
         <IdCard size={18} className="mt-0.5 text-black" />
       </div>
@@ -839,7 +812,6 @@ function HomeScanShortcut() {
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[hsl(var(--muted))]">Scan access</p>
           <h2 className="mt-1 text-lg font-semibold tracking-tight">Open the scanner fast</h2>
-          <p className="mt-1 text-sm text-[hsl(var(--muted))]">Go directly to the QR scan flow from Home without opening another workspace first.</p>
         </div>
         <Link
           href="/scan"
@@ -860,7 +832,6 @@ function HomeLogoutShortcut() {
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[hsl(var(--muted))]">Session</p>
           <h2 className="mt-1 text-lg font-semibold tracking-tight">Sign out from Home</h2>
-          <p className="mt-1 text-sm text-[hsl(var(--muted))]">Leave the app safely without opening another page first.</p>
         </div>
         <Link
           href="/logout"
@@ -877,27 +848,21 @@ function HomeLogoutShortcut() {
 
 function memberActions(): QuickAction[] {
   return [
-    { href: '/profile', label: 'Profile', desc: 'Membership and QR code.', icon: IdCard },
-    { href: '/schedule', label: 'Schedule', desc: "Today's classes.", icon: CalendarDays },
-    { href: '/notifications', label: 'Notifications', desc: 'Unread updates.', icon: Bell },
-    { href: '/packages-and-promos', label: 'Offers', desc: 'Current packages and promos.', icon: Gift },
-    { href: '/contact', label: 'Contact admin', desc: 'Get help when needed.', icon: UserCog },
+    { href: '/profile', label: 'My profile', desc: 'Identity, subscription details and QR code.', icon: IdCard },
+    { href: '/schedule', label: 'Schedule', desc: 'See the current class schedule.', icon: CalendarDays },
+    { href: '/notifications', label: 'Notifications', desc: 'Read your latest updates.', icon: Bell },
+    { href: '/packages-and-promos', label: 'Packages & promos', desc: 'See current offers and packages.', icon: Gift },
+    { href: '/contact', label: 'Contact admin', desc: 'Send a message when you need help.', icon: UserCog },
   ]
 }
 
-function coachActions(role: 'coach' | 'assistant_coach' | 'head_coach'): QuickAction[] {
-  const actions: QuickAction[] = [
-    { href: '/profile', label: 'Profile', desc: 'QR code and personal info.', icon: IdCard },
-    { href: '/schedule', label: 'Schedule', desc: "Today's classes.", icon: CalendarDays },
-    { href: '/notifications', label: 'Notifications', desc: 'Staff updates.', icon: Bell },
-    { href: '/packages-and-promos', label: 'Offers', desc: 'Current packages and promos.', icon: Gift },
+function coachActions(): QuickAction[] {
+  return [
+    { href: '/profile', label: 'My profile', desc: 'Identity, QR code and personal info.', icon: IdCard },
+    { href: '/schedule', label: 'Schedule', desc: 'Open the latest class schedule.', icon: CalendarDays },
+    { href: '/notifications', label: 'Notifications', desc: 'Read the latest staff updates.', icon: Bell },
+    { href: '/packages-and-promos', label: 'Packages & promos', desc: 'Quick access to current offers.', icon: Gift },
   ]
-
-  if (role === 'coach' || role === 'head_coach') {
-    actions.splice(1, 0, { href: '/members', label: 'Member lookup', desc: 'Read-only search.', icon: UserRoundSearch })
-  }
-
-  return actions
 }
 
 function receptionActions(): QuickAction[] {
@@ -945,9 +910,6 @@ export default async function HomePage() {
         <section className="mx-auto max-w-6xl px-4 py-8">
           <Surface className="p-6 sm:p-8">
             <h1 className="text-2xl font-semibold tracking-tight">Welcome to ATOM</h1>
-            <p className="mt-2 max-w-xl text-sm text-[hsl(var(--muted))] sm:text-base">
-              Sign in to access your role dashboard, QR code, subscriptions and daily operations.
-            </p>
             <div className="mt-5">
               <Link
                 href="/login"
@@ -1007,14 +969,20 @@ export default async function HomePage() {
 
         {isMemberLikeRole(user.role) ? (
           <>
-            <div className="grid gap-4 lg:grid-cols-[1.1fr_0.9fr]">
+            <PriorityGrid
+              title="Your access today"
+              subtitle="The essentials only. Open what matters next."
+              items={buildMemberPriorities(memberSnapshot!, unreadNotificationsCount, Boolean(qrCode))}
+            />
+
+            <div className="grid gap-4 lg:grid-cols-[1.2fr_0.8fr]">
               <MembershipCard snapshot={memberSnapshot!} />
               <QrCard qrCode={qrCode} />
             </div>
 
             <QuickActions
-              title="Essentials"
-              subtitle="Only the actions you use most."
+              title="Quick actions"
+              subtitle="Keep the next step simple."
               items={memberActions().slice(0, 3)}
             />
           </>
@@ -1022,21 +990,25 @@ export default async function HomePage() {
 
         {(user.role === 'coach' || user.role === 'assistant_coach' || user.role === 'head_coach') ? (
           <>
-            <div className="grid gap-4 lg:grid-cols-[1fr_1fr]">
-              <StaffAccessCard role={user.role} />
-              <QrCard qrCode={qrCode} />
-            </div>
-
-            <QuickActions
-              title="Essentials"
-              subtitle="Only the staff actions you use most."
-              items={coachActions(user.role).slice(0, 3)}
+            <PriorityGrid
+              title="Training useful today"
+              subtitle="Useful only, with less repetition."
+              items={buildStaffPriorities(user.role, unreadNotificationsCount, Boolean(qrCode))}
             />
+
+            <div className="grid gap-4 lg:grid-cols-[0.9fr_1.1fr]">
+              <QrCard qrCode={qrCode} />
+              <QuickActions
+                title="Coach shortcuts"
+                subtitle="The most useful staff actions first."
+                items={coachActions().slice(0, 3)}
+              />
+            </div>
 
             {(user.role === 'coach' || user.role === 'head_coach') ? (
               <HomeMemberLookup
                 title="Quick member lookup"
-                subtitle="Read-only access when you need a quick lookup."
+                subtitle="Coach access is read-only. Search fast when you need help on the mat."
                 canOpenProfile
                 showSensitiveFields={false}
               />
@@ -1059,7 +1031,7 @@ export default async function HomePage() {
             </div>
 
             <QuickActions
-              title="Essentials"
+              title="Quick actions"
               subtitle="The desk tools used most often."
               items={receptionActions().slice(0, 5)}
             />
