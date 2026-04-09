@@ -4,7 +4,7 @@ import ReloadButton from '@/components/ReloadButton'
 
 export default function PageHeader({
   title,
-  subtitle,
+  subtitle: _subtitle,
   right,
   showReload = false,
 }: {

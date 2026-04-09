@@ -105,7 +105,7 @@ function AgeBadge({ dob }: { dob?: string | null }) {
 
 export default function HomeMemberLookup({
   title = 'Quick member lookup',
-  subtitle = 'Search a member by name, member ID or phone.',
+  subtitle: _subtitle = 'Search a member by name, member ID or phone.',
   canOpenProfile = false,
   showSensitiveFields = true,
 }: {
@@ -243,7 +243,6 @@ export default function HomeMemberLookup({
             {helperText}
           </InlineAlert>
         ) : null}
-        <p className="text-[11px] text-[hsl(var(--muted))]">Press Enter to search. Press Esc to clear.</p>
         {error ? (
           <InlineAlert variant="error">{error}</InlineAlert>
         ) : null}
