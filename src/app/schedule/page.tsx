@@ -181,12 +181,12 @@ export default async function SchedulePage() {
   if (!me) {
     return (
       <main>
-        <PageHeader title="Schedule" subtitle="Weekly training timetable" />
+        <PageHeader title="Schedule" subtitle="Today first, then the full weekly timetable" />
         <Section>
           <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-5 shadow-soft">
             <h2 className="text-base font-semibold">Please sign in</h2>
             <p className="mt-1 text-sm text-[hsl(var(--muted))]">
-              You need to be authenticated to access the schedule.
+              You need to be authenticated to view the training timetable.
             </p>
           </div>
         </Section>
@@ -219,7 +219,7 @@ export default async function SchedulePage() {
 
   return (
     <main>
-      <PageHeader title="Schedule" subtitle="Weekly training timetable" />
+      <PageHeader title="Schedule" subtitle="Today first, then the full weekly timetable" />
       <Section className="space-y-6">
         <ScheduleEditor initialContent={content} updatedAt={updatedAt} canEdit={canEdit} />
       </Section>
