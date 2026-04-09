@@ -707,12 +707,12 @@ function HeroCard({
   joinedAt?: string | null
 }) {
   const roleCopy: Record<Role, string> = {
-    member: 'Everything important at a glance: membership, QR code and useful updates.',
-    champion: 'Member tools with always-active gym access.',
-    vip: 'Member tools with always-active gym access.',
-    coach: 'Fast access to your staff tools, QR code and a read-only member lookup.',
-    assistant_coach: 'Fast access to your staff tools, QR code and useful updates.',
-    head_coach: 'Coach shortcuts plus notification control and a read-only member lookup.',
+    member: 'Your membership, QR code and the next useful action.',
+    champion: 'Your access, QR code and the essentials only.',
+    vip: 'Your access, QR code and the essentials only.',
+    coach: 'Your QR code, useful shortcuts and a fast member lookup.',
+    assistant_coach: 'Your QR code and the most useful staff shortcuts.',
+    head_coach: 'Your QR code, core staff shortcuts and fast member lookup.',
     reception: 'Built for quick actions at the front desk: scan, member creation and daily queues.',
     scan_terminal: 'Door tablet mode: scanner only, front camera locked, result screen and automatic restart.',
     admin: 'Daily operations first: members, finance, reporting and control.',
@@ -778,10 +778,10 @@ function StaffAccessCard({ role }: { role: 'coach' | 'assistant_coach' | 'head_c
       <div className="mt-3 text-xl font-semibold tracking-tight text-emerald-700">Always active</div>
       <p className="mt-2 text-sm text-[hsl(var(--muted))]">
         {role === 'coach'
-          ? 'Your coach access is designed for daily training operations.'
+          ? 'Coach access is ready for daily training.'
           : role === 'head_coach'
-            ? 'Your head coach access is designed for daily training operations.'
-            : 'Your assistant coach access is designed for daily training operations.'}
+            ? 'Head coach access is ready for daily training.'
+            : 'Assistant coach access is ready for daily training.'}
       </p>
       <div className="mt-4 flex items-center gap-2 text-sm font-medium">
         <Link href="/profile" className="inline-flex items-center gap-1 hover:underline">
@@ -799,7 +799,7 @@ async function QrCard({ qrCode }: { qrCode?: string | null }) {
       <div className="flex items-start justify-between gap-3">
         <div>
           <div className="text-sm font-semibold tracking-tight">My QR code</div>
-          <p className="mt-1 text-sm text-[hsl(var(--muted))]">Show this code at reception.</p>
+          <p className="mt-1 text-sm text-[hsl(var(--muted))]">Show it at reception.</p>
         </div>
         <IdCard size={18} className="mt-0.5 text-black" />
       </div>
@@ -877,21 +877,27 @@ function HomeLogoutShortcut() {
 
 function memberActions(): QuickAction[] {
   return [
-    { href: '/profile', label: 'My profile', desc: 'Identity, subscription details and QR code.', icon: IdCard },
-    { href: '/schedule', label: 'Schedule', desc: 'See the current class schedule.', icon: CalendarDays },
-    { href: '/notifications', label: 'Notifications', desc: 'Read your latest updates.', icon: Bell },
-    { href: '/packages-and-promos', label: 'Packages & promos', desc: 'See current offers and packages.', icon: Gift },
-    { href: '/contact', label: 'Contact admin', desc: 'Send a message when you need help.', icon: UserCog },
+    { href: '/profile', label: 'Profile', desc: 'Membership and QR code.', icon: IdCard },
+    { href: '/schedule', label: 'Schedule', desc: "Today's classes.", icon: CalendarDays },
+    { href: '/notifications', label: 'Notifications', desc: 'Unread updates.', icon: Bell },
+    { href: '/packages-and-promos', label: 'Offers', desc: 'Current packages and promos.', icon: Gift },
+    { href: '/contact', label: 'Contact admin', desc: 'Get help when needed.', icon: UserCog },
   ]
 }
 
-function coachActions(): QuickAction[] {
-  return [
-    { href: '/profile', label: 'My profile', desc: 'Identity, QR code and personal info.', icon: IdCard },
-    { href: '/schedule', label: 'Schedule', desc: 'Open the latest class schedule.', icon: CalendarDays },
-    { href: '/notifications', label: 'Notifications', desc: 'Read the latest staff updates.', icon: Bell },
-    { href: '/packages-and-promos', label: 'Packages & promos', desc: 'Quick access to current offers.', icon: Gift },
+function coachActions(role: 'coach' | 'assistant_coach' | 'head_coach'): QuickAction[] {
+  const actions: QuickAction[] = [
+    { href: '/profile', label: 'Profile', desc: 'QR code and personal info.', icon: IdCard },
+    { href: '/schedule', label: 'Schedule', desc: "Today's classes.", icon: CalendarDays },
+    { href: '/notifications', label: 'Notifications', desc: 'Staff updates.', icon: Bell },
+    { href: '/packages-and-promos', label: 'Offers', desc: 'Current packages and promos.', icon: Gift },
   ]
+
+  if (role === 'coach' || role === 'head_coach') {
+    actions.splice(1, 0, { href: '/members', label: 'Member lookup', desc: 'Read-only search.', icon: UserRoundSearch })
+  }
+
+  return actions
 }
 
 function receptionActions(): QuickAction[] {
@@ -1001,20 +1007,14 @@ export default async function HomePage() {
 
         {isMemberLikeRole(user.role) ? (
           <>
-            <PriorityGrid
-              title="Your access today"
-              subtitle="The essentials only. Open what matters next."
-              items={buildMemberPriorities(memberSnapshot!, unreadNotificationsCount, Boolean(qrCode))}
-            />
-
-            <div className="grid gap-4 lg:grid-cols-[1.2fr_0.8fr]">
+            <div className="grid gap-4 lg:grid-cols-[1.1fr_0.9fr]">
               <MembershipCard snapshot={memberSnapshot!} />
               <QrCard qrCode={qrCode} />
             </div>
 
             <QuickActions
               title="Quick actions"
-              subtitle="Keep the next step simple."
+              subtitle="Profile, schedule and notifications only."
               items={memberActions().slice(0, 3)}
             />
           </>
@@ -1022,25 +1022,21 @@ export default async function HomePage() {
 
         {(user.role === 'coach' || user.role === 'assistant_coach' || user.role === 'head_coach') ? (
           <>
-            <PriorityGrid
-              title="Training useful today"
-              subtitle="Useful only, with less repetition."
-              items={buildStaffPriorities(user.role, unreadNotificationsCount, Boolean(qrCode))}
-            />
-
-            <div className="grid gap-4 lg:grid-cols-[0.9fr_1.1fr]">
+            <div className="grid gap-4 lg:grid-cols-[1fr_1fr]">
+              <StaffAccessCard role={user.role} />
               <QrCard qrCode={qrCode} />
-              <QuickActions
-                title="Coach shortcuts"
-                subtitle="The most useful staff actions first."
-                items={coachActions().slice(0, 3)}
-              />
             </div>
+
+            <QuickActions
+              title="Coach shortcuts"
+              subtitle="Only the most useful staff actions."
+              items={coachActions(user.role).slice(0, 3)}
+            />
 
             {(user.role === 'coach' || user.role === 'head_coach') ? (
               <HomeMemberLookup
                 title="Quick member lookup"
-                subtitle="Coach access is read-only. Search fast when you need help on the mat."
+                subtitle="Read-only access. Search fast when you need help on the mat."
                 canOpenProfile
                 showSensitiveFields={false}
               />
