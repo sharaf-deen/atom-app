@@ -99,7 +99,7 @@ type PriorityItem = {
   href: string
   eyebrow: string
   title: string
-  desc: string
+  desc?: string
   icon: IconType
   tone: PriorityTone
 }
@@ -109,7 +109,7 @@ type IconType = React.ComponentType<{ size?: number | string; strokeWidth?: numb
 type QuickAction = {
   href: string
   label: string
-  desc: string
+  desc?: string
   icon: IconType
 }
 
@@ -399,7 +399,7 @@ function priorityToneClasses(tone: PriorityTone) {
   }
 }
 
-function PriorityCard({ href, eyebrow, title, desc, icon: Icon, tone }: PriorityItem) {
+function PriorityCard({ href, eyebrow, title, desc: _desc, icon: Icon, tone }: PriorityItem) {
   const styles = priorityToneClasses(tone)
 
   return (
@@ -411,7 +411,6 @@ function PriorityCard({ href, eyebrow, title, desc, icon: Icon, tone }: Priority
         <div className="min-w-0">
           <div className={`inline-flex rounded-full border px-2.5 py-1 text-[11px] font-semibold ${styles.badge}`}>{eyebrow}</div>
           <div className="mt-3 text-sm font-semibold tracking-tight sm:text-base">{title}</div>
-          <p className="mt-1 text-sm text-[hsl(var(--muted))]">{desc}</p>
         </div>
         <span className={`inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border ${styles.iconWrap}`}>
           <Icon size={18} strokeWidth={2.1} />
@@ -630,7 +629,7 @@ function Surface({ children, className = '' }: React.PropsWithChildren<{ classNa
   return <section className={`rounded-3xl border border-[hsl(var(--border))] bg-white shadow-soft ${className}`}>{children}</section>
 }
 
-function SectionTitle({ title }: { title: string; subtitle?: string }) {
+function SectionTitle({ title, subtitle: _subtitle }: { title: string; subtitle?: string }) {
   return (
     <div className="flex flex-col gap-1">
       <h2 className="text-base font-semibold tracking-tight">{title}</h2>
@@ -649,7 +648,7 @@ function RoleBadge({ role }: { role: Role }) {
 function SummaryCard({
   label,
   value,
-  hint,
+  hint: _hint,
   href,
 }: {
   label: string
@@ -672,14 +671,16 @@ function SummaryCard({
   )
 }
 
-function ActionCard({ href, label, desc, icon: Icon }: QuickAction) {
+function ActionCard({ href, label, desc: _desc, icon: Icon }: QuickAction) {
   return (
     <Link
       href={href}
       className="group block rounded-3xl border border-[hsl(var(--border))] bg-white p-4 shadow-soft transition hover:-translate-y-0.5 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
     >
-      <div className="flex items-center justify-between gap-3">
-        <div className="min-w-0 text-sm font-semibold tracking-tight">{label}</div>
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="text-sm font-semibold tracking-tight">{label}</div>
+        </div>
         <span className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] transition group-hover:translate-x-0.5">
           <Icon size={18} strokeWidth={2.1} className="text-black" />
         </span>
@@ -701,7 +702,6 @@ function HeroCard({
   memberId?: string | null
   joinedAt?: string | null
 }) {
-
   return (
     <Surface className="overflow-hidden">
       <div className="flex flex-col gap-5 p-5 sm:p-6 lg:flex-row lg:items-center lg:justify-between">
@@ -739,6 +739,7 @@ function MembershipCard({ snapshot }: { snapshot: MembershipSnapshot }) {
     <Surface className="p-4 sm:p-5">
       <div className={`inline-flex rounded-full border px-2.5 py-1 text-[11px] font-semibold ${tone.badge}`}>{snapshot.eyebrow}</div>
       <div className={`mt-3 text-xl font-semibold tracking-tight ${tone.accent}`}>{snapshot.title}</div>
+      <p className="mt-2 text-sm text-[hsl(var(--muted))]">{snapshot.meta}</p>
       {snapshot.extra ? <p className="mt-2 text-sm font-medium text-black">{snapshot.extra}</p> : null}
       <div className="mt-4 flex items-center gap-2 text-sm font-medium">
         <Link href="/profile" className="inline-flex items-center gap-1 hover:underline">
@@ -757,6 +758,13 @@ function StaffAccessCard({ role }: { role: 'coach' | 'assistant_coach' | 'head_c
         Staff access
       </div>
       <div className="mt-3 text-xl font-semibold tracking-tight text-emerald-700">Always active</div>
+      <p className="mt-2 text-sm text-[hsl(var(--muted))]">
+        {role === 'coach'
+          ? 'Your coach access is designed for daily training operations.'
+          : role === 'head_coach'
+            ? 'Your head coach access is designed for daily training operations.'
+            : 'Your assistant coach access is designed for daily training operations.'}
+      </p>
       <div className="mt-4 flex items-center gap-2 text-sm font-medium">
         <Link href="/profile" className="inline-flex items-center gap-1 hover:underline">
           Open profile
@@ -791,10 +799,10 @@ async function QrCard({ qrCode }: { qrCode?: string | null }) {
 }
 
 
-function QuickActions({ title, subtitle, items }: { title: string; subtitle?: string; items: QuickAction[] }) {
+function QuickActions({ title, subtitle: _subtitle, items }: { title: string; subtitle?: string; items: QuickAction[] }) {
   return (
     <Surface className="p-4 sm:p-5">
-      <SectionTitle title={title} subtitle={subtitle} />
+      <SectionTitle title={title} subtitle={_subtitle} />
       <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
         {items.map((item) => (
           <ActionCard key={item.href} {...item} />
@@ -910,6 +918,9 @@ export default async function HomePage() {
         <section className="mx-auto max-w-6xl px-4 py-8">
           <Surface className="p-6 sm:p-8">
             <h1 className="text-2xl font-semibold tracking-tight">Welcome to ATOM</h1>
+            <p className="mt-2 max-w-xl text-sm text-[hsl(var(--muted))] sm:text-base">
+              Sign in to access your role dashboard, QR code, subscriptions and daily operations.
+            </p>
             <div className="mt-5">
               <Link
                 href="/login"
