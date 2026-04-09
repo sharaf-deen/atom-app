@@ -7,7 +7,7 @@ type Props = {
   className?: string
 }
 
-export default function PageHeader({ title, subtitle, right, className }: Props) {
+export default function PageHeader({ title, subtitle: _subtitle, right, className }: Props) {
   return (
     <div className={['flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between', className || ''].join(' ')}>
       <div>

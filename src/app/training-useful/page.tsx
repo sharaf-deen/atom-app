@@ -37,7 +37,7 @@ type ProfileLite = {
 type QuickLink = {
   href: string
   label: string
-  desc: string
+  desc?: string
   icon: React.ComponentType<{ size?: number | string; className?: string }>
 }
 
@@ -164,13 +164,6 @@ export default async function TrainingUsefulPage() {
               </div>
               <div>
                 <h2 className="text-2xl font-semibold tracking-tight">Quick floor tools</h2>
-                <p className="mt-2 max-w-2xl text-sm text-[hsl(var(--muted))]">
-                  {isCoachView
-                    ? 'QR, schedule, staff updates and read-only member lookup in one place.'
-                    : isAssistantView
-                      ? 'QR, schedule, staff updates and useful field shortcuts.'
-                      : 'Preview the coach-facing shortcuts used during daily training.'}
-                </p>
               </div>
               <p className="text-xs text-[hsl(var(--muted))]">{joinedHint}</p>
             </div>
@@ -179,16 +172,10 @@ export default async function TrainingUsefulPage() {
               <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] p-4">
                 <div className="text-xs font-semibold uppercase tracking-wide text-[hsl(var(--muted))]">QR readiness</div>
                 <div className="mt-2 text-lg font-semibold tracking-tight">{qrCode ? 'Ready for entry' : 'Check profile first'}</div>
-                <p className="mt-1 text-sm text-[hsl(var(--muted))]">
-                  {qrCode ? 'Your QR code is ready.' : 'Open your profile to check your QR code.'}
-                </p>
               </div>
               <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] p-4">
                 <div className="text-xs font-semibold uppercase tracking-wide text-[hsl(var(--muted))]">Staff updates</div>
                 <div className="mt-2 text-lg font-semibold tracking-tight">{unreadCount > 0 ? `${unreadCount} unread` : 'Inbox up to date'}</div>
-                <p className="mt-1 text-sm text-[hsl(var(--muted))]">
-                  {unreadCount > 0 ? 'Check the latest update before class.' : 'No unread update right now.'}
-                </p>
               </div>
             </div>
           </div>
@@ -199,7 +186,6 @@ export default async function TrainingUsefulPage() {
             <div className="flex items-start justify-between gap-3">
               <div>
                 <div className="text-sm font-semibold tracking-tight">My QR code</div>
-                <p className="mt-1 text-sm text-[hsl(var(--muted))]">Fast staff entry at the desk.</p>
               </div>
               <ShieldCheck size={18} className="mt-0.5 text-black" />
             </div>
@@ -246,7 +232,6 @@ export default async function TrainingUsefulPage() {
           <div className="flex items-start justify-between gap-4">
             <div>
               <h2 className="text-lg font-semibold tracking-tight">Training quick actions</h2>
-              <p className="mt-1 text-sm text-[hsl(var(--muted))]">The coach tools used most often.</p>
             </div>
             <Badge className="bg-[hsl(var(--bg))] text-[hsl(var(--muted))]">Today-first shortcuts</Badge>
           </div>
@@ -261,7 +246,6 @@ export default async function TrainingUsefulPage() {
                 <div className="flex items-start justify-between gap-3">
                   <div>
                     <div className="text-sm font-semibold tracking-tight">{item.label}</div>
-                    <p className="mt-1 text-sm text-[hsl(var(--muted))]">{item.desc}</p>
                   </div>
                   <item.icon size={18} className="mt-0.5 text-black transition group-hover:translate-x-0.5" />
                 </div>
@@ -289,11 +273,6 @@ export default async function TrainingUsefulPage() {
               <ScanLine size={18} className="mt-0.5 text-black" />
               <div>
                 <h2 className="text-lg font-semibold tracking-tight">Useful next step</h2>
-                <p className="mt-1 text-sm text-[hsl(var(--muted))]">
-                  {isAssistantView
-                    ? 'Keep QR, schedule and updates close before class.'
-                    : 'Use this page as a quick preview, then return to the main workspace when needed.'}
-                </p>
               </div>
             </div>
           </Surface>

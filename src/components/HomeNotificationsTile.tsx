@@ -25,7 +25,7 @@ function fmtCount(n: number) {
 export default function HomeNotificationsTile({
   href = '/notifications',
   label = 'Notifications',
-  desc,
+  desc: _desc,
   initialCount = 0,
   pollMs = 5000,
   pollHiddenMs = 30000,
