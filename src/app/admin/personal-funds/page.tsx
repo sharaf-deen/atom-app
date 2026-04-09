@@ -13,6 +13,7 @@ import Input from '@/components/ui/Input'
 import Select from '@/components/ui/Select'
 import InlineAlert from '@/components/ui/InlineAlert'
 import SaveButton from '@/components/forms/SaveButton'
+import ScrollToSavedItem from '@/components/ScrollToSavedItem'
 import { getSessionUserCached, getSupabaseAdminClientCached } from '@/lib/requestCache'
 import { canAccessPersonalFunds } from '@/lib/rbac'
 
@@ -421,30 +422,39 @@ async function addEntryAction(formData: FormData) {
     redirect(withFlash(returnQS, { error: e?.message || 'Receipt upload failed.' }))
   }
 
-  const { error } = await admin.from('personal_fund_entries').insert([
-    {
-      id: entryId,
-      entry_date,
-      person_id,
-      kind,
-      amount,
-      payment_method,
-      note: note || null,
-      receipt_path,
-      receipt_mime,
-      receipt_filename,
-      receipt_size_bytes,
-      created_by: me.id,
-      updated_by: me.id,
-    },
-  ])
+  const { data: inserted, error } = await admin
+    .from('personal_fund_entries')
+    .insert([
+      {
+        id: entryId,
+        entry_date,
+        person_id,
+        kind,
+        amount,
+        payment_method,
+        note: note || null,
+        receipt_path,
+        receipt_mime,
+        receipt_filename,
+        receipt_size_bytes,
+        created_by: me.id,
+        updated_by: me.id,
+      },
+    ])
+    .select('id')
+    .single<{ id: string }>()
 
   if (error) {
     await removeReceiptPath(admin, receipt_path)
     redirect(withFlash(returnQS, { error: error.message || 'Could not save entry.' }))
   }
 
-  redirect(withFlash(returnQS, { saved: '1' }))
+  const sp = new URLSearchParams(returnQS)
+  sp.set('saved', '1')
+  sp.set('page', '1')
+  if (inserted?.id) sp.set('focus_id', inserted.id)
+  const qs = sp.toString()
+  redirect(`/admin/personal-funds${qs ? `?${qs}` : ''}`)
 }
 
 async function updateEntryAction(formData: FormData) {
@@ -648,6 +658,7 @@ export default async function PersonalFundsPage({
   const errorMsg = safeStr(searchParams.error)
   const editId = safeStr(searchParams.edit).trim()
   const previewId = safeStr(searchParams.preview).trim()
+  const focusId = safeStr(searchParams.focus_id).trim()
 
   const returnQS = buildQS({
     preset,
@@ -823,7 +834,7 @@ export default async function PersonalFundsPage({
       createdLabel,
       isEditing,
       node: (
-        <div key={entry.id} className="rounded-2xl border border-[hsl(var(--border))] bg-white p-4 shadow-soft">
+        <div id={`personal-fund-entry-${entry.id}`} key={entry.id} className={`rounded-2xl border bg-white p-4 shadow-soft ${focusId === entry.id ? 'border-emerald-300 ring-2 ring-emerald-200/70 bg-emerald-50/30' : 'border-[hsl(var(--border))]'}`}>
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div className="min-w-0 space-y-1">
               <div className="flex flex-wrap items-center gap-2 text-xs text-[hsl(var(--muted))]">
@@ -919,6 +930,8 @@ export default async function PersonalFundsPage({
         }
       />
 
+      <ScrollToSavedItem targetId={focusId ? `personal-fund-entry-${focusId}` : ''} />
+
       <Section className="space-y-4">
         {peopleError ? (
           <InlineAlert variant="error" title="People">
@@ -947,7 +960,7 @@ export default async function PersonalFundsPage({
         ) : null}
         {saved === '1' ? (
           <InlineAlert variant="success" title="Personal Funds">
-            Entry saved.
+            Entry saved. Showing first page and scrolling to the new entry below.
           </InlineAlert>
         ) : null}
         {updated === '1' ? (
@@ -1010,6 +1023,8 @@ export default async function PersonalFundsPage({
           </Card>
         </div>
       </Section>
+
+      <ScrollToSavedItem targetId={focusId ? `personal-fund-entry-${focusId}` : ''} />
 
       <Section className="space-y-4">
         <div className="grid gap-4 xl:grid-cols-[1.1fr_0.9fr]">
@@ -1081,7 +1096,7 @@ export default async function PersonalFundsPage({
                 </label>
 
                 <div className="flex flex-wrap items-center gap-2">
-                  <Button type="submit" disabled={people.length === 0}>Add entry</Button>
+                  <SaveButton idleLabel="Add entry" pendingLabel="Saving..." disabled={people.length === 0} />
                   <div className="text-xs text-[hsl(var(--muted))]">Editing and receipt replacement stay inside Personal Funds.</div>
                 </div>
               </form>
@@ -1098,7 +1113,7 @@ export default async function PersonalFundsPage({
                 <div className="min-w-0 flex-1">
                   <Input name="label" placeholder="e.g. Shawki" />
                 </div>
-                <Button type="submit">Add person</Button>
+                <SaveButton idleLabel="Add person" pendingLabel="Saving..." />
               </form>
 
               {personCards.length === 0 ? (
@@ -1144,6 +1159,8 @@ export default async function PersonalFundsPage({
           </Card>
         </div>
       </Section>
+
+      <ScrollToSavedItem targetId={focusId ? `personal-fund-entry-${focusId}` : ''} />
 
       <Section className="space-y-4">
         <Card>

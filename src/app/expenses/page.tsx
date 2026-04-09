@@ -158,24 +158,32 @@ async function addExpenseAction(formData: FormData) {
     }
   }
 
-  const { error } = await admin.from('expenses').insert([
-    {
-      date,
-      category_key,
-      description: description || null,
-      amount,
-      payment_method,
-      receipt_path,
-      receipt_mime,
-      receipt_filename,
-    },
-  ])
+  const { data: inserted, error } = await admin
+    .from('expenses')
+    .insert([
+      {
+        date,
+        category_key,
+        description: description || null,
+        amount,
+        payment_method,
+        receipt_path,
+        receipt_mime,
+        receipt_filename,
+      },
+    ])
+    .select('id')
+    .single<{ id: string }>()
 
   if (error) {
     redirect(`/expenses?${return_qs}&error=${encodeURIComponent(error.message || 'Save failed.')}`)
   }
 
-  redirect(`/expenses?${return_qs}&saved=1`)
+  const sp = new URLSearchParams(return_qs)
+  sp.set('saved', '1')
+  sp.set('page', '1')
+  if (inserted?.id) sp.set('focus_id', inserted.id)
+  redirect(`/expenses?${sp.toString()}`)
 }
 
 export default async function ExpensesPage({
@@ -236,6 +244,7 @@ export default async function ExpensesPage({
   const updated = typeof searchParams.updated === 'string' ? searchParams.updated : ''
   const deleted = typeof searchParams.deleted === 'string' ? searchParams.deleted : ''
   const errorMsg = typeof searchParams.error === 'string' ? searchParams.error : ''
+  const focusId = typeof searchParams.focus_id === 'string' ? searchParams.focus_id : ''
 
   const admin = getSupabaseAdminClientCached()
 
@@ -371,7 +380,7 @@ export default async function ExpensesPage({
 
       {saved ? (
         <InlineAlert variant="success" title="Saved">
-          Expense added. Showing first page.
+          Expense added. Showing first page and scrolling to the new entry below.
         </InlineAlert>
       ) : null}
 
@@ -550,7 +559,7 @@ export default async function ExpensesPage({
 
         <CardContent>
           {expenses.length > 0 ? (
-            <ExpensesTableClient expenses={expenses} labelByKey={labelByKeyObj} returnQueryString={filterReturnQS} />
+            <ExpensesTableClient expenses={expenses} labelByKey={labelByKeyObj} returnQueryString={filterReturnQS} focusExpenseId={focusId} />
           ) : (
             <div className="rounded-2xl border border-dashed border-[hsl(var(--border))] bg-[hsl(var(--bg))]/40 p-6 text-center">
               <div className="text-base font-medium">No expenses found for the current filters.</div>
