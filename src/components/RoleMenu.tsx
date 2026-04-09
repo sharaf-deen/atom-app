@@ -23,6 +23,7 @@ import {
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import type { IconKey, MenuItem } from './AppNav'
+import type { Role } from '@/lib/rbac'
 
 const ICONS: Record<IconKey, LucideIcon> = {
   home: House,
@@ -124,7 +125,9 @@ function useBodyScrollLock(locked: boolean) {
   }, [locked])
 }
 
-export default function RoleMenu({ items }: { items: MenuItem[] }) {
+const LITE_MENU_ROLES: Role[] = ['member', 'champion', 'vip', 'assistant_coach', 'coach', 'head_coach']
+
+export default function RoleMenu({ items, role }: { items: MenuItem[]; role?: Role }) {
   const [open, setOpen] = useState(false)
   const [showAll, setShowAll] = useState(false)
   const [q, setQ] = useState('')
@@ -145,6 +148,8 @@ export default function RoleMenu({ items }: { items: MenuItem[] }) {
   }, [items])
 
   const quickItems = useMemo(() => pickQuick(menuItems), [menuItems])
+  const isLiteMenu = !!role && LITE_MENU_ROLES.includes(role)
+  const supportsAllTools = !isLiteMenu && menuItems.length > QUICK_MAX
 
   const hasNotifications = useMemo(() => menuItems.some((it) => it.href === '/notifications'), [menuItems])
   const [unreadCount, setUnreadCount] = useState<number>(0)
@@ -254,7 +259,7 @@ export default function RoleMenu({ items }: { items: MenuItem[] }) {
     return menuItems.filter((it) => (it.label + ' ' + it.href).toLowerCase().includes(qq))
   }, [menuItems, q])
 
-  const list = showAll ? filteredAll : quickItems
+  const list = isLiteMenu ? menuItems : showAll ? filteredAll : quickItems
 
   function close() {
     setOpen(false)
@@ -275,14 +280,17 @@ export default function RoleMenu({ items }: { items: MenuItem[] }) {
               href={it.href}
               onClick={close}
               className={
-                'flex items-center justify-between gap-3 px-3 py-2.5 text-[15px] hover:bg-black/[0.03] dark:hover:bg-white/[0.06] focus:bg-black/[0.04] dark:focus:bg-white/[0.08] outline-none ' +
+                'flex items-center justify-between gap-3 px-3 ' +
+                (isLiteMenu ? 'py-3 text-[15px] rounded-2xl ' : 'py-2.5 text-[15px] ') +
+                'hover:bg-black/[0.03] dark:hover:bg-white/[0.06] focus:bg-black/[0.04] dark:focus:bg-white/[0.08] outline-none ' +
                 (isNotifUnread ? 'text-red-700 font-semibold' : '')
               }
             >
               <div className="flex min-w-0 items-center gap-3">
                 <span
                   className={
-                    'inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-black/10 dark:border-white/10 ' +
+                    'inline-flex shrink-0 items-center justify-center border border-black/10 dark:border-white/10 ' +
+                    (isLiteMenu ? 'h-10 w-10 rounded-2xl ' : 'h-9 w-9 rounded-xl ') +
                     (isNotifUnread ? 'border-red-200 bg-red-50 dark:bg-white/10' : '')
                   }
                 >
@@ -349,18 +357,20 @@ export default function RoleMenu({ items }: { items: MenuItem[] }) {
 
             {/* Header */}
             <div className="flex items-center justify-between gap-2 px-4 pt-3 pb-2">
-              <div className="text-base font-semibold">{showAll ? 'All tools' : 'Quick menu'}</div>
+              <div className="text-base font-semibold">{isLiteMenu ? 'Menu' : showAll ? 'All tools' : 'Quick menu'}</div>
               <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setShowAll((v) => !v)
-                    setQ('')
-                  }}
-                  className="text-xs font-semibold rounded-full border px-2.5 py-1 hover:bg-black/[0.03] dark:hover:bg-white/[0.06]"
-                >
-                  {showAll ? 'Quick' : `All (${menuItems.length})`}
-                </button>
+                {supportsAllTools ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowAll((v) => !v)
+                      setQ('')
+                    }}
+                    className="text-xs font-semibold rounded-full border px-2.5 py-1 hover:bg-black/[0.03] dark:hover:bg-white/[0.06]"
+                  >
+                    {showAll ? 'Quick' : `All (${menuItems.length})`}
+                  </button>
+                ) : null}
                 <button
                   type="button"
                   onClick={close}
@@ -372,7 +382,7 @@ export default function RoleMenu({ items }: { items: MenuItem[] }) {
               </div>
             </div>
 
-            {showAll ? (
+            {!isLiteMenu && showAll ? (
               <div className="px-4 pb-2">
                 <div className="relative">
                   <Search
@@ -409,20 +419,22 @@ export default function RoleMenu({ items }: { items: MenuItem[] }) {
           className="hidden sm:block absolute z-50 mt-3 w-72 rounded-2xl border border-black/10 bg-white dark:bg-black shadow-xl"
         >
           <div className="flex items-center justify-between gap-2 px-3 pt-3 pb-2">
-            <div className="text-sm font-semibold">{showAll ? 'All tools' : 'Quick menu'}</div>
-            <button
-              type="button"
-              onClick={() => {
-                setShowAll((v) => !v)
-                setQ('')
-              }}
-              className="text-xs font-semibold rounded-full border px-2.5 py-1 hover:bg-black/[0.03] dark:hover:bg-white/[0.06]"
-            >
-              {showAll ? 'Quick' : `All (${menuItems.length})`}
-            </button>
+            <div className="text-sm font-semibold">{isLiteMenu ? 'Menu' : showAll ? 'All tools' : 'Quick menu'}</div>
+            {supportsAllTools ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setShowAll((v) => !v)
+                  setQ('')
+                }}
+                className="text-xs font-semibold rounded-full border px-2.5 py-1 hover:bg-black/[0.03] dark:hover:bg-white/[0.06]"
+              >
+                {showAll ? 'Quick' : `All (${menuItems.length})`}
+              </button>
+            ) : null}
           </div>
 
-          {showAll ? (
+          {!isLiteMenu && showAll ? (
             <div className="px-3 pb-2">
               <div className="relative">
                 <Search
