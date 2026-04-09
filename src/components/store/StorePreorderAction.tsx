@@ -57,7 +57,7 @@ export default function StorePreorderAction({ product }: { product: Product }) {
         return
       }
 
-      setStatus({ kind: 'success', msg: 'Pre-order sent successfully.' })
+      setStatus({ kind: 'success', msg: 'Request sent successfully.' })
       setNote('')
       setQty(1)
       setOpen(false)
@@ -83,8 +83,21 @@ export default function StorePreorderAction({ product }: { product: Product }) {
   return (
     <div className="space-y-3">
       {open ? (
-        <div className="space-y-3 rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-3">
-          <div className="grid gap-3 sm:grid-cols-2">
+        <div className="space-y-4 rounded-2xl border border-[hsl(var(--border))] bg-white/80 p-4">
+          <div className="flex flex-wrap items-start gap-3">
+            <div className="min-w-0 flex-1">
+              <div className="text-sm font-semibold">Send pre-order request</div>
+              <div className="mt-1 text-xs text-[hsl(var(--muted))]">
+                Final deposit and pickup are confirmed later by the store admin.
+              </div>
+            </div>
+            <div className="rounded-2xl border border-dashed border-[hsl(var(--border))] bg-[hsl(var(--card))] px-3 py-2 text-right">
+              <div className="text-[11px] uppercase tracking-wide text-[hsl(var(--muted))]">Estimated total</div>
+              <div className="mt-1 text-sm font-semibold">{total}</div>
+            </div>
+          </div>
+
+          <div className="grid gap-3 sm:grid-cols-[140px,minmax(0,1fr)] sm:items-start">
             <Input
               label="Quantity"
               type="number"
@@ -93,22 +106,18 @@ export default function StorePreorderAction({ product }: { product: Product }) {
               onChange={(e) => setQty(Math.max(1, Number(e.target.value || 1)))}
               disabled={busy}
             />
-            <div className="rounded-xl border border-dashed border-[hsl(var(--border))] px-3 py-2">
-              <div className="text-xs text-[hsl(var(--muted))]">Estimated total</div>
-              <div className="mt-1 text-sm font-semibold">{total}</div>
-            </div>
-          </div>
 
-          <label className="block">
-            <span className="mb-1 block text-sm font-medium">Note</span>
-            <textarea
-              value={note}
-              onChange={(e) => setNote(e.target.value.slice(0, 400))}
-              placeholder="Optional note"
-              className="min-h-[88px] w-full rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm placeholder:text-[hsl(var(--muted))] outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-[hsl(var(--bg))]"
-              disabled={busy}
-            />
-          </label>
+            <label className="block">
+              <span className="mb-1 block text-sm font-medium">Message (optional)</span>
+              <textarea
+                value={note}
+                onChange={(e) => setNote(e.target.value.slice(0, 400))}
+                placeholder="Size, timing or special request"
+                className="min-h-[88px] w-full rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm placeholder:text-[hsl(var(--muted))] outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-[hsl(var(--bg))]"
+                disabled={busy}
+              />
+            </label>
+          </div>
 
           {status.msg ? (
             <InlineAlert variant={status.kind === 'error' ? 'error' : 'success'} compact>
@@ -118,7 +127,7 @@ export default function StorePreorderAction({ product }: { product: Product }) {
 
           <div className="flex flex-wrap gap-2">
             <Button type="button" onClick={submitPreorder} loading={busy} loadingText="Sending…">
-              Confirm pre-order
+              Send request
             </Button>
             <Button
               type="button"
@@ -129,14 +138,14 @@ export default function StorePreorderAction({ product }: { product: Product }) {
                 setStatus({ kind: '', msg: '' })
               }}
             >
-              Cancel
+              Close
             </Button>
           </div>
         </div>
       ) : (
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <Button type="button" onClick={() => setOpen(true)}>
-            Pre-order
+            Request pre-order
           </Button>
           <div className="text-xs text-[hsl(var(--muted))]">Simple request. Payment later.</div>
         </div>
