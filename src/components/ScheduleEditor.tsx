@@ -46,7 +46,7 @@ type DayBlock = {
   other: DaySession[]
 }
 
-type TabKey = 'day' | 'adults' | 'kids'
+type TabKey = 'today' | 'day' | 'adults' | 'kids'
 
 function cn(...parts: Array<string | null | undefined | false>) {
   return parts.filter((p): p is string => Boolean(p)).join(' ')
@@ -309,8 +309,10 @@ function TabButton({
       type="button"
       onClick={onClick}
       className={cn(
-        'h-9 rounded-xl px-3 text-sm font-semibold transition',
-        active ? 'bg-neutral-900 text-white' : 'bg-white text-neutral-700 hover:bg-neutral-50'
+        'h-10 rounded-2xl px-4 text-sm font-semibold transition',
+        active
+          ? 'bg-neutral-900 text-white shadow-soft'
+          : 'bg-white text-neutral-600 hover:bg-neutral-50 hover:text-neutral-900'
       )}
       aria-pressed={active}
     >
@@ -322,7 +324,7 @@ function TabButton({
 function SectionTitle({ children }: { children: ReactNode }) {
   return (
     <div className="text-center">
-      <h3 className="text-3xl font-extrabold tracking-tight text-neutral-900">{children}</h3>
+      <h3 className="text-2xl font-bold tracking-tight text-neutral-900 sm:text-3xl">{children}</h3>
     </div>
   )
 }
@@ -375,29 +377,34 @@ function ItemLine({ it }: { it: ProgramItem }) {
 
   if (left && time) {
     return (
-      <div className="text-sm text-neutral-900">
-        <span className="font-semibold">{left}</span>
-        <span className="text-neutral-500"> – </span>
-        <span className="font-semibold">{time}</span>
-        {detail ? <span className="text-neutral-700"> {detail}</span> : null}
+      <div className="rounded-2xl border border-neutral-200/80 bg-neutral-50/80 px-3 py-2.5 text-sm text-neutral-900">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="rounded-full bg-white px-2.5 py-1 text-xs font-semibold text-neutral-700 ring-1 ring-neutral-200">
+            {left}
+          </span>
+          <span className="rounded-full bg-neutral-900 px-2.5 py-1 text-xs font-semibold text-white">{time}</span>
+        </div>
+        {detail ? <div className="mt-2 text-sm text-neutral-700">{detail}</div> : null}
       </div>
     )
   }
 
-  return <div className="text-sm text-neutral-800">{it.raw}</div>
+  return <div className="rounded-2xl border border-neutral-200/80 bg-neutral-50/80 px-3 py-2.5 text-sm text-neutral-800">{it.raw}</div>
 }
 
 function BlockCard({ title, subtitle, description, children }: { title: string; subtitle?: string; description?: string; children: ReactNode }) {
   return (
-    <div className="rounded-2xl border border-neutral-200 bg-white p-5 shadow-soft">
-      <div className="text-lg font-extrabold tracking-tight text-neutral-900">{title}</div>
-      {subtitle ? (
-        <div className="mt-2 text-xs font-bold uppercase tracking-wide text-neutral-500">{subtitle}</div>
-      ) : null}
-      {description ? (
-        <div className="mt-2 text-xs font-semibold uppercase tracking-wide text-neutral-500">{description}</div>
-      ) : null}
-      <div className="mt-3 space-y-1.5">{children}</div>
+    <div className="rounded-3xl border border-neutral-200 bg-white p-5 shadow-soft sm:p-6">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <div className="text-xl font-bold tracking-tight text-neutral-900">{title}</div>
+          {subtitle ? (
+            <div className="mt-2 text-xs font-semibold uppercase tracking-[0.18em] text-neutral-500">{subtitle}</div>
+          ) : null}
+          {description ? <div className="mt-2 max-w-2xl text-sm text-neutral-600">{description}</div> : null}
+        </div>
+      </div>
+      <div className="mt-4 space-y-2">{children}</div>
     </div>
   )
 }
@@ -408,55 +415,160 @@ function isTitleMatch(title: string, pattern: RegExp) {
 
 function DayCardStacked({ d }: { d: DayBlock }) {
   return (
-    <div className="rounded-2xl border border-neutral-200 bg-white p-5 shadow-soft">
-      <div className="text-xl font-extrabold tracking-tight text-neutral-900">{d.day}</div>
+    <div className="rounded-3xl border border-neutral-200 bg-white p-5 shadow-soft sm:p-6">
+      <div className="flex items-center justify-between gap-3">
+        <div className="text-xl font-bold tracking-tight text-neutral-900">{d.day}</div>
+        <div className="rounded-full bg-neutral-100 px-3 py-1 text-xs font-semibold text-neutral-600">
+          {d.kids.length + d.adults.length + d.other.length} sessions
+        </div>
+      </div>
 
-      <div className="mt-4">
-        <div className="text-xs font-bold uppercase tracking-wide text-neutral-500">Kids &amp; Teens</div>
-        <div className="mt-2 space-y-1">
+      <div className="mt-5">
+        <div className="text-xs font-semibold uppercase tracking-[0.18em] text-neutral-500">Kids &amp; teens</div>
+        <div className="mt-2 space-y-2">
           {d.kids.length ? (
             d.kids.map((s, idx) => (
-              <div key={idx} className="text-sm text-neutral-900">
-                <span className="font-semibold">{s.time}</span>
-                <span className="text-neutral-500"> – </span>
-                <span className="text-neutral-800">{s.text}</span>
+              <div key={idx} className="rounded-2xl border border-neutral-200/80 bg-neutral-50/80 px-3 py-2.5 text-sm text-neutral-900">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="rounded-full bg-neutral-900 px-2.5 py-1 text-xs font-semibold text-white">{s.time}</span>
+                  <span className="text-neutral-800">{s.text}</span>
+                </div>
               </div>
             ))
           ) : (
-            <div className="text-sm text-neutral-400">—</div>
+            <div className="rounded-2xl border border-dashed border-neutral-200 bg-neutral-50 px-3 py-2.5 text-sm text-neutral-400">No kids classes.</div>
           )}
         </div>
       </div>
 
       <div className="mt-4">
-        <div className="text-xs font-bold uppercase tracking-wide text-neutral-500">Adults</div>
-        <div className="mt-2 space-y-1">
+        <div className="text-xs font-semibold uppercase tracking-[0.18em] text-neutral-500">Adults</div>
+        <div className="mt-2 space-y-2">
           {d.adults.length ? (
             d.adults.map((s, idx) => (
-              <div key={idx} className="text-sm text-neutral-900">
-                <span className="font-semibold">{s.time}</span>
-                <span className="text-neutral-500"> – </span>
-                <span className="text-neutral-800">{s.text}</span>
+              <div key={idx} className="rounded-2xl border border-neutral-200/80 bg-neutral-50/80 px-3 py-2.5 text-sm text-neutral-900">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="rounded-full bg-neutral-900 px-2.5 py-1 text-xs font-semibold text-white">{s.time}</span>
+                  <span className="text-neutral-800">{s.text}</span>
+                </div>
               </div>
             ))
           ) : (
-            <div className="text-sm text-neutral-400">—</div>
+            <div className="rounded-2xl border border-dashed border-neutral-200 bg-neutral-50 px-3 py-2.5 text-sm text-neutral-400">No adult classes.</div>
           )}
         </div>
       </div>
 
       {d.other.length ? (
         <div className="mt-4">
-          <div className="text-xs font-bold uppercase tracking-wide text-neutral-500">Other</div>
-          <div className="mt-2 space-y-1">
+          <div className="text-xs font-semibold uppercase tracking-[0.18em] text-neutral-500">Other</div>
+          <div className="mt-2 space-y-2">
             {d.other.map((x, i) => (
-              <div key={i} className="text-sm text-neutral-600">
+              <div key={i} className="rounded-2xl border border-neutral-200/80 bg-neutral-50/80 px-3 py-2.5 text-sm text-neutral-600">
                 {x.text}
               </div>
             ))}
           </div>
         </div>
       ) : null}
+    </div>
+  )
+}
+
+function DayChip({
+  label,
+  active,
+  isToday,
+  onClick,
+}: {
+  label: string
+  active: boolean
+  isToday: boolean
+  onClick: () => void
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        'inline-flex min-w-fit items-center gap-2 rounded-full border px-3 py-2 text-sm font-medium transition',
+        active
+          ? 'border-neutral-900 bg-neutral-900 text-white shadow-soft'
+          : 'border-neutral-200 bg-white text-neutral-700 hover:border-neutral-300 hover:text-neutral-900'
+      )}
+    >
+      <span>{label}</span>
+      {isToday ? (
+        <span
+          className={cn(
+            'rounded-full px-2 py-0.5 text-[11px] font-semibold',
+            active ? 'bg-white/15 text-white' : 'bg-neutral-100 text-neutral-600'
+          )}
+        >
+          Today
+        </span>
+      ) : null}
+    </button>
+  )
+}
+
+function DayPreviewPanel({ d, currentDay }: { d: DayBlock | null; currentDay: string }) {
+  if (!d) {
+    return (
+      <div className="rounded-3xl border border-dashed border-neutral-200 bg-white p-6 text-sm text-neutral-500 shadow-soft">
+        No sessions available for this day yet.
+      </div>
+    )
+  }
+
+  const isToday = d.day === currentDay
+
+  const renderGroup = (title: string, sessions: DaySession[], emptyText: string) => (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between gap-3">
+        <div className="text-xs font-semibold uppercase tracking-[0.18em] text-neutral-500">{title}</div>
+        <div className="text-xs font-medium text-neutral-400">{sessions.length || 0}</div>
+      </div>
+      {sessions.length ? (
+        <div className="space-y-2">
+          {sessions.map((s, idx) => (
+            <div key={idx} className="rounded-2xl border border-neutral-200/80 bg-neutral-50/80 px-4 py-3">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="rounded-full bg-neutral-900 px-2.5 py-1 text-xs font-semibold text-white">{s.time || 'Time TBC'}</span>
+                <span className="text-sm text-neutral-800">{s.text}</span>
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="rounded-2xl border border-dashed border-neutral-200 bg-neutral-50 px-4 py-3 text-sm text-neutral-400">{emptyText}</div>
+      )}
+    </div>
+  )
+
+  return (
+    <div className="rounded-3xl border border-neutral-200 bg-white p-5 shadow-soft sm:p-6">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <div className="flex flex-wrap items-center gap-2">
+            <h3 className="text-2xl font-bold tracking-tight text-neutral-900">{d.day}</h3>
+            {isToday ? (
+              <span className="rounded-full bg-neutral-900 px-2.5 py-1 text-xs font-semibold text-white">Today</span>
+            ) : null}
+          </div>
+          <p className="mt-2 text-sm text-neutral-600">Your classes for this day at a glance.</p>
+        </div>
+        <div className="rounded-full bg-neutral-100 px-3 py-1 text-xs font-semibold text-neutral-600">
+          {d.kids.length + d.adults.length + d.other.length} sessions
+        </div>
+      </div>
+
+      <div className="mt-6 grid gap-4 lg:grid-cols-2">
+        {renderGroup('Kids & Teens', d.kids, 'No kids classes scheduled.')}
+        {renderGroup('Adults', d.adults, 'No adult classes scheduled.')}
+      </div>
+
+      {d.other.length ? <div className="mt-4">{renderGroup('Other', d.other, 'No extra schedule notes.')}</div> : null}
     </div>
   )
 }
@@ -477,7 +589,8 @@ export default function ScheduleEditor({ initialContent, canEdit, updatedAt }: P
   const [error, setError] = useState<string | null>(null)
   const [ok, setOk] = useState<string | null>(null)
 
-  const [tab, setTab] = useState<TabKey>('day')
+  const [tab, setTab] = useState<TabKey>('today')
+  const [selectedDay, setSelectedDay] = useState<string>(DAY_NAMES[new Date().getDay()] || DAY_NAMES[0])
 
   useEffect(() => {
     setContent(initialContent)
@@ -487,6 +600,15 @@ export default function ScheduleEditor({ initialContent, canEdit, updatedAt }: P
   const parts = useMemo(() => splitByMarker(content), [content])
   const program = useMemo(() => parseProgram(parts.a), [parts.a])
   const byDay = useMemo(() => (parts.b ? parseByDay(parts.b) : []), [parts.b])
+  const currentDay = useMemo(() => DAY_NAMES[new Date().getDay()] || DAY_NAMES[0], [])
+  const selectedDayBlock = useMemo(() => byDay.find((d) => d.day === selectedDay) || null, [byDay, selectedDay])
+
+  useEffect(() => {
+    if (!byDay.length) return
+    if (!byDay.some((d) => d.day === selectedDay)) {
+      setSelectedDay(byDay.some((d) => d.day === currentDay) ? currentDay : byDay[0].day)
+    }
+  }, [byDay, currentDay, selectedDay])
 
   const adultBlocksAll = useMemo(() => program.blocks.filter((b) => b.top === 'Adults'), [program.blocks])
   const kidsBlocksAll = useMemo(() => program.blocks.filter((b) => b.top === 'Kids & Teens'), [program.blocks])
@@ -668,6 +790,7 @@ async function onSave() {
   }
 
   const nothingToShow = useMemo(() => {
+    if (tab === 'today') return byDay.length === 0
     if (tab === 'day') return byDay.length === 0
     if (tab === 'adults') return adultBlocksAll.length === 0
     return kidsBlocksAll.length === 0
@@ -681,16 +804,22 @@ async function onSave() {
 
 return (
     <div className="space-y-4">
-      <div className="rounded-2xl border border-neutral-200 bg-white p-5 shadow-soft">
-        <div className="flex items-start justify-between gap-3">
+      <div className="rounded-3xl border border-neutral-200 bg-white p-5 shadow-soft sm:p-6">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
           <div className="min-w-0">
-            <h2 className="text-base font-semibold text-neutral-900">Schedule</h2>
-            <p className="mt-1 text-sm text-neutral-600">
-              {canEdit ? 'Visible to all users. Editable only by super admin.' : 'Visible to all users.'}
+            <div className="flex flex-wrap items-center gap-2">
+              <h2 className="text-lg font-bold tracking-tight text-neutral-900">Weekly schedule</h2>
+              {updatedAt ? (
+                <span className="rounded-full bg-neutral-100 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-neutral-500">
+                  Updated {new Date(updatedAt).toLocaleDateString()}
+                </span>
+              ) : null}
+            </div>
+            <p className="mt-2 max-w-2xl text-sm text-neutral-600">
+              {canEdit
+                ? 'Simple and readable for members. Editable only by super admin.'
+                : 'See today first, then browse the full weekly timetable.'}
             </p>
-            {updatedAt ? (
-              <div className="mt-2 text-xs text-neutral-500">Last updated: {new Date(updatedAt).toLocaleString()}</div>
-            ) : null}
           </div>
 
           <div className="flex items-center gap-2">
@@ -718,12 +847,12 @@ return (
         ) : null}
 
         {editing ? (
-          <div className="mt-4 space-y-2">
+          <div className="mt-5 space-y-2">
             <label className="text-sm font-medium text-neutral-900">Schedule content</label>
             <textarea
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
-              className="min-h-[520px] w-full rounded-2xl border border-neutral-200 bg-white p-3 text-sm text-neutral-900 outline-none placeholder:text-neutral-400 focus:ring-2 focus:ring-neutral-200"
+              className="min-h-[520px] w-full rounded-3xl border border-neutral-200 bg-white p-4 text-sm text-neutral-900 outline-none placeholder:text-neutral-400 focus:ring-2 focus:ring-neutral-200"
               placeholder="Paste your schedule here..."
             />
             <p className="text-xs text-neutral-500">
@@ -731,28 +860,66 @@ return (
             </p>
           </div>
         ) : (
-          <div className="mt-4">
+          <div className="mt-5">
             {/* Tabs */}
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-              <div className="text-sm font-semibold text-neutral-700">Weekly schedule</div>
-              <div className="flex w-full gap-2 rounded-2xl border border-neutral-200 bg-neutral-50 p-1 sm:w-auto">
-                <TabButton active={tab === 'day'} onClick={() => setTab('day')}>
-                  By day
-                </TabButton>
-                <TabButton active={tab === 'adults'} onClick={() => setTab('adults')}>
-                  By adults
-                </TabButton>
-                <TabButton active={tab === 'kids'} onClick={() => setTab('kids')}>
-                  By kids
-                </TabButton>
+            <div className="flex flex-col gap-3">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <div className="text-sm font-semibold text-neutral-800">Training at a glance</div>
+                  <div className="mt-1 text-xs text-neutral-500">Start with today, then browse the full week.</div>
+                </div>
+                <div className="flex w-full gap-2 rounded-2xl border border-neutral-200 bg-neutral-50 p-1 sm:w-auto">
+                  <TabButton active={tab === 'today'} onClick={() => setTab('today')}>
+                    Today
+                  </TabButton>
+                  <TabButton active={tab === 'day'} onClick={() => setTab('day')}>
+                    Full week
+                  </TabButton>
+                  <TabButton active={tab === 'adults'} onClick={() => setTab('adults')}>
+                    Adults
+                  </TabButton>
+                  <TabButton active={tab === 'kids'} onClick={() => setTab('kids')}>
+                    Kids & teens
+                  </TabButton>
+                </div>
               </div>
+
+              {byDay.length ? (
+                <div className="flex gap-2 overflow-x-auto pb-1">
+                  {DAY_NAMES.map((day) => (
+                    <DayChip
+                      key={day}
+                      label={day}
+                      active={selectedDay === day}
+                      isToday={day === currentDay}
+                      onClick={() => {
+                        setSelectedDay(day)
+                        setTab('today')
+                      }}
+                    />
+                  ))}
+                </div>
+              ) : null}
             </div>
 
             {/* Content */}
             <div className="mt-8 space-y-10">
+              {tab === 'today' && byDay.length ? (
+                <section className="space-y-6">
+                  <SectionTitle>Today first</SectionTitle>
+                  <div className="mx-auto max-w-5xl text-center text-sm text-neutral-600">
+                    Pick any day above to preview the classes in a cleaner, quicker way.
+                  </div>
+                  <DayPreviewPanel d={selectedDayBlock} currentDay={currentDay} />
+                </section>
+              ) : null}
+
               {tab === 'day' && byDay.length ? (
                 <section className="space-y-6">
-                  <SectionTitle>Weekly Schedule by Day</SectionTitle>
+                  <SectionTitle>Full week</SectionTitle>
+                  <div className="mx-auto max-w-5xl text-center text-sm text-neutral-600">
+                    See every day of the week with kids and adult sessions grouped clearly.
+                  </div>
                   <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-3">
                     {byDay.map((d) => (
                       <DayCardStacked key={d.day} d={d} />
@@ -764,6 +931,9 @@ return (
               {tab === 'adults' ? (
                 <section className="space-y-6">
                   <SectionTitle>Adults</SectionTitle>
+                  <div className="mx-auto max-w-5xl text-center text-sm text-neutral-600">
+                    Quick overview by level so members can find the right class faster.
+                  </div>
 
                   {adultsView.beginners || adultsView.intermediate || adultsView.openMatItems.length || adultsView.advancedItems.length ? (
                     <div className="space-y-6">
@@ -828,6 +998,9 @@ return (
               {tab === 'kids' ? (
                 <section className="space-y-6">
                   <SectionTitle>Kids &amp; Teens</SectionTitle>
+                  <div className="mx-auto max-w-5xl text-center text-sm text-neutral-600">
+                    Clear group-by-group planning for children, teens and competition teams.
+                  </div>
 
                   <div className="grid gap-6 md:grid-cols-2">
                     <BlockCard title="Baby 3-5 years">
@@ -929,7 +1102,7 @@ return (
               ) : null}
 
               {nothingToShow ? (
-                <div className="rounded-2xl border border-neutral-200 bg-neutral-50 p-6 text-sm text-neutral-600">
+                <div className="rounded-3xl border border-dashed border-neutral-200 bg-neutral-50 p-6 text-sm text-neutral-600">
                   No schedule data to display.
                 </div>
               ) : null}
