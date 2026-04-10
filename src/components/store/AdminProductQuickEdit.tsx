@@ -1,13 +1,22 @@
-// src/components/store/AdminProductQuickEdit.tsx
 'use client'
 
 import { useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import Button from '@/components/ui/Button'
+import Modal from '@/components/ui/Modal'
+import StoreProductForm from '@/components/StoreProductForm'
+
+type Category = 'kimono' | 'rashguard' | 'short' | 'belt'
 
 type Props = {
   id: string
+  category: Category
+  name: string
+  color: string | null
+  size: string | null
+  priceCents: number
+  currency: string | null
   inventoryQty: number
   isActive: boolean
   allowPreorder: boolean
@@ -16,6 +25,12 @@ type Props = {
 
 export default function AdminProductQuickEdit({
   id,
+  category,
+  name,
+  color,
+  size,
+  priceCents,
+  currency,
   inventoryQty,
   isActive,
   allowPreorder,
@@ -27,6 +42,8 @@ export default function AdminProductQuickEdit({
   const [preorder, setPreorder] = useState<boolean>(!!allowPreorder)
   const [threshold, setThreshold] = useState<number>(Number.isFinite(lowStockThreshold) ? lowStockThreshold : 0)
   const [loading, setLoading] = useState(false)
+  const [editOpen, setEditOpen] = useState(false)
+  const [deleteBusy, setDeleteBusy] = useState(false)
 
   const dirty = useMemo(
     () => qty !== inventoryQty || active !== isActive || preorder !== allowPreorder || threshold !== lowStockThreshold,
@@ -75,53 +92,127 @@ export default function AdminProductQuickEdit({
     }
   }
 
+  async function removeProduct() {
+    if (deleteBusy) return
+    const ok = globalThis.confirm(
+      'Delete this product? Existing store history linked to this product may block deletion.'
+    )
+    if (!ok) return
+
+    setDeleteBusy(true)
+    try {
+      const r = await fetch(`/api/store/products/delete?id=${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+        cache: 'no-store',
+      })
+      const j = await r.json().catch(() => ({}))
+      if (!r.ok || !j?.ok) {
+        toast.error(j?.details || j?.error || 'Delete failed')
+        return
+      }
+      toast.success('Product deleted')
+      router.refresh()
+      setTimeout(() => router.refresh(), 250)
+    } catch (e: any) {
+      toast.error(e?.message || 'Network error')
+    } finally {
+      setDeleteBusy(false)
+    }
+  }
+
   return (
-    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-[120px_140px_auto_auto_auto] xl:items-end">
-      <div className="flex flex-col gap-1">
-        <label className="text-[11px] text-[hsl(var(--muted))]">Stock</label>
-        <input
-          type="number"
-          min={0}
-          value={qty}
-          onChange={(e) => setQty(Number(e.target.value || 0))}
-          className="rounded-xl border px-3 py-2 text-sm bg-white"
-        />
+    <div className="grid gap-3">
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-[120px_140px_auto_auto_auto] xl:items-end">
+        <div className="flex flex-col gap-1">
+          <label className="text-[11px] text-[hsl(var(--muted))]">Stock</label>
+          <input
+            type="number"
+            min={0}
+            value={qty}
+            onChange={(e) => setQty(Number(e.target.value || 0))}
+            className="rounded-xl border px-3 py-2 text-sm bg-white"
+          />
+        </div>
+
+        <div className="flex flex-col gap-1">
+          <label className="text-[11px] text-[hsl(var(--muted))]">Low stock threshold</label>
+          <input
+            type="number"
+            min={0}
+            value={threshold}
+            onChange={(e) => setThreshold(Number(e.target.value || 0))}
+            className="rounded-xl border px-3 py-2 text-sm bg-white"
+          />
+        </div>
+
+        <label className="flex items-center gap-2 text-sm select-none pb-2">
+          <input
+            type="checkbox"
+            checked={preorder}
+            onChange={(e) => setPreorder(e.target.checked)}
+            className="h-4 w-4"
+          />
+          Preorder enabled
+        </label>
+
+        <label className="flex items-center gap-2 text-sm select-none pb-2">
+          <input
+            type="checkbox"
+            checked={active}
+            onChange={(e) => setActive(e.target.checked)}
+            className="h-4 w-4"
+          />
+          Active
+        </label>
+
+        <Button onClick={save} disabled={!dirty || loading} className="h-[40px]">
+          {loading ? 'Saving…' : 'Save'}
+        </Button>
       </div>
 
-      <div className="flex flex-col gap-1">
-        <label className="text-[11px] text-[hsl(var(--muted))]">Low stock threshold</label>
-        <input
-          type="number"
-          min={0}
-          value={threshold}
-          onChange={(e) => setThreshold(Number(e.target.value || 0))}
-          className="rounded-xl border px-3 py-2 text-sm bg-white"
-        />
+      <div className="flex flex-wrap items-center gap-2">
+        <Button type="button" variant="outline" onClick={() => setEditOpen(true)}>
+          Edit details
+        </Button>
+        <Button
+          type="button"
+          variant="outline"
+          className="border-rose-200 text-rose-700 hover:bg-rose-50"
+          onClick={removeProduct}
+          loading={deleteBusy}
+          loadingText="Deleting…"
+          disabled={deleteBusy}
+        >
+          Delete product
+        </Button>
       </div>
 
-      <label className="flex items-center gap-2 text-sm select-none pb-2">
-        <input
-          type="checkbox"
-          checked={preorder}
-          onChange={(e) => setPreorder(e.target.checked)}
-          className="h-4 w-4"
+      <Modal
+        open={editOpen}
+        onClose={() => setEditOpen(false)}
+        title="Edit product"
+        className="w-[min(96vw,42rem)]"
+      >
+        <StoreProductForm
+          product={{
+            id,
+            category,
+            name,
+            color,
+            size,
+            price_cents: priceCents,
+            currency,
+            inventory_qty: inventoryQty,
+            is_active: isActive,
+          }}
+          onSaved={() => {
+            setEditOpen(false)
+            router.refresh()
+            setTimeout(() => router.refresh(), 250)
+          }}
+          onCancel={() => setEditOpen(false)}
         />
-        Preorder enabled
-      </label>
-
-      <label className="flex items-center gap-2 text-sm select-none pb-2">
-        <input
-          type="checkbox"
-          checked={active}
-          onChange={(e) => setActive(e.target.checked)}
-          className="h-4 w-4"
-        />
-        Active
-      </label>
-
-      <Button onClick={save} disabled={!dirty || loading} className="h-[40px]">
-        {loading ? 'Saving…' : 'Save'}
-      </Button>
+      </Modal>
     </div>
   )
 }

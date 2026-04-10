@@ -7,8 +7,6 @@ import { revalidatePath, revalidateTag } from 'next/cache'
 import { createSupabaseServerActionClient } from '@/lib/supabaseServer'
 import { createSupabaseAdminClient } from '@/lib/supabaseAdmin'
 
-const STORE_BUCKET = 'store-product-images'
-
 function noStore(res: NextResponse) {
   res.headers.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate')
   return res
@@ -35,47 +33,78 @@ export async function DELETE(req: NextRequest) {
       .select('role')
       .eq('user_id', user.id)
       .maybeSingle<{ role: string | null }>()
+
     if (meErr) {
       return noStore(
         NextResponse.json({ ok: false, error: 'PROFILE_ERROR', details: meErr.message }, { status: 500 })
       )
     }
-    if (me?.role !== 'super_admin') {
+
+    if ((me?.role || '') !== 'super_admin') {
       return noStore(NextResponse.json({ ok: false, error: 'FORBIDDEN' }, { status: 403 }))
     }
 
     const url = new URL(req.url)
     const id = (url.searchParams.get('id') || '').trim()
-    if (!id) return noStore(NextResponse.json({ ok: false, error: 'MISSING_ID' }, { status: 400 }))
+    if (!id) {
+      return noStore(NextResponse.json({ ok: false, error: 'MISSING_ID' }, { status: 400 }))
+    }
 
-    const { data: product, error: lookupErr } = await admin
-      .from('store_products')
-      .select('id, image_path')
+    const { data: sale, error: saleErr } = await admin
+      .from('store_sales')
+      .select('id, status')
       .eq('id', id)
-      .maybeSingle<{ id: string; image_path: string | null }>()
+      .maybeSingle<{ id: string; status: string }>()
 
-    if (lookupErr) {
-      return noStore(
-        NextResponse.json({ ok: false, error: 'LOOKUP_FAILED', details: lookupErr.message }, { status: 500 })
-      )
+    if (saleErr) {
+      return noStore(NextResponse.json({ ok: false, error: 'LOOKUP_FAILED', details: saleErr.message }, { status: 500 }))
     }
-    if (!product?.id) {
-      return noStore(NextResponse.json({ ok: false, error: 'NOT_FOUND' }, { status: 404 }))
+    if (!sale?.id) {
+      return noStore(NextResponse.json({ ok: false, error: 'SALE_NOT_FOUND' }, { status: 404 }))
     }
 
-    const { error } = await admin.from('store_products').delete().eq('id', id)
-    if (error) {
-      const details =
-        error.code === '23503'
-          ? 'This product is linked to store history and cannot be deleted.'
-          : error.message
+    if (sale.status !== 'draft' && sale.status !== 'canceled') {
       return noStore(
-        NextResponse.json({ ok: false, error: 'DELETE_FAILED', details }, { status: 500 })
+        NextResponse.json(
+          { ok: false, error: 'DELETE_NOT_ALLOWED', details: 'Only draft or canceled sales can be deleted.' },
+          { status: 400 }
+        )
       )
     }
 
-    if (product.image_path) {
-      await admin.storage.from(STORE_BUCKET).remove([product.image_path]).catch(() => undefined)
+    const { data: deliveredLines, error: linesErr } = await admin
+      .from('store_sale_items')
+      .select('sale_id')
+      .eq('sale_id', id)
+      .eq('delivered_stock_applied', true)
+      .limit(1)
+
+    if (linesErr) {
+      return noStore(
+        NextResponse.json({ ok: false, error: 'LINE_LOOKUP_FAILED', details: linesErr.message }, { status: 500 })
+      )
+    }
+    if (Array.isArray(deliveredLines) && deliveredLines.length > 0) {
+      return noStore(
+        NextResponse.json(
+          { ok: false, error: 'DELETE_NOT_ALLOWED', details: 'This sale already applied stock and cannot be deleted.' },
+          { status: 400 }
+        )
+      )
+    }
+
+    const { error: deleteItemsErr } = await admin.from('store_sale_items').delete().eq('sale_id', id)
+    if (deleteItemsErr) {
+      return noStore(
+        NextResponse.json({ ok: false, error: 'DELETE_ITEMS_FAILED', details: deleteItemsErr.message }, { status: 500 })
+      )
+    }
+
+    const { error: deleteSaleErr } = await admin.from('store_sales').delete().eq('id', id)
+    if (deleteSaleErr) {
+      return noStore(
+        NextResponse.json({ ok: false, error: 'DELETE_SALE_FAILED', details: deleteSaleErr.message }, { status: 500 })
+      )
     }
 
     revalidateTag('store-products')
