@@ -1,13 +1,13 @@
-// src/app/api/store/products/delete/route.ts
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
-import { revalidatePath, revalidateTag } from 'next/cache'
 import { NextRequest, NextResponse } from 'next/server'
-import { createSupabaseAdminClient } from '@/lib/supabaseAdmin'
+import { revalidatePath, revalidateTag } from 'next/cache'
 import { createSupabaseServerActionClient } from '@/lib/supabaseServer'
-import { STORE_PRODUCT_IMAGE_BUCKET } from '@/lib/storeProductImages'
+import { createSupabaseAdminClient } from '@/lib/supabaseAdmin'
+
+const STORE_BUCKET = 'store-product-images'
 
 function noStore(res: NextResponse) {
   res.headers.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate')
@@ -48,40 +48,41 @@ export async function DELETE(req: NextRequest) {
     const id = (url.searchParams.get('id') || '').trim()
     if (!id) return noStore(NextResponse.json({ ok: false, error: 'MISSING_ID' }, { status: 400 }))
 
-    const { data: current, error: loadErr } = await supa
+    const { data: product, error: lookupErr } = await admin
       .from('store_products')
       .select('id, image_path')
       .eq('id', id)
       .maybeSingle<{ id: string; image_path: string | null }>()
-    if (loadErr) {
+
+    if (lookupErr) {
       return noStore(
-        NextResponse.json({ ok: false, error: 'LOAD_FAILED', details: loadErr.message }, { status: 500 })
+        NextResponse.json({ ok: false, error: 'LOOKUP_FAILED', details: lookupErr.message }, { status: 500 })
       )
     }
+    if (!product?.id) {
+      return noStore(NextResponse.json({ ok: false, error: 'NOT_FOUND' }, { status: 404 }))
+    }
 
-    const imagePath = current?.image_path ?? null
-
-    const { error } = await supa.from('store_products').delete().eq('id', id)
+    const { error } = await admin.from('store_products').delete().eq('id', id)
     if (error) {
+      const details =
+        error.code === '23503'
+          ? 'This product is linked to store history and cannot be deleted.'
+          : error.message
       return noStore(
-        NextResponse.json({ ok: false, error: 'DELETE_FAILED', details: error.message }, { status: 500 })
+        NextResponse.json({ ok: false, error: 'DELETE_FAILED', details }, { status: 500 })
       )
     }
 
-    if (imagePath) {
-      try {
-        await admin.storage.from(STORE_PRODUCT_IMAGE_BUCKET).remove([imagePath])
-      } catch {
-        // best effort only
-      }
+    if (product.image_path) {
+      await admin.storage.from(STORE_BUCKET).remove([product.image_path]).catch(() => undefined)
     }
 
-    try {
-      revalidatePath('/admin/store')
-      revalidatePath('/store')
-      revalidateTag('admin-store-products')
-      revalidateTag('store-products')
-    } catch {}
+    revalidateTag('store-products')
+    try { revalidatePath('/store') } catch {}
+    try { revalidatePath('/admin/store') } catch {}
+    try { revalidatePath('/admin/store/dashboard') } catch {}
+    try { revalidatePath('/admin/store/sales') } catch {}
 
     return noStore(NextResponse.json({ ok: true }))
   } catch (e: any) {
