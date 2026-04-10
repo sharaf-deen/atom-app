@@ -364,6 +364,15 @@ export default async function AdminStoreSalesPage({ searchParams }: { searchPara
 
           {sales.map((sale) => {
             const items = itemsBySale.get(sale.id) ?? []
+            const hasAppliedStock = items.some((item) => !!item.delivered_stock_applied)
+            const canDeleteSale = (sale.status === 'draft' || sale.status === 'canceled') && !hasAppliedStock
+            const deleteBlockedReason = canDeleteSale
+              ? null
+              : hasAppliedStock
+                ? 'Delete is blocked because stock was already applied on this sale.'
+                : sale.status === 'draft' || sale.status === 'canceled'
+                  ? null
+                  : 'Only draft or canceled sales can be deleted.'
             return (
               <Card key={sale.id}>
                 <CardContent className="space-y-4">
@@ -430,6 +439,8 @@ export default async function AdminStoreSalesPage({ searchParams }: { searchPara
                       paymentMethod={sale.payment_method}
                       status={sale.status}
                       note={sale.note}
+                      canDelete={canDeleteSale}
+                      deleteBlockedReason={deleteBlockedReason}
                     />
                   </div>
                 </CardContent>
