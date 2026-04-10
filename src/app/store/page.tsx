@@ -1,8 +1,8 @@
+// src/app/store/page.tsx
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
 import Link from 'next/link'
-import dynamicImport from 'next/dynamic'
 import { redirect } from 'next/navigation'
 import { unstable_cache } from 'next/cache'
 import { getSessionUserCached, getSupabaseAdminClientCached } from '@/lib/requestCache'
@@ -11,9 +11,9 @@ import Section from '@/components/layout/Section'
 import { Card, CardContent } from '@/components/ui/Card'
 import { formatCurrency } from '@/lib/money'
 import { canAccessStore, canAccessStoreAdmin } from '@/lib/rbac'
+import { STORE_PRODUCT_IMAGE_BUCKET } from '@/lib/storeProductImages'
 
 type Category = 'kimono' | 'rashguard' | 'short' | 'belt'
-
 const CATEGORIES: Array<{ v: 'all' | Category; label: string }> = [
   { v: 'all', label: 'All' },
   { v: 'kimono', label: 'Kimono' },
@@ -21,25 +21,6 @@ const CATEGORIES: Array<{ v: 'all' | Category; label: string }> = [
   { v: 'short', label: 'Short' },
   { v: 'belt', label: 'Belt' },
 ]
-
-const USER_PREORDER_ROLES = new Set([
-  'member',
-  'coach',
-  'assistant_coach',
-  'head_coach',
-  'vip',
-  'champion',
-])
-
-const StorePreorderAction = dynamicImport(() => import('@/components/store/StorePreorderAction'), {
-  ssr: false,
-  loading: () => <div className="text-sm text-gray-500">Loading preorder action…</div>,
-})
-
-const StoreMyPreorders = dynamicImport(() => import('@/components/store/StoreMyPreorders'), {
-  ssr: false,
-  loading: () => <div className="text-sm text-gray-500">Loading my preorders…</div>,
-})
 
 type ProductRow = {
   id: string
@@ -51,26 +32,14 @@ type ProductRow = {
   currency: string | null
   inventory_qty: number
   is_active: boolean
-  allow_preorder: boolean
-  image_path: string | null
   created_at?: string | null
-}
-
-
-const STORE_PRODUCT_BUCKET = 'store-product-images'
-const SUPABASE_URL = (process.env.NEXT_PUBLIC_SUPABASE_URL || '').replace(/\/+$/, '')
-
-function storeProductImageUrl(path: string | null | undefined) {
-  const clean = String(path ?? '').trim()
-  if (!SUPABASE_URL || !clean) return ''
-  const encodedPath = clean.split('/').map((segment) => encodeURIComponent(segment)).join('/')
-  return `${SUPABASE_URL}/storage/v1/object/public/${STORE_PRODUCT_BUCKET}/${encodedPath}`
+  image_path?: string | null
+  image_url?: string | null
 }
 
 const listStoreProductsCached = unstable_cache(
   async (
     isSuperAdmin: boolean,
-    showPreorderOnly: boolean,
     category: string,
     q: string,
     fromRow: number,
@@ -80,12 +49,11 @@ const listStoreProductsCached = unstable_cache(
 
     let qry = supa
       .from('store_products')
-      .select('id, category, name, color, size, price_cents, currency, inventory_qty, is_active, allow_preorder, image_path, created_at')
+.select('id, category, name, color, size, price_cents, currency, inventory_qty, is_active, created_at, image_path')
       .order('created_at', { ascending: false })
       .range(fromRow, toRow + 1)
 
     if (!isSuperAdmin) qry = qry.eq('is_active', true)
-    if (showPreorderOnly) qry = qry.eq('allow_preorder', true)
     if (category && category !== 'all') qry = qry.eq('category', category)
 
     if (q) {
@@ -93,12 +61,14 @@ const listStoreProductsCached = unstable_cache(
         qry = qry.textSearch('search_tsv', q, { type: 'websearch', config: 'simple' })
       } else {
         const safe = q.replace(/,/g, ' ').trim()
-        qry = qry.or([
-          `name.ilike.%${safe}%`,
-          `color.ilike.%${safe}%`,
-          `size.ilike.%${safe}%`,
-          `category.ilike.%${safe}%`,
-        ].join(','))
+        qry = qry.or(
+          [
+            `name.ilike.%${safe}%`,
+            `color.ilike.%${safe}%`,
+            `size.ilike.%${safe}%`,
+            `category.ilike.%${safe}%`,
+          ].join(',')
+        )
       }
     }
 
@@ -108,9 +78,9 @@ const listStoreProductsCached = unstable_cache(
     const rows = (data ?? []) as any[]
     const hasMore = rows.length > toRow - fromRow + 1
     const sliced = hasMore ? rows.slice(0, toRow - fromRow + 1) : rows
-    return { items: sliced as ProductRow[], hasMore }
+    return { items: sliced as any, hasMore }
   },
-  ['store_products_user_preorders_v2'],
+  ['store_products_v2'],
   { revalidate: 120, tags: ['store-products'] }
 )
 
@@ -137,22 +107,6 @@ function buildUrl(base: string, params: Record<string, string>) {
   return s ? `${base}?${s}` : base
 }
 
-function stockTone(stock: number) {
-  if (stock <= 0) return 'text-amber-700'
-  if (stock <= 2) return 'text-amber-700'
-  return 'text-emerald-700'
-}
-
-function stockLabel(stock: number) {
-  if (stock <= 0) return 'No stock now'
-  if (stock <= 2) return 'Low stock'
-  return 'In stock'
-}
-
-function categoryLabel(category: Category | 'all') {
-  return CATEGORIES.find((item) => item.v === category)?.label ?? 'All'
-}
-
 export default async function StorePage({
   searchParams,
 }: {
@@ -163,12 +117,11 @@ export default async function StorePage({
 
   const role = me.role
   const isSuperAdmin = canAccessStoreAdmin(role)
-  const canPreorder = USER_PREORDER_ROLES.has(role)
 
   if (!canAccessStore(role)) redirect('/')
 
   const page = clampInt(searchParams?.page, 1, 1, 9999)
-  const pageSize = 12
+  const pageSize = clampInt(searchParams?.page_size, 12, 6, 48)
   const category = normalizeCat(strParam(searchParams?.category))
   const q = strParam(searchParams?.q).trim()
 
@@ -180,9 +133,17 @@ export default async function StorePage({
   let hasMore = false
 
   try {
-    const res = await listStoreProductsCached(isSuperAdmin, canPreorder, category, q, fromRow, toRow)
-    items = res.items
-    hasMore = Boolean(res.hasMore)
+    const res = await listStoreProductsCached(isSuperAdmin, category, q, fromRow, toRow)
+    items = res.items as any
+    hasMore = Boolean((res as any).hasMore)
+
+    if (items.length > 0) {
+      const bucket = getSupabaseAdminClientCached().storage.from(STORE_PRODUCT_IMAGE_BUCKET)
+      items = items.map((item) => ({
+        ...item,
+        image_url: item.image_path ? bucket.getPublicUrl(item.image_path).data.publicUrl : null,
+      }))
+    }
   } catch (e: any) {
     errorMsg = e?.message || String(e)
   }
@@ -190,22 +151,12 @@ export default async function StorePage({
   const baseParams = {
     category: category === 'all' ? '' : category,
     q,
+    page_size: String(pageSize),
   }
-
-  const searchLabel = q ? `Search: ${q}` : `Category: ${categoryLabel(category)}`
 
   return (
     <main>
-      <PageHeader
-        title="Store"
-        subtitle={
-          isSuperAdmin
-            ? 'Browse the catalog or open Store Admin.'
-            : canPreorder
-              ? 'Browse the catalog and send a preorder quickly.'
-              : 'Browse the catalog.'
-        }
-      />
+      <PageHeader title="Store" />
 
       <Section className="space-y-6">
         {isSuperAdmin ? (
@@ -213,116 +164,69 @@ export default async function StorePage({
             <CardContent className="flex flex-wrap items-center gap-3">
               <div>
                 <div className="font-semibold">Admin management</div>
-                <div className="text-sm text-gray-600">Catalog, supplier orders, preorders, sales, and the dashboard are managed from Store Admin.</div>
+                <div className="text-sm text-gray-600">Catalog & orders management is now in /admin/store.</div>
               </div>
               <Link
                 prefetch={false}
-                href="/admin/store/dashboard"
+                href="/admin/store"
                 className="ml-auto inline-flex items-center rounded-xl border px-4 py-2 text-sm font-medium hover:bg-gray-50"
               >
-                Open Store Admin
+                Open /admin/store
               </Link>
             </CardContent>
           </Card>
         ) : null}
 
-        {canPreorder ? (
-          <Card>
-            <CardContent className="space-y-4 py-4">
-              <div className="flex flex-wrap items-start gap-3">
-                <div className="min-w-0 flex-1">
-                  <div className="font-semibold">Pre-order gear</div>
-                  <div className="mt-1 text-sm text-[hsl(var(--muted))]">
-                    Choose your item, send your request, then confirm the rest later with the store admin.
-                  </div>
-                </div>
-                <Link
-                  prefetch={false}
-                  href="#store-search"
-                  className="inline-flex items-center rounded-xl border px-3 py-2 text-sm font-medium hover:bg-gray-50"
-                >
-                  Browse catalog
-                </Link>
-              </div>
-
-              <div className="grid gap-2 text-sm sm:grid-cols-3">
-                <div className="rounded-2xl border border-[hsl(var(--border))] bg-white/70 px-3 py-3">
-                  <div className="font-medium">1. Choose</div>
-                  <div className="mt-1 text-xs text-[hsl(var(--muted))]">Pick the product, color and size that suit you.</div>
-                </div>
-                <div className="rounded-2xl border border-[hsl(var(--border))] bg-white/70 px-3 py-3">
-                  <div className="font-medium">2. Send request</div>
-                  <div className="mt-1 text-xs text-[hsl(var(--muted))]">Set the quantity and add an optional note.</div>
-                </div>
-                <div className="rounded-2xl border border-[hsl(var(--border))] bg-white/70 px-3 py-3">
-                  <div className="font-medium">3. Pay later</div>
-                  <div className="mt-1 text-xs text-[hsl(var(--muted))]">Deposit and final payment stay managed offline.</div>
-                </div>
-              </div>
-
-              <details className="group rounded-2xl border border-[hsl(var(--border))] bg-white/70 p-4">
-                <summary className="flex cursor-pointer list-none items-center gap-3">
-                  <div className="min-w-0 flex-1">
-                    <div className="font-medium">My preorders</div>
-                    <div className="text-xs text-[hsl(var(--muted))]">Track status, deposits and pickup readiness.</div>
-                  </div>
-                  <span className="text-xs font-medium text-[hsl(var(--muted))] transition group-open:rotate-180">⌄</span>
-                </summary>
-                <div className="pt-4">
-                  <StoreMyPreorders />
-                </div>
-              </details>
-
-              <div className="text-xs text-[hsl(var(--muted))]">
-                Need the old archive?{' '}
-                <Link prefetch={false} href="/orders" className="underline hover:text-black">
-                  Open legacy orders
-                </Link>
-                .
-              </div>
-            </CardContent>
-          </Card>
-        ) : null}
-
         <Card>
-          <CardContent className="space-y-4 py-4">
-            <div className="flex flex-wrap items-start gap-3">
-              <div className="min-w-0 flex-1">
-                <div className="font-semibold">Browse catalog</div>
-                <div className="mt-1 text-sm text-[hsl(var(--muted))]">
-                  Quick search, clean cards and simple category shortcuts.
-                </div>
-              </div>
-              <div className="rounded-full border border-[hsl(var(--border))] bg-white px-3 py-1 text-xs font-medium text-[hsl(var(--muted))]">
-                {searchLabel}
-              </div>
-            </div>
-
+          <CardContent>
             <form action="/store" method="get" className="flex flex-wrap items-end gap-3">
-              <input type="hidden" name="category" value={category} />
-
-              <div className="flex min-w-[220px] flex-1 flex-col gap-1">
-                <label htmlFor="store-search" className="text-xs text-[hsl(var(--muted))]">
-                  Search
-                </label>
+              <div className="flex flex-col gap-1">
+                <label className="text-xs text-[hsl(var(--muted))]">Search</label>
                 <input
-                  id="store-search"
                   name="q"
                   defaultValue={q}
-                  className="rounded-xl border bg-white px-3 py-2 text-sm"
-                  placeholder="Search by item, color or size"
+                  className="rounded-xl border px-3 py-2 text-sm bg-white"
+                  placeholder="Name, color, size…"
                 />
               </div>
 
-              <button className="rounded-xl border px-4 py-2 text-sm font-medium hover:bg-gray-50" type="submit">
-                Search
+              <div className="flex flex-col gap-1">
+                <label className="text-xs text-[hsl(var(--muted))]">Category</label>
+                <select
+                  name="category"
+                  defaultValue={category}
+                  className="rounded-xl border px-3 py-2 text-sm bg-white"
+                >
+                  {CATEGORIES.map((c) => (
+                    <option key={c.v} value={c.v}>
+                      {c.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="flex flex-col gap-1">
+                <label className="text-xs text-[hsl(var(--muted))]">Page size</label>
+                <select
+                  name="page_size"
+                  defaultValue={String(pageSize)}
+                  className="rounded-xl border px-3 py-2 text-sm bg-white"
+                >
+                  {[12, 24, 48].map((n) => (
+                    <option key={n} value={n}>
+                      {n}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <button className="rounded-xl px-4 py-2 text-sm font-medium border hover:bg-gray-50" type="submit">
+                Apply
               </button>
 
-              {(q || category !== 'all') ? (
-                <Link prefetch={false} href="/store" className="text-sm underline text-gray-700 hover:text-black">
-                  Clear
-                </Link>
-              ) : null}
+              <Link prefetch={false} href="/store" className="text-sm underline text-gray-700 hover:text-black">
+                Clear
+              </Link>
 
               <div className="ml-auto text-xs text-[hsl(var(--muted))]">
                 {items.length > 0 ? (
@@ -334,30 +238,6 @@ export default async function StorePage({
                 )}
               </div>
             </form>
-
-            <div className="flex flex-wrap gap-2">
-              {CATEGORIES.map((item) => {
-                const href = buildUrl('/store', {
-                  q,
-                  category: item.v === 'all' ? '' : item.v,
-                })
-                const active = category === item.v
-                return (
-                  <Link
-                    key={item.v}
-                    prefetch={false}
-                    href={href}
-                    className={`inline-flex items-center rounded-full border px-3 py-1.5 text-sm font-medium transition ${
-                      active
-                        ? 'border-black bg-black text-white'
-                        : 'border-[hsl(var(--border))] bg-white text-black hover:bg-gray-50'
-                    }`}
-                  >
-                    {item.label}
-                  </Link>
-                )
-              })}
-            </div>
           </CardContent>
         </Card>
 
@@ -370,101 +250,44 @@ export default async function StorePage({
         ) : items.length === 0 ? (
           <Card>
             <CardContent>
-              <div className="text-sm text-[hsl(var(--muted))]">
-                {canPreorder ? 'No preorderable products match your search right now.' : 'No products match your search right now.'}
-              </div>
+              <div className="text-sm text-[hsl(var(--muted))]">No products match your filters.</div>
             </CardContent>
           </Card>
         ) : (
           <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
             {items.map((p) => {
               const price = formatCurrency(p.price_cents ?? 0, 'en-EG', p.currency ?? 'EGP')
-              const stock = Math.max(0, Number(p.inventory_qty ?? 0))
-              const itemDetails = [p.color, p.size].filter(Boolean).join(' · ')
-              const imageUrl = storeProductImageUrl(p.image_path)
+              const stock = Number(p.inventory_qty ?? 0)
 
               return (
                 <Card key={p.id} hover>
-                  <CardContent className="space-y-4 py-4">
-                    {imageUrl ? (
-                      <div className="overflow-hidden rounded-2xl border bg-slate-50">
-                        <img src={imageUrl} alt={p.name} className="h-48 w-full object-cover" loading="lazy" />
-                      </div>
-                    ) : null}
-
-                    <div className="flex items-start gap-3">
-                      <div className="min-w-0 flex-1">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <span className="rounded-full border border-[hsl(var(--border))] bg-white px-2.5 py-1 text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">
-                            {categoryLabel(p.category)}
-                          </span>
-                          {!isSuperAdmin ? (
-                            <span className="rounded-full border border-sky-200 bg-sky-50 px-2.5 py-1 text-[11px] font-medium text-sky-700">
-                              Pre-order open
-                            </span>
-                          ) : null}
-                          {imageUrl ? (
-                            <span className="rounded-full border border-[hsl(var(--border))] bg-white px-2.5 py-1 text-[11px] font-medium text-[hsl(var(--muted))]">
-                              Photo
-                            </span>
-                          ) : null}
-                        </div>
-
-                        <div className="mt-3 text-base font-semibold leading-snug">{p.name}</div>
-                        {itemDetails ? (
-                          <div className="mt-1 text-sm text-[hsl(var(--muted))]">{itemDetails}</div>
-                        ) : (
-                          <div className="mt-1 text-sm text-[hsl(var(--muted))]">Store item</div>
-                        )}
-                      </div>
-
-                      <div className="text-right">
-                        <div className="text-[11px] uppercase tracking-wide text-[hsl(var(--muted))]">Price</div>
-                        <div className="mt-1 text-base font-semibold">{price}</div>
-                      </div>
-                    </div>
-
-                    {isSuperAdmin ? (
-                      <div className="flex flex-wrap items-center gap-2 text-xs">
-                        <span className={`font-medium ${stockTone(stock)}`}>
-                          {stockLabel(stock)}: {stock}
-                        </span>
-                        {p.allow_preorder ? (
-                          <span className="rounded-full border border-sky-200 bg-sky-50 px-2.5 py-1 font-medium text-sky-700">
-                            Pre-order available
-                          </span>
-                        ) : (
-                          <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 font-medium text-slate-600">
-                            Pre-order off
-                          </span>
-                        )}
-                        {!p.is_active ? (
-                          <span className="rounded-full border border-rose-200 bg-rose-50 px-2.5 py-1 font-medium text-rose-700">
-                            Inactive
-                          </span>
-                        ) : null}
-                      </div>
+                  <CardContent className="py-4 space-y-3">
+                    {p.image_url ? (
+                      <img src={p.image_url} alt={p.name} className="h-48 w-full rounded-xl border object-cover bg-[hsl(var(--bg))]" />
                     ) : (
-                      <div className="rounded-2xl border border-[hsl(var(--border))] bg-white/70 px-3 py-3 text-sm text-[hsl(var(--muted))]">
-                        Reserve this item now. Deposit and final payment are confirmed later by the store admin.
+                      <div className="flex h-48 items-center justify-center rounded-xl border border-dashed text-xs text-[hsl(var(--muted))] bg-[hsl(var(--bg))]">
+                        No photo
                       </div>
                     )}
 
-                    {canPreorder ? (
-                      <StorePreorderAction
-                        product={{
-                          id: p.id,
-                          category: p.category,
-                          name: p.name,
-                          color: p.color,
-                          size: p.size,
-                          price_cents: p.price_cents,
-                          currency: p.currency,
-                          is_active: p.is_active,
-                          allow_preorder: p.allow_preorder,
-                        }}
-                      />
-                    ) : null}
+                    <div className="flex items-start gap-2">
+                      <div className="flex-1">
+                        <div className="font-semibold">{p.name}</div>
+                        <div className="text-xs text-[hsl(var(--muted))]">
+                          {p.category}
+                          {p.color ? ` · ${p.color}` : ''}
+                          {p.size ? ` · ${p.size}` : ''}
+                        </div>
+                      </div>
+                      <div className="text-sm font-semibold">{price}</div>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <div className="text-xs text-[hsl(var(--muted))]">
+                        Stock: <b>{stock}</b>
+                        {!p.is_active ? <span className="ml-2 text-red-600">Inactive</span> : null}
+                      </div>
+                    </div>
                   </CardContent>
                 </Card>
               )
@@ -478,7 +301,7 @@ export default async function StorePage({
               prefetch={false}
               href={buildUrl('/store', { ...baseParams, page: String(Math.max(1, page - 1)) })}
               aria-disabled={page <= 1}
-              className={`rounded border px-2 py-1 ${page <= 1 ? 'pointer-events-none opacity-50' : 'hover:bg-gray-50'}`}
+              className={`px-2 py-1 rounded border ${page <= 1 ? 'opacity-50 pointer-events-none' : 'hover:bg-gray-50'}`}
             >
               Prev
             </Link>
@@ -489,7 +312,7 @@ export default async function StorePage({
               prefetch={false}
               href={buildUrl('/store', { ...baseParams, page: String(page + 1) })}
               aria-disabled={!hasMore}
-              className={`rounded border px-2 py-1 ${!hasMore ? 'pointer-events-none opacity-50' : 'hover:bg-gray-50'}`}
+              className={`px-2 py-1 rounded border ${!hasMore ? 'opacity-50 pointer-events-none' : 'hover:bg-gray-50'}`}
             >
               Next
             </Link>
