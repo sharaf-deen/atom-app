@@ -5,15 +5,29 @@ export const revalidate = 0
 
 import { NextRequest, NextResponse } from 'next/server'
 import { createSupabaseServerActionClient } from '@/lib/supabaseServer'
+import { createSupabaseAdminClient } from '@/lib/supabaseAdmin'
+
+const IMAGE_BUCKET = 'store-product-images'
 
 function noStore(res: NextResponse) {
   res.headers.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate')
   return res
 }
 
+async function removeImageIfAny(admin: ReturnType<typeof createSupabaseAdminClient>, path?: string | null) {
+  const safe = String(path || '').trim()
+  if (!safe) return
+  try {
+    await admin.storage.from(IMAGE_BUCKET).remove([safe])
+  } catch {
+    // best effort cleanup
+  }
+}
+
 export async function DELETE(req: NextRequest) {
   try {
     const supa = createSupabaseServerActionClient()
+    const admin = createSupabaseAdminClient()
 
     // 1) Auth
     const { data: auth, error: authErr } = await supa.auth.getUser()
@@ -47,13 +61,30 @@ export async function DELETE(req: NextRequest) {
     const id = (url.searchParams.get('id') || '').trim()
     if (!id) return noStore(NextResponse.json({ ok: false, error: 'MISSING_ID' }, { status: 400 }))
 
+    const { data: existing, error: existingErr } = await admin
+      .from('store_products')
+      .select('id, image_path')
+      .eq('id', id)
+      .maybeSingle<{ id: string; image_path: string | null }>()
+
+    if (existingErr) {
+      return noStore(
+        NextResponse.json({ ok: false, error: 'READ_FAILED', details: existingErr.message }, { status: 500 })
+      )
+    }
+    if (!existing) {
+      return noStore(NextResponse.json({ ok: false, error: 'NOT_FOUND' }, { status: 404 }))
+    }
+
     // 4) Delete
-    const { error } = await supa.from('store_products').delete().eq('id', id)
+    const { error } = await admin.from('store_products').delete().eq('id', id)
     if (error) {
       return noStore(
         NextResponse.json({ ok: false, error: 'DELETE_FAILED', details: error.message }, { status: 500 })
       )
     }
+
+    await removeImageIfAny(admin, existing.image_path)
 
     return noStore(NextResponse.json({ ok: true }))
   } catch (e: any) {
