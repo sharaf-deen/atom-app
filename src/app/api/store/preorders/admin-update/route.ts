@@ -5,6 +5,7 @@ export const revalidate = 0
 import { NextResponse } from 'next/server'
 import { revalidatePath, revalidateTag } from 'next/cache'
 import { createSupabaseServerActionClient } from '@/lib/supabaseServer'
+import { createSupabaseAdminClient } from '@/lib/supabaseAdmin'
 import { isStorePaymentMethod, isStorePreorderStatus } from '@/lib/storeV2'
 
 type Body = {
@@ -84,10 +85,12 @@ export async function PATCH(req: Request) {
 
     const { data: current, error: currentErr } = await supa
       .from('store_preorders')
-      .select('id, total_cents, deposit_cents, deposit_payment_method, status')
+      .select('id, buyer_user_id, product_name, total_cents, deposit_cents, deposit_payment_method, status')
       .eq('id', id)
       .maybeSingle<{
         id: string
+        buyer_user_id: string
+        product_name: string | null
         total_cents: number
         deposit_cents: number
         deposit_payment_method: string | null
@@ -154,6 +157,42 @@ export async function PATCH(req: Request) {
           { status: 500 }
         )
       )
+    }
+
+    const statusChanged = status !== undefined && updated.status !== current.status
+    if (statusChanged && current.buyer_user_id) {
+      const titleMap: Partial<Record<string, string>> = {
+        confirmed: 'Preorder confirmed',
+        ordered_from_supplier: 'Preorder ordered from supplier',
+        ready: 'Preorder ready',
+        completed: 'Preorder completed',
+        canceled: 'Preorder canceled',
+      }
+
+      const bodyMap: Partial<Record<string, string>> = {
+        confirmed: `Your preorder${current.product_name ? ` for ${current.product_name}` : ''} has been confirmed.`,
+        ordered_from_supplier: `Your preorder${current.product_name ? ` for ${current.product_name}` : ''} has been ordered from the supplier.`,
+        ready: `Your preorder${current.product_name ? ` for ${current.product_name}` : ''} is ready.`,
+        completed: `Your preorder${current.product_name ? ` for ${current.product_name}` : ''} has been completed.`,
+        canceled: `Your preorder${current.product_name ? ` for ${current.product_name}` : ''} has been canceled.`,
+      }
+
+      const nextTitle = titleMap[updated.status]
+      const nextBody = bodyMap[updated.status]
+
+      if (nextTitle && nextBody) {
+        try {
+          const admin = createSupabaseAdminClient()
+          await admin.from('notifications').insert({
+            user_id: current.buyer_user_id,
+            member_id: current.buyer_user_id,
+            created_by: user.id,
+            kind: 'order_update',
+            title: nextTitle,
+            body: nextBody,
+          })
+        } catch {}
+      }
     }
 
     revalidateTag('store-products')
