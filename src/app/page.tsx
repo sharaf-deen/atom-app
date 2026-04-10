@@ -93,6 +93,12 @@ type HealthLite = {
   createdAt: string | null
 }
 
+type TodayScheduleSession = {
+  section: 'kids' | 'adults' | 'other'
+  time: string
+  text: string
+}
+
 type PriorityTone = 'success' | 'warning' | 'danger' | 'neutral'
 
 type PriorityItem = {
@@ -369,6 +375,103 @@ async function getLatestHealthSnapshot(): Promise<HealthLite | null> {
       status: data.overall_status ?? null,
       createdAt: data.created_at ?? null,
     }
+  } catch {
+    return null
+  }
+}
+
+const HOME_SCHEDULE_DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'] as const
+const HOME_SCHEDULE_DAY_SET = new Set<string>(HOME_SCHEDULE_DAYS)
+
+function cairoDayName() {
+  return new Intl.DateTimeFormat('en-US', { timeZone: 'Africa/Cairo', weekday: 'long' }).format(new Date())
+}
+
+function normalizeScheduleDash(line: string) {
+  return line.replace(/\s-\s/g, ' – ').replace(/\s—\s/g, ' – ').replace(/\s–\s/g, ' – ')
+}
+
+function splitHomeScheduleSessions(line: string): Array<{ time: string; text: string }> {
+  const s = normalizeScheduleDash(line)
+  const rx = /(\d{1,2}:\d{2}\s*(?:AM|PM))\s*–\s*/gi
+  const matches = Array.from(s.matchAll(rx))
+
+  if (matches.length <= 1) {
+    const one = s.match(/^\s*(\d{1,2}:\d{2}\s*(?:AM|PM))\s*–\s*(.*)$/i)
+    if (!one) return []
+    return [{ time: one[1].trim(), text: (one[2] || '').trim() }]
+  }
+
+  const out: Array<{ time: string; text: string }> = []
+  for (let i = 0; i < matches.length; i++) {
+    const m = matches[i]
+    const time = (m[1] || '').trim()
+    const start = (m.index ?? 0) + m[0].length
+    const end = i + 1 < matches.length ? (matches[i + 1].index ?? s.length) : s.length
+    const sessionText = s.slice(start, end).trim()
+    if (time && sessionText) out.push({ time, text: sessionText })
+  }
+  return out
+}
+
+function extractTodaySchedule(content: string, dayName: string): TodayScheduleSession[] {
+  const marker = 'Weekly Schedule by Day'
+  const idx = content.indexOf(marker)
+  if (idx < 0) return []
+
+  const lines = content
+    .slice(idx + marker.length)
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+
+  let inCurrentDay = false
+  let section: TodayScheduleSession['section'] = 'other'
+  const sessions: TodayScheduleSession[] = []
+
+  for (const raw of lines) {
+    const line = normalizeScheduleDash(raw)
+
+    if (HOME_SCHEDULE_DAY_SET.has(line)) {
+      if (inCurrentDay) break
+      inCurrentDay = line === dayName
+      section = 'other'
+      continue
+    }
+
+    if (!inCurrentDay) continue
+
+    if (line === 'Kids & Teens') {
+      section = 'kids'
+      continue
+    }
+    if (line === 'Adults') {
+      section = 'adults'
+      continue
+    }
+
+    const split = splitHomeScheduleSessions(line)
+    if (split.length) {
+      for (const item of split) {
+        sessions.push({ section, time: item.time, text: item.text })
+      }
+      continue
+    }
+
+    sessions.push({ section: 'other', time: '', text: line })
+  }
+
+  return sessions
+}
+
+async function getTodaySchedule(): Promise<{ dayName: string; sessions: TodayScheduleSession[] } | null> {
+  try {
+    const supabase = createSupabaseRSC()
+    const { data } = await supabase.from('app_schedule').select('content').eq('key', 'main').maybeSingle<{ content: string | null }>()
+    const content = data?.content?.trim()
+    if (!content) return null
+    const dayName = cairoDayName()
+    return { dayName, sessions: extractTodaySchedule(content, dayName) }
   } catch {
     return null
   }
@@ -798,6 +901,68 @@ async function QrCard({ qrCode }: { qrCode?: string | null }) {
   )
 }
 
+function TodayScheduleSection({ dayName, sessions }: { dayName: string; sessions: TodayScheduleSession[] }) {
+  const kids = sessions.filter((session) => session.section === 'kids')
+  const adults = sessions.filter((session) => session.section === 'adults')
+  const other = sessions.filter((session) => session.section === 'other')
+
+  const renderGroup = (label: string, items: TodayScheduleSession[]) => {
+    if (!items.length) return null
+    return (
+      <div className="space-y-2">
+        <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[hsl(var(--muted))]">{label}</div>
+        <div className="space-y-2">
+          {items.map((item, index) => (
+            <div key={`${label}-${index}-${item.time || item.text}`} className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] px-3 py-2.5 text-sm text-black">
+              <div className="flex flex-wrap items-center gap-2">
+                {item.time ? (
+                  <span className="rounded-full bg-black px-2.5 py-1 text-[11px] font-semibold text-white">{item.time}</span>
+                ) : null}
+                <span>{item.text}</span>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <Surface className="p-4 sm:p-5">
+      <details className="group">
+        <summary className="flex cursor-pointer list-none items-center justify-between gap-3">
+          <div>
+            <div className="text-sm font-semibold tracking-tight">Today’s schedule</div>
+            <div className="mt-1 text-xs text-[hsl(var(--muted))]">{dayName}</div>
+          </div>
+          <span className="inline-flex h-10 items-center justify-center rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] px-4 text-sm font-semibold text-black transition group-open:bg-black group-open:text-white">
+            Show
+          </span>
+        </summary>
+
+        <div className="mt-4 space-y-4">
+          {sessions.length ? (
+            <>
+              {renderGroup('Kids & Teens', kids)}
+              {renderGroup('Adults', adults)}
+              {renderGroup('Other', other)}
+            </>
+          ) : (
+            <div className="rounded-2xl border border-dashed border-[hsl(var(--border))] bg-[hsl(var(--bg))] px-4 py-3 text-sm text-[hsl(var(--muted))]">
+              No sessions scheduled today.
+            </div>
+          )}
+          <div>
+            <Link href="/schedule" className="inline-flex items-center gap-1 text-sm font-medium hover:underline">
+              Open full schedule
+              <ArrowRight size={15} />
+            </Link>
+          </div>
+        </div>
+      </details>
+    </Surface>
+  )
+}
 
 function QuickActions({ title, subtitle: _subtitle, items }: { title: string; subtitle?: string; items: QuickAction[] }) {
   return (
