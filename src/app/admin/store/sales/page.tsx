@@ -290,7 +290,7 @@ export default async function AdminStoreSalesPage({ searchParams }: { searchPara
       />
 
       <Section className="space-y-4">
-        <StoreAdminNav current="/admin/store/sales" />
+        <StoreAdminNav current="/admin/store/sales" role={me.role} />
       </Section>
 
       <Section className="space-y-6">

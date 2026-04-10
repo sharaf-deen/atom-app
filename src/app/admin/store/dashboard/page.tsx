@@ -10,7 +10,7 @@ import Button from '@/components/ui/Button'
 import InlineAlert from '@/components/ui/InlineAlert'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card'
 import { formatCurrency } from '@/lib/money'
-import { canAccessStoreAdmin } from '@/lib/rbac'
+import { canAccessStoreDashboard, canManageStorePreorders, canManageStoreSales } from '@/lib/rbac'
 import { getSessionUserCached, getSupabaseAdminClientCached } from '@/lib/requestCache'
 import StoreAdminNav from '@/components/store/StoreAdminNav'
 
@@ -228,14 +228,14 @@ export default async function StoreDashboardPage({ searchParams }: { searchParam
   const me = await getSessionUserCached()
   if (!me) redirect('/login?next=/admin/store/dashboard')
 
-  if (!canAccessStoreAdmin(me.role)) {
+  if (!canAccessStoreDashboard(me.role)) {
     return (
       <AccessDeniedPage
         title="Store Dashboard"
         subtitle="Access restricted."
         signedInAs={me.email}
-        message="This page is for super admins only."
-        allowed="super_admin"
+        message="This page is for admin and super admin."
+        allowed="admin, super_admin"
         nextPath="/admin/store/dashboard"
         actions={[{ href: '/admin/store', label: 'Go to Store Admin' }]}
         showBackHome
@@ -349,21 +349,25 @@ export default async function StoreDashboardPage({ searchParams }: { searchParam
       />
 
       <Section className="space-y-4">
-        <StoreAdminNav current="/admin/store/dashboard" />
+        <StoreAdminNav current="/admin/store/dashboard" role={me.role} />
       </Section>
 
       <Section className="space-y-6">
         <Card>
           <CardContent className="flex flex-wrap items-center gap-2">
             <Button asChild href="/admin/store" variant="outline" size="sm">
-              Store admin
+              Catalog & stock
             </Button>
-            <Button asChild href="/admin/store/preorders" variant="outline" size="sm">
-              Preorders
-            </Button>
-            <Button asChild href="/admin/store/sales" variant="outline" size="sm">
-              Sales
-            </Button>
+            {canManageStorePreorders(me.role) ? (
+              <Button asChild href="/admin/store/preorders" variant="outline" size="sm">
+                Preorders
+              </Button>
+            ) : null}
+            {canManageStoreSales(me.role) ? (
+              <Button asChild href="/admin/store/sales" variant="outline" size="sm">
+                Sales
+              </Button>
+            ) : null}
             <Button asChild href="/store" variant="ghost" size="sm">
               Open /store
             </Button>
