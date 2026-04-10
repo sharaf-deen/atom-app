@@ -6,6 +6,7 @@ import { toast } from 'sonner'
 import Button from '@/components/ui/Button'
 import Modal from '@/components/ui/Modal'
 import StoreProductForm from '@/components/StoreProductForm'
+import InlineAlert from '@/components/ui/InlineAlert'
 
 type Category = 'kimono' | 'rashguard' | 'short' | 'belt'
 
@@ -16,11 +17,12 @@ type Props = {
   color: string | null
   size: string | null
   priceCents: number
-  currency: string | null
+  currency: string
   inventoryQty: number
   isActive: boolean
   allowPreorder: boolean
   lowStockThreshold: number
+  imagePath?: string | null
 }
 
 export default function AdminProductQuickEdit({
@@ -42,8 +44,9 @@ export default function AdminProductQuickEdit({
   const [preorder, setPreorder] = useState<boolean>(!!allowPreorder)
   const [threshold, setThreshold] = useState<number>(Number.isFinite(lowStockThreshold) ? lowStockThreshold : 0)
   const [loading, setLoading] = useState(false)
-  const [editOpen, setEditOpen] = useState(false)
-  const [deleteBusy, setDeleteBusy] = useState(false)
+  const [deleting, setDeleting] = useState(false)
+  const [showEditModal, setShowEditModal] = useState(false)
+  const [deleteError, setDeleteError] = useState('')
 
   const dirty = useMemo(
     () => qty !== inventoryQty || active !== isActive || preorder !== allowPreorder || threshold !== lowStockThreshold,
@@ -92,14 +95,13 @@ export default function AdminProductQuickEdit({
     }
   }
 
-  async function removeProduct() {
-    if (deleteBusy) return
-    const ok = globalThis.confirm(
-      'Delete this product? Existing store history linked to this product may block deletion.'
-    )
-    if (!ok) return
+  async function deleteProduct() {
+    if (deleting) return
+    const confirmed = window.confirm(`Delete product \"${name}\"? This cannot be undone.`)
+    if (!confirmed) return
 
-    setDeleteBusy(true)
+    setDeleting(true)
+    setDeleteError('')
     try {
       const r = await fetch(`/api/store/products/delete?id=${encodeURIComponent(id)}`, {
         method: 'DELETE',
@@ -107,22 +109,27 @@ export default function AdminProductQuickEdit({
       })
       const j = await r.json().catch(() => ({}))
       if (!r.ok || !j?.ok) {
-        toast.error(j?.details || j?.error || 'Delete failed')
+        const msg = j?.details || j?.error || 'Delete failed'
+        setDeleteError(msg)
+        toast.error(msg)
         return
       }
+
       toast.success('Product deleted')
       router.refresh()
       setTimeout(() => router.refresh(), 250)
     } catch (e: any) {
-      toast.error(e?.message || 'Network error')
+      const msg = e?.message || 'Network error'
+      setDeleteError(msg)
+      toast.error(msg)
     } finally {
-      setDeleteBusy(false)
+      setDeleting(false)
     }
   }
 
   return (
-    <div className="grid gap-3">
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-[120px_140px_auto_auto_auto] xl:items-end">
+    <>
+      <div className="grid gap-3 rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4 sm:grid-cols-2 xl:grid-cols-[120px_140px_auto_auto_auto] xl:items-end">
         <div className="flex flex-col gap-1">
           <label className="text-[11px] text-[hsl(var(--muted))]">Stock</label>
           <input
@@ -170,29 +177,22 @@ export default function AdminProductQuickEdit({
         </Button>
       </div>
 
-      <div className="flex flex-wrap items-center gap-2">
-        <Button type="button" variant="outline" onClick={() => setEditOpen(true)}>
+      <div className="mt-3 flex flex-wrap gap-2">
+        <Button variant="outline" onClick={() => setShowEditModal(true)}>
           Edit details
         </Button>
-        <Button
-          type="button"
-          variant="outline"
-          className="border-rose-200 text-rose-700 hover:bg-rose-50"
-          onClick={removeProduct}
-          loading={deleteBusy}
-          loadingText="Deleting…"
-          disabled={deleteBusy}
-        >
+        <Button variant="outline" onClick={deleteProduct} loading={deleting} loadingText="Deleting…">
           Delete product
         </Button>
       </div>
 
-      <Modal
-        open={editOpen}
-        onClose={() => setEditOpen(false)}
-        title="Edit product"
-        className="w-[min(96vw,42rem)]"
-      >
+      {deleteError ? (
+        <div className="mt-3">
+          <InlineAlert variant="error">{deleteError}</InlineAlert>
+        </div>
+      ) : null}
+
+      <Modal open={showEditModal} onClose={() => setShowEditModal(false)} title="Edit product" className="w-[min(92vw,42rem)]">
         <StoreProductForm
           product={{
             id,
@@ -206,13 +206,14 @@ export default function AdminProductQuickEdit({
             is_active: isActive,
           }}
           onSaved={() => {
-            setEditOpen(false)
+            setShowEditModal(false)
+            toast.success('Product details updated')
             router.refresh()
             setTimeout(() => router.refresh(), 250)
           }}
-          onCancel={() => setEditOpen(false)}
+          onCancel={() => setShowEditModal(false)}
         />
       </Modal>
-    </div>
+    </>
   )
 }

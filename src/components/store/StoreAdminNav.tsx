@@ -1,43 +1,39 @@
 import Link from 'next/link'
+import type { Role } from '@/lib/rbac'
 import {
-  type Role,
-  canAccessStoreCatalogAdmin,
+  canAccessStoreCatalog,
   canAccessStoreDashboard,
   canManageStorePreorders,
   canManageStoreSales,
   canManageStoreSupplierOrders,
 } from '@/lib/rbac'
 
-const ITEMS = [
-  {
-    href: '/admin/store/dashboard',
-    label: 'Dashboard',
-    show: (role: Role) => canAccessStoreDashboard(role),
-  },
-  {
-    href: '/admin/store',
-    label: 'Catalog & stock',
-    show: (role: Role) => canAccessStoreCatalogAdmin(role),
-  },
-  {
-    href: '/admin/store?tab=supplier-orders',
-    label: 'Supplier orders',
-    show: (role: Role) => canManageStoreSupplierOrders(role),
-  },
-  {
-    href: '/admin/store/preorders',
-    label: 'Preorders',
-    show: (role: Role) => canManageStorePreorders(role),
-  },
-  {
-    href: '/admin/store/sales',
-    label: 'Sales',
-    show: (role: Role) => canManageStoreSales(role),
-  },
-] as const
+function getItems(role: Role | null | undefined) {
+  const items: Array<{ href: string; label: string }> = []
 
-export default function StoreAdminNav({ current, role }: { current: string; role: Role }) {
-  const items = ITEMS.filter((item) => item.show(role))
+  if (canAccessStoreDashboard(role)) {
+    items.push({ href: '/admin/store/dashboard', label: 'Dashboard' })
+  }
+  if (canAccessStoreCatalog(role)) {
+    items.push({ href: '/admin/store', label: 'Catalog & stock' })
+  }
+  if (canManageStoreSupplierOrders(role)) {
+    items.push({ href: '/admin/store?tab=supplier-orders', label: 'Supplier orders' })
+  }
+  if (canManageStorePreorders(role)) {
+    items.push({ href: '/admin/store/preorders', label: 'Preorders' })
+  }
+  if (canManageStoreSales(role)) {
+    items.push({ href: '/admin/store/sales', label: 'Sales' })
+  }
+
+  return items
+}
+
+export default function StoreAdminNav({ current, role }: { current: string; role: Role | null | undefined }) {
+  const items = getItems(role)
+
+  if (items.length === 0) return null
 
   return (
     <nav aria-label="Store admin navigation" className="flex flex-wrap gap-2">

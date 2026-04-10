@@ -234,7 +234,7 @@ export default async function StoreDashboardPage({ searchParams }: { searchParam
         title="Store Dashboard"
         subtitle="Access restricted."
         signedInAs={me.email}
-        message="This page is for admin and super admin."
+        message="This page is for admin and super admin roles."
         allowed="admin, super_admin"
         nextPath="/admin/store/dashboard"
         actions={[{ href: '/admin/store', label: 'Go to Store Admin' }]}
@@ -242,6 +242,9 @@ export default async function StoreDashboardPage({ searchParams }: { searchParam
       />
     )
   }
+
+  const canViewPreorders = canManageStorePreorders(me.role)
+  const canViewSales = canManageStoreSales(me.role)
 
   const windowRaw = strParam(searchParams?.window)
   const selectedWindow = WINDOWS.find((item) => item.value === windowRaw) ?? WINDOWS[1]
@@ -356,14 +359,14 @@ export default async function StoreDashboardPage({ searchParams }: { searchParam
         <Card>
           <CardContent className="flex flex-wrap items-center gap-2">
             <Button asChild href="/admin/store" variant="outline" size="sm">
-              Catalog & stock
+              Store admin
             </Button>
-            {canManageStorePreorders(me.role) ? (
+            {canViewPreorders ? (
               <Button asChild href="/admin/store/preorders" variant="outline" size="sm">
                 Preorders
               </Button>
             ) : null}
-            {canManageStoreSales(me.role) ? (
+            {canViewSales ? (
               <Button asChild href="/admin/store/sales" variant="outline" size="sm">
                 Sales
               </Button>
