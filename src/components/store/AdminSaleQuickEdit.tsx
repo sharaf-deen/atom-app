@@ -51,7 +51,6 @@ export default function AdminSaleQuickEdit({
   const [saleStatus, setSaleStatus] = useState<SaleStatus>(status)
   const [internalNote, setInternalNote] = useState(note ?? '')
   const [busy, setBusy] = useState(false)
-  const [deleteBusy, setDeleteBusy] = useState(false)
   const [err, setErr] = useState('')
 
   const nextPaidCents = useMemo(() => {
@@ -71,7 +70,6 @@ export default function AdminSaleQuickEdit({
   }, [nextPaidCents, paidCents, method, paymentMethod, saleStatus, status, internalNote, note])
 
   const statusLocked = status === 'delivered' || status === 'canceled'
-  const canDelete = status === 'draft' || status === 'canceled'
 
   async function save() {
     if (!dirty || busy) return
@@ -109,37 +107,6 @@ export default function AdminSaleQuickEdit({
     }
   }
 
-  async function removeSale() {
-    if (!canDelete || deleteBusy) return
-    const ok = globalThis.confirm('Delete this sale? Only draft or canceled sales can be deleted.')
-    if (!ok) return
-
-    setDeleteBusy(true)
-    setErr('')
-    try {
-      const r = await fetch(`/api/store/sales/delete?id=${encodeURIComponent(id)}`, {
-        method: 'DELETE',
-        cache: 'no-store',
-      })
-      const j = await r.json().catch(() => ({}))
-      if (!r.ok || !j?.ok) {
-        const msg = j?.details || j?.error || 'Delete failed'
-        setErr(msg)
-        toast.error(msg)
-        return
-      }
-      toast.success('Sale deleted')
-      router.refresh()
-      setTimeout(() => router.refresh(), 250)
-    } catch (e: any) {
-      const msg = e?.message || 'Network error'
-      setErr(msg)
-      toast.error(msg)
-    } finally {
-      setDeleteBusy(false)
-    }
-  }
-
   return (
     <div className="grid gap-3 rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4">
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
@@ -151,10 +118,10 @@ export default function AdminSaleQuickEdit({
           step="0.01"
           value={paid}
           onChange={(e) => setPaid(e.target.value)}
-          disabled={busy || deleteBusy}
+          disabled={busy}
         />
 
-        <Select label="Payment method" value={method} onChange={(e) => setMethod(e.target.value as PaymentMethod)} disabled={busy || deleteBusy}>
+        <Select label="Payment method" value={method} onChange={(e) => setMethod(e.target.value as PaymentMethod)} disabled={busy}>
           {PAYMENT_METHODS.map((m) => (
             <option key={m.value} value={m.value}>
               {m.label}
@@ -166,7 +133,7 @@ export default function AdminSaleQuickEdit({
           label="Status"
           value={saleStatus}
           onChange={(e) => setSaleStatus(e.target.value as SaleStatus)}
-          disabled={busy || deleteBusy || statusLocked}
+          disabled={busy || statusLocked}
         >
           {SALE_STATUSES.map((s) => (
             <option key={s.value} value={s.value}>
@@ -181,7 +148,7 @@ export default function AdminSaleQuickEdit({
         rows={2}
         value={internalNote}
         onChange={(e) => setInternalNote(e.target.value)}
-        disabled={busy || deleteBusy}
+        disabled={busy}
       />
 
       <div className="rounded-2xl border border-[hsl(var(--border))] bg-white p-3 text-sm">
@@ -198,28 +165,11 @@ export default function AdminSaleQuickEdit({
         </InlineAlert>
       ) : null}
 
-      {!canDelete ? (
-        <InlineAlert compact variant="info">
-          Only draft or canceled sales can be deleted.
-        </InlineAlert>
-      ) : null}
-
       {err ? <InlineAlert variant="error">{err}</InlineAlert> : null}
 
       <div className="flex flex-wrap items-center gap-2">
-        <Button onClick={save} disabled={!dirty || busy || deleteBusy} loading={busy} loadingText="Saving…">
+        <Button onClick={save} disabled={!dirty || busy} loading={busy} loadingText="Saving…">
           Save
-        </Button>
-        <Button
-          type="button"
-          variant="outline"
-          className="border-rose-200 text-rose-700 hover:bg-rose-50"
-          onClick={removeSale}
-          disabled={!canDelete || busy || deleteBusy}
-          loading={deleteBusy}
-          loadingText="Deleting…"
-        >
-          Delete sale
         </Button>
       </div>
     </div>

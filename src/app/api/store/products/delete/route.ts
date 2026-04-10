@@ -3,22 +3,22 @@ export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
-import { revalidatePath, revalidateTag } from 'next/cache'
 import { NextRequest, NextResponse } from 'next/server'
-import { createSupabaseAdminClient } from '@/lib/supabaseAdmin'
 import { createSupabaseServerActionClient } from '@/lib/supabaseServer'
-import { STORE_PRODUCT_IMAGE_BUCKET } from '@/lib/storeProductImages'
+import { createSupabaseAdminClient } from '@/lib/supabaseAdmin'
 
 function noStore(res: NextResponse) {
   res.headers.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate')
   return res
 }
 
+const STORE_BUCKET = 'store-product-images'
+
 export async function DELETE(req: NextRequest) {
   try {
     const supa = createSupabaseServerActionClient()
-    const admin = createSupabaseAdminClient()
 
+    // 1) Auth
     const { data: auth, error: authErr } = await supa.auth.getUser()
     if (authErr) {
       return noStore(
@@ -30,6 +30,7 @@ export async function DELETE(req: NextRequest) {
       return noStore(NextResponse.json({ ok: false, error: 'NOT_AUTHENTICATED' }, { status: 401 }))
     }
 
+    // 2) Role check
     const { data: me, error: meErr } = await supa
       .from('profiles')
       .select('role')
@@ -44,24 +45,28 @@ export async function DELETE(req: NextRequest) {
       return noStore(NextResponse.json({ ok: false, error: 'FORBIDDEN' }, { status: 403 }))
     }
 
+    // 3) Param
     const url = new URL(req.url)
     const id = (url.searchParams.get('id') || '').trim()
     if (!id) return noStore(NextResponse.json({ ok: false, error: 'MISSING_ID' }, { status: 400 }))
 
-    const { data: current, error: loadErr } = await supa
+    // 4) Delete
+    const admin = createSupabaseAdminClient()
+
+    const { data: product, error: loadErr } = await admin
       .from('store_products')
-      .select('id, image_path')
+      .select('image_path')
       .eq('id', id)
-      .maybeSingle<{ id: string; image_path: string | null }>()
+      .maybeSingle<{ image_path: string | null }>()
     if (loadErr) {
       return noStore(
         NextResponse.json({ ok: false, error: 'LOAD_FAILED', details: loadErr.message }, { status: 500 })
       )
     }
 
-    const imagePath = current?.image_path ?? null
+    const imagePath = String(product?.image_path ?? '').trim()
 
-    const { error } = await supa.from('store_products').delete().eq('id', id)
+    const { error } = await admin.from('store_products').delete().eq('id', id)
     if (error) {
       return noStore(
         NextResponse.json({ ok: false, error: 'DELETE_FAILED', details: error.message }, { status: 500 })
@@ -69,19 +74,8 @@ export async function DELETE(req: NextRequest) {
     }
 
     if (imagePath) {
-      try {
-        await admin.storage.from(STORE_PRODUCT_IMAGE_BUCKET).remove([imagePath])
-      } catch {
-        // best effort only
-      }
+      await admin.storage.from(STORE_BUCKET).remove([imagePath])
     }
-
-    try {
-      revalidatePath('/admin/store')
-      revalidatePath('/store')
-      revalidateTag('admin-store-products')
-      revalidateTag('store-products')
-    } catch {}
 
     return noStore(NextResponse.json({ ok: true }))
   } catch (e: any) {
