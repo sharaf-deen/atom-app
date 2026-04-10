@@ -1,14 +1,13 @@
+// src/app/api/store/products/delete/route.ts
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
-import { NextRequest, NextResponse } from 'next/server'
 import { revalidatePath, revalidateTag } from 'next/cache'
-
+import { NextRequest, NextResponse } from 'next/server'
 import { createSupabaseAdminClient } from '@/lib/supabaseAdmin'
 import { createSupabaseServerActionClient } from '@/lib/supabaseServer'
-
-const STORE_BUCKET = 'store-product-images'
+import { STORE_PRODUCT_IMAGE_BUCKET } from '@/lib/storeProductImages'
 
 function noStore(res: NextResponse) {
   res.headers.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate')
@@ -49,42 +48,40 @@ export async function DELETE(req: NextRequest) {
     const id = (url.searchParams.get('id') || '').trim()
     if (!id) return noStore(NextResponse.json({ ok: false, error: 'MISSING_ID' }, { status: 400 }))
 
-    const { data: existing, error: existingErr } = await admin
+    const { data: current, error: loadErr } = await supa
       .from('store_products')
-      .select('id,image_path')
+      .select('id, image_path')
       .eq('id', id)
       .maybeSingle<{ id: string; image_path: string | null }>()
-    if (existingErr) {
+    if (loadErr) {
       return noStore(
-        NextResponse.json({ ok: false, error: 'LOOKUP_FAILED', details: existingErr.message }, { status: 500 })
+        NextResponse.json({ ok: false, error: 'LOAD_FAILED', details: loadErr.message }, { status: 500 })
       )
     }
-    if (!existing) {
-      return noStore(NextResponse.json({ ok: false, error: 'NOT_FOUND' }, { status: 404 }))
-    }
 
-    const { error } = await admin.from('store_products').delete().eq('id', id)
+    const imagePath = current?.image_path ?? null
+
+    const { error } = await supa.from('store_products').delete().eq('id', id)
     if (error) {
       return noStore(
-        NextResponse.json({
-          ok: false,
-          error: 'DELETE_FAILED',
-          details: error.message.includes('violates foreign key constraint')
-            ? 'This product is linked to existing store history and cannot be deleted.'
-            : error.message,
-        }, { status: 500 })
+        NextResponse.json({ ok: false, error: 'DELETE_FAILED', details: error.message }, { status: 500 })
       )
     }
 
-    if (existing.image_path) {
-      await admin.storage.from(STORE_BUCKET).remove([existing.image_path])
+    if (imagePath) {
+      try {
+        await admin.storage.from(STORE_PRODUCT_IMAGE_BUCKET).remove([imagePath])
+      } catch {
+        // best effort only
+      }
     }
 
-    revalidateTag('store-products')
-    try { revalidatePath('/admin/store') } catch {}
-    try { revalidatePath('/admin/store/dashboard') } catch {}
-    try { revalidatePath('/admin/store/sales') } catch {}
-    try { revalidatePath('/store') } catch {}
+    try {
+      revalidatePath('/admin/store')
+      revalidatePath('/store')
+      revalidateTag('admin-store-products')
+      revalidateTag('store-products')
+    } catch {}
 
     return noStore(NextResponse.json({ ok: true }))
   } catch (e: any) {
