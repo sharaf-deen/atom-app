@@ -54,7 +54,12 @@ type ProfileLite = {
   member_id: string | null
   qr_code: string | null
   id_photo_path: string | null
+  date_of_birth: string | null
   created_at: string | null
+}
+
+type TrainingProfileLite = {
+  program_level: string | null
 }
 
 type SubscriptionLite = {
@@ -98,6 +103,9 @@ type TodayScheduleSession = {
   time: string
   text: string
 }
+
+type ScheduleAudience = 'adult' | 'kids_3_5' | 'kids_6_9' | 'kids_10_14' | 'kids_unknown' | 'unknown'
+type ProgramLevelLite = 'beginner' | 'intermediate' | 'advanced' | 'competitor'
 
 type PriorityTone = 'success' | 'warning' | 'danger' | 'neutral'
 
@@ -289,9 +297,20 @@ async function getProfileLite(userId: string): Promise<ProfileLite | null> {
   const supabase = createSupabaseRSC()
   const { data } = await supabase
     .from('profiles')
-    .select('member_id, qr_code, id_photo_path, created_at')
+    .select('member_id, qr_code, id_photo_path, date_of_birth, created_at')
     .eq('user_id', userId)
     .maybeSingle<ProfileLite>()
+
+  return data ?? null
+}
+
+async function getTrainingProfileLite(userId: string): Promise<TrainingProfileLite | null> {
+  const supabase = createSupabaseRSC()
+  const { data } = await supabase
+    .from('member_training_profiles')
+    .select('program_level')
+    .eq('member_user_id', userId)
+    .maybeSingle<TrainingProfileLite>()
 
   return data ?? null
 }
@@ -475,6 +494,94 @@ async function getTodaySchedule(): Promise<{ dayName: string; sessions: TodaySch
   } catch {
     return null
   }
+}
+
+
+function normalizeProgramLevel(value?: string | null): ProgramLevelLite | null {
+  const v = String(value || '').trim().toLowerCase()
+  if (v === 'beginner' || v === 'intermediate' || v === 'advanced' || v === 'competitor') return v
+  return null
+}
+
+function ageYearsForSchedule(dateOfBirth?: string | null) {
+  if (!dateOfBirth) return null
+  const dob = new Date(`${dateOfBirth}T00:00:00Z`)
+  if (Number.isNaN(dob.getTime())) return null
+  const today = new Date()
+  let age = today.getUTCFullYear() - dob.getUTCFullYear()
+  const monthDiff = today.getUTCMonth() - dob.getUTCMonth()
+  const dayDiff = today.getUTCDate() - dob.getUTCDate()
+  if (monthDiff < 0 || (monthDiff === 0 && dayDiff < 0)) age -= 1
+  return age >= 0 ? age : null
+}
+
+function inferScheduleAudience(role: Role, dateOfBirth?: string | null): ScheduleAudience {
+  const age = ageYearsForSchedule(dateOfBirth)
+  if (typeof age === 'number') {
+    if (age >= 15) return 'adult'
+    if (age >= 10) return 'kids_10_14'
+    if (age >= 6) return 'kids_6_9'
+    if (age >= 3) return 'kids_3_5'
+    return 'kids_unknown'
+  }
+
+  if (role === 'coach' || role === 'assistant_coach' || role === 'head_coach') return 'adult'
+  return 'unknown'
+}
+
+function isCompetitionSession(text: string) {
+  const value = text.toLowerCase()
+  return value.includes('competition') || value.includes('competitor') || value.includes('group a') || value.includes('group b')
+}
+
+function matchesKidsAgeBand(text: string, audience: Exclude<ScheduleAudience, 'adult' | 'unknown'>) {
+  const value = text.toLowerCase()
+  if (audience === 'kids_unknown') return true
+  if (audience === 'kids_3_5') return value.includes('3–5') || value.includes('3-5') || value.includes('baby')
+  if (audience === 'kids_6_9') return value.includes('6–9') || value.includes('6-9')
+  if (audience === 'kids_10_14') return value.includes('10–14') || value.includes('10-14') || value.includes('teen')
+  return false
+}
+
+function matchesProgram(text: string, program: ProgramLevelLite) {
+  const value = text.toLowerCase()
+  if (program === 'beginner') return value.includes('beginner')
+  if (program === 'intermediate') return value.includes('intermediate')
+  if (program === 'advanced') return value.includes('advanced')
+  return isCompetitionSession(value)
+}
+
+function filterTodayScheduleForProfile(
+  sessions: TodayScheduleSession[],
+  audience: ScheduleAudience,
+  program: ProgramLevelLite | null,
+): TodayScheduleSession[] {
+  const base = sessions.filter((session) => session.section !== 'other')
+
+  if (!program) {
+    if (audience === 'adult') return base.filter((session) => session.section === 'adults')
+    if (audience.startsWith('kids_')) return base.filter((session) => session.section === 'kids')
+    return base
+  }
+
+  if (audience === 'adult') {
+    return base.filter((session) => session.section === 'adults' && matchesProgram(session.text, program))
+  }
+
+  if (
+    audience === 'kids_3_5' ||
+    audience === 'kids_6_9' ||
+    audience === 'kids_10_14' ||
+    audience === 'kids_unknown'
+  ) {
+    return base.filter((session) => {
+      if (session.section !== 'kids') return false
+      if (program === 'competitor') return isCompetitionSession(session.text)
+      return matchesKidsAgeBand(session.text, audience) && matchesProgram(session.text, program)
+    })
+  }
+
+  return base.filter((session) => matchesProgram(session.text, program))
 }
 
 function priorityToneClasses(tone: PriorityTone) {
@@ -902,36 +1009,11 @@ async function QrCard({ qrCode }: { qrCode?: string | null }) {
 }
 
 function TodayScheduleSection({ dayName, sessions }: { dayName: string; sessions: TodayScheduleSession[] }) {
-  const kids = sessions.filter((session) => session.section === 'kids')
-  const adults = sessions.filter((session) => session.section === 'adults')
-  const other = sessions.filter((session) => session.section === 'other')
-
-  const renderGroup = (label: string, items: TodayScheduleSession[]) => {
-    if (!items.length) return null
-    return (
-      <div className="space-y-2">
-        <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[hsl(var(--muted))]">{label}</div>
-        <div className="space-y-2">
-          {items.map((item, index) => (
-            <div key={`${label}-${index}-${item.time || item.text}`} className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] px-3 py-2.5 text-sm text-black">
-              <div className="flex flex-wrap items-center gap-2">
-                {item.time ? (
-                  <span className="rounded-full bg-black px-2.5 py-1 text-[11px] font-semibold text-white">{item.time}</span>
-                ) : null}
-                <span>{item.text}</span>
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-    )
-  }
-
   return (
     <Surface className="p-4 sm:p-5">
       <details className="group">
         <summary className="flex cursor-pointer list-none items-center justify-between gap-3">
-          <div>
+          <div className="min-w-0">
             <div className="text-sm font-semibold tracking-tight">Today’s schedule</div>
             <div className="mt-1 text-xs text-[hsl(var(--muted))]">{dayName}</div>
           </div>
@@ -940,21 +1022,32 @@ function TodayScheduleSection({ dayName, sessions }: { dayName: string; sessions
           </span>
         </summary>
 
-        <div className="mt-4 space-y-4">
+        <div className="mt-4 space-y-3">
           {sessions.length ? (
-            <>
-              {renderGroup('Kids & Teens', kids)}
-              {renderGroup('Adults', adults)}
-              {renderGroup('Other', other)}
-            </>
+            <div className="space-y-2">
+              {sessions.map((item, index) => (
+                <div key={`${index}-${item.time || item.text}`} className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] px-3 py-2.5 text-sm text-black">
+                  <div className="flex flex-wrap items-center gap-2">
+                    {item.time ? (
+                      <span className="rounded-full bg-black px-2.5 py-1 text-[11px] font-semibold text-white">{item.time}</span>
+                    ) : null}
+                    <span>{item.text}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
           ) : (
             <div className="rounded-2xl border border-dashed border-[hsl(var(--border))] bg-[hsl(var(--bg))] px-4 py-3 text-sm text-[hsl(var(--muted))]">
-              No sessions scheduled today.
+              No matching class today.
             </div>
           )}
+
           <div>
-            <Link href="/schedule" className="inline-flex items-center gap-1 text-sm font-medium hover:underline">
-              Open full schedule
+            <Link
+              href="/schedule"
+              className="inline-flex items-center gap-1 rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm font-semibold text-black transition hover:bg-[hsl(var(--bg))]"
+            >
+              View schedule
               <ArrowRight size={15} />
             </Link>
           </div>
@@ -1101,10 +1194,22 @@ export default async function HomePage() {
   }
 
   const displayName = await getDisplayName(user)
-  const [profile, unreadNotificationsCount] = await Promise.all([
+  const showHomeTodaySchedule = isMemberLikeRole(user.role) || user.role === 'coach' || user.role === 'assistant_coach' || user.role === 'head_coach'
+  const [profile, unreadNotificationsCount, trainingProfile, homeTodaySchedule] = await Promise.all([
     getProfileLite(user.id),
     getUnreadNotificationsCount(user.id),
+    showHomeTodaySchedule ? getTrainingProfileLite(user.id) : Promise.resolve(null),
+    showHomeTodaySchedule ? getTodaySchedule() : Promise.resolve(null),
   ])
+
+  const homeScheduleAudience = inferScheduleAudience(user.role, profile?.date_of_birth ?? null)
+  const homeScheduleProgram = normalizeProgramLevel(trainingProfile?.program_level ?? null)
+  const filteredHomeTodaySchedule = homeTodaySchedule
+    ? {
+        dayName: homeTodaySchedule.dayName,
+        sessions: filterTodayScheduleForProfile(homeTodaySchedule.sessions, homeScheduleAudience, homeScheduleProgram),
+      }
+    : null
 
   const avatarPath = user.id_photo_path ?? profile?.id_photo_path ?? null
   const avatarUrl = ['member', 'champion', 'vip', 'coach', 'assistant_coach', 'head_coach'].includes(user.role) ? await getSignedAvatar(avatarPath) : ''
@@ -1156,6 +1261,8 @@ export default async function HomePage() {
               <QrCard qrCode={qrCode} />
             </div>
 
+            {filteredHomeTodaySchedule ? <TodayScheduleSection dayName={filteredHomeTodaySchedule.dayName} sessions={filteredHomeTodaySchedule.sessions} /> : null}
+
             <QuickActions
               title="Quick actions"
               subtitle="Keep the next step simple."
@@ -1180,6 +1287,8 @@ export default async function HomePage() {
                 items={coachActions().slice(0, 3)}
               />
             </div>
+
+            {filteredHomeTodaySchedule ? <TodayScheduleSection dayName={filteredHomeTodaySchedule.dayName} sessions={filteredHomeTodaySchedule.sessions} /> : null}
 
             {(user.role === 'coach' || user.role === 'head_coach') ? (
               <HomeMemberLookup
