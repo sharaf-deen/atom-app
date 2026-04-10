@@ -661,7 +661,6 @@ export type Database = {
           created_by: string | null
           currency: string | null
           id: string
-          image_path: string | null
           inventory_qty: number
           is_active: boolean
           name: string
@@ -676,7 +675,6 @@ export type Database = {
           created_by?: string | null
           currency?: string | null
           id?: string
-          image_path?: string | null
           inventory_qty?: number
           is_active?: boolean
           name: string
@@ -691,7 +689,6 @@ export type Database = {
           created_by?: string | null
           currency?: string | null
           id?: string
-          image_path?: string | null
           inventory_qty?: number
           is_active?: boolean
           name?: string
