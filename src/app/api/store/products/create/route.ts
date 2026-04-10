@@ -1,99 +1,47 @@
+// src/app/api/store/products/create/route.ts
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
+import { revalidatePath, revalidateTag } from 'next/cache'
 import { NextResponse } from 'next/server'
-import { createSupabaseServerActionClient } from '@/lib/supabaseServer'
 import { createSupabaseAdminClient } from '@/lib/supabaseAdmin'
+import { createSupabaseServerActionClient } from '@/lib/supabaseServer'
+import {
+  buildStoreProductImagePath,
+  inferStoreProductImageMime,
+  STORE_PRODUCT_IMAGE_BUCKET,
+  STORE_PRODUCT_IMAGE_MAX_BYTES,
+} from '@/lib/storeProductImages'
 
 type Category = 'kimono' | 'rashguard' | 'short' | 'belt'
-type JsonBody = {
+type Body = {
   category: Category
   name: string
-  color?: string | null
-  size?: string | null
+  color?: string
+  size?: string
   price_cents: number
   inventory_qty?: number
   is_active?: boolean
   currency?: string | null
 }
 
-const ACCEPTED_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp'])
-const MAX_IMAGE_BYTES = 5 * 1024 * 1024
-const STORE_BUCKET = 'store-product-images'
-
 function noStore(res: NextResponse) {
   res.headers.set('Cache-Control', 'no-store')
   return res
 }
 
-function toCleanString(value: FormDataEntryValue | string | null | undefined) {
-  if (typeof value !== 'string') return ''
-  return value.trim()
-}
-
-function toNonNegativeInt(value: FormDataEntryValue | string | number | null | undefined) {
-  const raw = typeof value === 'number' ? value : Number(typeof value === 'string' ? value : 0)
-  if (!Number.isFinite(raw)) return 0
-  return Math.max(0, Math.trunc(raw))
-}
-
-function toBoolean(value: FormDataEntryValue | string | boolean | null | undefined, fallback = true) {
-  if (typeof value === 'boolean') return value
-  if (typeof value !== 'string') return fallback
-  const normalized = value.trim().toLowerCase()
-  if (['1', 'true', 'yes', 'on'].includes(normalized)) return true
-  if (['0', 'false', 'no', 'off'].includes(normalized)) return false
-  return fallback
-}
-
-function sanitizeFilename(name: string) {
-  return (name || 'image').replace(/[^a-zA-Z0-9._-]+/g, '_')
-}
-
-function buildUploadPath(userId: string, filename: string) {
-  const today = new Date().toISOString().slice(0, 10)
-  const uuid = globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`
-  return `products/${userId}/${today}/${uuid}-${sanitizeFilename(filename)}`
-}
-
-async function parsePayload(req: Request): Promise<{ fields: JsonBody; imageFile: File | null }> {
-  const contentType = req.headers.get('content-type') || ''
-
-  if (contentType.includes('multipart/form-data') || contentType.includes('application/x-www-form-urlencoded')) {
-    const fd = await req.formData()
-    const imageValue = fd.get('image')
-    const imageFile = imageValue instanceof File && imageValue.size > 0 ? imageValue : null
-
-    return {
-      fields: {
-        category: (toCleanString(fd.get('category')) || 'kimono') as Category,
-        name: toCleanString(fd.get('name')),
-        color: toCleanString(fd.get('color')) || null,
-        size: toCleanString(fd.get('size')) || null,
-        price_cents: toNonNegativeInt(fd.get('price_cents')),
-        inventory_qty: toNonNegativeInt(fd.get('inventory_qty')),
-        is_active: toBoolean(fd.get('is_active'), true),
-        currency: toCleanString(fd.get('currency')) || 'EGP',
-      },
-      imageFile,
-    }
-  }
-
-  const b = (await req.json()) as JsonBody
-  return {
-    fields: b,
-    imageFile: null,
-  }
+function str(value: FormDataEntryValue | null | undefined) {
+  return typeof value === 'string' ? value : ''
 }
 
 export async function POST(req: Request) {
   let uploadedPath: string | null = null
+  let createdId: string | null = null
 
   try {
     const supa = createSupabaseServerActionClient()
     const admin = createSupabaseAdminClient()
-
     const { data: auth } = await supa.auth.getUser()
     if (!auth.user) return noStore(NextResponse.json({ ok: false, error: 'NOT_AUTHENTICATED' }, { status: 401 }))
 
@@ -102,59 +50,107 @@ export async function POST(req: Request) {
       return noStore(NextResponse.json({ ok: false, error: 'FORBIDDEN' }, { status: 403 }))
     }
 
-    const { fields, imageFile } = await parsePayload(req)
+    const contentType = req.headers.get('content-type') || ''
+    let b: Body
+    let imageFile: File | null = null
+
+    if (contentType.includes('multipart/form-data')) {
+      const form = await req.formData()
+      b = {
+        category: str(form.get('category')) as Category,
+        name: str(form.get('name')),
+        color: str(form.get('color')),
+        size: str(form.get('size')),
+        price_cents: Number(str(form.get('price_cents')) || 0),
+        inventory_qty: Number(str(form.get('inventory_qty')) || 0),
+        is_active: str(form.get('is_active')) === 'true',
+        currency: str(form.get('currency')) || 'EGP',
+      }
+      const maybeImage = form.get('image')
+      imageFile = maybeImage && typeof (maybeImage as File)?.arrayBuffer === 'function' ? (maybeImage as File) : null
+    } else {
+      b = (await req.json()) as Body
+    }
 
     const payload = {
-      category: fields.category,
-      name: (fields.name || '').trim(),
-      color: (fields.color || '').trim() || null,
-      size: (fields.size || '').trim() || null,
-      price_cents: Math.max(0, Number(fields.price_cents || 0)),
-      inventory_qty: Math.max(0, Number(fields.inventory_qty ?? 0)),
-      is_active: fields.is_active ?? true,
-      currency: fields.currency ?? 'EGP',
+      category: b.category,
+      name: (b.name || '').trim(),
+      color: (b.color || '').trim() || null,
+      size: (b.size || '').trim() || null,
+      price_cents: Math.max(0, Number(b.price_cents || 0)),
+      inventory_qty: Math.max(0, Number(b.inventory_qty ?? 0)),
+      is_active: b.is_active ?? true,
+      currency: b.currency ?? 'EGP',
       created_by: auth.user.id,
-      image_path: null as string | null,
     }
+    if (!payload.name) return noStore(NextResponse.json({ ok: false, error: 'INVALID_INPUT' }, { status: 400 }))
 
-    if (!payload.name) {
-      return noStore(NextResponse.json({ ok: false, error: 'INVALID_INPUT', details: 'Name is required.' }, { status: 400 }))
-    }
+    const { data, error } = await supa.from('store_products').insert(payload).select('id').maybeSingle()
+    if (error) return noStore(NextResponse.json({ ok: false, error: error.message }, { status: 500 }))
 
-    if (imageFile) {
-      const mime = (imageFile.type || '').toLowerCase()
-      if (!ACCEPTED_IMAGE_TYPES.has(mime)) {
-        return noStore(NextResponse.json({ ok: false, error: 'INVALID_IMAGE_TYPE', details: 'Photo must be JPG, PNG or WEBP.' }, { status: 400 }))
+    createdId = data?.id ?? null
+
+    if (createdId && imageFile && imageFile.size > 0) {
+      if (imageFile.size > STORE_PRODUCT_IMAGE_MAX_BYTES) {
+        await supa.from('store_products').delete().eq('id', createdId)
+        return noStore(
+          NextResponse.json({ ok: false, error: 'IMAGE_TOO_LARGE', details: 'Image is too large (max 5MB).' }, { status: 400 })
+        )
       }
-      if (imageFile.size > MAX_IMAGE_BYTES) {
-        return noStore(NextResponse.json({ ok: false, error: 'IMAGE_TOO_LARGE', details: 'Photo is too large (max 5 MB).' }, { status: 400 }))
+
+      const mime = inferStoreProductImageMime(imageFile)
+      if (!mime) {
+        await supa.from('store_products').delete().eq('id', createdId)
+        return noStore(
+          NextResponse.json({ ok: false, error: 'INVALID_IMAGE_TYPE', details: 'Image must be JPG, PNG, or WEBP.' }, { status: 400 })
+        )
       }
 
-      uploadedPath = buildUploadPath(auth.user.id, imageFile.name || 'product-image')
-      const buffer = await imageFile.arrayBuffer()
-      const up = await admin.storage.from(STORE_BUCKET).upload(uploadedPath, buffer, {
-        contentType: mime || 'application/octet-stream',
+      uploadedPath = buildStoreProductImagePath(createdId, imageFile.name || 'product-image')
+      const ab = await imageFile.arrayBuffer()
+      const up = await admin.storage.from(STORE_PRODUCT_IMAGE_BUCKET).upload(uploadedPath, ab, {
+        contentType: mime,
         upsert: false,
       })
 
       if (up.error) {
-        uploadedPath = null
-        return noStore(NextResponse.json({ ok: false, error: 'UPLOAD_FAILED', details: up.error.message }, { status: 500 }))
+        await supa.from('store_products').delete().eq('id', createdId)
+        return noStore(
+          NextResponse.json({ ok: false, error: 'IMAGE_UPLOAD_FAILED', details: up.error.message }, { status: 500 })
+        )
       }
 
-      payload.image_path = uploadedPath
-    }
-
-    const { data, error } = await admin.from('store_products').insert(payload).select('id').maybeSingle()
-    if (error) {
-      if (uploadedPath) {
-        await admin.storage.from(STORE_BUCKET).remove([uploadedPath])
+      const { error: patchErr } = await supa.from('store_products').update({ image_path: uploadedPath }).eq('id', createdId)
+      if (patchErr) {
+        await admin.storage.from(STORE_PRODUCT_IMAGE_BUCKET).remove([uploadedPath])
+        await supa.from('store_products').delete().eq('id', createdId)
+        return noStore(
+          NextResponse.json({ ok: false, error: 'IMAGE_SAVE_FAILED', details: patchErr.message }, { status: 500 })
+        )
       }
-      return noStore(NextResponse.json({ ok: false, error: error.message }, { status: 500 }))
     }
 
-    return noStore(NextResponse.json({ ok: true, id: data?.id }))
+    try {
+      revalidatePath('/admin/store')
+      revalidatePath('/store')
+      revalidateTag('admin-store-products')
+      revalidateTag('store-products')
+    } catch {}
+
+    return noStore(NextResponse.json({ ok: true, id: createdId, image_path: uploadedPath }))
   } catch (e: any) {
+    if (uploadedPath) {
+      try {
+        const admin = createSupabaseAdminClient()
+        await admin.storage.from(STORE_PRODUCT_IMAGE_BUCKET).remove([uploadedPath])
+      } catch {}
+    }
+    if (createdId) {
+      try {
+        const supa = createSupabaseServerActionClient()
+        await supa.from('store_products').delete().eq('id', createdId)
+      } catch {}
+    }
     return noStore(NextResponse.json({ ok: false, error: e?.message || 'SERVER_ERROR' }, { status: 500 }))
   }
 }
