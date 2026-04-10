@@ -52,7 +52,19 @@ type ProductRow = {
   inventory_qty: number
   is_active: boolean
   allow_preorder: boolean
+  image_path: string | null
   created_at?: string | null
+}
+
+
+const STORE_PRODUCT_BUCKET = 'store-product-images'
+const SUPABASE_URL = (process.env.NEXT_PUBLIC_SUPABASE_URL || '').replace(/\/+$/, '')
+
+function storeProductImageUrl(path: string | null | undefined) {
+  const clean = String(path ?? '').trim()
+  if (!SUPABASE_URL || !clean) return ''
+  const encodedPath = clean.split('/').map((segment) => encodeURIComponent(segment)).join('/')
+  return `${SUPABASE_URL}/storage/v1/object/public/${STORE_PRODUCT_BUCKET}/${encodedPath}`
 }
 
 const listStoreProductsCached = unstable_cache(
@@ -68,7 +80,7 @@ const listStoreProductsCached = unstable_cache(
 
     let qry = supa
       .from('store_products')
-      .select('id, category, name, color, size, price_cents, currency, inventory_qty, is_active, allow_preorder, created_at')
+      .select('id, category, name, color, size, price_cents, currency, inventory_qty, is_active, allow_preorder, image_path, created_at')
       .order('created_at', { ascending: false })
       .range(fromRow, toRow + 1)
 
@@ -369,10 +381,17 @@ export default async function StorePage({
               const price = formatCurrency(p.price_cents ?? 0, 'en-EG', p.currency ?? 'EGP')
               const stock = Math.max(0, Number(p.inventory_qty ?? 0))
               const itemDetails = [p.color, p.size].filter(Boolean).join(' · ')
+              const imageUrl = storeProductImageUrl(p.image_path)
 
               return (
                 <Card key={p.id} hover>
                   <CardContent className="space-y-4 py-4">
+                    {imageUrl ? (
+                      <div className="overflow-hidden rounded-2xl border bg-slate-50">
+                        <img src={imageUrl} alt={p.name} className="h-48 w-full object-cover" loading="lazy" />
+                      </div>
+                    ) : null}
+
                     <div className="flex items-start gap-3">
                       <div className="min-w-0 flex-1">
                         <div className="flex flex-wrap items-center gap-2">
@@ -382,6 +401,11 @@ export default async function StorePage({
                           {!isSuperAdmin ? (
                             <span className="rounded-full border border-sky-200 bg-sky-50 px-2.5 py-1 text-[11px] font-medium text-sky-700">
                               Pre-order open
+                            </span>
+                          ) : null}
+                          {imageUrl ? (
+                            <span className="rounded-full border border-[hsl(var(--border))] bg-white px-2.5 py-1 text-[11px] font-medium text-[hsl(var(--muted))]">
+                              Photo
                             </span>
                           ) : null}
                         </div>
