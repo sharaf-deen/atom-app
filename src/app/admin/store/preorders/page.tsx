@@ -9,7 +9,7 @@ import Section from '@/components/layout/Section'
 import AccessDeniedPage from '@/components/AccessDeniedPage'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card'
 import { formatCurrency } from '@/lib/money'
-import { canManageStorePreorders } from '@/lib/rbac'
+import { canAccessStoreAdmin } from '@/lib/rbac'
 import AdminPreorderQuickEdit from '@/components/store/AdminPreorderQuickEdit'
 import StoreAdminNav from '@/components/store/StoreAdminNav'
 
@@ -169,7 +169,7 @@ export default async function AdminStorePreordersPage({
   const me = await getSessionUserCached()
   if (!me) redirect('/login?next=/admin/store/preorders')
 
-  if (!canManageStorePreorders(me.role)) {
+  if (!canAccessStoreAdmin(me.role)) {
     return (
       <AccessDeniedPage
         title="Store Admin"
@@ -252,7 +252,7 @@ export default async function AdminStorePreordersPage({
       />
 
       <Section className="space-y-4">
-        <StoreAdminNav role={me.role} current="/admin/store/preorders" />
+        <StoreAdminNav current="/admin/store/preorders" role={me.role} />
       </Section>
 
       <Section className="space-y-4">

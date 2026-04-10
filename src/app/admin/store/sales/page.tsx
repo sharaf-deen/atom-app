@@ -10,7 +10,7 @@ import { Card, CardContent } from '@/components/ui/Card'
 import Button from '@/components/ui/Button'
 import InlineAlert from '@/components/ui/InlineAlert'
 import { formatCurrency } from '@/lib/money'
-import { canManageStoreSales } from '@/lib/rbac'
+import { canAccessStoreAdmin } from '@/lib/rbac'
 import AdminSaleForm from '@/components/store/AdminSaleForm'
 import AdminSaleQuickEdit from '@/components/store/AdminSaleQuickEdit'
 import StoreAdminNav from '@/components/store/StoreAdminNav'
@@ -147,7 +147,7 @@ export default async function AdminStoreSalesPage({ searchParams }: { searchPara
   const me = await getSessionUserCached()
   if (!me) redirect('/login?next=/admin/store/sales')
 
-  if (!canManageStoreSales(me.role)) {
+  if (!canAccessStoreAdmin(me.role)) {
     return (
       <AccessDeniedPage
         title="Store Sales"
@@ -290,7 +290,7 @@ export default async function AdminStoreSalesPage({ searchParams }: { searchPara
       />
 
       <Section className="space-y-4">
-        <StoreAdminNav role={me.role} current="/admin/store/sales" />
+        <StoreAdminNav current="/admin/store/sales" role={me.role} />
       </Section>
 
       <Section className="space-y-6">
@@ -430,14 +430,6 @@ export default async function AdminStoreSalesPage({ searchParams }: { searchPara
                       paymentMethod={sale.payment_method}
                       status={sale.status}
                       note={sale.note}
-                      canDelete={(sale.status === 'draft' || sale.status === 'canceled') && !items.some((item) => !!item.delivered_stock_applied)}
-                      deleteBlockedReason={
-                        items.some((item) => !!item.delivered_stock_applied)
-                          ? 'This sale cannot be deleted because stock was already applied.'
-                          : sale.status === 'draft' || sale.status === 'canceled'
-                            ? null
-                            : 'Only draft or canceled sales can be deleted.'
-                      }
                     />
                   </div>
                 </CardContent>

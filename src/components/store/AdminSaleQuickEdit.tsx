@@ -3,7 +3,6 @@
 import { useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
-
 import Button from '@/components/ui/Button'
 import Input from '@/components/ui/Input'
 import Select from '@/components/ui/Select'
@@ -37,8 +36,6 @@ export default function AdminSaleQuickEdit({
   paymentMethod,
   status,
   note,
-  canDelete,
-  deleteBlockedReason,
 }: {
   id: string
   totalCents: number
@@ -47,8 +44,6 @@ export default function AdminSaleQuickEdit({
   paymentMethod: PaymentMethod | null
   status: SaleStatus
   note: string | null
-  canDelete: boolean
-  deleteBlockedReason?: string | null
 }) {
   const router = useRouter()
   const [paid, setPaid] = useState<string>(toPriceString(paidCents))
@@ -76,6 +71,7 @@ export default function AdminSaleQuickEdit({
   }, [nextPaidCents, paidCents, method, paymentMethod, saleStatus, status, internalNote, note])
 
   const statusLocked = status === 'delivered' || status === 'canceled'
+  const canDelete = status === 'draft' || status === 'canceled'
 
   async function save() {
     if (!dirty || busy) return
@@ -113,9 +109,9 @@ export default function AdminSaleQuickEdit({
     }
   }
 
-  async function deleteSale() {
+  async function removeSale() {
     if (!canDelete || deleteBusy) return
-    const ok = window.confirm('Delete this sale? Only draft or canceled sales without applied stock can be deleted.')
+    const ok = globalThis.confirm('Delete this sale? Only draft or canceled sales can be deleted.')
     if (!ok) return
 
     setDeleteBusy(true)
@@ -202,8 +198,10 @@ export default function AdminSaleQuickEdit({
         </InlineAlert>
       ) : null}
 
-      {!canDelete && deleteBlockedReason ? (
-        <InlineAlert compact variant="info">{deleteBlockedReason}</InlineAlert>
+      {!canDelete ? (
+        <InlineAlert compact variant="info">
+          Only draft or canceled sales can be deleted.
+        </InlineAlert>
       ) : null}
 
       {err ? <InlineAlert variant="error">{err}</InlineAlert> : null}
@@ -215,8 +213,9 @@ export default function AdminSaleQuickEdit({
         <Button
           type="button"
           variant="outline"
-          onClick={deleteSale}
-          disabled={!canDelete || busy}
+          className="border-rose-200 text-rose-700 hover:bg-rose-50"
+          onClick={removeSale}
+          disabled={!canDelete || busy || deleteBusy}
           loading={deleteBusy}
           loadingText="Deleting…"
         >
