@@ -5,11 +5,14 @@ export const revalidate = 0
 
 import { NextRequest, NextResponse } from 'next/server'
 import { createSupabaseServerActionClient } from '@/lib/supabaseServer'
+import { createSupabaseAdminClient } from '@/lib/supabaseAdmin'
 
 function noStore(res: NextResponse) {
   res.headers.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate')
   return res
 }
+
+const STORE_BUCKET = 'store-product-images'
 
 export async function DELETE(req: NextRequest) {
   try {
@@ -48,11 +51,30 @@ export async function DELETE(req: NextRequest) {
     if (!id) return noStore(NextResponse.json({ ok: false, error: 'MISSING_ID' }, { status: 400 }))
 
     // 4) Delete
-    const { error } = await supa.from('store_products').delete().eq('id', id)
+    const admin = createSupabaseAdminClient()
+
+    const { data: product, error: loadErr } = await admin
+      .from('store_products')
+      .select('image_path')
+      .eq('id', id)
+      .maybeSingle<{ image_path: string | null }>()
+    if (loadErr) {
+      return noStore(
+        NextResponse.json({ ok: false, error: 'LOAD_FAILED', details: loadErr.message }, { status: 500 })
+      )
+    }
+
+    const imagePath = String(product?.image_path ?? '').trim()
+
+    const { error } = await admin.from('store_products').delete().eq('id', id)
     if (error) {
       return noStore(
         NextResponse.json({ ok: false, error: 'DELETE_FAILED', details: error.message }, { status: 500 })
       )
+    }
+
+    if (imagePath) {
+      await admin.storage.from(STORE_BUCKET).remove([imagePath])
     }
 
     return noStore(NextResponse.json({ ok: true }))

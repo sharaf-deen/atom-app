@@ -53,6 +53,7 @@ type ProductRow = {
   is_active: boolean
   allow_preorder: boolean
   low_stock_threshold: number
+  image_path: string | null
   created_at: string | null
 }
 
@@ -125,6 +126,17 @@ const STOCK_FILTERS: Array<{ value: StockFilter; label: string }> = [
   { value: 'out', label: 'Out of stock' },
   { value: 'low', label: 'Low stock' },
 ]
+
+
+const STORE_PRODUCT_BUCKET = 'store-product-images'
+const SUPABASE_URL = (process.env.NEXT_PUBLIC_SUPABASE_URL || '').replace(/\/+$/, '')
+
+function storeProductImageUrl(path: string | null | undefined) {
+  const clean = String(path ?? '').trim()
+  if (!SUPABASE_URL || !clean) return ''
+  const encodedPath = clean.split('/').map((segment) => encodeURIComponent(segment)).join('/')
+  return `${SUPABASE_URL}/storage/v1/object/public/${STORE_PRODUCT_BUCKET}/${encodedPath}`
+}
 
 const PREORDER_FILTERS: Array<{ value: PreorderFilter; label: string }> = [
   { value: 'all', label: 'All' },
@@ -345,7 +357,7 @@ export default async function AdminStorePage({
   try {
     let productQuery = supa
       .from('store_products')
-      .select('id, category, name, color, size, price_cents, currency, inventory_qty, is_active, allow_preorder, low_stock_threshold, created_at')
+      .select('id, category, name, color, size, price_cents, currency, inventory_qty, is_active, allow_preorder, low_stock_threshold, image_path, created_at')
       .order('created_at', { ascending: false })
       .limit(1000)
 
@@ -575,44 +587,55 @@ export default async function AdminStorePage({
                     {pagedProducts.length === 0 ? (
                       <div className="rounded-2xl border border-dashed p-4 text-sm text-[hsl(var(--muted))]">No products match the current filters.</div>
                     ) : (
-                      pagedProducts.map((product) => (
-                        <div key={product.id} className="rounded-2xl border bg-white p-4">
-                          <div className="flex flex-wrap items-start justify-between gap-3">
-                            <div>
-                              <div className="text-sm font-semibold">{product.name}</div>
-                              <div className="mt-1 flex flex-wrap gap-2 text-xs text-[hsl(var(--muted))]">
-                                <span className="rounded-full border px-2 py-1">ID: {shortId(product.id)}</span>
-                                <span className="rounded-full border px-2 py-1">{product.category}</span>
-                                {product.size ? <span className="rounded-full border px-2 py-1">Size: {product.size}</span> : null}
-                                {product.color ? <span className="rounded-full border px-2 py-1">Color: {product.color}</span> : null}
+                      pagedProducts.map((product) => {
+                        const imageUrl = storeProductImageUrl(product.image_path)
+
+                        return (
+                          <div key={product.id} className="rounded-2xl border bg-white p-4">
+                            {imageUrl ? (
+                              <div className="mb-4 overflow-hidden rounded-2xl border bg-slate-50">
+                                <img src={imageUrl} alt={product.name} className="h-48 w-full object-cover" loading="lazy" />
+                              </div>
+                            ) : null}
+
+                            <div className="flex flex-wrap items-start justify-between gap-3">
+                              <div>
+                                <div className="text-sm font-semibold">{product.name}</div>
+                                <div className="mt-1 flex flex-wrap gap-2 text-xs text-[hsl(var(--muted))]">
+                                  <span className="rounded-full border px-2 py-1">ID: {shortId(product.id)}</span>
+                                  <span className="rounded-full border px-2 py-1">{product.category}</span>
+                                  {product.size ? <span className="rounded-full border px-2 py-1">Size: {product.size}</span> : null}
+                                  {product.color ? <span className="rounded-full border px-2 py-1">Color: {product.color}</span> : null}
+                                  {imageUrl ? <span className="rounded-full border px-2 py-1">Photo</span> : null}
+                                </div>
+                              </div>
+                              <div className="flex flex-wrap items-center gap-2">
+                                {stockPill(product)}
+                                <span className={`rounded-full border px-2.5 py-1 text-xs font-medium ${product.allow_preorder ? 'border-violet-200 bg-violet-50 text-violet-700' : 'border-slate-200 bg-slate-50 text-slate-700'}`}>
+                                  {product.allow_preorder ? 'Preorder enabled' : 'Preorder disabled'}
+                                </span>
                               </div>
                             </div>
-                            <div className="flex flex-wrap items-center gap-2">
-                              {stockPill(product)}
-                              <span className={`rounded-full border px-2.5 py-1 text-xs font-medium ${product.allow_preorder ? 'border-violet-200 bg-violet-50 text-violet-700' : 'border-slate-200 bg-slate-50 text-slate-700'}`}>
-                                {product.allow_preorder ? 'Preorder enabled' : 'Preorder disabled'}
-                              </span>
+
+                            <div className="mt-3 grid gap-2 text-sm sm:grid-cols-2 xl:grid-cols-4">
+                              <div><span className="text-[hsl(var(--muted))]">Price:</span> <span className="font-medium">{formatCurrency(product.price_cents, 'en-EG', product.currency ?? 'EGP')}</span></div>
+                              <div><span className="text-[hsl(var(--muted))]">Stock:</span> <span className="font-medium">{product.inventory_qty}</span></div>
+                              <div><span className="text-[hsl(var(--muted))]">Threshold:</span> <span className="font-medium">{product.low_stock_threshold}</span></div>
+                              <div><span className="text-[hsl(var(--muted))]">Created:</span> <span className="font-medium">{formatDateTime(product.created_at)}</span></div>
+                            </div>
+
+                            <div className="mt-4">
+                              <AdminProductQuickEdit
+                                id={product.id}
+                                inventoryQty={product.inventory_qty}
+                                isActive={product.is_active}
+                                allowPreorder={product.allow_preorder}
+                                lowStockThreshold={product.low_stock_threshold}
+                              />
                             </div>
                           </div>
-
-                          <div className="mt-3 grid gap-2 text-sm sm:grid-cols-2 xl:grid-cols-4">
-                            <div><span className="text-[hsl(var(--muted))]">Price:</span> <span className="font-medium">{formatCurrency(product.price_cents, 'en-EG', product.currency ?? 'EGP')}</span></div>
-                            <div><span className="text-[hsl(var(--muted))]">Stock:</span> <span className="font-medium">{product.inventory_qty}</span></div>
-                            <div><span className="text-[hsl(var(--muted))]">Threshold:</span> <span className="font-medium">{product.low_stock_threshold}</span></div>
-                            <div><span className="text-[hsl(var(--muted))]">Created:</span> <span className="font-medium">{formatDateTime(product.created_at)}</span></div>
-                          </div>
-
-                          <div className="mt-4">
-                            <AdminProductQuickEdit
-                              id={product.id}
-                              inventoryQty={product.inventory_qty}
-                              isActive={product.is_active}
-                              allowPreorder={product.allow_preorder}
-                              lowStockThreshold={product.low_stock_threshold}
-                            />
-                          </div>
-                        </div>
-                      ))
+                        )
+                      })
                     )}
 
                     <div className="flex flex-wrap items-center justify-between gap-2 pt-2 text-sm">
