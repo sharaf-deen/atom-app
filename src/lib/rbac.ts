@@ -13,8 +13,6 @@ export const LIFETIME_ACCESS_ROLES = ['assistant_coach', 'coach', 'head_coach', 
 export const NOTIFICATION_MANAGER_ROLES = ['head_coach', 'admin', 'super_admin'] as const satisfies readonly Role[]
 export const NOTIFICATION_RECIPIENT_ROLES = ['member', 'champion', 'vip', 'assistant_coach', 'coach', 'head_coach'] as const satisfies readonly Role[]
 export const STORE_CUSTOMER_ROLES = ['member', 'champion', 'vip', 'assistant_coach', 'coach', 'head_coach'] as const satisfies readonly Role[]
-export const STORE_CATALOG_ADMIN_ROLES = ['reception', 'admin', 'super_admin'] as const satisfies readonly Role[]
-export const STORE_DASHBOARD_ROLES = ['admin', 'super_admin'] as const satisfies readonly Role[]
 
 export type NavIconKey =
   | 'home'
@@ -99,6 +97,7 @@ const APP_NAV_BY_ROLE: MenuByRole = {
   ],
   reception: [
     { label: 'Front Desk', href: '/reception', icon: 'dashboard' },
+    { label: 'Store Catalog', href: '/admin/store', icon: 'bag' },
     { label: 'Schedule', href: '/schedule', icon: 'calendar' },
     { label: 'Membership', href: '/kiosk', icon: 'id' },
     { label: 'My Profile', href: '/profile', icon: 'id' },
@@ -107,7 +106,6 @@ const APP_NAV_BY_ROLE: MenuByRole = {
     { label: 'CRM', href: '/admin/crm', icon: 'users' },
     { label: 'Visitors', href: '/admin/visitors', icon: 'users' },
     { label: 'Packages & Promos', href: '/packages-and-promos', icon: 'gift' },
-    { label: 'Store Catalog', href: '/admin/store', icon: 'bag' },
   ],
   scan_terminal: [],
   admin: [
@@ -339,11 +337,11 @@ export function canCreateStorePreorder(role: Role | null | undefined) {
 }
 
 export function canAccessStoreDashboard(role: Role | null | undefined) {
-  return hasAnyRole(role, STORE_DASHBOARD_ROLES)
+  return hasAnyRole(role, ['admin', 'super_admin'])
 }
 
-export function canAccessStoreCatalogAdmin(role: Role | null | undefined) {
-  return hasAnyRole(role, STORE_CATALOG_ADMIN_ROLES)
+export function canAccessStoreCatalog(role: Role | null | undefined) {
+  return hasAnyRole(role, ['reception', 'admin', 'super_admin'])
 }
 
 export function canManageStoreCatalog(role: Role | null | undefined) {
@@ -363,7 +361,7 @@ export function canManageStoreSales(role: Role | null | undefined) {
 }
 
 export function canAccessStoreAdmin(role: Role | null | undefined) {
-  return hasAnyRole(role, SUPER_ADMIN_ROLES)
+  return canAccessStoreCatalog(role) || canManageStoreSupplierOrders(role) || canManageStorePreorders(role) || canManageStoreSales(role)
 }
 
 export function canAccessNotifications(role: Role | null | undefined) {
@@ -628,20 +626,12 @@ const CAPABILITY_BLUEPRINTS: CapabilityBlueprint[] = [
     check: (role) => canAccessStoreDashboard(role),
   },
   {
-    key: 'store_catalog_workspace',
-    category: 'Store',
-    label: 'Store catalog workspace',
-    description: 'Open the internal store catalog page. Reception and admin are read-only, super admin can manage it.',
-    href: '/admin/store',
-    check: (role) => canAccessStoreCatalogAdmin(role),
-  },
-  {
     key: 'store_catalog_manage',
     category: 'Store',
-    label: 'Manage store catalog',
-    description: 'Manage products, stock visibility, and catalog state in store admin.',
+    label: 'Access store catalog',
+    description: 'Open the internal store catalog. Super admin can edit it; admin and reception get read-only access.',
     href: '/admin/store?tab=catalog',
-    check: (role) => canManageStoreCatalog(role),
+    check: (role) => canAccessStoreCatalog(role),
   },
   {
     key: 'store_supplier_orders_manage',
@@ -670,8 +660,8 @@ const CAPABILITY_BLUEPRINTS: CapabilityBlueprint[] = [
   {
     key: 'store_admin',
     category: 'Store',
-    label: 'Full store admin',
-    description: 'Open full store admin controls reserved for super admin.',
+    label: 'Store admin',
+    description: 'Open internal store pages according to the current role permissions.',
     href: '/admin/store',
     check: (role) => canAccessStoreAdmin(role),
   },
