@@ -1250,6 +1250,8 @@ export default async function HomePage() {
 
         {isMemberLikeRole(user.role) ? (
           <>
+            {filteredHomeTodaySchedule ? <TodayScheduleSection dayName={filteredHomeTodaySchedule.dayName} sessions={filteredHomeTodaySchedule.sessions} /> : null}
+
             <PriorityGrid
               title="Your access today"
               subtitle="The essentials only. Open what matters next."
@@ -1261,8 +1263,6 @@ export default async function HomePage() {
               <QrCard qrCode={qrCode} />
             </div>
 
-            {filteredHomeTodaySchedule ? <TodayScheduleSection dayName={filteredHomeTodaySchedule.dayName} sessions={filteredHomeTodaySchedule.sessions} /> : null}
-
             <QuickActions
               title="Quick actions"
               subtitle="Keep the next step simple."
@@ -1273,6 +1273,8 @@ export default async function HomePage() {
 
         {(user.role === 'coach' || user.role === 'assistant_coach' || user.role === 'head_coach') ? (
           <>
+            {filteredHomeTodaySchedule ? <TodayScheduleSection dayName={filteredHomeTodaySchedule.dayName} sessions={filteredHomeTodaySchedule.sessions} /> : null}
+
             <PriorityGrid
               title="Training useful today"
               subtitle="Useful only, with less repetition."
@@ -1287,8 +1289,6 @@ export default async function HomePage() {
                 items={coachActions().slice(0, 3)}
               />
             </div>
-
-            {filteredHomeTodaySchedule ? <TodayScheduleSection dayName={filteredHomeTodaySchedule.dayName} sessions={filteredHomeTodaySchedule.sessions} /> : null}
 
             {(user.role === 'coach' || user.role === 'head_coach') ? (
               <HomeMemberLookup
