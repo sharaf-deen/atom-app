@@ -349,14 +349,14 @@ export default async function StoreDashboardPage({ searchParams }: { searchParam
       />
 
       <Section className="space-y-4">
-        <StoreAdminNav role={me.role} current="/admin/store/dashboard" />
+        <StoreAdminNav current="/admin/store/dashboard" role={me.role} />
       </Section>
 
       <Section className="space-y-6">
         <Card>
           <CardContent className="flex flex-wrap items-center gap-2">
             <Button asChild href="/admin/store" variant="outline" size="sm">
-              Store catalog
+              Catalog & stock
             </Button>
             {canManageStorePreorders(me.role) ? (
               <Button asChild href="/admin/store/preorders" variant="outline" size="sm">
