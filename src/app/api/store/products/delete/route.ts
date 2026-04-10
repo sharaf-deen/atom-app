@@ -1,24 +1,24 @@
+// src/app/api/store/products/delete/route.ts
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
 import { NextRequest, NextResponse } from 'next/server'
-import { revalidatePath, revalidateTag } from 'next/cache'
 import { createSupabaseServerActionClient } from '@/lib/supabaseServer'
 import { createSupabaseAdminClient } from '@/lib/supabaseAdmin'
-
-const STORE_BUCKET = 'store-product-images'
 
 function noStore(res: NextResponse) {
   res.headers.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate')
   return res
 }
 
+const STORE_BUCKET = 'store-product-images'
+
 export async function DELETE(req: NextRequest) {
   try {
     const supa = createSupabaseServerActionClient()
-    const admin = createSupabaseAdminClient()
 
+    // 1) Auth
     const { data: auth, error: authErr } = await supa.auth.getUser()
     if (authErr) {
       return noStore(
@@ -30,6 +30,7 @@ export async function DELETE(req: NextRequest) {
       return noStore(NextResponse.json({ ok: false, error: 'NOT_AUTHENTICATED' }, { status: 401 }))
     }
 
+    // 2) Role check
     const { data: me, error: meErr } = await supa
       .from('profiles')
       .select('role')
@@ -44,45 +45,37 @@ export async function DELETE(req: NextRequest) {
       return noStore(NextResponse.json({ ok: false, error: 'FORBIDDEN' }, { status: 403 }))
     }
 
+    // 3) Param
     const url = new URL(req.url)
     const id = (url.searchParams.get('id') || '').trim()
     if (!id) return noStore(NextResponse.json({ ok: false, error: 'MISSING_ID' }, { status: 400 }))
 
-    const { data: product, error: lookupErr } = await admin
-      .from('store_products')
-      .select('id, image_path')
-      .eq('id', id)
-      .maybeSingle<{ id: string; image_path: string | null }>()
+    // 4) Delete
+    const admin = createSupabaseAdminClient()
 
-    if (lookupErr) {
+    const { data: product, error: loadErr } = await admin
+      .from('store_products')
+      .select('image_path')
+      .eq('id', id)
+      .maybeSingle<{ image_path: string | null }>()
+    if (loadErr) {
       return noStore(
-        NextResponse.json({ ok: false, error: 'LOOKUP_FAILED', details: lookupErr.message }, { status: 500 })
+        NextResponse.json({ ok: false, error: 'LOAD_FAILED', details: loadErr.message }, { status: 500 })
       )
     }
-    if (!product?.id) {
-      return noStore(NextResponse.json({ ok: false, error: 'NOT_FOUND' }, { status: 404 }))
-    }
+
+    const imagePath = String(product?.image_path ?? '').trim()
 
     const { error } = await admin.from('store_products').delete().eq('id', id)
     if (error) {
-      const details =
-        error.code === '23503'
-          ? 'This product is linked to store history and cannot be deleted.'
-          : error.message
       return noStore(
-        NextResponse.json({ ok: false, error: 'DELETE_FAILED', details }, { status: 500 })
+        NextResponse.json({ ok: false, error: 'DELETE_FAILED', details: error.message }, { status: 500 })
       )
     }
 
-    if (product.image_path) {
-      await admin.storage.from(STORE_BUCKET).remove([product.image_path]).catch(() => undefined)
+    if (imagePath) {
+      await admin.storage.from(STORE_BUCKET).remove([imagePath])
     }
-
-    revalidateTag('store-products')
-    try { revalidatePath('/store') } catch {}
-    try { revalidatePath('/admin/store') } catch {}
-    try { revalidatePath('/admin/store/dashboard') } catch {}
-    try { revalidatePath('/admin/store/sales') } catch {}
 
     return noStore(NextResponse.json({ ok: true }))
   } catch (e: any) {

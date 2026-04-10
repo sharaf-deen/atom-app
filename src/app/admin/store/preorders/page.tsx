@@ -252,7 +252,7 @@ export default async function AdminStorePreordersPage({
       />
 
       <Section className="space-y-4">
-        <StoreAdminNav current="/admin/store/preorders" role={me.role} />
+        <StoreAdminNav current="/admin/store/preorders" />
       </Section>
 
       <Section className="space-y-4">
