@@ -9,8 +9,6 @@ import { createServerClient, type CookieOptions } from '@supabase/ssr'
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!
 const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 
-type Category = 'kimono' | 'rashguard' | 'short' | 'belt'
-const CATEGORIES = new Set<Category>(['kimono', 'rashguard', 'short', 'belt'])
 
 function noStore(res: NextResponse) {
   res.headers.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate')
@@ -103,15 +101,12 @@ export async function GET(req: NextRequest) {
     const limit = clampInt(url.searchParams.get('limit'), 10, 1, 100)
     const from = (page - 1) * limit
     const to = from + limit - 1
-    const category = (url.searchParams.get('category') || '').trim() as Category | ''
+    const category = (url.searchParams.get('category') || '').trim()
     const all = url.searchParams.get('all') === '1'
     const active = normActive(url.searchParams.get('active'))
     const preorder = normPreorder(url.searchParams.get('preorder'))
     const q = safeSearch(url.searchParams.get('q'))
 
-    if (category && !CATEGORIES.has(category)) {
-      return json(400, { ok: false, error: 'INVALID_CATEGORY' })
-    }
 
     const selectCols =
       'id, category, name, color, size, price_cents, currency, inventory_qty, is_active, allow_preorder, low_stock_threshold, created_at'

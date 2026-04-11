@@ -24,7 +24,7 @@ type Body = {
 type ProductSnapshot = {
   id: string
   name: string | null
-  category: 'kimono' | 'rashguard' | 'short' | 'belt' | null
+  category: string | null
   color: string | null
   size: string | null
 }

@@ -11,16 +11,14 @@ import Section from '@/components/layout/Section'
 import { Card, CardContent } from '@/components/ui/Card'
 import { formatCurrency } from '@/lib/money'
 import { canAccessStore, canAccessStoreAdmin } from '@/lib/rbac'
+import {
+  FALLBACK_STORE_PRODUCT_CATEGORIES,
+  buildStoreCategoryOptions,
+  storeCategoryLabelMap,
+  type StoreProductCategoryRow,
+} from '@/lib/storeCategories'
 
-type Category = 'kimono' | 'rashguard' | 'short' | 'belt'
-
-const CATEGORIES: Array<{ v: 'all' | Category; label: string }> = [
-  { v: 'all', label: 'All' },
-  { v: 'kimono', label: 'Kimono' },
-  { v: 'rashguard', label: 'Rashguard' },
-  { v: 'short', label: 'Short' },
-  { v: 'belt', label: 'Belt' },
-]
+type Category = string
 
 const USER_PREORDER_ROLES = new Set([
   'member',
@@ -126,8 +124,9 @@ function strParam(v: unknown) {
   return typeof s === 'string' ? s : ''
 }
 
-function normalizeCat(v: string): 'all' | Category {
-  return v === 'kimono' || v === 'rashguard' || v === 'short' || v === 'belt' ? v : 'all'
+function normalizeCat(v: string, allowed: Set<string>): 'all' | Category {
+  const clean = String(v || '').trim()
+  return clean && allowed.has(clean) ? clean : 'all'
 }
 
 function buildUrl(base: string, params: Record<string, string>) {
@@ -149,8 +148,9 @@ function stockLabel(stock: number) {
   return 'In stock'
 }
 
-function categoryLabel(category: Category | 'all') {
-  return CATEGORIES.find((item) => item.v === category)?.label ?? 'All'
+function categoryLabel(category: Category | 'all', labels: Map<string, string>) {
+  if (category === 'all') return 'All'
+  return labels.get(category) ?? category
 }
 
 export default async function StorePage({
@@ -167,9 +167,28 @@ export default async function StorePage({
 
   if (!canAccessStore(role)) redirect('/')
 
+  let categoryRows: StoreProductCategoryRow[] = []
+  try {
+    const { data, error } = await getSupabaseAdminClientCached()
+      .from('store_product_categories')
+      .select('key,label,is_active,sort_order')
+      .eq('is_active', true)
+      .order('sort_order', { ascending: true })
+      .order('label', { ascending: true })
+    if (error) throw error
+    categoryRows = ((data ?? []) as StoreProductCategoryRow[]).filter((row) => row.key && row.label)
+  } catch {
+    categoryRows = FALLBACK_STORE_PRODUCT_CATEGORIES.filter((row) => row.is_active)
+  }
+
+  if (categoryRows.length === 0) categoryRows = FALLBACK_STORE_PRODUCT_CATEGORIES.filter((row) => row.is_active)
+  const categoryKeys = new Set(categoryRows.map((row) => row.key))
+  const categoryOptions = buildStoreCategoryOptions(categoryRows, { includeAll: true, activeOnly: true })
+  const categoryLabels = storeCategoryLabelMap(categoryRows)
+
   const page = clampInt(searchParams?.page, 1, 1, 9999)
   const pageSize = 12
-  const category = normalizeCat(strParam(searchParams?.category))
+  const category = normalizeCat(strParam(searchParams?.category), categoryKeys)
   const q = strParam(searchParams?.q).trim()
 
   const fromRow = (page - 1) * pageSize
@@ -192,7 +211,7 @@ export default async function StorePage({
     q,
   }
 
-  const searchLabel = q ? `Search: ${q}` : `Category: ${categoryLabel(category)}`
+  const searchLabel = q ? `Search: ${q}` : `Category: ${categoryLabel(category, categoryLabels)}`
 
   return (
     <main>
@@ -336,15 +355,15 @@ export default async function StorePage({
             </form>
 
             <div className="flex flex-wrap gap-2">
-              {CATEGORIES.map((item) => {
+              {categoryOptions.map((item) => {
                 const href = buildUrl('/store', {
                   q,
-                  category: item.v === 'all' ? '' : item.v,
+                  category: item.value === 'all' ? '' : item.value,
                 })
-                const active = category === item.v
+                const active = category === item.value
                 return (
                   <Link
-                    key={item.v}
+                    key={item.value}
                     prefetch={false}
                     href={href}
                     className={`inline-flex items-center rounded-full border px-3 py-1.5 text-sm font-medium transition ${
@@ -396,7 +415,7 @@ export default async function StorePage({
                       <div className="min-w-0 flex-1">
                         <div className="flex flex-wrap items-center gap-2">
                           <span className="rounded-full border border-[hsl(var(--border))] bg-white px-2.5 py-1 text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">
-                            {categoryLabel(p.category)}
+                            {categoryLabel(p.category, categoryLabels)}
                           </span>
                           {!isSuperAdmin ? (
                             <span className="rounded-full border border-sky-200 bg-sky-50 px-2.5 py-1 text-[11px] font-medium text-sky-700">

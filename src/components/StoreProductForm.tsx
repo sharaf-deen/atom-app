@@ -7,12 +7,15 @@ import Button from '@/components/ui/Button'
 import Input from '@/components/ui/Input'
 import Select from '@/components/ui/Select'
 import InlineAlert from '@/components/ui/InlineAlert'
-
-type Category = 'kimono' | 'rashguard' | 'short' | 'belt'
+import {
+  ensureCategoryInList,
+  FALLBACK_STORE_PRODUCT_CATEGORIES,
+  type StoreProductCategoryRow,
+} from '@/lib/storeCategories'
 
 type Product = {
   id?: string
-  category?: Category
+  category?: string
   name: string
   color?: string | null
   size?: string | null
@@ -23,7 +26,6 @@ type Product = {
   image_path?: string | null
 }
 
-const CATEGORIES: Category[] = ['kimono', 'rashguard', 'short', 'belt']
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024
 const ACCEPTED_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp']
 
@@ -36,7 +38,11 @@ export default function StoreProductForm({
   onSaved?: () => void
   onCancel?: () => void
 }) {
-  const [category, setCategory] = useState<Category>(product?.category ?? 'kimono')
+  const [categories, setCategories] = useState<StoreProductCategoryRow[]>(
+    ensureCategoryInList(FALLBACK_STORE_PRODUCT_CATEGORIES, product?.category, product?.category)
+  )
+  const [categoriesLoading, setCategoriesLoading] = useState(true)
+  const [category, setCategory] = useState<string>(product?.category ?? FALLBACK_STORE_PRODUCT_CATEGORIES[0]?.key ?? 'kimono')
   const [name, setName] = useState(product?.name ?? '')
   const [color, setColor] = useState(product?.color ?? '')
   const [size, setSize] = useState(product?.size ?? '')
@@ -65,7 +71,7 @@ export default function StoreProductForm({
 
   useEffect(() => {
     if (!product) return
-    setCategory(product.category ?? 'kimono')
+    setCategory(product.category ?? FALLBACK_STORE_PRODUCT_CATEGORIES[0]?.key ?? 'kimono')
     setName(product.name ?? '')
     setColor(product.color ?? '')
     setSize(product.size ?? '')
@@ -75,6 +81,37 @@ export default function StoreProductForm({
     setActive(product.is_active === undefined ? true : !!product.is_active)
     setImageFile(null)
   }, [product])
+
+  useEffect(() => {
+    let cancelled = false
+    async function loadCategories() {
+      setCategoriesLoading(true)
+      try {
+        const res = await fetch('/api/store/categories/list?include_inactive=1', {
+          cache: 'no-store',
+          credentials: 'include',
+        })
+        const json = await res.json().catch(() => ({}))
+        const rows = Array.isArray(json?.items) ? (json.items as StoreProductCategoryRow[]) : []
+        const next = ensureCategoryInList(rows.length > 0 ? rows : FALLBACK_STORE_PRODUCT_CATEGORIES, product?.category, product?.category)
+        if (!cancelled) {
+          setCategories(next)
+          if (!product?.category && next[0]?.key) setCategory((current) => current || next[0].key)
+        }
+      } catch {
+        if (!cancelled) {
+          const next = ensureCategoryInList(FALLBACK_STORE_PRODUCT_CATEGORIES, product?.category, product?.category)
+          setCategories(next)
+        }
+      } finally {
+        if (!cancelled) setCategoriesLoading(false)
+      }
+    }
+    void loadCategories()
+    return () => {
+      cancelled = true
+    }
+  }, [product?.category])
 
   function validateImage(file: File | null) {
     if (!file) return null
@@ -102,6 +139,11 @@ export default function StoreProductForm({
         toast.error(imageError)
         return
       }
+      if (!category.trim()) {
+        setStatus({ kind: 'error', msg: 'Category is required.' })
+        toast.error('Category is required')
+        return
+      }
 
       let url = '/api/store/products/create'
       let method: 'POST' | 'PATCH' = 'POST'
@@ -113,7 +155,7 @@ export default function StoreProductForm({
         url = '/api/store/products/update'
         body = JSON.stringify({
           id: product.id,
-          category,
+          category: category.trim(),
           name: name.trim(),
           color: color.trim() || null,
           size: size.trim() || null,
@@ -125,7 +167,7 @@ export default function StoreProductForm({
         headers = { 'Content-Type': 'application/json' }
       } else {
         const fd = new FormData()
-        fd.set('category', category)
+        fd.set('category', category.trim())
         fd.set('name', name.trim())
         fd.set('color', color.trim())
         fd.set('size', size.trim())
@@ -161,19 +203,21 @@ export default function StoreProductForm({
     }
   }
 
+  const categoryOptions = categories.length > 0 ? categories : FALLBACK_STORE_PRODUCT_CATEGORIES
+
   return (
     <form onSubmit={onSubmit} className="grid gap-4">
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <Select
           label="Category *"
           value={category}
-          onChange={(e) => setCategory(e.target.value as Category)}
-          disabled={busy}
+          onChange={(e) => setCategory(e.target.value)}
+          disabled={busy || categoriesLoading}
           aria-label="Category"
         >
-          {CATEGORIES.map((c) => (
-            <option key={c} value={c}>
-              {c.replace('_', ' ')}
+          {categoryOptions.map((option) => (
+            <option key={option.key} value={option.key}>
+              {option.label}
             </option>
           ))}
         </Select>
@@ -259,17 +303,21 @@ export default function StoreProductForm({
         </div>
       ) : null}
 
-      {status.msg && <InlineAlert variant={status.kind === 'error' ? 'error' : 'success'}>{status.msg}</InlineAlert>}
+      {status.msg ? (
+        <InlineAlert variant={status.kind === 'error' ? 'error' : 'success'} compact>
+          {status.msg}
+        </InlineAlert>
+      ) : null}
 
-      <div className="flex flex-wrap items-center gap-2">
-        <Button type="submit" disabled={busy || !name.trim()}>
-          {busy ? 'Saving…' : product?.id ? 'Update' : 'Create'}
+      <div className="flex flex-wrap gap-2">
+        <Button type="submit" loading={busy} loadingText="Saving…">
+          Save
         </Button>
-        {onCancel && (
-          <Button type="button" variant="outline" onClick={onCancel}>
+        {onCancel ? (
+          <Button type="button" variant="outline" onClick={onCancel} disabled={busy}>
             Cancel
           </Button>
-        )}
+        ) : null}
       </div>
     </form>
   )

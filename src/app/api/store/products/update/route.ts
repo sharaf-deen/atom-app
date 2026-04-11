@@ -6,9 +6,8 @@ export const revalidate = 0
 import { NextRequest, NextResponse } from 'next/server'
 import { revalidatePath, revalidateTag } from 'next/cache'
 import { createSupabaseServerActionClient } from '@/lib/supabaseServer'
-
-type Category = 'kimono' | 'rashguard' | 'short' | 'belt'
-const CATEGORIES: readonly Category[] = ['kimono', 'rashguard', 'short', 'belt'] as const
+import { createSupabaseAdminClient } from '@/lib/supabaseAdmin'
+import { normalizeStoreCategoryKey } from '@/lib/storeCategories'
 
 function noStore(res: NextResponse) {
   res.headers.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate')
@@ -18,13 +17,11 @@ function noStore(res: NextResponse) {
 function isNonEmptyStr(v: unknown): v is string {
   return typeof v === 'string' && v.trim().length > 0
 }
-function isCategory(v: unknown): v is Category {
-  return typeof v === 'string' && (CATEGORIES as readonly string[]).includes(v)
-}
 
 export async function PATCH(req: NextRequest) {
   try {
     const supa = createSupabaseServerActionClient()
+    const admin = createSupabaseAdminClient()
 
     const { data: auth, error: authErr } = await supa.auth.getUser()
     if (authErr) {
@@ -57,7 +54,7 @@ export async function PATCH(req: NextRequest) {
 
     const patch: Record<string, any> = {}
 
-    if (isCategory(body?.category)) patch.category = body.category
+    if (typeof body?.category === 'string') patch.category = normalizeStoreCategoryKey(body.category)
     if (typeof body?.name === 'string') patch.name = body.name.trim()
     if (typeof body?.color === 'string') patch.color = body.color.trim()
     if (typeof body?.size === 'string') patch.size = body.size.trim()
@@ -97,6 +94,21 @@ export async function PATCH(req: NextRequest) {
 
     if (Object.keys(patch).length === 0) {
       return noStore(NextResponse.json({ ok: false, error: 'NO_FIELDS_TO_UPDATE' }, { status: 400 }))
+    }
+
+    if (typeof patch.category === 'string') {
+      const { data: categoryRow, error: categoryErr } = await admin
+        .from('store_product_categories')
+        .select('key')
+        .eq('key', patch.category)
+        .maybeSingle<{ key: string }>()
+
+      if (categoryErr) {
+        return noStore(NextResponse.json({ ok: false, error: 'CATEGORY_LOOKUP_FAILED', details: categoryErr.message }, { status: 500 }))
+      }
+      if (!categoryRow?.key) {
+        return noStore(NextResponse.json({ ok: false, error: 'INVALID_CATEGORY', details: 'Selected category was not found.' }, { status: 400 }))
+      }
     }
 
     const { data, error } = await supa

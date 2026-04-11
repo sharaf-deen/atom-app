@@ -653,6 +653,54 @@ export type Database = {
           },
         ]
       }
+      store_product_categories: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          is_active: boolean
+          key: string
+          label: string
+          sort_order: number
+          updated_at: string
+          updated_by: string | null
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          is_active?: boolean
+          key: string
+          label: string
+          sort_order?: number
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          is_active?: boolean
+          key?: string
+          label?: string
+          sort_order?: number
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "store_product_categories_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["user_id"]
+          },
+          {
+            foreignKeyName: "store_product_categories_updated_by_fkey"
+            columns: ["updated_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["user_id"]
+          },
+        ]
+      }
       store_products: {
         Row: {
           category: string
@@ -700,6 +748,13 @@ export type Database = {
           updated_at?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "store_products_category_fkey"
+            columns: ["category"]
+            isOneToOne: false
+            referencedRelation: "store_product_categories"
+            referencedColumns: ["key"]
+          },
           {
             foreignKeyName: "store_products_created_by_fkey"
             columns: ["created_by"]

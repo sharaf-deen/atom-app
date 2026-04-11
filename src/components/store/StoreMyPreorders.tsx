@@ -8,7 +8,7 @@ import InlineAlert from '@/components/ui/InlineAlert'
 type PreorderRow = {
   id: string
   product_name: string
-  product_category: 'kimono' | 'rashguard' | 'short' | 'belt' | null
+  product_category: string | null
   product_color: string | null
   product_size: string | null
   qty: number
