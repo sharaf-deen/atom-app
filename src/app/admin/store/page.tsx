@@ -11,7 +11,7 @@ import AccessDeniedPage from '@/components/AccessDeniedPage'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card'
 import { formatCurrency } from '@/lib/money'
 import {
-  canAccessStoreCatalog,
+  canAccessStoreCatalogAdmin,
   canAccessStoreDashboard,
   canManageStoreCatalog,
   canManageStorePreorders,
@@ -20,6 +20,12 @@ import {
 } from '@/lib/rbac'
 import AdminProductQuickEdit from '@/components/store/AdminProductQuickEdit'
 import StoreAdminNav from '@/components/store/StoreAdminNav'
+import {
+  FALLBACK_STORE_PRODUCT_CATEGORIES,
+  buildStoreCategoryOptions,
+  storeCategoryLabelMap,
+  type StoreProductCategoryRow,
+} from '@/lib/storeCategories'
 
 const StoreProductForm = dynamicImport(() => import('@/components/StoreProductForm'), {
   ssr: false,
@@ -41,7 +47,12 @@ const SupplierOrderReceiveLine = dynamicImport(() => import('@/components/store/
   loading: () => <div className="text-xs text-gray-500">Loading receive controls…</div>,
 })
 
-type Category = 'kimono' | 'rashguard' | 'short' | 'belt'
+const StoreCategoryManager = dynamicImport(() => import('@/components/store/StoreCategoryManager'), {
+  ssr: false,
+  loading: () => <div className="text-sm text-gray-500">Loading category manager…</div>,
+})
+
+type Category = string
 type ActiveFilter = 'all' | 'active' | 'inactive'
 type StockFilter = 'all' | 'in' | 'out' | 'low'
 type PreorderFilter = 'all' | '1' | '0'
@@ -60,7 +71,6 @@ type ProductRow = {
   is_active: boolean
   allow_preorder: boolean
   low_stock_threshold: number
-  image_path: string | null
   created_at: string | null
 }
 
@@ -113,14 +123,6 @@ type DashboardMetrics = {
   supplierOrderedValueCents: number
 }
 
-const CATEGORIES: Array<{ value: 'all' | Category; label: string }> = [
-  { value: 'all', label: 'All' },
-  { value: 'kimono', label: 'Kimono' },
-  { value: 'rashguard', label: 'Rashguard' },
-  { value: 'short', label: 'Short' },
-  { value: 'belt', label: 'Belt' },
-]
-
 const ACTIVE_FILTERS: Array<{ value: ActiveFilter; label: string }> = [
   { value: 'all', label: 'All' },
   { value: 'active', label: 'Active' },
@@ -133,17 +135,6 @@ const STOCK_FILTERS: Array<{ value: StockFilter; label: string }> = [
   { value: 'out', label: 'Out of stock' },
   { value: 'low', label: 'Low stock' },
 ]
-
-
-const STORE_PRODUCT_BUCKET = 'store-product-images'
-const SUPABASE_URL = (process.env.NEXT_PUBLIC_SUPABASE_URL || '').replace(/\/+$/, '')
-
-function storeProductImageUrl(path: string | null | undefined) {
-  const clean = String(path ?? '').trim()
-  if (!SUPABASE_URL || !clean) return ''
-  const encodedPath = clean.split('/').map((segment) => encodeURIComponent(segment)).join('/')
-  return `${SUPABASE_URL}/storage/v1/object/public/${STORE_PRODUCT_BUCKET}/${encodedPath}`
-}
 
 const PREORDER_FILTERS: Array<{ value: PreorderFilter; label: string }> = [
   { value: 'all', label: 'All' },
@@ -176,8 +167,9 @@ function normalizeTab(v: string): Tab {
   return v === 'supplier-orders' ? 'supplier-orders' : 'catalog'
 }
 
-function normalizeCategory(v: string): 'all' | Category {
-  return v === 'kimono' || v === 'rashguard' || v === 'short' || v === 'belt' ? v : 'all'
+function normalizeCategory(v: string, allowed: Set<string>): 'all' | Category {
+  const clean = String(v || '').trim()
+  return clean && allowed.has(clean) ? clean : 'all'
 }
 
 function normalizeActive(v: string): ActiveFilter {
@@ -323,13 +315,13 @@ export default async function AdminStorePage({
   const me = await getSessionUserCached()
   if (!me) redirect('/login?next=/admin/store')
 
-  if (!canAccessStoreCatalog(me.role)) {
+  if (!canAccessStoreCatalogAdmin(me.role)) {
     return (
       <AccessDeniedPage
         title="Store Admin"
         subtitle="Access restricted."
         signedInAs={me.email}
-        message="This page is for reception, admin, and super admin roles."
+        message="This page is for reception, admin, and super admin. Catalog access is read-only except for super admin."
         allowed="reception, admin, super_admin"
         nextPath="/admin/store"
         actions={[{ href: '/store', label: 'Go to Store' }]}
@@ -338,26 +330,13 @@ export default async function AdminStorePage({
     )
   }
 
-  const canViewDashboard = canAccessStoreDashboard(me.role)
-  const canEditCatalog = canManageStoreCatalog(me.role)
-  const canViewSupplierOrders = canManageStoreSupplierOrders(me.role)
-  const canViewPreorders = canManageStorePreorders(me.role)
-  const canViewSales = canManageStoreSales(me.role)
-
   const requestedTab = strParam(searchParams?.tab)
-  if (requestedTab === 'dashboard') {
-    redirect(canViewDashboard ? '/admin/store/dashboard' : '/admin/store')
-  }
-
-  const tab = canViewSupplierOrders ? normalizeTab(requestedTab) : 'catalog'
-
-  if (requestedTab === 'supplier-orders' && !canViewSupplierOrders) {
-    redirect('/admin/store')
-  }
+  if (requestedTab === 'dashboard') redirect('/admin/store/dashboard')
+  const tab = normalizeTab(requestedTab)
+  if (tab === 'supplier-orders' && !canManageStoreSupplierOrders(me.role)) redirect('/admin/store')
   const page = clampInt(searchParams?.page, 1, 1, 9999)
   const pageSize = clampInt(searchParams?.page_size, 12, 6, 60)
   const q = strParam(searchParams?.q).trim()
-  const category = normalizeCategory(strParam(searchParams?.category))
   const active = normalizeActive(strParam(searchParams?.active))
   const stock = normalizeStock(strParam(searchParams?.stock))
   const preorder = normalizePreorder(strParam(searchParams?.preorder))
@@ -369,6 +348,26 @@ export default async function AdminStorePage({
 
   const supa = getSupabaseAdminClientCached()
 
+  let categoryRows: StoreProductCategoryRow[] = []
+  try {
+    const { data, error } = await supa
+      .from('store_product_categories')
+      .select('key,label,is_active,sort_order')
+      .order('sort_order', { ascending: true })
+      .order('label', { ascending: true })
+    if (error) throw error
+    categoryRows = ((data ?? []) as StoreProductCategoryRow[]).filter((row) => row.key && row.label)
+  } catch {
+    categoryRows = FALLBACK_STORE_PRODUCT_CATEGORIES
+  }
+
+  if (categoryRows.length === 0) categoryRows = FALLBACK_STORE_PRODUCT_CATEGORIES
+  const activeCategoryRows = categoryRows.filter((row) => row.is_active)
+  const categoryKeys = new Set(activeCategoryRows.map((row) => row.key))
+  const category = normalizeCategory(strParam(searchParams?.category), categoryKeys)
+  const categoryOptions = buildStoreCategoryOptions(activeCategoryRows, { includeAll: true })
+  const categoryLabels = storeCategoryLabelMap(categoryRows)
+
   let productsError: string | null = null
   let supplierError: string | null = null
   let allProducts: ProductRow[] = []
@@ -377,7 +376,7 @@ export default async function AdminStorePage({
   try {
     let productQuery = supa
       .from('store_products')
-      .select('id, category, name, color, size, price_cents, currency, inventory_qty, is_active, allow_preorder, low_stock_threshold, image_path, created_at')
+      .select('id, category, name, color, size, price_cents, currency, inventory_qty, is_active, allow_preorder, low_stock_threshold, created_at')
       .order('created_at', { ascending: false })
       .limit(1000)
 
@@ -398,9 +397,8 @@ export default async function AdminStorePage({
     productsError = error?.message || String(error)
   }
 
-  if (canViewSupplierOrders) {
-    try {
-      let supplierQuery = supa
+  try {
+    let supplierQuery = supa
       .from('store_supplier_orders')
       .select(
         'id, reference, supplier_name, status, notes, ordered_at, expected_at, received_at, created_at, updated_at, created_by, updated_by, items:store_supplier_order_items(id, supplier_order_id, product_id, product_name, product_category, product_color, product_size, unit_cost_cents, ordered_qty, received_qty, line_total_cents, line_status, created_at, updated_at)'
@@ -417,9 +415,8 @@ export default async function AdminStorePage({
     const { data, error } = await supplierQuery
     if (error) throw new Error(error.message)
     supplierOrders = (Array.isArray(data) ? data : []) as SupplierOrderRow[]
-    } catch (error: any) {
-      supplierError = error?.message || String(error)
-    }
+  } catch (error: any) {
+    supplierError = error?.message || String(error)
   }
 
   const filteredProducts = !productsError
@@ -464,14 +461,20 @@ export default async function AdminStorePage({
     s_page_size: String(supplierPageSize),
   }
 
+  const canSeeDashboard = canAccessStoreDashboard(me.role)
+  const canManageCatalog = canManageStoreCatalog(me.role)
+  const canManageSupplierOrders = canManageStoreSupplierOrders(me.role)
+  const canManagePreorders = canManageStorePreorders(me.role)
+  const canManageSales = canManageStoreSales(me.role)
+
   return (
     <main>
       <PageHeader
         title="Store Admin"
-        subtitle="V2 — catalog, supplier orders, and converged entry points"
+        subtitle="V2 — catalog workspace with role-based access."
         right={
           <div className="flex flex-wrap items-center gap-2">
-            {canViewDashboard ? (
+            {canSeeDashboard ? (
               <Link
                 prefetch={false}
                 href="/admin/store/dashboard"
@@ -480,7 +483,7 @@ export default async function AdminStorePage({
                 Open dashboard
               </Link>
             ) : null}
-            {canViewPreorders ? (
+            {canManagePreorders ? (
               <Link
                 prefetch={false}
                 href="/admin/store/preorders"
@@ -489,7 +492,7 @@ export default async function AdminStorePage({
                 Open preorders
               </Link>
             ) : null}
-            {canViewSales ? (
+            {canManageSales ? (
               <Link
                 prefetch={false}
                 href="/admin/store/sales"
@@ -516,35 +519,25 @@ export default async function AdminStorePage({
       <Section className="space-y-4">
         <Card>
           <CardContent className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-            {canViewDashboard ? (
+            {canSeeDashboard ? (
               <Link href="/admin/store/dashboard" className="rounded-2xl border bg-white p-4 transition hover:bg-gray-50">
                 <div className="text-sm font-semibold">Dashboard</div>
                 <div className="mt-1 text-xs text-[hsl(var(--muted))]">Open the dedicated business summary.</div>
               </Link>
-            ) : (
-              <div className="rounded-2xl border bg-white p-4">
-                <div className="text-sm font-semibold">Catalog access</div>
-                <div className="mt-1 text-xs text-[hsl(var(--muted))]">Reception stays on catalog only. Admin also gets the dedicated dashboard.</div>
-              </div>
-            )}
+            ) : null}
             <Link href="/admin/store?tab=catalog" className="rounded-2xl border bg-white p-4 transition hover:bg-gray-50">
               <div className="text-sm font-semibold">Catalog & Stock</div>
-              <div className="mt-1 text-xs text-[hsl(var(--muted))]">Manage active products, stock, and preorder flags.</div>
+              <div className="mt-1 text-xs text-[hsl(var(--muted))]">{canManageCatalog ? 'Manage active products, stock, and preorder flags.' : 'Read-only catalog and stock visibility for your role.'}</div>
             </Link>
-            {canViewSupplierOrders ? (
+            {canManageSupplierOrders ? (
               <Link href="/admin/store?tab=supplier-orders" className="rounded-2xl border bg-white p-4 transition hover:bg-gray-50">
                 <div className="text-sm font-semibold">Supplier Orders</div>
                 <div className="mt-1 text-xs text-[hsl(var(--muted))]">Create orders and receive stock by delta.</div>
               </Link>
-            ) : (
-              <div className="rounded-2xl border bg-white p-4">
-                <div className="text-sm font-semibold">Catalog only</div>
-                <div className="mt-1 text-xs text-[hsl(var(--muted))]">Orders, preorders, and sales stay restricted to the super admin role.</div>
-              </div>
-            )}
+            ) : null}
             <div className="rounded-2xl border bg-white p-4">
               <div className="text-sm font-semibold">Store V2 hub</div>
-              <div className="mt-1 text-xs text-[hsl(var(--muted))]">Legacy cart/order creation is retired. Use preorders and sales pages for new operations.</div>
+              <div className="mt-1 text-xs text-[hsl(var(--muted))]">{canManageCatalog ? 'Full catalog controls stay on super admin. Preorders and sales remain separated.' : 'Preorders, supplier orders, sales, and catalog changes stay restricted to super admin.'}</div>
             </div>
           </CardContent>
         </Card>
@@ -553,17 +546,17 @@ export default async function AdminStorePage({
           <Link href="/admin/store?tab=catalog" className={`rounded-xl border px-4 py-2 text-sm font-medium ${tab === 'catalog' ? 'bg-black text-white border-black' : 'hover:bg-gray-50'}`}>
             Catalog & Stock
           </Link>
-          {canViewSupplierOrders ? (
+          {canManageSupplierOrders ? (
             <Link href="/admin/store?tab=supplier-orders" className={`rounded-xl border px-4 py-2 text-sm font-medium ${tab === 'supplier-orders' ? 'bg-black text-white border-black' : 'hover:bg-gray-50'}`}>
               Supplier Orders
             </Link>
           ) : null}
-          {canViewPreorders ? (
+          {canManagePreorders ? (
             <Link href="/admin/store/preorders" className="rounded-xl border px-4 py-2 text-sm font-medium hover:bg-gray-50">
               Preorders
             </Link>
           ) : null}
-          {canViewSales ? (
+          {canManageSales ? (
             <Link href="/admin/store/sales" className="rounded-xl border px-4 py-2 text-sm font-medium hover:bg-gray-50">
               Sales & Debt
             </Link>
@@ -571,19 +564,25 @@ export default async function AdminStorePage({
         </div>
 
         {tab === 'catalog' && (
-          <div className="grid gap-4 xl:grid-cols-[minmax(0,420px)_minmax(0,1fr)]">
-            <Card>
-              <CardHeader><CardTitle>{canEditCatalog ? 'Create catalog product' : 'Catalog access'}</CardTitle></CardHeader>
-              <CardContent>
-                {canEditCatalog ? (
+          <div className={`grid gap-4 ${canManageCatalog ? 'xl:grid-cols-[minmax(0,420px)_minmax(0,1fr)]' : 'xl:grid-cols-1'}`}>
+            {canManageCatalog ? (
+              <Card>
+                <CardHeader><CardTitle>Create catalog product</CardTitle></CardHeader>
+                <CardContent className="space-y-4">
                   <StoreProductForm />
-                ) : (
-                  <div className="rounded-2xl border border-dashed p-4 text-sm text-[hsl(var(--muted))]">
-                    Read-only catalog access. Product create, edit, delete, supplier orders, preorders, and sales stay restricted to the super admin role.
+                  <div className="rounded-2xl border border-dashed p-4">
+                    <StoreCategoryManager />
                   </div>
-                )}
-              </CardContent>
-            </Card>
+                </CardContent>
+              </Card>
+            ) : (
+              <Card>
+                <CardHeader><CardTitle>Catalog access</CardTitle></CardHeader>
+                <CardContent className="text-sm text-[hsl(var(--muted))]">
+                  Read-only catalog access for your role. Product create, edit, delete, supplier orders, preorders, and sales stay restricted to super admin.
+                </CardContent>
+              </Card>
+            )}
 
             <div className="grid gap-4">
               <Card>
@@ -598,7 +597,7 @@ export default async function AdminStorePage({
                     <label className="block">
                       <span className="mb-1 block text-sm font-medium">Category</span>
                       <select name="category" defaultValue={category} className="min-h-[42px] w-full rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm">
-                        {CATEGORIES.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                        {categoryOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
                       </select>
                     </label>
                     <label className="block">
@@ -641,64 +640,54 @@ export default async function AdminStorePage({
                     {pagedProducts.length === 0 ? (
                       <div className="rounded-2xl border border-dashed p-4 text-sm text-[hsl(var(--muted))]">No products match the current filters.</div>
                     ) : (
-                      pagedProducts.map((product) => {
-                        const imageUrl = storeProductImageUrl(product.image_path)
-
-                        return (
-                          <div key={product.id} className="rounded-2xl border bg-white p-4">
-                            {imageUrl ? (
-                              <div className="mb-4 overflow-hidden rounded-2xl border bg-slate-50">
-                                <img src={imageUrl} alt={product.name} className="h-48 w-full object-cover" loading="lazy" />
-                              </div>
-                            ) : null}
-
-                            <div className="flex flex-wrap items-start justify-between gap-3">
-                              <div>
-                                <div className="text-sm font-semibold">{product.name}</div>
-                                <div className="mt-1 flex flex-wrap gap-2 text-xs text-[hsl(var(--muted))]">
-                                  <span className="rounded-full border px-2 py-1">ID: {shortId(product.id)}</span>
-                                  <span className="rounded-full border px-2 py-1">{product.category}</span>
-                                  {product.size ? <span className="rounded-full border px-2 py-1">Size: {product.size}</span> : null}
-                                  {product.color ? <span className="rounded-full border px-2 py-1">Color: {product.color}</span> : null}
-                                  {imageUrl ? <span className="rounded-full border px-2 py-1">Photo</span> : null}
-                                </div>
-                              </div>
-                              <div className="flex flex-wrap items-center gap-2">
-                                {stockPill(product)}
-                                <span className={`rounded-full border px-2.5 py-1 text-xs font-medium ${product.allow_preorder ? 'border-violet-200 bg-violet-50 text-violet-700' : 'border-slate-200 bg-slate-50 text-slate-700'}`}>
-                                  {product.allow_preorder ? 'Preorder enabled' : 'Preorder disabled'}
-                                </span>
+                      pagedProducts.map((product) => (
+                        <div key={product.id} className="rounded-2xl border bg-white p-4">
+                          <div className="flex flex-wrap items-start justify-between gap-3">
+                            <div>
+                              <div className="text-sm font-semibold">{product.name}</div>
+                              <div className="mt-1 flex flex-wrap gap-2 text-xs text-[hsl(var(--muted))]">
+                                <span className="rounded-full border px-2 py-1">ID: {shortId(product.id)}</span>
+                                <span className="rounded-full border px-2 py-1">{categoryLabels.get(product.category) ?? product.category}</span>
+                                {product.size ? <span className="rounded-full border px-2 py-1">Size: {product.size}</span> : null}
+                                {product.color ? <span className="rounded-full border px-2 py-1">Color: {product.color}</span> : null}
                               </div>
                             </div>
-
-                            <div className="mt-3 grid gap-2 text-sm sm:grid-cols-2 xl:grid-cols-4">
-                              <div><span className="text-[hsl(var(--muted))]">Price:</span> <span className="font-medium">{formatCurrency(product.price_cents, 'en-EG', product.currency ?? 'EGP')}</span></div>
-                              <div><span className="text-[hsl(var(--muted))]">Stock:</span> <span className="font-medium">{product.inventory_qty}</span></div>
-                              <div><span className="text-[hsl(var(--muted))]">Threshold:</span> <span className="font-medium">{product.low_stock_threshold}</span></div>
-                              <div><span className="text-[hsl(var(--muted))]">Created:</span> <span className="font-medium">{formatDateTime(product.created_at)}</span></div>
+                            <div className="flex flex-wrap items-center gap-2">
+                              {stockPill(product)}
+                              <span className={`rounded-full border px-2.5 py-1 text-xs font-medium ${product.allow_preorder ? 'border-violet-200 bg-violet-50 text-violet-700' : 'border-slate-200 bg-slate-50 text-slate-700'}`}>
+                                {product.allow_preorder ? 'Preorder enabled' : 'Preorder disabled'}
+                              </span>
                             </div>
-
-                            {canEditCatalog ? (
-                              <div className="mt-4">
-                                <AdminProductQuickEdit
-                                  id={product.id}
-                                  category={product.category}
-                                  name={product.name}
-                                  color={product.color}
-                                  size={product.size}
-                                  priceCents={product.price_cents}
-                                  currency={product.currency ?? 'EGP'}
-                                  inventoryQty={product.inventory_qty}
-                                  isActive={product.is_active}
-                                  allowPreorder={product.allow_preorder}
-                                  lowStockThreshold={product.low_stock_threshold}
-                                  imagePath={product.image_path}
-                                />
-                              </div>
-                            ) : null}
                           </div>
-                        )
-                      })
+
+                          <div className="mt-3 grid gap-2 text-sm sm:grid-cols-2 xl:grid-cols-4">
+                            <div><span className="text-[hsl(var(--muted))]">Price:</span> <span className="font-medium">{formatCurrency(product.price_cents, 'en-EG', product.currency ?? 'EGP')}</span></div>
+                            <div><span className="text-[hsl(var(--muted))]">Stock:</span> <span className="font-medium">{product.inventory_qty}</span></div>
+                            <div><span className="text-[hsl(var(--muted))]">Threshold:</span> <span className="font-medium">{product.low_stock_threshold}</span></div>
+                            <div><span className="text-[hsl(var(--muted))]">Created:</span> <span className="font-medium">{formatDateTime(product.created_at)}</span></div>
+                          </div>
+
+                          <div className="mt-4">
+                            {canManageCatalog ? (
+                              <AdminProductQuickEdit
+                                id={product.id}
+                                category={product.category}
+                                name={product.name}
+                                color={product.color}
+                                size={product.size}
+                                priceCents={product.price_cents}
+                                currency={product.currency}
+                                inventoryQty={product.inventory_qty}
+                                isActive={product.is_active}
+                                allowPreorder={product.allow_preorder}
+                                lowStockThreshold={product.low_stock_threshold}
+                              />
+                            ) : (
+                              <div className="text-xs text-[hsl(var(--muted))]">Read-only catalog access for your role.</div>
+                            )}
+                          </div>
+                        </div>
+                      ))
                     )}
 
                     <div className="flex flex-wrap items-center justify-between gap-2 pt-2 text-sm">

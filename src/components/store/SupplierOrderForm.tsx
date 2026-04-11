@@ -9,7 +9,7 @@ import Input from '@/components/ui/Input'
 import Select from '@/components/ui/Select'
 import { parsePriceToCents, toPriceString } from '@/lib/money'
 
-type Category = 'kimono' | 'rashguard' | 'short' | 'belt'
+type Category = string
 type SupplierOrderStatus = 'draft' | 'ordered' | 'canceled'
 
 type ProductOption = {
