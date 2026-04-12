@@ -20,6 +20,12 @@ import {
 } from '@/lib/rbac'
 import AdminProductQuickEdit from '@/components/store/AdminProductQuickEdit'
 import StoreAdminNav from '@/components/store/StoreAdminNav'
+import {
+  FALLBACK_STORE_PRODUCT_CATEGORIES,
+  buildStoreCategoryOptions,
+  storeCategoryLabelMap,
+  type StoreProductCategoryRow,
+} from '@/lib/storeCategories'
 
 const StoreProductForm = dynamicImport(() => import('@/components/StoreProductForm'), {
   ssr: false,
@@ -41,7 +47,12 @@ const SupplierOrderReceiveLine = dynamicImport(() => import('@/components/store/
   loading: () => <div className="text-xs text-gray-500">Loading receive controls…</div>,
 })
 
-type Category = 'kimono' | 'rashguard' | 'short' | 'belt'
+const StoreCategoryManager = dynamicImport(() => import('@/components/store/StoreCategoryManager'), {
+  ssr: false,
+  loading: () => <div className="text-sm text-gray-500">Loading category manager…</div>,
+})
+
+type Category = string
 type ActiveFilter = 'all' | 'active' | 'inactive'
 type StockFilter = 'all' | 'in' | 'out' | 'low'
 type PreorderFilter = 'all' | '1' | '0'
@@ -112,14 +123,6 @@ type DashboardMetrics = {
   supplierOrderedValueCents: number
 }
 
-const CATEGORIES: Array<{ value: 'all' | Category; label: string }> = [
-  { value: 'all', label: 'All' },
-  { value: 'kimono', label: 'Kimono' },
-  { value: 'rashguard', label: 'Rashguard' },
-  { value: 'short', label: 'Short' },
-  { value: 'belt', label: 'Belt' },
-]
-
 const ACTIVE_FILTERS: Array<{ value: ActiveFilter; label: string }> = [
   { value: 'all', label: 'All' },
   { value: 'active', label: 'Active' },
@@ -164,8 +167,9 @@ function normalizeTab(v: string): Tab {
   return v === 'supplier-orders' ? 'supplier-orders' : 'catalog'
 }
 
-function normalizeCategory(v: string): 'all' | Category {
-  return v === 'kimono' || v === 'rashguard' || v === 'short' || v === 'belt' ? v : 'all'
+function normalizeCategory(v: string, allowed: Set<string>): 'all' | Category {
+  const clean = String(v || '').trim()
+  return clean && allowed.has(clean) ? clean : 'all'
 }
 
 function normalizeActive(v: string): ActiveFilter {
@@ -333,7 +337,6 @@ export default async function AdminStorePage({
   const page = clampInt(searchParams?.page, 1, 1, 9999)
   const pageSize = clampInt(searchParams?.page_size, 12, 6, 60)
   const q = strParam(searchParams?.q).trim()
-  const category = normalizeCategory(strParam(searchParams?.category))
   const active = normalizeActive(strParam(searchParams?.active))
   const stock = normalizeStock(strParam(searchParams?.stock))
   const preorder = normalizePreorder(strParam(searchParams?.preorder))
@@ -344,6 +347,26 @@ export default async function AdminStorePage({
   const supplierStatus = normalizeSupplierStatus(strParam(searchParams?.s_status))
 
   const supa = getSupabaseAdminClientCached()
+
+  let categoryRows: StoreProductCategoryRow[] = []
+  try {
+    const { data, error } = await supa
+      .from('store_product_categories')
+      .select('key,label,is_active,sort_order')
+      .order('sort_order', { ascending: true })
+      .order('label', { ascending: true })
+    if (error) throw error
+    categoryRows = ((data ?? []) as StoreProductCategoryRow[]).filter((row) => row.key && row.label)
+  } catch {
+    categoryRows = FALLBACK_STORE_PRODUCT_CATEGORIES
+  }
+
+  if (categoryRows.length === 0) categoryRows = FALLBACK_STORE_PRODUCT_CATEGORIES
+  const activeCategoryRows = categoryRows.filter((row) => row.is_active)
+  const categoryKeys = new Set(activeCategoryRows.map((row) => row.key))
+  const category = normalizeCategory(strParam(searchParams?.category), categoryKeys)
+  const categoryOptions = buildStoreCategoryOptions(activeCategoryRows, { includeAll: true })
+  const categoryLabels = storeCategoryLabelMap(categoryRows)
 
   let productsError: string | null = null
   let supplierError: string | null = null
@@ -545,8 +568,11 @@ export default async function AdminStorePage({
             {canManageCatalog ? (
               <Card>
                 <CardHeader><CardTitle>Create catalog product</CardTitle></CardHeader>
-                <CardContent>
+                <CardContent className="space-y-4">
                   <StoreProductForm />
+                  <div className="rounded-2xl border border-dashed p-4">
+                    <StoreCategoryManager />
+                  </div>
                 </CardContent>
               </Card>
             ) : (
@@ -571,7 +597,7 @@ export default async function AdminStorePage({
                     <label className="block">
                       <span className="mb-1 block text-sm font-medium">Category</span>
                       <select name="category" defaultValue={category} className="min-h-[42px] w-full rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm">
-                        {CATEGORIES.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                        {categoryOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
                       </select>
                     </label>
                     <label className="block">
@@ -621,7 +647,7 @@ export default async function AdminStorePage({
                               <div className="text-sm font-semibold">{product.name}</div>
                               <div className="mt-1 flex flex-wrap gap-2 text-xs text-[hsl(var(--muted))]">
                                 <span className="rounded-full border px-2 py-1">ID: {shortId(product.id)}</span>
-                                <span className="rounded-full border px-2 py-1">{product.category}</span>
+                                <span className="rounded-full border px-2 py-1">{categoryLabels.get(product.category) ?? product.category}</span>
                                 {product.size ? <span className="rounded-full border px-2 py-1">Size: {product.size}</span> : null}
                                 {product.color ? <span className="rounded-full border px-2 py-1">Color: {product.color}</span> : null}
                               </div>

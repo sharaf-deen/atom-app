@@ -342,6 +342,10 @@ export function canAccessStoreDashboard(role: Role | null | undefined) {
   return hasAnyRole(role, STORE_DASHBOARD_ROLES)
 }
 
+export function canAccessStoreCatalog(role: Role | null | undefined) {
+  return hasAnyRole(role, STORE_CATALOG_ADMIN_ROLES)
+}
+
 export function canAccessStoreCatalogAdmin(role: Role | null | undefined) {
   return hasAnyRole(role, STORE_CATALOG_ADMIN_ROLES)
 }

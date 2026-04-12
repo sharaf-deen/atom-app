@@ -36,6 +36,8 @@ export default function AdminSaleQuickEdit({
   paymentMethod,
   status,
   note,
+  canDelete,
+  deleteBlockedReason,
 }: {
   id: string
   totalCents: number
@@ -44,6 +46,8 @@ export default function AdminSaleQuickEdit({
   paymentMethod: PaymentMethod | null
   status: SaleStatus
   note: string | null
+  canDelete?: boolean
+  deleteBlockedReason?: string | null
 }) {
   const router = useRouter()
   const [paid, setPaid] = useState<string>(toPriceString(paidCents))
@@ -51,7 +55,7 @@ export default function AdminSaleQuickEdit({
   const [saleStatus, setSaleStatus] = useState<SaleStatus>(status)
   const [internalNote, setInternalNote] = useState(note ?? '')
   const [busy, setBusy] = useState(false)
-  const [deleteBusy, setDeleteBusy] = useState(false)
+  const [deleting, setDeleting] = useState(false)
   const [err, setErr] = useState('')
 
   const nextPaidCents = useMemo(() => {
@@ -71,7 +75,6 @@ export default function AdminSaleQuickEdit({
   }, [nextPaidCents, paidCents, method, paymentMethod, saleStatus, status, internalNote, note])
 
   const statusLocked = status === 'delivered' || status === 'canceled'
-  const canDelete = status === 'draft' || status === 'canceled'
 
   async function save() {
     if (!dirty || busy) return
@@ -109,12 +112,12 @@ export default function AdminSaleQuickEdit({
     }
   }
 
-  async function removeSale() {
-    if (!canDelete || deleteBusy) return
-    const ok = globalThis.confirm('Delete this sale? Only draft or canceled sales can be deleted.')
-    if (!ok) return
+  async function deleteSale() {
+    if (!canDelete || deleting) return
+    const confirmed = window.confirm('Delete this sale? This action cannot be undone.')
+    if (!confirmed) return
 
-    setDeleteBusy(true)
+    setDeleting(true)
     setErr('')
     try {
       const r = await fetch(`/api/store/sales/delete?id=${encodeURIComponent(id)}`, {
@@ -136,7 +139,7 @@ export default function AdminSaleQuickEdit({
       setErr(msg)
       toast.error(msg)
     } finally {
-      setDeleteBusy(false)
+      setDeleting(false)
     }
   }
 
@@ -151,10 +154,10 @@ export default function AdminSaleQuickEdit({
           step="0.01"
           value={paid}
           onChange={(e) => setPaid(e.target.value)}
-          disabled={busy || deleteBusy}
+          disabled={busy || deleting}
         />
 
-        <Select label="Payment method" value={method} onChange={(e) => setMethod(e.target.value as PaymentMethod)} disabled={busy || deleteBusy}>
+        <Select label="Payment method" value={method} onChange={(e) => setMethod(e.target.value as PaymentMethod)} disabled={busy || deleting}>
           {PAYMENT_METHODS.map((m) => (
             <option key={m.value} value={m.value}>
               {m.label}
@@ -166,7 +169,7 @@ export default function AdminSaleQuickEdit({
           label="Status"
           value={saleStatus}
           onChange={(e) => setSaleStatus(e.target.value as SaleStatus)}
-          disabled={busy || deleteBusy || statusLocked}
+          disabled={busy || deleting || statusLocked}
         >
           {SALE_STATUSES.map((s) => (
             <option key={s.value} value={s.value}>
@@ -181,7 +184,7 @@ export default function AdminSaleQuickEdit({
         rows={2}
         value={internalNote}
         onChange={(e) => setInternalNote(e.target.value)}
-        disabled={busy || deleteBusy}
+        disabled={busy || deleting}
       />
 
       <div className="rounded-2xl border border-[hsl(var(--border))] bg-white p-3 text-sm">
@@ -198,25 +201,18 @@ export default function AdminSaleQuickEdit({
         </InlineAlert>
       ) : null}
 
-      {!canDelete ? (
-        <InlineAlert compact variant="info">
-          Only draft or canceled sales can be deleted.
-        </InlineAlert>
-      ) : null}
-
+      {deleteBlockedReason ? <InlineAlert compact variant="info">{deleteBlockedReason}</InlineAlert> : null}
       {err ? <InlineAlert variant="error">{err}</InlineAlert> : null}
 
       <div className="flex flex-wrap items-center gap-2">
-        <Button onClick={save} disabled={!dirty || busy || deleteBusy} loading={busy} loadingText="Saving…">
+        <Button onClick={save} disabled={!dirty || busy || deleting} loading={busy} loadingText="Saving…">
           Save
         </Button>
         <Button
-          type="button"
           variant="outline"
-          className="border-rose-200 text-rose-700 hover:bg-rose-50"
-          onClick={removeSale}
-          disabled={!canDelete || busy || deleteBusy}
-          loading={deleteBusy}
+          onClick={deleteSale}
+          disabled={!canDelete || busy || deleting}
+          loading={deleting}
           loadingText="Deleting…"
         >
           Delete sale

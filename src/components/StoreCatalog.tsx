@@ -11,7 +11,7 @@ import Select from '@/components/ui/Select'
 import Badge from '@/components/ui/Badge'
 import { Card, CardContent } from '@/components/ui/Card'
 
-type Category = 'kimono' | 'rashguard' | 'short' | 'belt'
+type Category = string
 type Product = {
   id: string
   category: Category
@@ -25,6 +25,7 @@ type Product = {
 }
 
 const CATEGORIES: Category[] = ['kimono', 'rashguard', 'short', 'belt']
+
 const PER_PAGE = 8
 
 type StatusKind = '' | 'info' | 'success' | 'error'
@@ -59,8 +60,7 @@ export default function StoreCatalog({
     const page0 = clampInt(searchParams.get('page'), 1)
 
     const cat0 = searchParams.get('category')
-    const category =
-      cat0 === 'kimono' || cat0 === 'rashguard' || cat0 === 'short' || cat0 === 'belt' ? cat0 : 'all'
+    const category = cat0 && CATEGORIES.includes(cat0) ? cat0 : 'all'
 
     const a0 = searchParams.get('active')
     const active = a0 === '1' || a0 === '0' ? a0 : 'all'

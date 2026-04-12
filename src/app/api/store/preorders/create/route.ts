@@ -76,7 +76,7 @@ export async function POST(req: Request) {
       .eq('id', productId)
       .maybeSingle<{
         id: string
-        category: 'kimono' | 'rashguard' | 'short' | 'belt'
+        category: string
         name: string | null
         color: string | null
         size: string | null

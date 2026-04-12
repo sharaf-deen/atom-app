@@ -7,11 +7,9 @@ import Button from '@/components/ui/Button'
 import Modal from '@/components/ui/Modal'
 import StoreProductForm from '@/components/StoreProductForm'
 
-type Category = 'kimono' | 'rashguard' | 'short' | 'belt'
-
 type Props = {
   id: string
-  category: Category
+  category: string
   name: string
   color: string | null
   size: string | null

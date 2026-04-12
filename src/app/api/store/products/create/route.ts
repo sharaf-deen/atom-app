@@ -5,10 +5,10 @@ export const revalidate = 0
 import { NextResponse } from 'next/server'
 import { createSupabaseServerActionClient } from '@/lib/supabaseServer'
 import { createSupabaseAdminClient } from '@/lib/supabaseAdmin'
+import { normalizeStoreCategoryKey } from '@/lib/storeCategories'
 
-type Category = 'kimono' | 'rashguard' | 'short' | 'belt'
 type JsonBody = {
-  category: Category
+  category: string
   name: string
   color?: string | null
   size?: string | null
@@ -67,7 +67,7 @@ async function parsePayload(req: Request): Promise<{ fields: JsonBody; imageFile
 
     return {
       fields: {
-        category: (toCleanString(fd.get('category')) || 'kimono') as Category,
+        category: normalizeStoreCategoryKey(toCleanString(fd.get('category')) || 'kimono'),
         name: toCleanString(fd.get('name')),
         color: toCleanString(fd.get('color')) || null,
         size: toCleanString(fd.get('size')) || null,
@@ -105,7 +105,7 @@ export async function POST(req: Request) {
     const { fields, imageFile } = await parsePayload(req)
 
     const payload = {
-      category: fields.category,
+      category: normalizeStoreCategoryKey(fields.category || 'kimono'),
       name: (fields.name || '').trim(),
       color: (fields.color || '').trim() || null,
       size: (fields.size || '').trim() || null,
@@ -119,6 +119,19 @@ export async function POST(req: Request) {
 
     if (!payload.name) {
       return noStore(NextResponse.json({ ok: false, error: 'INVALID_INPUT', details: 'Name is required.' }, { status: 400 }))
+    }
+
+    const { data: categoryRow, error: categoryErr } = await admin
+      .from('store_product_categories')
+      .select('key,is_active')
+      .eq('key', payload.category)
+      .maybeSingle<{ key: string; is_active: boolean }>()
+
+    if (categoryErr) {
+      return noStore(NextResponse.json({ ok: false, error: 'CATEGORY_LOOKUP_FAILED', details: categoryErr.message }, { status: 500 }))
+    }
+    if (!categoryRow?.key || categoryRow.is_active !== true) {
+      return noStore(NextResponse.json({ ok: false, error: 'INVALID_CATEGORY', details: 'Select an active product category.' }, { status: 400 }))
     }
 
     if (imageFile) {

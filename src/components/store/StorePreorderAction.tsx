@@ -9,7 +9,7 @@ import { formatCurrency } from '@/lib/money'
 
 type Product = {
   id: string
-  category: 'kimono' | 'rashguard' | 'short' | 'belt'
+  category: string
   name: string
   color: string | null
   size: string | null
