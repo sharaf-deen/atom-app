@@ -4,8 +4,8 @@ import { useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import Button from '@/components/ui/Button'
-import InlineAlert from '@/components/ui/InlineAlert'
 import Textarea from '@/components/ui/Textarea'
+import InlineAlert from '@/components/ui/InlineAlert'
 import { STORE_PAYMENT_METHODS, STORE_PREORDER_STATUSES, type StorePaymentMethod, type StorePreorderStatus } from '@/lib/storeV2'
 
 type Props = {
@@ -72,43 +72,53 @@ export default function AdminPreorderQuickEdit({
   const [depositAmount, setDepositAmount] = useState(centsToAmount(depositCents))
   const [paymentMethod, setPaymentMethod] = useState<StorePaymentMethod | ''>(depositPaymentMethod ?? '')
   const [nextStatus, setNextStatus] = useState<StorePreorderStatus>(status)
-  const [internalNote, setInternalNote] = useState(note ?? '')
+  const [nextNote, setNextNote] = useState(note ?? '')
   const [loading, setLoading] = useState(false)
-  const [deleteBusy, setDeleteBusy] = useState(false)
-  const [feedback, setFeedback] = useState<{ kind: '' | 'error' | 'success'; msg: string }>({ kind: '', msg: '' })
+  const [deleting, setDeleting] = useState(false)
+  const [error, setError] = useState('')
 
   const nextDepositCents = useMemo(() => amountToCents(depositAmount), [depositAmount])
+  const nextBalanceCents = useMemo(() => {
+    if (!Number.isFinite(nextDepositCents)) return totalCents
+    return Math.max(totalCents - nextDepositCents, 0)
+  }, [nextDepositCents, totalCents])
+
   const dirty = useMemo(() => {
     const methodChanged = (paymentMethod || null) !== (depositPaymentMethod || null)
-    return nextStatus !== status || nextDepositCents !== depositCents || methodChanged || internalNote !== (note ?? '')
-  }, [depositCents, depositPaymentMethod, nextDepositCents, nextStatus, paymentMethod, status, internalNote, note])
+    return (
+      nextStatus !== status ||
+      nextDepositCents !== depositCents ||
+      methodChanged ||
+      nextNote.trim() !== (note ?? '').trim()
+    )
+  }, [depositCents, depositPaymentMethod, nextDepositCents, nextNote, nextStatus, note, paymentMethod, status])
 
   async function save() {
     if (loading || !dirty) return
 
     if (!Number.isFinite(nextDepositCents) || nextDepositCents < 0) {
       const msg = 'Deposit amount is invalid'
-      setFeedback({ kind: 'error', msg })
+      setError(msg)
       toast.error(msg)
       return
     }
 
     if (nextDepositCents > totalCents) {
       const msg = 'Deposit cannot exceed total'
-      setFeedback({ kind: 'error', msg })
+      setError(msg)
       toast.error(msg)
       return
     }
 
     if (nextDepositCents > 0 && !paymentMethod) {
       const msg = 'Select a payment method for the deposit'
-      setFeedback({ kind: 'error', msg })
+      setError(msg)
       toast.error(msg)
       return
     }
 
     setLoading(true)
-    setFeedback({ kind: '', msg: '' })
+    setError('')
     try {
       const res = await fetch('/api/store/preorders/admin-update', {
         method: 'PATCH',
@@ -118,7 +128,7 @@ export default function AdminPreorderQuickEdit({
           status: nextStatus,
           deposit_amount: depositAmount,
           deposit_payment_method: nextDepositCents > 0 ? paymentMethod : null,
-          note: internalNote.trim() || null,
+          note: nextNote.trim() || null,
         }),
         cache: 'no-store',
       })
@@ -126,18 +136,17 @@ export default function AdminPreorderQuickEdit({
 
       if (!res.ok || !json?.ok) {
         const msg = json?.details || json?.error || 'Failed to update preorder'
-        setFeedback({ kind: 'error', msg })
+        setError(msg)
         toast.error(msg)
         return
       }
 
-      setFeedback({ kind: 'success', msg: 'Preorder updated.' })
       toast.success('Preorder updated')
       router.refresh()
       setTimeout(() => router.refresh(), 200)
     } catch (e: any) {
       const msg = e?.message || 'Network error'
-      setFeedback({ kind: 'error', msg })
+      setError(msg)
       toast.error(msg)
     } finally {
       setLoading(false)
@@ -145,21 +154,22 @@ export default function AdminPreorderQuickEdit({
   }
 
   async function removePreorder() {
-    if (deleteBusy) return
-    const confirmed = window.confirm('Delete this preorder? This removes the customer order record and cannot be undone.')
+    if (deleting) return
+    const confirmed = window.confirm('Delete this preorder? This action cannot be undone.')
     if (!confirmed) return
 
-    setDeleteBusy(true)
-    setFeedback({ kind: '', msg: '' })
+    setDeleting(true)
+    setError('')
     try {
       const res = await fetch(`/api/store/preorders/delete?id=${encodeURIComponent(id)}`, {
         method: 'DELETE',
         cache: 'no-store',
       })
       const json = await res.json().catch(() => ({}))
+
       if (!res.ok || !json?.ok) {
         const msg = json?.details || json?.error || 'Failed to delete preorder'
-        setFeedback({ kind: 'error', msg })
+        setError(msg)
         toast.error(msg)
         return
       }
@@ -169,15 +179,15 @@ export default function AdminPreorderQuickEdit({
       setTimeout(() => router.refresh(), 200)
     } catch (e: any) {
       const msg = e?.message || 'Network error'
-      setFeedback({ kind: 'error', msg })
+      setError(msg)
       toast.error(msg)
     } finally {
-      setDeleteBusy(false)
+      setDeleting(false)
     }
   }
 
   return (
-    <div className="grid gap-3 rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4">
+    <div className="grid gap-3 rounded-2xl border border-[hsl(var(--border))] bg-white p-4">
       <div className="grid gap-3 xl:grid-cols-[160px_180px_minmax(0,220px)] xl:items-end">
         <label className="block">
           <span className="mb-1 block text-[11px] text-[hsl(var(--muted))]">Deposit</span>
@@ -188,7 +198,7 @@ export default function AdminPreorderQuickEdit({
             value={depositAmount}
             onChange={(e) => setDepositAmount(e.target.value)}
             className="min-h-[40px] w-full rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm"
-            disabled={loading || deleteBusy}
+            disabled={loading || deleting}
           />
         </label>
 
@@ -198,7 +208,7 @@ export default function AdminPreorderQuickEdit({
             value={paymentMethod}
             onChange={(e) => setPaymentMethod((e.target.value || '') as StorePaymentMethod | '')}
             className="min-h-[40px] w-full rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm"
-            disabled={loading || deleteBusy}
+            disabled={loading || deleting}
           >
             <option value="">No deposit</option>
             {STORE_PAYMENT_METHODS.map((value) => (
@@ -215,7 +225,7 @@ export default function AdminPreorderQuickEdit({
             value={nextStatus}
             onChange={(e) => setNextStatus(e.target.value as StorePreorderStatus)}
             className="min-h-[40px] w-full rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm"
-            disabled={loading || deleteBusy}
+            disabled={loading || deleting}
           >
             {STORE_PREORDER_STATUSES.map((value) => (
               <option key={value} value={value}>
@@ -227,32 +237,30 @@ export default function AdminPreorderQuickEdit({
       </div>
 
       <Textarea
-        label="Note"
+        label="Customer note"
         rows={3}
-        value={internalNote}
-        onChange={(e) => setInternalNote(e.target.value)}
-        disabled={loading || deleteBusy}
+        value={nextNote}
+        onChange={(e) => setNextNote(e.target.value)}
+        disabled={loading || deleting}
       />
 
-      <div className="rounded-2xl border border-[hsl(var(--border))] bg-white p-3 text-sm">
+      <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-3 text-sm">
         <div>Total: {centsToAmount(totalCents)} EGP</div>
-        <div>Deposit after save: {Number.isFinite(nextDepositCents) ? centsToAmount(nextDepositCents) : '—'} EGP</div>
-        <div>Balance after save: {Number.isFinite(nextDepositCents) ? centsToAmount(Math.max(totalCents - nextDepositCents, 0)) : '—'} EGP</div>
+        <div>Current deposit: {centsToAmount(depositCents)} EGP</div>
+        <div>Next balance after save: {centsToAmount(nextBalanceCents)} EGP</div>
       </div>
 
-      {feedback.msg ? <InlineAlert compact variant={feedback.kind === 'error' ? 'error' : 'success'}>{feedback.msg}</InlineAlert> : null}
+      {error ? <InlineAlert variant="error">{error}</InlineAlert> : null}
 
       <div className="flex flex-wrap items-center gap-2">
-        <Button onClick={save} disabled={!dirty || loading || deleteBusy} loading={loading} loadingText="Saving…">
-          Save preorder
+        <Button onClick={save} disabled={!dirty || loading || deleting} loading={loading} loadingText="Saving…">
+          Save changes
         </Button>
         <Button
-          type="button"
           variant="outline"
-          className="border-rose-200 text-rose-700 hover:bg-rose-50"
           onClick={removePreorder}
-          disabled={loading || deleteBusy}
-          loading={deleteBusy}
+          disabled={loading || deleting}
+          loading={deleting}
           loadingText="Deleting…"
         >
           Delete preorder

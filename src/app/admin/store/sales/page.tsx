@@ -143,6 +143,13 @@ function statusChipClass(status: SaleStatus) {
   }
 }
 
+function saleItemsLabel(items: SaleItemRow[]) {
+  if (items.length === 0) return 'No items'
+  const first = items[0]?.product_name || 'Product'
+  if (items.length === 1) return first
+  return `${first} +${items.length - 1}`
+}
+
 export default async function AdminStoreSalesPage({ searchParams }: { searchParams?: SearchParams }) {
   const me = await getSessionUserCached()
   if (!me) redirect('/login?next=/admin/store/sales')
@@ -275,26 +282,14 @@ export default async function AdminStoreSalesPage({ searchParams }: { searchPara
   return (
     <main>
       <PageHeader
-        title="Store Sales"
-        subtitle="Admin sales, debt, and delivery flow."
-        right={
-          <>
-            <Button asChild variant="outline" size="sm" href="/admin/store/preorders">
-              Open preorders
-            </Button>
-            <Button asChild variant="outline" size="sm" href="/admin/store">
-              Back to store admin
-            </Button>
-          </>
-        }
+        title="Store Admin — Sales & Debt"
+        subtitle="Dense admin row list for sales with expandable detail panels."
       />
 
       <Section className="space-y-4">
         <StoreAdminNav current="/admin/store/sales" role={me.role} />
-      </Section>
 
-      <Section className="space-y-6">
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
           <Card><CardContent className="space-y-1"><div className="text-xs text-[hsl(var(--muted))]">Sales</div><div className="text-2xl font-semibold">{metrics.totalSales}</div></CardContent></Card>
           <Card><CardContent className="space-y-1"><div className="text-xs text-[hsl(var(--muted))]">Delivered</div><div className="text-2xl font-semibold">{metrics.deliveredCount}</div></CardContent></Card>
           <Card><CardContent className="space-y-1"><div className="text-xs text-[hsl(var(--muted))]">Collected</div><div className="text-2xl font-semibold">{formatCurrency(metrics.collectedCents, 'en-EG', 'EGP')}</div></CardContent></Card>
@@ -362,105 +357,158 @@ export default async function AdminStoreSalesPage({ searchParams }: { searchPara
             </Card>
           ) : null}
 
-          {sales.map((sale) => {
-            const items = itemsBySale.get(sale.id) ?? []
-            const hasAppliedStock = items.some((item) => !!item.delivered_stock_applied)
-            const canDeleteSale = (sale.status === 'draft' || sale.status === 'canceled') && !hasAppliedStock
-            const deleteBlockedReason = canDeleteSale
-              ? null
-              : hasAppliedStock
-                ? 'Delete is blocked because stock was already applied on this sale.'
-                : sale.status === 'draft' || sale.status === 'canceled'
-                  ? null
-                  : 'Only draft or canceled sales can be deleted.'
-            return (
-              <details key={sale.id} className="overflow-hidden rounded-2xl border bg-white">
-                <summary className="cursor-pointer list-none p-4 [&::-webkit-details-marker]:hidden">
-                  <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-                    <div className="min-w-0 space-y-1">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <div className="text-lg font-semibold">{sale.buyer_full_name || 'Buyer'}</div>
-                        <span className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs ${statusChipClass(sale.status)}`}>
-                          {humanStatus(sale.status)}
-                        </span>
-                      </div>
-                      <div className="text-sm text-[hsl(var(--muted))]">
-                        {sale.buyer_email || 'No email'}{sale.buyer_phone ? ` · ${sale.buyer_phone}` : ''}
-                      </div>
-                      <div className="text-xs text-[hsl(var(--muted))]">Created {fmtDateTime(sale.created_at)}{sale.delivered_at ? ` · Delivered ${fmtDateTime(sale.delivered_at)}` : ''}</div>
-                    </div>
+          {sales.length > 0 ? (
+            <Card>
+              <CardContent className="space-y-4">
+                <div className="text-xs text-[hsl(var(--muted))]">Ultra-dense desktop row list. Open only the sales you need to inspect or edit.</div>
 
-                    <div className="flex flex-wrap items-center justify-end gap-2">
-                      <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-medium text-slate-700">
-                        Total {formatCurrency(sale.total_cents, 'en-EG', sale.currency || 'EGP')}
-                      </span>
-                      <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-medium text-slate-700">
-                        Paid {formatCurrency(sale.paid_cents, 'en-EG', sale.currency || 'EGP')}
-                      </span>
-                      <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-medium text-slate-700">
-                        Debt {formatCurrency(sale.debt_cents, 'en-EG', sale.currency || 'EGP')}
-                      </span>
-                    </div>
-                  </div>
-                </summary>
-
-                <div className="border-t p-4">
-                  <div className="flex flex-wrap items-center gap-2 pb-4">
-                    {sale.buyer_user_id ? (
-                      <Button asChild variant="outline" size="sm" href={`/members/${sale.buyer_user_id}`}>
-                        Open member
-                      </Button>
-                    ) : null}
-                  </div>
-
-                  <div className="grid grid-cols-1 gap-3 xl:grid-cols-3">
-                    <div className="rounded-2xl border border-[hsl(var(--border))] bg-white p-4">
-                      <div className="text-xs font-medium text-[hsl(var(--muted))]">Items</div>
-                      <div className="mt-2 space-y-2">
-                        {items.length === 0 ? <div className="text-sm text-[hsl(var(--muted))]">No items.</div> : null}
-                        {items.map((item, index) => (
-                          <div key={`${sale.id}-${item.product_id}-${index}`} className="rounded-xl border border-[hsl(var(--border))] px-3 py-2 text-sm">
-                            <div className="font-medium">{item.product_name || 'Product'}</div>
-                            <div className="mt-1 text-[hsl(var(--muted))]">
-                              Qty {item.qty} · {formatCurrency(item.line_total_cents, 'en-EG', item.currency || sale.currency || 'EGP')}
-                            </div>
-                            {item.delivered_stock_applied ? (
-                              <div className="mt-1 text-[11px] text-emerald-700">Stock already applied</div>
-                            ) : (
-                              <div className="mt-1 text-[11px] text-[hsl(var(--muted))]">Stock will be applied on delivery</div>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-
-                    <div className="rounded-2xl border border-[hsl(var(--border))] bg-white p-4">
-                      <div className="text-xs font-medium text-[hsl(var(--muted))]">Money</div>
-                      <div className="mt-2 space-y-2 text-sm">
-                        <div>Total: <span className="font-medium">{formatCurrency(sale.total_cents, 'en-EG', sale.currency || 'EGP')}</span></div>
-                        <div>Paid: <span className="font-medium">{formatCurrency(sale.paid_cents, 'en-EG', sale.currency || 'EGP')}</span></div>
-                        <div>Debt: <span className="font-medium">{formatCurrency(sale.debt_cents, 'en-EG', sale.currency || 'EGP')}</span></div>
-                        <div>Payment: <span className="font-medium">{sale.payment_method || '—'}</span></div>
-                        {sale.note ? <div className="text-[hsl(var(--muted))]">Note: {sale.note}</div> : null}
-                      </div>
-                    </div>
-
-                    <AdminSaleQuickEdit
-                      id={sale.id}
-                      totalCents={sale.total_cents}
-                      paidCents={sale.paid_cents}
-                      debtCents={sale.debt_cents}
-                      paymentMethod={sale.payment_method}
-                      status={sale.status}
-                      note={sale.note}
-                      canDelete={canDeleteSale}
-                      deleteBlockedReason={deleteBlockedReason}
-                    />
-                  </div>
+                <div className="hidden xl:grid grid-cols-[minmax(0,1.8fr)_minmax(0,1.8fr)_140px_120px_120px_120px_150px_96px] gap-3 rounded-2xl border bg-[hsl(var(--card))] px-4 py-3 text-[11px] font-semibold uppercase tracking-[0.14em] text-[hsl(var(--muted))]">
+                  <div>Buyer</div>
+                  <div>Items</div>
+                  <div>Status</div>
+                  <div>Total</div>
+                  <div>Paid</div>
+                  <div>Debt</div>
+                  <div>Created</div>
+                  <div className="text-right">Open</div>
                 </div>
-              </details>
-            )
-          })}
+
+                <div className="grid gap-3">
+                  {sales.map((sale) => {
+                    const items = itemsBySale.get(sale.id) ?? []
+                    const hasAppliedStock = items.some((item) => !!item.delivered_stock_applied)
+                    const canDeleteSale = (sale.status === 'draft' || sale.status === 'canceled') && !hasAppliedStock
+                    const deleteBlockedReason = canDeleteSale
+                      ? null
+                      : hasAppliedStock
+                        ? 'Delete is blocked because stock was already applied on this sale.'
+                        : sale.status === 'draft' || sale.status === 'canceled'
+                          ? null
+                          : 'Only draft or canceled sales can be deleted.'
+
+                    return (
+                      <details key={sale.id} className="group overflow-hidden rounded-2xl border bg-white shadow-sm">
+                        <summary className="list-none cursor-pointer">
+                          <div className="xl:hidden p-4">
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="min-w-0">
+                                <div className="truncate text-sm font-semibold">{sale.buyer_full_name || 'Buyer'}</div>
+                                <div className="mt-1 text-xs text-[hsl(var(--muted))]">{saleItemsLabel(items)}</div>
+                              </div>
+                              <span className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs ${statusChipClass(sale.status)}`}>
+                                {humanStatus(sale.status)}
+                              </span>
+                            </div>
+                            <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
+                              <div><span className="text-[hsl(var(--muted))]">Total:</span> <span className="font-medium">{formatCurrency(sale.total_cents, 'en-EG', sale.currency || 'EGP')}</span></div>
+                              <div><span className="text-[hsl(var(--muted))]">Paid:</span> <span className="font-medium">{formatCurrency(sale.paid_cents, 'en-EG', sale.currency || 'EGP')}</span></div>
+                              <div><span className="text-[hsl(var(--muted))]">Debt:</span> <span className="font-medium">{formatCurrency(sale.debt_cents, 'en-EG', sale.currency || 'EGP')}</span></div>
+                              <div><span className="text-[hsl(var(--muted))]">Created:</span> <span className="font-medium">{fmtDateTime(sale.created_at)}</span></div>
+                            </div>
+                            <div className="mt-3 text-right text-xs font-medium text-[hsl(var(--muted))] group-open:hidden">Tap to open</div>
+                            <div className="mt-3 hidden text-right text-xs font-medium text-[hsl(var(--muted))] group-open:block">Tap to close</div>
+                          </div>
+
+                          <div className="hidden xl:grid grid-cols-[minmax(0,1.8fr)_minmax(0,1.8fr)_140px_120px_120px_120px_150px_96px] items-center gap-3 px-4 py-3">
+                            <div className="min-w-0">
+                              <div className="truncate text-sm font-semibold">{sale.buyer_full_name || 'Buyer'}</div>
+                              <div className="truncate text-[11px] text-[hsl(var(--muted))]">{sale.buyer_email || sale.buyer_phone || 'No contact details'}</div>
+                            </div>
+                            <div className="min-w-0">
+                              <div className="truncate text-sm font-medium">{saleItemsLabel(items)}</div>
+                              <div className="truncate text-[11px] text-[hsl(var(--muted))]">{items.reduce((sum, item) => sum + Math.max(0, Number(item.qty || 0)), 0)} unit(s)</div>
+                            </div>
+                            <div>
+                              <span className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs ${statusChipClass(sale.status)}`}>
+                                {humanStatus(sale.status)}
+                              </span>
+                            </div>
+                            <div className="text-sm font-medium">{formatCurrency(sale.total_cents, 'en-EG', sale.currency || 'EGP')}</div>
+                            <div className="text-sm font-medium">{formatCurrency(sale.paid_cents, 'en-EG', sale.currency || 'EGP')}</div>
+                            <div className="text-sm font-medium">{formatCurrency(sale.debt_cents, 'en-EG', sale.currency || 'EGP')}</div>
+                            <div className="text-sm text-[hsl(var(--muted))]">{fmtDateTime(sale.created_at)}</div>
+                            <div className="text-right text-xs font-medium text-[hsl(var(--muted))] group-open:hidden">Details</div>
+                            <div className="hidden text-right text-xs font-medium text-[hsl(var(--muted))] group-open:block">Close</div>
+                          </div>
+                        </summary>
+
+                        <div className="border-t bg-[hsl(var(--bg))]/40 p-4">
+                          <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)]">
+                            <div className="space-y-4">
+                              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                                <div className="rounded-2xl border bg-white p-3 text-sm">
+                                  <div className="text-[11px] uppercase tracking-[0.12em] text-[hsl(var(--muted))]">Buyer</div>
+                                  <div className="mt-1 font-medium">{sale.buyer_full_name || 'Buyer'}</div>
+                                  <div className="mt-1 text-[hsl(var(--muted))]">{sale.buyer_email || '—'}</div>
+                                  <div className="text-[hsl(var(--muted))]">{sale.buyer_phone || '—'}</div>
+                                </div>
+                                <div className="rounded-2xl border bg-white p-3 text-sm">
+                                  <div className="text-[11px] uppercase tracking-[0.12em] text-[hsl(var(--muted))]">Money</div>
+                                  <div className="mt-1">Total: <span className="font-medium">{formatCurrency(sale.total_cents, 'en-EG', sale.currency || 'EGP')}</span></div>
+                                  <div>Paid: <span className="font-medium">{formatCurrency(sale.paid_cents, 'en-EG', sale.currency || 'EGP')}</span></div>
+                                  <div>Debt: <span className="font-medium">{formatCurrency(sale.debt_cents, 'en-EG', sale.currency || 'EGP')}</span></div>
+                                </div>
+                                <div className="rounded-2xl border bg-white p-3 text-sm">
+                                  <div className="text-[11px] uppercase tracking-[0.12em] text-[hsl(var(--muted))]">Timeline</div>
+                                  <div className="mt-1">Created: <span className="font-medium">{fmtDateTime(sale.created_at)}</span></div>
+                                  <div>Delivered: <span className="font-medium">{fmtDateTime(sale.delivered_at)}</span></div>
+                                  <div>Payment: <span className="font-medium">{sale.payment_method || '—'}</span></div>
+                                </div>
+                              </div>
+
+                              <div className="rounded-2xl border bg-white p-4">
+                                <div className="text-sm font-semibold">Items</div>
+                                <div className="mt-3 grid gap-2">
+                                  {items.length === 0 ? <div className="text-sm text-[hsl(var(--muted))]">No items.</div> : null}
+                                  {items.map((item, index) => (
+                                    <div key={`${sale.id}-${item.product_id}-${index}`} className="rounded-xl border px-3 py-2 text-sm">
+                                      <div className="flex flex-wrap items-start justify-between gap-2">
+                                        <div>
+                                          <div className="font-medium">{item.product_name || 'Product'}</div>
+                                          <div className="mt-1 text-[hsl(var(--muted))]">
+                                            Qty {item.qty} · {formatCurrency(item.line_total_cents, 'en-EG', item.currency || sale.currency || 'EGP')}
+                                          </div>
+                                        </div>
+                                        {item.delivered_stock_applied ? (
+                                          <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[11px] text-emerald-700">Stock applied</span>
+                                        ) : (
+                                          <span className="rounded-full border px-2 py-0.5 text-[11px] text-[hsl(var(--muted))]">Pending stock</span>
+                                        )}
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+
+                              {sale.buyer_user_id ? (
+                                <div>
+                                  <Button asChild variant="outline" size="sm" href={`/members/${sale.buyer_user_id}`}>
+                                    Open member
+                                  </Button>
+                                </div>
+                              ) : null}
+                            </div>
+
+                            <AdminSaleQuickEdit
+                              id={sale.id}
+                              totalCents={sale.total_cents}
+                              paidCents={sale.paid_cents}
+                              debtCents={sale.debt_cents}
+                              paymentMethod={sale.payment_method}
+                              status={sale.status}
+                              note={sale.note}
+                              canDelete={canDeleteSale}
+                              deleteBlockedReason={deleteBlockedReason}
+                            />
+                          </div>
+                        </div>
+                      </details>
+                    )
+                  })}
+                </div>
+              </CardContent>
+            </Card>
+          ) : null}
         </div>
 
         {totalPages > 1 ? (
