@@ -43,7 +43,6 @@ export async function DELETE(req: NextRequest) {
     }
 
     const admin = createSupabaseAdminClient()
-
     const { data: existing, error: loadErr } = await admin
       .from('store_preorders')
       .select('id')
@@ -69,6 +68,6 @@ export async function DELETE(req: NextRequest) {
 
     return noStore(NextResponse.json({ ok: true }))
   } catch (e: any) {
-    return noStore(NextResponse.json({ ok: false, error: 'SERVER_ERROR', details: e?.message ?? String(e) }, { status: 500 }))
+    return noStore(NextResponse.json({ ok: false, error: 'SERVER_ERROR', details: e?.message || String(e) }, { status: 500 }))
   }
 }

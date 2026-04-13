@@ -471,7 +471,7 @@ export default async function AdminStorePage({
     <main>
       <PageHeader
         title="Store Admin"
-        subtitle="V2 — catalog workspace with role-based access."
+        subtitle="V2 — compact admin workspace with dense expandable row lists for large volumes."
         right={
           <div className="flex flex-wrap items-center gap-2">
             {canSeeDashboard ? (
@@ -634,70 +634,116 @@ export default async function AdminStorePage({
                 <Card>
                   <CardHeader>
                     <CardTitle>Catalog & stock</CardTitle>
-                    <div className="text-xs text-[hsl(var(--muted))]">{totalFilteredProducts} product(s)</div>
+                    <div className="text-xs text-[hsl(var(--muted))]">{totalFilteredProducts} product(s) · dense row list for desktop</div>
                   </CardHeader>
-                  <CardContent className="grid gap-3">
+                  <CardContent className="space-y-4">
                     {pagedProducts.length === 0 ? (
                       <div className="rounded-2xl border border-dashed p-4 text-sm text-[hsl(var(--muted))]">No products match the current filters.</div>
                     ) : (
-                      pagedProducts.map((product) => (
-                        <details key={product.id} className="overflow-hidden rounded-2xl border bg-white">
-                          <summary className="cursor-pointer list-none p-4 [&::-webkit-details-marker]:hidden">
-                            <div className="flex flex-wrap items-start justify-between gap-3">
-                              <div className="min-w-0 space-y-2">
-                                <div className="text-sm font-semibold">{product.name}</div>
-                                <div className="flex flex-wrap gap-2 text-xs text-[hsl(var(--muted))]">
-                                  <span className="rounded-full border px-2 py-1">ID: {shortId(product.id)}</span>
-                                  <span className="rounded-full border px-2 py-1">{categoryLabels.get(product.category) ?? product.category}</span>
-                                  {product.size ? <span className="rounded-full border px-2 py-1">Size: {product.size}</span> : null}
-                                  {product.color ? <span className="rounded-full border px-2 py-1">Color: {product.color}</span> : null}
+                      <>
+                        <div className="hidden xl:grid grid-cols-[minmax(0,2fr)_minmax(0,1.1fr)_100px_120px_130px_130px_96px] gap-3 rounded-2xl border bg-[hsl(var(--card))] px-4 py-3 text-[11px] font-semibold uppercase tracking-[0.14em] text-[hsl(var(--muted))]">
+                          <div>Product</div>
+                          <div>Category</div>
+                          <div>Stock</div>
+                          <div>Price</div>
+                          <div>Status</div>
+                          <div>Created</div>
+                          <div className="text-right">Open</div>
+                        </div>
+
+                        <div className="grid gap-3">
+                          {pagedProducts.map((product) => (
+                            <details key={product.id} className="group overflow-hidden rounded-2xl border bg-white shadow-sm">
+                              <summary className="list-none cursor-pointer">
+                                <div className="xl:hidden p-4">
+                                  <div className="flex items-start justify-between gap-3">
+                                    <div className="min-w-0">
+                                      <div className="truncate text-sm font-semibold">{product.name}</div>
+                                      <div className="mt-1 flex flex-wrap gap-2 text-xs text-[hsl(var(--muted))]">
+                                        <span className="rounded-full border px-2 py-1">ID: {shortId(product.id)}</span>
+                                        <span className="rounded-full border px-2 py-1">{categoryLabels.get(product.category) ?? product.category}</span>
+                                        {product.size ? <span className="rounded-full border px-2 py-1">Size: {product.size}</span> : null}
+                                        {product.color ? <span className="rounded-full border px-2 py-1">Color: {product.color}</span> : null}
+                                      </div>
+                                    </div>
+                                    {stockPill(product)}
+                                  </div>
+                                  <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
+                                    <div><span className="text-[hsl(var(--muted))]">Price:</span> <span className="font-medium">{formatCurrency(product.price_cents, 'en-EG', product.currency ?? 'EGP')}</span></div>
+                                    <div><span className="text-[hsl(var(--muted))]">Stock:</span> <span className="font-medium">{product.inventory_qty}</span></div>
+                                    <div><span className="text-[hsl(var(--muted))]">Threshold:</span> <span className="font-medium">{product.low_stock_threshold}</span></div>
+                                    <div><span className="text-[hsl(var(--muted))]">Created:</span> <span className="font-medium">{formatDateTime(product.created_at)}</span></div>
+                                  </div>
+                                  <div className="mt-3 flex flex-wrap gap-2">
+                                    <span className={`rounded-full border px-2.5 py-1 text-xs font-medium ${product.allow_preorder ? 'border-violet-200 bg-violet-50 text-violet-700' : 'border-slate-200 bg-slate-50 text-slate-700'}`}>
+                                      {product.allow_preorder ? 'Preorder enabled' : 'Preorder disabled'}
+                                    </span>
+                                    <span className={`rounded-full border px-2.5 py-1 text-xs font-medium ${product.is_active ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-slate-200 bg-slate-50 text-slate-700'}`}>
+                                      {product.is_active ? 'Active' : 'Inactive'}
+                                    </span>
+                                  </div>
+                                  <div className="mt-3 text-right text-xs font-medium text-[hsl(var(--muted))] group-open:hidden">Tap to open</div>
+                                  <div className="mt-3 hidden text-right text-xs font-medium text-[hsl(var(--muted))] group-open:block">Tap to close</div>
+                                </div>
+
+                                <div className="hidden xl:grid grid-cols-[minmax(0,2fr)_minmax(0,1.1fr)_100px_120px_130px_130px_96px] items-center gap-3 px-4 py-3">
+                                  <div className="min-w-0">
+                                    <div className="truncate text-sm font-semibold">{product.name}</div>
+                                    <div className="mt-1 flex flex-wrap gap-2 text-[11px] text-[hsl(var(--muted))]">
+                                      <span className="rounded-full border px-2 py-0.5">ID: {shortId(product.id)}</span>
+                                      {product.size ? <span className="rounded-full border px-2 py-0.5">Size: {product.size}</span> : null}
+                                      {product.color ? <span className="rounded-full border px-2 py-0.5">Color: {product.color}</span> : null}
+                                    </div>
+                                  </div>
+                                  <div className="text-sm font-medium">{categoryLabels.get(product.category) ?? product.category}</div>
+                                  <div className="text-sm font-medium">{product.inventory_qty}</div>
+                                  <div className="text-sm font-medium">{formatCurrency(product.price_cents, 'en-EG', product.currency ?? 'EGP')}</div>
+                                  <div className="flex flex-wrap gap-2">
+                                    {stockPill(product)}
+                                    <span className={`rounded-full border px-2 py-0.5 text-[11px] font-medium ${product.allow_preorder ? 'border-violet-200 bg-violet-50 text-violet-700' : 'border-slate-200 bg-slate-50 text-slate-700'}`}>
+                                      {product.allow_preorder ? 'Preorder' : 'No preorder'}
+                                    </span>
+                                  </div>
+                                  <div className="text-sm text-[hsl(var(--muted))]">{formatDateTime(product.created_at)}</div>
+                                  <div className="text-right text-xs font-medium text-[hsl(var(--muted))] group-open:hidden">Details</div>
+                                  <div className="hidden text-right text-xs font-medium text-[hsl(var(--muted))] group-open:block">Close</div>
+                                </div>
+                              </summary>
+
+                              <div className="border-t bg-[hsl(var(--bg))]/40 p-4">
+                                <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+                                  <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                                    <div className="rounded-2xl border bg-white p-3 text-sm"><span className="text-[hsl(var(--muted))]">Price:</span> <span className="font-medium">{formatCurrency(product.price_cents, 'en-EG', product.currency ?? 'EGP')}</span></div>
+                                    <div className="rounded-2xl border bg-white p-3 text-sm"><span className="text-[hsl(var(--muted))]">Stock:</span> <span className="font-medium">{product.inventory_qty}</span></div>
+                                    <div className="rounded-2xl border bg-white p-3 text-sm"><span className="text-[hsl(var(--muted))]">Threshold:</span> <span className="font-medium">{product.low_stock_threshold}</span></div>
+                                    <div className="rounded-2xl border bg-white p-3 text-sm"><span className="text-[hsl(var(--muted))]">Created:</span> <span className="font-medium">{formatDateTime(product.created_at)}</span></div>
+                                  </div>
+
+                                  <div>
+                                    {canManageCatalog ? (
+                                      <AdminProductQuickEdit
+                                        id={product.id}
+                                        category={product.category}
+                                        name={product.name}
+                                        color={product.color}
+                                        size={product.size}
+                                        priceCents={product.price_cents}
+                                        currency={product.currency}
+                                        inventoryQty={product.inventory_qty}
+                                        isActive={product.is_active}
+                                        allowPreorder={product.allow_preorder}
+                                        lowStockThreshold={product.low_stock_threshold}
+                                      />
+                                    ) : (
+                                      <div className="text-xs text-[hsl(var(--muted))]">Read-only catalog access for your role.</div>
+                                    )}
+                                  </div>
                                 </div>
                               </div>
-                              <div className="flex flex-wrap items-center justify-end gap-2">
-                                <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-medium text-slate-700">
-                                  Price {formatCurrency(product.price_cents, 'en-EG', product.currency ?? 'EGP')}
-                                </span>
-                                <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-medium text-slate-700">
-                                  Stock {product.inventory_qty}
-                                </span>
-                                {stockPill(product)}
-                                <span className={`rounded-full border px-2.5 py-1 text-xs font-medium ${product.allow_preorder ? 'border-violet-200 bg-violet-50 text-violet-700' : 'border-slate-200 bg-slate-50 text-slate-700'}`}>
-                                  {product.allow_preorder ? 'Preorder enabled' : 'Preorder disabled'}
-                                </span>
-                              </div>
-                            </div>
-                          </summary>
-
-                          <div className="border-t p-4">
-                            <div className="grid gap-2 text-sm sm:grid-cols-2 xl:grid-cols-4">
-                              <div><span className="text-[hsl(var(--muted))]">Price:</span> <span className="font-medium">{formatCurrency(product.price_cents, 'en-EG', product.currency ?? 'EGP')}</span></div>
-                              <div><span className="text-[hsl(var(--muted))]">Stock:</span> <span className="font-medium">{product.inventory_qty}</span></div>
-                              <div><span className="text-[hsl(var(--muted))]">Threshold:</span> <span className="font-medium">{product.low_stock_threshold}</span></div>
-                              <div><span className="text-[hsl(var(--muted))]">Created:</span> <span className="font-medium">{formatDateTime(product.created_at)}</span></div>
-                            </div>
-
-                            <div className="mt-4">
-                              {canManageCatalog ? (
-                                <AdminProductQuickEdit
-                                  id={product.id}
-                                  category={product.category}
-                                  name={product.name}
-                                  color={product.color}
-                                  size={product.size}
-                                  priceCents={product.price_cents}
-                                  currency={product.currency}
-                                  inventoryQty={product.inventory_qty}
-                                  isActive={product.is_active}
-                                  allowPreorder={product.allow_preorder}
-                                  lowStockThreshold={product.low_stock_threshold}
-                                />
-                              ) : (
-                                <div className="text-xs text-[hsl(var(--muted))]">Read-only catalog access for your role.</div>
-                              )}
-                            </div>
-                          </div>
-                        </details>
-                      ))
+                            </details>
+                          ))}
+                        </div>
+                      </>
                     )}
 
                     <div className="flex flex-wrap items-center justify-between gap-2 pt-2 text-sm">
@@ -766,110 +812,142 @@ export default async function AdminStorePage({
                 <Card>
                   <CardHeader>
                     <CardTitle>Supplier orders</CardTitle>
-                    <div className="text-xs text-[hsl(var(--muted))]">{totalSupplierOrders} order(s)</div>
+                    <div className="text-xs text-[hsl(var(--muted))]">{totalSupplierOrders} order(s) · dense row list for desktop</div>
                   </CardHeader>
-                  <CardContent className="grid gap-4">
+                  <CardContent className="space-y-4">
                     {pagedSupplierOrders.length === 0 ? (
                       <div className="rounded-2xl border border-dashed p-4 text-sm text-[hsl(var(--muted))]">No supplier orders match the current filters.</div>
                     ) : (
-                      pagedSupplierOrders.map((order) => {
-                        const totalOrderedQty = (order.items ?? []).reduce((sum, item) => sum + Math.max(0, Number(item.ordered_qty ?? 0)), 0)
-                        const totalReceivedQty = (order.items ?? []).reduce((sum, item) => sum + Math.max(0, Number(item.received_qty ?? 0)), 0)
-                        const totalCostCents = (order.items ?? []).reduce((sum, item) => sum + Math.max(0, Number(item.line_total_cents ?? 0)), 0)
-                        const canDeleteSupplierOrder = totalReceivedQty <= 0
-                        const deleteBlockedReason = canDeleteSupplierOrder
-                          ? null
-                          : 'Delete is blocked because received quantities already increased stock.'
+                      <>
+                        <div className="hidden xl:grid grid-cols-[minmax(0,1.6fr)_130px_140px_100px_100px_130px_130px_96px] gap-3 rounded-2xl border bg-[hsl(var(--card))] px-4 py-3 text-[11px] font-semibold uppercase tracking-[0.14em] text-[hsl(var(--muted))]">
+                          <div>Supplier</div>
+                          <div>Reference</div>
+                          <div>Status</div>
+                          <div>Ordered</div>
+                          <div>Received</div>
+                          <div>Estimated cost</div>
+                          <div>Expected</div>
+                          <div className="text-right">Open</div>
+                        </div>
 
-                        return (
-                          <details key={order.id} className="overflow-hidden rounded-2xl border bg-[hsl(var(--card))]">
-                            <summary className="cursor-pointer list-none p-4 [&::-webkit-details-marker]:hidden">
-                              <div className="flex flex-wrap items-start justify-between gap-3">
-                                <div className="min-w-0 space-y-2">
-                                  <div className="text-sm font-semibold">{order.supplier_name || 'Supplier'}</div>
-                                  <div className="flex flex-wrap gap-2 text-xs text-[hsl(var(--muted))]">
-                                    <span className="rounded-full border px-2 py-1">Order ID: {shortId(order.id)}</span>
-                                    {order.reference ? <span className="rounded-full border px-2 py-1">Ref: {order.reference}</span> : null}
-                                    <span className="rounded-full border px-2 py-1">Ordered qty: {totalOrderedQty}</span>
-                                    <span className="rounded-full border px-2 py-1">Received qty: {totalReceivedQty}</span>
-                                  </div>
-                                </div>
-                                <div className="flex flex-wrap items-center justify-end gap-2">
-                                  <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-medium text-slate-700">
-                                    Cost {formatCurrency(totalCostCents)}
-                                  </span>
-                                  {supplierStatusPill(order.status)}
-                                </div>
-                              </div>
-                            </summary>
+                        <div className="grid gap-3">
+                          {pagedSupplierOrders.map((order) => {
+                            const totalOrderedQty = (order.items ?? []).reduce((sum, item) => sum + Math.max(0, Number(item.ordered_qty ?? 0)), 0)
+                            const totalReceivedQty = (order.items ?? []).reduce((sum, item) => sum + Math.max(0, Number(item.received_qty ?? 0)), 0)
+                            const totalCostCents = (order.items ?? []).reduce((sum, item) => sum + Math.max(0, Number(item.line_total_cents ?? 0)), 0)
+                            const deleteBlockedReason = totalReceivedQty > 0 ? 'Delete stays blocked once received quantities have already impacted stock.' : null
 
-                            <div className="border-t p-4">
-                              <div className="grid gap-2 text-sm sm:grid-cols-2 xl:grid-cols-4">
-                                <div><span className="text-[hsl(var(--muted))]">Expected:</span> <span className="font-medium">{order.expected_at || '—'}</span></div>
-                                <div><span className="text-[hsl(var(--muted))]">Ordered at:</span> <span className="font-medium">{formatDateTime(order.ordered_at)}</span></div>
-                                <div><span className="text-[hsl(var(--muted))]">Received at:</span> <span className="font-medium">{formatDateTime(order.received_at)}</span></div>
-                                <div><span className="text-[hsl(var(--muted))]">Estimated cost:</span> <span className="font-medium">{formatCurrency(totalCostCents)}</span></div>
-                              </div>
-
-                              <div className="mt-4">
-                                <SupplierOrderHeaderEditor
-                                  id={order.id}
-                                  reference={order.reference}
-                                  supplierName={order.supplier_name}
-                                  expectedAt={order.expected_at}
-                                  notes={order.notes}
-                                  status={order.status}
-                                  canDelete={canDeleteSupplierOrder}
-                                  deleteBlockedReason={deleteBlockedReason}
-                                />
-                              </div>
-
-                              <div className="mt-4 grid gap-3">
-                                {(order.items ?? []).length === 0 ? (
-                                  <div className="rounded-2xl border border-dashed p-3 text-sm text-[hsl(var(--muted))]">No lines on this supplier order.</div>
-                                ) : (
-                                  (order.items ?? []).map((item) => {
-                                    const remainingQty = Math.max(0, Number(item.ordered_qty ?? 0) - Number(item.received_qty ?? 0))
-                                    return (
-                                      <div key={item.id} className="rounded-2xl border bg-white p-3">
-                                        <div className="flex flex-wrap items-start justify-between gap-2">
-                                          <div>
-                                            <div className="text-sm font-medium">{item.product_name}</div>
-                                            <div className="mt-1 flex flex-wrap gap-2 text-xs text-[hsl(var(--muted))]">
-                                              {item.product_id ? <span className="rounded-full border px-2 py-1">Product ID: {shortId(item.product_id)}</span> : null}
-                                              {item.product_size ? <span className="rounded-full border px-2 py-1">Size: {item.product_size}</span> : null}
-                                              {item.product_color ? <span className="rounded-full border px-2 py-1">Color: {item.product_color}</span> : null}
-                                              {item.product_category ? <span className="rounded-full border px-2 py-1">{item.product_category}</span> : null}
-                                            </div>
-                                          </div>
-                                          <div>{supplierLinePill(item.line_status)}</div>
-                                        </div>
-
-                                        <div className="mt-3 grid gap-2 text-sm sm:grid-cols-2 xl:grid-cols-5">
-                                          <div><span className="text-[hsl(var(--muted))]">Unit cost:</span> <span className="font-medium">{formatCurrency(item.unit_cost_cents)}</span></div>
-                                          <div><span className="text-[hsl(var(--muted))]">Ordered:</span> <span className="font-medium">{item.ordered_qty}</span></div>
-                                          <div><span className="text-[hsl(var(--muted))]">Received:</span> <span className="font-medium">{item.received_qty}</span></div>
-                                          <div><span className="text-[hsl(var(--muted))]">Remaining:</span> <span className="font-medium">{remainingQty}</span></div>
-                                          <div><span className="text-[hsl(var(--muted))]">Line total:</span> <span className="font-medium">{formatCurrency(item.line_total_cents)}</span></div>
-                                        </div>
-
-                                        <div className="mt-4">
-                                          <SupplierOrderReceiveLine
-                                            itemId={item.id}
-                                            orderedQty={item.ordered_qty}
-                                            receivedQty={item.received_qty}
-                                            lineStatus={item.line_status}
-                                          />
+                            return (
+                              <details key={order.id} className="group overflow-hidden rounded-2xl border bg-white shadow-sm">
+                                <summary className="list-none cursor-pointer">
+                                  <div className="xl:hidden p-4">
+                                    <div className="flex items-start justify-between gap-3">
+                                      <div className="min-w-0">
+                                        <div className="truncate text-sm font-semibold">{order.supplier_name || 'Supplier'}</div>
+                                        <div className="mt-1 flex flex-wrap gap-2 text-xs text-[hsl(var(--muted))]">
+                                          <span className="rounded-full border px-2 py-1">Order ID: {shortId(order.id)}</span>
+                                          {order.reference ? <span className="rounded-full border px-2 py-1">Ref: {order.reference}</span> : null}
                                         </div>
                                       </div>
-                                    )
-                                  })
-                                )}
-                              </div>
-                            </div>
-                          </details>
-                        )
-                      })
+                                      {supplierStatusPill(order.status)}
+                                    </div>
+                                    <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
+                                      <div><span className="text-[hsl(var(--muted))]">Ordered:</span> <span className="font-medium">{totalOrderedQty}</span></div>
+                                      <div><span className="text-[hsl(var(--muted))]">Received:</span> <span className="font-medium">{totalReceivedQty}</span></div>
+                                      <div><span className="text-[hsl(var(--muted))]">Cost:</span> <span className="font-medium">{formatCurrency(totalCostCents)}</span></div>
+                                      <div><span className="text-[hsl(var(--muted))]">Expected:</span> <span className="font-medium">{order.expected_at || '—'}</span></div>
+                                    </div>
+                                    <div className="mt-3 text-right text-xs font-medium text-[hsl(var(--muted))] group-open:hidden">Tap to open</div>
+                                    <div className="mt-3 hidden text-right text-xs font-medium text-[hsl(var(--muted))] group-open:block">Tap to close</div>
+                                  </div>
+
+                                  <div className="hidden xl:grid grid-cols-[minmax(0,1.6fr)_130px_140px_100px_100px_130px_130px_96px] items-center gap-3 px-4 py-3">
+                                    <div className="min-w-0">
+                                      <div className="truncate text-sm font-semibold">{order.supplier_name || 'Supplier'}</div>
+                                      <div className="truncate text-[11px] text-[hsl(var(--muted))]">{(order.items ?? []).length} line(s) · ID {shortId(order.id)}</div>
+                                    </div>
+                                    <div className="text-sm font-medium">{order.reference || '—'}</div>
+                                    <div>{supplierStatusPill(order.status)}</div>
+                                    <div className="text-sm font-medium">{totalOrderedQty}</div>
+                                    <div className="text-sm font-medium">{totalReceivedQty}</div>
+                                    <div className="text-sm font-medium">{formatCurrency(totalCostCents)}</div>
+                                    <div className="text-sm text-[hsl(var(--muted))]">{order.expected_at || '—'}</div>
+                                    <div className="text-right text-xs font-medium text-[hsl(var(--muted))] group-open:hidden">Details</div>
+                                    <div className="hidden text-right text-xs font-medium text-[hsl(var(--muted))] group-open:block">Close</div>
+                                  </div>
+                                </summary>
+
+                                <div className="border-t bg-[hsl(var(--bg))]/40 p-4">
+                                  <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+                                    <div className="space-y-4">
+                                      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                                        <div className="rounded-2xl border bg-white p-3 text-sm"><span className="text-[hsl(var(--muted))]">Ordered at:</span> <span className="font-medium">{formatDateTime(order.ordered_at)}</span></div>
+                                        <div className="rounded-2xl border bg-white p-3 text-sm"><span className="text-[hsl(var(--muted))]">Received at:</span> <span className="font-medium">{formatDateTime(order.received_at)}</span></div>
+                                        <div className="rounded-2xl border bg-white p-3 text-sm"><span className="text-[hsl(var(--muted))]">Expected:</span> <span className="font-medium">{order.expected_at || '—'}</span></div>
+                                        <div className="rounded-2xl border bg-white p-3 text-sm"><span className="text-[hsl(var(--muted))]">Estimated cost:</span> <span className="font-medium">{formatCurrency(totalCostCents)}</span></div>
+                                      </div>
+
+                                      <div className="grid gap-3">
+                                        {(order.items ?? []).length === 0 ? (
+                                          <div className="rounded-2xl border border-dashed bg-white p-3 text-sm text-[hsl(var(--muted))]">No lines on this supplier order.</div>
+                                        ) : (
+                                          (order.items ?? []).map((item) => {
+                                            const remainingQty = Math.max(0, Number(item.ordered_qty ?? 0) - Number(item.received_qty ?? 0))
+                                            return (
+                                              <div key={item.id} className="rounded-2xl border bg-white p-3">
+                                                <div className="flex flex-wrap items-start justify-between gap-2">
+                                                  <div>
+                                                    <div className="text-sm font-medium">{item.product_name}</div>
+                                                    <div className="mt-1 flex flex-wrap gap-2 text-xs text-[hsl(var(--muted))]">
+                                                      {item.product_id ? <span className="rounded-full border px-2 py-1">Product ID: {shortId(item.product_id)}</span> : null}
+                                                      {item.product_size ? <span className="rounded-full border px-2 py-1">Size: {item.product_size}</span> : null}
+                                                      {item.product_color ? <span className="rounded-full border px-2 py-1">Color: {item.product_color}</span> : null}
+                                                      {item.product_category ? <span className="rounded-full border px-2 py-1">{item.product_category}</span> : null}
+                                                    </div>
+                                                  </div>
+                                                  <div>{supplierLinePill(item.line_status)}</div>
+                                                </div>
+
+                                                <div className="mt-3 grid gap-2 text-sm sm:grid-cols-2 xl:grid-cols-5">
+                                                  <div><span className="text-[hsl(var(--muted))]">Unit cost:</span> <span className="font-medium">{formatCurrency(item.unit_cost_cents)}</span></div>
+                                                  <div><span className="text-[hsl(var(--muted))]">Ordered:</span> <span className="font-medium">{item.ordered_qty}</span></div>
+                                                  <div><span className="text-[hsl(var(--muted))]">Received:</span> <span className="font-medium">{item.received_qty}</span></div>
+                                                  <div><span className="text-[hsl(var(--muted))]">Remaining:</span> <span className="font-medium">{remainingQty}</span></div>
+                                                  <div><span className="text-[hsl(var(--muted))]">Line total:</span> <span className="font-medium">{formatCurrency(item.line_total_cents)}</span></div>
+                                                </div>
+
+                                                <div className="mt-4">
+                                                  <SupplierOrderReceiveLine
+                                                    itemId={item.id}
+                                                    orderedQty={item.ordered_qty}
+                                                    receivedQty={item.received_qty}
+                                                    lineStatus={item.line_status}
+                                                  />
+                                                </div>
+                                              </div>
+                                            )
+                                          })
+                                        )}
+                                      </div>
+                                    </div>
+
+                                    <SupplierOrderHeaderEditor
+                                      id={order.id}
+                                      reference={order.reference}
+                                      supplierName={order.supplier_name}
+                                      expectedAt={order.expected_at}
+                                      notes={order.notes}
+                                      status={order.status}
+                                      canDelete={totalReceivedQty <= 0}
+                                      deleteBlockedReason={deleteBlockedReason}
+                                    />
+                                  </div>
+                                </div>
+                              </details>
+                            )
+                          })}
+                        </div>
+                      </>
                     )}
 
                     <div className="flex flex-wrap items-center justify-between gap-2 pt-2 text-sm">
