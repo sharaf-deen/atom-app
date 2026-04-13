@@ -812,7 +812,7 @@ export default async function AdminStorePage({
                       <div className="rounded-2xl border border-dashed p-4 text-sm text-[hsl(var(--muted))]">No products match the current filters.</div>
                     ) : (
                       <>
-                        <div className="hidden xl:grid grid-cols-[minmax(0,2fr)_minmax(0,1.1fr)_100px_120px_130px_130px_96px] gap-3 rounded-2xl border bg-[hsl(var(--card))] px-4 py-3 text-[11px] font-semibold uppercase tracking-[0.14em] text-[hsl(var(--muted))]">
+                        <div className="hidden lg:grid sticky top-16 z-20 grid-cols-[minmax(0,2fr)_minmax(0,1.1fr)_100px_120px_130px_130px_96px] gap-3 rounded-2xl border bg-[hsl(var(--card))]/95 px-4 py-3 text-[11px] font-semibold uppercase tracking-[0.14em] text-[hsl(var(--muted))] shadow-sm backdrop-blur supports-[backdrop-filter]:bg-[hsl(var(--card))]/90">
                           {renderSortLink('/admin/store', catalogBaseParams, 'name', catalogSort, catalogDir, 'Product')}
                           {renderSortLink('/admin/store', catalogBaseParams, 'category', catalogSort, catalogDir, 'Category')}
                           {renderSortLink('/admin/store', catalogBaseParams, 'inventory_qty', catalogSort, catalogDir, 'Stock', 'desc')}
@@ -822,11 +822,12 @@ export default async function AdminStorePage({
                           <div className="text-right">Open</div>
                         </div>
 
-                        <div className="grid gap-3">
-                          {pagedProducts.map((product) => (
+                        <div className="overflow-x-auto">
+                          <div className="min-w-[1040px] space-y-3">
+                            {pagedProducts.map((product) => (
                             <details key={product.id} className="group overflow-hidden rounded-2xl border bg-white shadow-sm">
                               <summary className="list-none cursor-pointer">
-                                <div className="xl:hidden p-4">
+                                <div className="lg:hidden p-4">
                                   <div className="flex items-start justify-between gap-3">
                                     <div className="min-w-0">
                                       <div className="truncate text-sm font-semibold">{product.name}</div>
@@ -857,7 +858,7 @@ export default async function AdminStorePage({
                                   <div className="mt-3 hidden text-right text-xs font-medium text-[hsl(var(--muted))] group-open:block">Tap to close</div>
                                 </div>
 
-                                <div className="hidden xl:grid grid-cols-[minmax(0,2fr)_minmax(0,1.1fr)_100px_120px_130px_130px_96px] items-center gap-3 px-4 py-3">
+                                <div className="hidden lg:grid grid-cols-[minmax(0,2fr)_minmax(0,1.1fr)_100px_120px_130px_130px_96px] items-center gap-3 px-4 py-3">
                                   <div className="min-w-0">
                                     <div className="truncate text-sm font-semibold">{product.name}</div>
                                     <div className="mt-1 flex flex-wrap gap-2 text-[11px] text-[hsl(var(--muted))]">
@@ -913,6 +914,7 @@ export default async function AdminStorePage({
                               </div>
                             </details>
                           ))}
+                          </div>
                         </div>
                       </>
                     )}
@@ -1000,7 +1002,7 @@ export default async function AdminStorePage({
                       <div className="rounded-2xl border border-dashed p-4 text-sm text-[hsl(var(--muted))]">No supplier orders match the current filters.</div>
                     ) : (
                       <>
-                        <div className="hidden xl:grid grid-cols-[minmax(0,1.6fr)_130px_140px_100px_100px_130px_130px_96px] gap-3 rounded-2xl border bg-[hsl(var(--card))] px-4 py-3 text-[11px] font-semibold uppercase tracking-[0.14em] text-[hsl(var(--muted))]">
+                        <div className="hidden lg:grid sticky top-16 z-20 grid-cols-[minmax(0,1.6fr)_130px_140px_100px_100px_130px_130px_96px] gap-3 rounded-2xl border bg-[hsl(var(--card))]/95 px-4 py-3 text-[11px] font-semibold uppercase tracking-[0.14em] text-[hsl(var(--muted))] shadow-sm backdrop-blur supports-[backdrop-filter]:bg-[hsl(var(--card))]/90">
                           {renderSortLink('/admin/store', supplierBaseParams, 'supplier_name', supplierSort, supplierDir, 'Supplier', 'asc', 'left', 's_page')}
                           {renderSortLink('/admin/store', supplierBaseParams, 'reference', supplierSort, supplierDir, 'Reference', 'asc', 'left', 's_page')}
                           {renderSortLink('/admin/store', supplierBaseParams, 'status', supplierSort, supplierDir, 'Status', 'asc', 'left', 's_page')}
@@ -1011,8 +1013,9 @@ export default async function AdminStorePage({
                           <div className="text-right">Open</div>
                         </div>
 
-                        <div className="grid gap-3">
-                          {pagedSupplierOrders.map((order) => {
+                        <div className="overflow-x-auto">
+                          <div className="min-w-[1120px] space-y-3">
+                            {pagedSupplierOrders.map((order) => {
                             const totalOrderedQty = (order.items ?? []).reduce((sum, item) => sum + Math.max(0, Number(item.ordered_qty ?? 0)), 0)
                             const totalReceivedQty = (order.items ?? []).reduce((sum, item) => sum + Math.max(0, Number(item.received_qty ?? 0)), 0)
                             const totalCostCents = (order.items ?? []).reduce((sum, item) => sum + Math.max(0, Number(item.line_total_cents ?? 0)), 0)
@@ -1021,7 +1024,7 @@ export default async function AdminStorePage({
                             return (
                               <details key={order.id} className="group overflow-hidden rounded-2xl border bg-white shadow-sm">
                                 <summary className="list-none cursor-pointer">
-                                  <div className="xl:hidden p-4">
+                                  <div className="lg:hidden p-4">
                                     <div className="flex items-start justify-between gap-3">
                                       <div className="min-w-0">
                                         <div className="truncate text-sm font-semibold">{order.supplier_name || 'Supplier'}</div>
@@ -1042,7 +1045,7 @@ export default async function AdminStorePage({
                                     <div className="mt-3 hidden text-right text-xs font-medium text-[hsl(var(--muted))] group-open:block">Tap to close</div>
                                   </div>
 
-                                  <div className="hidden xl:grid grid-cols-[minmax(0,1.6fr)_130px_140px_100px_100px_130px_130px_96px] items-center gap-3 px-4 py-3">
+                                  <div className="hidden lg:grid grid-cols-[minmax(0,1.6fr)_130px_140px_100px_100px_130px_130px_96px] items-center gap-3 px-4 py-3">
                                     <div className="min-w-0">
                                       <div className="truncate text-sm font-semibold">{order.supplier_name || 'Supplier'}</div>
                                       <div className="truncate text-[11px] text-[hsl(var(--muted))]">{(order.items ?? []).length} line(s) · ID {shortId(order.id)}</div>
@@ -1127,6 +1130,7 @@ export default async function AdminStorePage({
                               </details>
                             )
                           })}
+                          </div>
                         </div>
                       </>
                     )}
