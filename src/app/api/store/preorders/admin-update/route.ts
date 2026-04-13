@@ -13,6 +13,7 @@ type Body = {
   status?: string
   deposit_amount?: string | number | null
   deposit_payment_method?: string | null
+  note?: string | null
 }
 
 function noStore(res: NextResponse) {
@@ -66,6 +67,7 @@ export async function PATCH(req: Request) {
     const status = body?.status === undefined ? undefined : String(body.status || '').trim()
     const depositCents = parseAmountToCents(body?.deposit_amount)
     const paymentMethodRaw = body?.deposit_payment_method === undefined ? undefined : (body.deposit_payment_method === null ? null : String(body.deposit_payment_method || '').trim())
+    const nextNote = body?.note === undefined ? undefined : (body.note === null ? null : String(body.note).trim() || null)
 
     if (!id) {
       return noStore(NextResponse.json({ ok: false, error: 'PREORDER_ID_REQUIRED' }, { status: 400 }))
@@ -85,7 +87,7 @@ export async function PATCH(req: Request) {
 
     const { data: current, error: currentErr } = await supa
       .from('store_preorders')
-      .select('id, buyer_user_id, product_name, total_cents, deposit_cents, deposit_payment_method, status')
+      .select('id, buyer_user_id, product_name, total_cents, deposit_cents, deposit_payment_method, status, note')
       .eq('id', id)
       .maybeSingle<{
         id: string
@@ -95,6 +97,7 @@ export async function PATCH(req: Request) {
         deposit_cents: number
         deposit_payment_method: string | null
         status: string
+        note: string | null
       }>()
 
     if (currentErr) {
@@ -128,6 +131,7 @@ export async function PATCH(req: Request) {
       deposit_cents: number
       deposit_payment_method: string | null
       status?: string
+      note?: string | null
     } = {
       updated_by: user.id,
       deposit_cents: depositCents,
@@ -135,12 +139,13 @@ export async function PATCH(req: Request) {
     }
 
     if (status !== undefined) updatePayload.status = status
+    if (nextNote !== undefined) updatePayload.note = nextNote
 
     const { data: updated, error: updateErr } = await supa
       .from('store_preorders')
       .update(updatePayload)
       .eq('id', id)
-      .select('id, status, deposit_cents, deposit_payment_method, balance_due_cents, updated_at')
+      .select('id, status, deposit_cents, deposit_payment_method, balance_due_cents, updated_at, note')
       .maybeSingle<{
         id: string
         status: string
@@ -148,6 +153,7 @@ export async function PATCH(req: Request) {
         deposit_payment_method: string | null
         balance_due_cents: number
         updated_at: string
+        note: string | null
       }>()
 
     if (updateErr || !updated?.id) {

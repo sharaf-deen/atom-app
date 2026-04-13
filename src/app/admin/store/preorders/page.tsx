@@ -329,66 +329,79 @@ export default async function AdminStorePreordersPage({
                 <div className="rounded-2xl border border-dashed p-4 text-sm text-[hsl(var(--muted))]">No preorders match the current filters.</div>
               ) : (
                 items.map((row) => (
-                  <div key={row.id} className="rounded-2xl border bg-white p-4">
-                    <div className="flex flex-wrap items-start justify-between gap-3">
-                      <div>
-                        <div className="text-sm font-semibold">{row.product_name}</div>
-                        <div className="mt-1 flex flex-wrap gap-2 text-xs text-[hsl(var(--muted))]">
-                          <span className="rounded-full border px-2 py-1">Preorder ID: {shortId(row.id)}</span>
-                          {row.product_category ? <span className="rounded-full border px-2 py-1">{row.product_category}</span> : null}
-                          {row.product_size ? <span className="rounded-full border px-2 py-1">Size: {row.product_size}</span> : null}
-                          {row.product_color ? <span className="rounded-full border px-2 py-1">Color: {row.product_color}</span> : null}
-                          <span className="rounded-full border px-2 py-1">Qty: {row.qty}</span>
+                  <details key={row.id} className="overflow-hidden rounded-2xl border bg-white">
+                    <summary className="cursor-pointer list-none p-4 [&::-webkit-details-marker]:hidden">
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div className="min-w-0 space-y-2">
+                          <div className="text-sm font-semibold">{row.product_name}</div>
+                          <div className="flex flex-wrap gap-2 text-xs text-[hsl(var(--muted))]">
+                            <span className="rounded-full border px-2 py-1">Preorder ID: {shortId(row.id)}</span>
+                            {row.product_category ? <span className="rounded-full border px-2 py-1">{row.product_category}</span> : null}
+                            {row.product_size ? <span className="rounded-full border px-2 py-1">Size: {row.product_size}</span> : null}
+                            {row.product_color ? <span className="rounded-full border px-2 py-1">Color: {row.product_color}</span> : null}
+                            <span className="rounded-full border px-2 py-1">Qty: {row.qty}</span>
+                          </div>
+                        </div>
+                        <div className="flex flex-wrap items-center justify-end gap-2">
+                          <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-medium text-slate-700">
+                            Total {formatCurrency(row.total_cents)}
+                          </span>
+                          <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-medium text-slate-700">
+                            Deposit {formatCurrency(row.deposit_cents)}
+                          </span>
+                          {preorderStatusPill(row.status)}
                         </div>
                       </div>
-                      <div className="flex flex-wrap items-center gap-2">{preorderStatusPill(row.status)}</div>
-                    </div>
+                    </summary>
 
-                    <div className="mt-4 grid gap-2 text-sm sm:grid-cols-2 xl:grid-cols-4">
-                      <div><span className="text-[hsl(var(--muted))]">Buyer:</span> <span className="font-medium">{row.buyer_full_name || row.buyer_email || 'Member'}</span></div>
-                      <div><span className="text-[hsl(var(--muted))]">Email:</span> <span className="font-medium">{row.buyer_email || '—'}</span></div>
-                      <div><span className="text-[hsl(var(--muted))]">Phone:</span> <span className="font-medium">{row.buyer_phone || '—'}</span></div>
-                      <div><span className="text-[hsl(var(--muted))]">Created:</span> <span className="font-medium">{formatDateTime(row.created_at)}</span></div>
-                    </div>
-
-                    <div className="mt-3 grid gap-2 text-sm sm:grid-cols-2 xl:grid-cols-4">
-                      <div><span className="text-[hsl(var(--muted))]">Unit price:</span> <span className="font-medium">{formatCurrency(row.unit_price_cents)}</span></div>
-                      <div><span className="text-[hsl(var(--muted))]">Total:</span> <span className="font-medium">{formatCurrency(row.total_cents)}</span></div>
-                      <div><span className="text-[hsl(var(--muted))]">Deposit:</span> <span className="font-medium">{formatCurrency(row.deposit_cents)}</span></div>
-                      <div><span className="text-[hsl(var(--muted))]">Balance due:</span> <span className="font-medium">{formatCurrency(row.balance_due_cents)}</span></div>
-                    </div>
-
-                    <div className="mt-3 flex flex-wrap gap-2 text-xs text-[hsl(var(--muted))]">
-                      <span className="rounded-full border px-2 py-1">Deposit payment: {paymentLabel(row.deposit_payment_method)}</span>
-                      <span className="rounded-full border px-2 py-1">Updated: {formatDateTime(row.updated_at)}</span>
-                    </div>
-
-                    {row.note ? (
-                      <div className="mt-3 rounded-2xl border border-dashed p-3 text-sm text-[hsl(var(--muted))]">
-                        <span className="font-medium text-black">Customer note:</span> {row.note}
+                    <div className="border-t p-4">
+                      <div className="grid gap-2 text-sm sm:grid-cols-2 xl:grid-cols-4">
+                        <div><span className="text-[hsl(var(--muted))]">Buyer:</span> <span className="font-medium">{row.buyer_full_name || row.buyer_email || 'Member'}</span></div>
+                        <div><span className="text-[hsl(var(--muted))]">Email:</span> <span className="font-medium">{row.buyer_email || '—'}</span></div>
+                        <div><span className="text-[hsl(var(--muted))]">Phone:</span> <span className="font-medium">{row.buyer_phone || '—'}</span></div>
+                        <div><span className="text-[hsl(var(--muted))]">Created:</span> <span className="font-medium">{formatDateTime(row.created_at)}</span></div>
                       </div>
-                    ) : null}
 
-                    <div className="mt-4 flex flex-wrap items-center gap-2">
-                      <Link
-                        prefetch={false}
-                        href={`/members/${row.buyer_user_id}`}
-                        className="inline-flex items-center rounded-xl border px-4 py-2 text-sm font-medium hover:bg-gray-50"
-                      >
-                        Open member
-                      </Link>
-                    </div>
+                      <div className="mt-3 grid gap-2 text-sm sm:grid-cols-2 xl:grid-cols-4">
+                        <div><span className="text-[hsl(var(--muted))]">Unit price:</span> <span className="font-medium">{formatCurrency(row.unit_price_cents)}</span></div>
+                        <div><span className="text-[hsl(var(--muted))]">Total:</span> <span className="font-medium">{formatCurrency(row.total_cents)}</span></div>
+                        <div><span className="text-[hsl(var(--muted))]">Deposit:</span> <span className="font-medium">{formatCurrency(row.deposit_cents)}</span></div>
+                        <div><span className="text-[hsl(var(--muted))]">Balance due:</span> <span className="font-medium">{formatCurrency(row.balance_due_cents)}</span></div>
+                      </div>
 
-                    <div className="mt-4">
-                      <AdminPreorderQuickEdit
-                        id={row.id}
-                        totalCents={row.total_cents}
-                        depositCents={row.deposit_cents}
-                        depositPaymentMethod={row.deposit_payment_method}
-                        status={row.status}
-                      />
+                      <div className="mt-3 flex flex-wrap gap-2 text-xs text-[hsl(var(--muted))]">
+                        <span className="rounded-full border px-2 py-1">Deposit payment: {paymentLabel(row.deposit_payment_method)}</span>
+                        <span className="rounded-full border px-2 py-1">Updated: {formatDateTime(row.updated_at)}</span>
+                      </div>
+
+                      {row.note ? (
+                        <div className="mt-3 rounded-2xl border border-dashed p-3 text-sm text-[hsl(var(--muted))]">
+                          <span className="font-medium text-black">Customer note:</span> {row.note}
+                        </div>
+                      ) : null}
+
+                      <div className="mt-4 flex flex-wrap items-center gap-2">
+                        <Link
+                          prefetch={false}
+                          href={`/members/${row.buyer_user_id}`}
+                          className="inline-flex items-center rounded-xl border px-4 py-2 text-sm font-medium hover:bg-gray-50"
+                        >
+                          Open member
+                        </Link>
+                      </div>
+
+                      <div className="mt-4">
+                        <AdminPreorderQuickEdit
+                          id={row.id}
+                          totalCents={row.total_cents}
+                          depositCents={row.deposit_cents}
+                          depositPaymentMethod={row.deposit_payment_method}
+                          status={row.status}
+                          note={row.note}
+                        />
+                      </div>
                     </div>
-                  </div>
+                  </details>
                 ))
               )}
 
