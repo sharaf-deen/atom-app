@@ -3,6 +3,7 @@ export type StoreProductCategoryRow = {
   label: string
   is_active: boolean
   sort_order: number
+  product_count?: number
 }
 
 export const FALLBACK_STORE_PRODUCT_CATEGORIES: StoreProductCategoryRow[] = [
