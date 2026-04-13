@@ -56,8 +56,15 @@ function buildFriendlyCategoryError(message: string, action: 'create' | 'update'
     return 'This key already exists. Use a different internal key.'
   }
 
-  if (lower.includes('category_in_use') || lower.includes('still use this category') || lower.includes('product(s) still use')) {
-    return source || 'Delete blocked. Products still use this category.'
+  if (
+    lower.includes('category_in_use') ||
+    lower.includes('still use this category') ||
+    lower.includes('product(s) still use') ||
+    lower.includes('foreign key constraint') ||
+    lower.includes('violates foreign key constraint') ||
+    lower.includes('still referenced')
+  ) {
+    return 'Delete blocked. Products still use this category.'
   }
 
   return source
