@@ -4,6 +4,7 @@ export const revalidate = 0
 
 import { NextRequest, NextResponse } from 'next/server'
 import { createSupabaseServerActionClient } from '@/lib/supabaseServer'
+import { createSupabaseAdminClient } from '@/lib/supabaseAdmin'
 import { canAccessStore, canAccessStoreCatalogAdmin, normalizeRole } from '@/lib/rbac'
 import {
   FALLBACK_STORE_PRODUCT_CATEGORIES,
@@ -19,6 +20,7 @@ function noStore(res: NextResponse) {
 export async function GET(req: NextRequest) {
   try {
     const supa = createSupabaseServerActionClient()
+    const admin = createSupabaseAdminClient()
 
     const { data: auth, error: authErr } = await supa.auth.getUser()
     if (authErr) {
@@ -64,12 +66,39 @@ export async function GET(req: NextRequest) {
       )
     }
 
-    const items = sortStoreProductCategories(
-      ((data ?? []) as StoreProductCategoryRow[]).filter((item) => item.key && item.label)
-    )
+    const rawItems = ((data ?? []) as StoreProductCategoryRow[]).filter((item) => item.key && item.label)
+    const items = sortStoreProductCategories(rawItems)
+
+    if (items.length === 0) {
+      return noStore(
+        NextResponse.json({ ok: true, items: FALLBACK_STORE_PRODUCT_CATEGORIES })
+      )
+    }
+
+    const usageKeys = items.map((item) => item.key)
+    const usageMap = new Map<string, number>()
+
+    if (usageKeys.length > 0) {
+      const { data: productUsage } = await admin
+        .from('store_products')
+        .select('category')
+        .in('category', usageKeys)
+
+      for (const row of (productUsage ?? []) as Array<{ category: string | null }>) {
+        const category = String(row?.category || '').trim()
+        if (!category) continue
+        usageMap.set(category, (usageMap.get(category) || 0) + 1)
+      }
+    }
 
     return noStore(
-      NextResponse.json({ ok: true, items: items.length > 0 ? items : FALLBACK_STORE_PRODUCT_CATEGORIES })
+      NextResponse.json({
+        ok: true,
+        items: items.map((item) => ({
+          ...item,
+          product_count: usageMap.get(item.key) || 0,
+        })),
+      })
     )
   } catch (e: any) {
     return noStore(
