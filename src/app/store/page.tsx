@@ -9,7 +9,7 @@ import { getSessionUserCached, getSupabaseAdminClientCached } from '@/lib/reques
 import PageHeader from '@/components/layout/PageHeader'
 import Section from '@/components/layout/Section'
 import { Card, CardContent } from '@/components/ui/Card'
-import { formatCurrency } from '@/lib/money'
+import StoreCatalogModelCard from '@/components/store/StoreCatalogModelCard'
 import { canAccessStore, canAccessStoreAdmin } from '@/lib/rbac'
 import {
   FALLBACK_STORE_PRODUCT_CATEGORIES,
@@ -28,11 +28,6 @@ const USER_PREORDER_ROLES = new Set([
   'vip',
   'champion',
 ])
-
-const StorePreorderAction = dynamicImport(() => import('@/components/store/StorePreorderAction'), {
-  ssr: false,
-  loading: () => <div className="text-sm text-gray-500">Loading preorder action…</div>,
-})
 
 const StoreMyPreorders = dynamicImport(() => import('@/components/store/StoreMyPreorders'), {
   ssr: false,
@@ -54,6 +49,18 @@ type ProductRow = {
   created_at?: string | null
 }
 
+type ProductModelGroup = {
+  key: string
+  category: Category
+  name: string
+  color: string | null
+  image_path: string | null
+  priceMinCents: number
+  priceMaxCents: number
+  currency: string
+  created_at: string | null
+  variants: ProductRow[]
+}
 
 const STORE_PRODUCT_BUCKET = 'store-product-images'
 const SUPABASE_URL = (process.env.NEXT_PUBLIC_SUPABASE_URL || '').replace(/\/+$/, '')
@@ -70,9 +77,7 @@ const listStoreProductsCached = unstable_cache(
     isSuperAdmin: boolean,
     showPreorderOnly: boolean,
     category: string,
-    q: string,
-    fromRow: number,
-    toRow: number
+    q: string
   ) => {
     const supa = getSupabaseAdminClientCached()
 
@@ -80,7 +85,6 @@ const listStoreProductsCached = unstable_cache(
       .from('store_products')
       .select('id, category, name, color, size, price_cents, currency, inventory_qty, is_active, allow_preorder, image_path, created_at')
       .order('created_at', { ascending: false })
-      .range(fromRow, toRow + 1)
 
     if (!isSuperAdmin) qry = qry.eq('is_active', true)
     if (showPreorderOnly) qry = qry.eq('allow_preorder', true)
@@ -100,15 +104,12 @@ const listStoreProductsCached = unstable_cache(
       }
     }
 
-    const { data, error } = await qry
+    const { data, error } = await qry.limit(240)
     if (error) throw new Error(error.message)
 
-    const rows = (data ?? []) as any[]
-    const hasMore = rows.length > toRow - fromRow + 1
-    const sliced = hasMore ? rows.slice(0, toRow - fromRow + 1) : rows
-    return { items: sliced as ProductRow[], hasMore }
+    return { items: ((data ?? []) as any[]) as ProductRow[] }
   },
-  ['store_products_user_preorders_v2'],
+  ['store_products_user_preorders_v3'],
   { revalidate: 120, tags: ['store-products'] }
 )
 
@@ -136,21 +137,46 @@ function buildUrl(base: string, params: Record<string, string>) {
   return s ? `${base}?${s}` : base
 }
 
-function stockTone(stock: number) {
-  if (stock <= 0) return 'text-amber-700'
-  if (stock <= 2) return 'text-amber-700'
-  return 'text-emerald-700'
-}
-
-function stockLabel(stock: number) {
-  if (stock <= 0) return 'No stock now'
-  if (stock <= 2) return 'Low stock'
-  return 'In stock'
-}
 
 function categoryLabel(category: Category | 'all', labels: Map<string, string>) {
   if (category === 'all') return 'All'
   return labels.get(category) ?? category
+}
+
+function buildModelGroups(items: ProductRow[]) {
+  const groups = new Map<string, ProductModelGroup>()
+
+  for (const item of items) {
+    const key = [item.category, item.name.trim().toLowerCase(), (item.color ?? '').trim().toLowerCase()].join('::')
+    const currency = item.currency ?? 'EGP'
+    const createdAt = item.created_at ?? null
+    const existing = groups.get(key)
+
+    if (!existing) {
+      groups.set(key, {
+        key,
+        category: item.category,
+        name: item.name,
+        color: item.color,
+        image_path: item.image_path,
+        priceMinCents: item.price_cents ?? 0,
+        priceMaxCents: item.price_cents ?? 0,
+        currency,
+        created_at: createdAt,
+        variants: [item],
+      })
+      continue
+    }
+
+    existing.variants.push(item)
+    existing.priceMinCents = Math.min(existing.priceMinCents, item.price_cents ?? 0)
+    existing.priceMaxCents = Math.max(existing.priceMaxCents, item.price_cents ?? 0)
+
+    if (!existing.image_path && item.image_path) existing.image_path = item.image_path
+    if ((createdAt ?? '') > (existing.created_at ?? '')) existing.created_at = createdAt
+  }
+
+  return Array.from(groups.values()).sort((a, b) => (b.created_at ?? '').localeCompare(a.created_at ?? ''))
 }
 
 export default async function StorePage({
@@ -191,20 +217,21 @@ export default async function StorePage({
   const category = normalizeCat(strParam(searchParams?.category), categoryKeys)
   const q = strParam(searchParams?.q).trim()
 
-  const fromRow = (page - 1) * pageSize
-  const toRow = fromRow + pageSize - 1
-
   let items: ProductRow[] = []
   let errorMsg: string | null = null
-  let hasMore = false
 
   try {
-    const res = await listStoreProductsCached(isSuperAdmin, canPreorder, category, q, fromRow, toRow)
+    const res = await listStoreProductsCached(isSuperAdmin, canPreorder, category, q)
     items = res.items
-    hasMore = Boolean(res.hasMore)
   } catch (e: any) {
     errorMsg = e?.message || String(e)
   }
+
+  const modelGroups = buildModelGroups(items)
+  const totalGroups = modelGroups.length
+  const fromRow = totalGroups > 0 ? (page - 1) * pageSize : 0
+  const pagedGroups = modelGroups.slice(fromRow, fromRow + pageSize)
+  const hasMore = fromRow + pageSize < totalGroups
 
   const baseParams = {
     category: category === 'all' ? '' : category,
@@ -344,9 +371,9 @@ export default async function StorePage({
               ) : null}
 
               <div className="ml-auto text-xs text-[hsl(var(--muted))]">
-                {items.length > 0 ? (
+                {totalGroups > 0 ? (
                   <>
-                    Showing <b>{fromRow + 1}</b>–<b>{fromRow + items.length}</b>
+                    Showing <b>{fromRow + 1}</b>–<b>{Math.min(totalGroups, fromRow + pagedGroups.length)}</b> of <b>{totalGroups}</b>
                   </>
                 ) : (
                   <>No products.</>
@@ -386,7 +413,7 @@ export default async function StorePage({
               <div className="text-sm text-red-600">Failed to load products: {errorMsg}</div>
             </CardContent>
           </Card>
-        ) : items.length === 0 ? (
+        ) : pagedGroups.length === 0 ? (
           <Card>
             <CardContent>
               <div className="text-sm text-[hsl(var(--muted))]">
@@ -396,98 +423,32 @@ export default async function StorePage({
           </Card>
         ) : (
           <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
-            {items.map((p) => {
-              const price = formatCurrency(p.price_cents ?? 0, 'en-EG', p.currency ?? 'EGP')
-              const stock = Math.max(0, Number(p.inventory_qty ?? 0))
-              const itemDetails = [p.color, p.size].filter(Boolean).join(' · ')
-              const imageUrl = storeProductImageUrl(p.image_path)
-
-              return (
-                <Card key={p.id} hover>
-                  <CardContent className="space-y-4 py-4">
-                    {imageUrl ? (
-                      <div className="overflow-hidden rounded-2xl border bg-slate-50">
-                        <img src={imageUrl} alt={p.name} className="h-48 w-full object-cover" loading="lazy" />
-                      </div>
-                    ) : null}
-
-                    <div className="flex items-start gap-3">
-                      <div className="min-w-0 flex-1">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <span className="rounded-full border border-[hsl(var(--border))] bg-white px-2.5 py-1 text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">
-                            {categoryLabel(p.category, categoryLabels)}
-                          </span>
-                          {!isSuperAdmin ? (
-                            <span className="rounded-full border border-sky-200 bg-sky-50 px-2.5 py-1 text-[11px] font-medium text-sky-700">
-                              Pre-order open
-                            </span>
-                          ) : null}
-                          {imageUrl ? (
-                            <span className="rounded-full border border-[hsl(var(--border))] bg-white px-2.5 py-1 text-[11px] font-medium text-[hsl(var(--muted))]">
-                              Photo
-                            </span>
-                          ) : null}
-                        </div>
-
-                        <div className="mt-3 text-base font-semibold leading-snug">{p.name}</div>
-                        {itemDetails ? (
-                          <div className="mt-1 text-sm text-[hsl(var(--muted))]">{itemDetails}</div>
-                        ) : (
-                          <div className="mt-1 text-sm text-[hsl(var(--muted))]">Store item</div>
-                        )}
-                      </div>
-
-                      <div className="text-right">
-                        <div className="text-[11px] uppercase tracking-wide text-[hsl(var(--muted))]">Price</div>
-                        <div className="mt-1 text-base font-semibold">{price}</div>
-                      </div>
-                    </div>
-
-                    {isSuperAdmin ? (
-                      <div className="flex flex-wrap items-center gap-2 text-xs">
-                        <span className={`font-medium ${stockTone(stock)}`}>
-                          {stockLabel(stock)}: {stock}
-                        </span>
-                        {p.allow_preorder ? (
-                          <span className="rounded-full border border-sky-200 bg-sky-50 px-2.5 py-1 font-medium text-sky-700">
-                            Pre-order available
-                          </span>
-                        ) : (
-                          <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 font-medium text-slate-600">
-                            Pre-order off
-                          </span>
-                        )}
-                        {!p.is_active ? (
-                          <span className="rounded-full border border-rose-200 bg-rose-50 px-2.5 py-1 font-medium text-rose-700">
-                            Inactive
-                          </span>
-                        ) : null}
-                      </div>
-                    ) : (
-                      <div className="rounded-2xl border border-[hsl(var(--border))] bg-white/70 px-3 py-3 text-sm text-[hsl(var(--muted))]">
-                        Reserve this item now. Deposit and final payment are confirmed later by the store admin.
-                      </div>
-                    )}
-
-                    {canPreorder ? (
-                      <StorePreorderAction
-                        product={{
-                          id: p.id,
-                          category: p.category,
-                          name: p.name,
-                          color: p.color,
-                          size: p.size,
-                          price_cents: p.price_cents,
-                          currency: p.currency,
-                          is_active: p.is_active,
-                          allow_preorder: p.allow_preorder,
-                        }}
-                      />
-                    ) : null}
-                  </CardContent>
-                </Card>
-              )
-            })}
+            {pagedGroups.map((model) => (
+              <StoreCatalogModelCard
+                key={model.key}
+                model={{
+                  key: model.key,
+                  categoryLabel: categoryLabel(model.category, categoryLabels),
+                  name: model.name,
+                  color: model.color,
+                  imageUrl: storeProductImageUrl(model.image_path),
+                  priceMinCents: model.priceMinCents,
+                  priceMaxCents: model.priceMaxCents,
+                  currency: model.currency,
+                  variants: model.variants.map((variant) => ({
+                    id: variant.id,
+                    category: variant.category,
+                    name: variant.name,
+                    color: variant.color,
+                    size: variant.size,
+                    price_cents: variant.price_cents,
+                    currency: variant.currency,
+                    is_active: variant.is_active,
+                    allow_preorder: variant.allow_preorder,
+                  })),
+                }}
+              />
+            ))}
           </div>
         )}
 
