@@ -7,6 +7,18 @@ import { createSupabaseServerActionClient } from '@/lib/supabaseServer'
 import { createSupabaseAdminClient } from '@/lib/supabaseAdmin'
 import { normalizeStoreCategoryKey } from '@/lib/storeCategories'
 
+type DbErrorLike = {
+  code?: string | null
+  message?: string | null
+  details?: string | null
+  hint?: string | null
+}
+
+function isCategoryInUseDbError(error: DbErrorLike | null | undefined) {
+  const details = [error?.message, error?.details, error?.hint].filter(Boolean).join(' | ').toLowerCase()
+  return error?.code === '23503' || details.includes('foreign key constraint') || details.includes('still referenced')
+}
+
 function noStore(res: NextResponse) {
   res.headers.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate')
   return res
@@ -48,12 +60,41 @@ export async function DELETE(req: NextRequest) {
       )
     }
 
-    const { error } = await admin.from('store_product_categories').delete().eq('key', key)
+    const { data: deleted, error } = await admin
+      .from('store_product_categories')
+      .delete()
+      .eq('key', key)
+      .select('key')
+      .maybeSingle<{ key: string }>()
+
     if (error) {
-      return noStore(NextResponse.json({ ok: false, error: 'DELETE_FAILED', details: error.message }, { status: 500 }))
+      if (isCategoryInUseDbError(error)) {
+        const { count: fallbackCount } = await admin
+          .from('store_products')
+          .select('id', { count: 'exact', head: true })
+          .eq('category', key)
+
+        return noStore(
+          NextResponse.json(
+            {
+              ok: false,
+              error: 'CATEGORY_IN_USE',
+              details: `Delete blocked. ${(fallbackCount || count || 0)} product(s) still use this category.`,
+            },
+            { status: 409 }
+          )
+        )
+      }
+
+      const details = [error.message, error.details, error.hint].filter(Boolean).join(' | ')
+      return noStore(NextResponse.json({ ok: false, error: 'DELETE_FAILED', details }, { status: 500 }))
     }
 
-    return noStore(NextResponse.json({ ok: true }))
+    if (!deleted?.key) {
+      return noStore(NextResponse.json({ ok: false, error: 'NOT_FOUND', details: 'Category not found.' }, { status: 404 }))
+    }
+
+    return noStore(NextResponse.json({ ok: true, deleted_key: deleted.key }))
   } catch (e: any) {
     return noStore(NextResponse.json({ ok: false, error: 'SERVER_ERROR', details: e?.message ?? String(e) }, { status: 500 }))
   }
