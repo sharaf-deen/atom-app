@@ -3,6 +3,7 @@ import type { Role } from '@/lib/rbac'
 import {
   canAccessStoreCatalog,
   canAccessStoreDashboard,
+  canManageStoreCatalog,
   canManageStorePreorders,
   canManageStoreSales,
   canManageStoreSupplierOrders,
@@ -16,6 +17,9 @@ function getItems(role: Role | null | undefined) {
   }
   if (canAccessStoreCatalog(role)) {
     items.push({ href: '/admin/store', label: 'Catalog & stock' })
+  }
+  if (canManageStoreCatalog(role)) {
+    items.push({ href: '/admin/store/models', label: 'Models' })
   }
   if (canManageStoreSupplierOrders(role)) {
     items.push({ href: '/admin/store?tab=supplier-orders', label: 'Supplier orders' })

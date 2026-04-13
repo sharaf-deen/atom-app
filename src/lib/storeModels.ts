@@ -12,6 +12,8 @@ export type StoreProductModelRow = {
   updated_at: string
   created_by: string | null
   updated_by: string | null
+  linked_product_count?: number
+  category_label?: string | null
 }
 
 export function normalizeStoreModelSlug(value: string) {
