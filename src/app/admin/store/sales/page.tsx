@@ -401,7 +401,7 @@ export default async function AdminStoreSalesPage({ searchParams }: { searchPara
               <CardContent className="space-y-4">
                 <div className="text-xs text-[hsl(var(--muted))]">Ultra-dense desktop row list. Open only the sales you need to inspect or edit. Click desktop headers to sort.</div>
 
-                <div className="hidden xl:grid grid-cols-[minmax(0,1.8fr)_minmax(0,1.8fr)_140px_120px_120px_120px_150px_96px] gap-3 rounded-2xl border bg-[hsl(var(--card))] px-4 py-3 text-[11px] font-semibold uppercase tracking-[0.14em] text-[hsl(var(--muted))]">
+                <div className="hidden lg:grid sticky top-16 z-20 grid-cols-[minmax(0,1.8fr)_minmax(0,1.8fr)_140px_120px_120px_120px_150px_96px] gap-3 rounded-2xl border bg-[hsl(var(--card))]/95 px-4 py-3 text-[11px] font-semibold uppercase tracking-[0.14em] text-[hsl(var(--muted))] shadow-sm backdrop-blur supports-[backdrop-filter]:bg-[hsl(var(--card))]/90">
                   {renderSortLink('/admin/store/sales', baseParams, 'buyer_full_name', sort, dir, 'Buyer')}
                   <div>Items</div>
                   {renderSortLink('/admin/store/sales', baseParams, 'status', sort, dir, 'Status')}
@@ -412,8 +412,9 @@ export default async function AdminStoreSalesPage({ searchParams }: { searchPara
                   <div className="text-right">Open</div>
                 </div>
 
-                <div className="grid gap-3">
-                  {sales.map((sale) => {
+                <div className="overflow-x-auto">
+                  <div className="min-w-[1160px] space-y-3">
+                    {sales.map((sale) => {
                     const items = itemsBySale.get(sale.id) ?? []
                     const hasAppliedStock = items.some((item) => !!item.delivered_stock_applied)
                     const canDeleteSale = (sale.status === 'draft' || sale.status === 'canceled') && !hasAppliedStock
@@ -428,7 +429,7 @@ export default async function AdminStoreSalesPage({ searchParams }: { searchPara
                     return (
                       <details key={sale.id} className="group overflow-hidden rounded-2xl border bg-white shadow-sm">
                         <summary className="list-none cursor-pointer">
-                          <div className="xl:hidden p-4">
+                          <div className="lg:hidden p-4">
                             <div className="flex items-start justify-between gap-3">
                               <div className="min-w-0">
                                 <div className="truncate text-sm font-semibold">{sale.buyer_full_name || 'Buyer'}</div>
@@ -448,7 +449,7 @@ export default async function AdminStoreSalesPage({ searchParams }: { searchPara
                             <div className="mt-3 hidden text-right text-xs font-medium text-[hsl(var(--muted))] group-open:block">Tap to close</div>
                           </div>
 
-                          <div className="hidden xl:grid grid-cols-[minmax(0,1.8fr)_minmax(0,1.8fr)_140px_120px_120px_120px_150px_96px] items-center gap-3 px-4 py-3">
+                          <div className="hidden lg:grid grid-cols-[minmax(0,1.8fr)_minmax(0,1.8fr)_140px_120px_120px_120px_150px_96px] items-center gap-3 px-4 py-3">
                             <div className="min-w-0">
                               <div className="truncate text-sm font-semibold">{sale.buyer_full_name || 'Buyer'}</div>
                               <div className="truncate text-[11px] text-[hsl(var(--muted))]">{sale.buyer_email || sale.buyer_phone || 'No contact details'}</div>
@@ -544,6 +545,7 @@ export default async function AdminStoreSalesPage({ searchParams }: { searchPara
                       </details>
                     )
                   })}
+                  </div>
                 </div>
               </CardContent>
             </Card>
