@@ -58,6 +58,9 @@ type StockFilter = 'all' | 'in' | 'out' | 'low'
 type PreorderFilter = 'all' | '1' | '0'
 type SupplierStatusFilter = 'all' | 'draft' | 'ordered' | 'partially_received' | 'received' | 'canceled'
 type Tab = 'catalog' | 'supplier-orders'
+type SortDir = 'asc' | 'desc'
+type ProductSortKey = 'created_at' | 'name' | 'category' | 'inventory_qty' | 'price_cents'
+type SupplierSortKey = 'created_at' | 'supplier_name' | 'reference' | 'status' | 'ordered_qty' | 'received_qty' | 'estimated_cost' | 'expected_at'
 
 type ProductRow = {
   id: string
@@ -151,6 +154,15 @@ const SUPPLIER_STATUS_FILTERS: Array<{ value: SupplierStatusFilter; label: strin
   { value: 'canceled', label: 'Canceled' },
 ]
 
+
+const SUPPLIER_STATUS_ORDER: Record<SupplierOrderRow['status'], number> = {
+  draft: 0,
+  ordered: 1,
+  partially_received: 2,
+  received: 3,
+  canceled: 4,
+}
+
 function clampInt(v: unknown, def: number, min: number, max: number) {
   const raw = Array.isArray(v) ? v[0] : v
   const n = Number(raw)
@@ -186,6 +198,131 @@ function normalizePreorder(v: string): PreorderFilter {
 
 function normalizeSupplierStatus(v: string): SupplierStatusFilter {
   return v === 'draft' || v === 'ordered' || v === 'partially_received' || v === 'received' || v === 'canceled' ? v : 'all'
+}
+
+
+function normalizeSortDir(v: string): SortDir {
+  return v === 'asc' ? 'asc' : 'desc'
+}
+
+function normalizeProductSort(v: string): ProductSortKey {
+  return v === 'name' || v === 'category' || v === 'inventory_qty' || v === 'price_cents' ? v : 'created_at'
+}
+
+function normalizeSupplierSort(v: string): SupplierSortKey {
+  return v === 'supplier_name' || v === 'reference' || v === 'status' || v === 'ordered_qty' || v === 'received_qty' || v === 'estimated_cost' || v === 'expected_at' ? v : 'created_at'
+}
+
+function compareText(a: string | null | undefined, b: string | null | undefined) {
+  return String(a || '').localeCompare(String(b || ''), 'en', { numeric: true, sensitivity: 'base' })
+}
+
+function compareNumber(a: number | null | undefined, b: number | null | undefined) {
+  return Number(a || 0) - Number(b || 0)
+}
+
+function compareDate(a: string | null | undefined, b: string | null | undefined) {
+  return new Date(a || 0).getTime() - new Date(b || 0).getTime()
+}
+
+function supplierTotals(order: SupplierOrderRow) {
+  const items = order.items ?? []
+  return items.reduce(
+    (acc, item) => {
+      acc.ordered += Math.max(0, Number(item.ordered_qty ?? 0))
+      acc.received += Math.max(0, Number(item.received_qty ?? 0))
+      acc.costCents += Math.max(0, Number(item.line_total_cents ?? 0))
+      return acc
+    },
+    { ordered: 0, received: 0, costCents: 0 }
+  )
+}
+
+function sortProducts(rows: ProductRow[], sort: ProductSortKey, dir: SortDir) {
+  const factor = dir === 'asc' ? 1 : -1
+  return [...rows].sort((a, b) => {
+    let result = 0
+    switch (sort) {
+      case 'name':
+        result = compareText(a.name, b.name)
+        break
+      case 'category':
+        result = compareText(a.category, b.category)
+        break
+      case 'inventory_qty':
+        result = compareNumber(a.inventory_qty, b.inventory_qty)
+        break
+      case 'price_cents':
+        result = compareNumber(a.price_cents, b.price_cents)
+        break
+      case 'created_at':
+      default:
+        result = compareDate(a.created_at, b.created_at)
+        break
+    }
+    if (result == 0) {
+      result = compareDate(a.created_at, b.created_at)
+      if (result == 0) result = compareText(a.name, b.name)
+      if (result == 0) result = compareText(a.id, b.id)
+    }
+    return result * factor
+  })
+}
+
+function sortSupplierOrders(rows: SupplierOrderRow[], sort: SupplierSortKey, dir: SortDir) {
+  const factor = dir === 'asc' ? 1 : -1
+  return [...rows].sort((a, b) => {
+    const ta = supplierTotals(a)
+    const tb = supplierTotals(b)
+    let result = 0
+    switch (sort) {
+      case 'supplier_name':
+        result = compareText(a.supplier_name, b.supplier_name)
+        break
+      case 'reference':
+        result = compareText(a.reference, b.reference)
+        break
+      case 'status':
+        result = compareNumber(SUPPLIER_STATUS_ORDER[a.status], SUPPLIER_STATUS_ORDER[b.status])
+        break
+      case 'ordered_qty':
+        result = compareNumber(ta.ordered, tb.ordered)
+        break
+      case 'received_qty':
+        result = compareNumber(ta.received, tb.received)
+        break
+      case 'estimated_cost':
+        result = compareNumber(ta.costCents, tb.costCents)
+        break
+      case 'expected_at':
+        result = compareDate(a.expected_at, b.expected_at)
+        break
+      case 'created_at':
+      default:
+        result = compareDate(a.created_at, b.created_at)
+        break
+    }
+    if (result === 0) {
+      result = compareDate(a.created_at, b.created_at)
+      if (result === 0) result = compareText(a.id, b.id)
+    }
+    return result * factor
+  })
+}
+
+function renderSortLink(basePath: string, params: Record<string, string>, column: ProductSortKey | SupplierSortKey, currentSort: string, currentDir: SortDir, label: string, defaultDir: SortDir = 'asc', align: 'left' | 'right' = 'left', pageParam: 'page' | 's_page' = 'page') {
+  const isActive = currentSort === column
+  const nextDir: SortDir = isActive ? (currentDir === 'asc' ? 'desc' : 'asc') : defaultDir
+  return (
+    <Link
+      prefetch={false}
+      href={buildUrl(basePath, { ...params, [pageParam]: '1', ...(pageParam === 'page' ? { s_page: params.s_page || '' } : { page: params.page || '' }), [pageParam === 'page' ? 'c_sort' : 's_sort']: String(column), [pageParam === 'page' ? 'c_dir' : 's_dir']: nextDir })}
+      className={`inline-flex w-full items-center gap-1 hover:text-black ${align === 'right' ? 'justify-end' : ''}`}
+    >
+      <span>{label}</span>
+      <span className="text-[10px]">{isActive ? (currentDir === 'asc' ? '↑' : '↓') : '↕'}</span>
+    </Link>
+  )
 }
 
 function buildUrl(base: string, params: Record<string, string>) {
@@ -346,6 +483,11 @@ export default async function AdminStorePage({
   const supplierQ = strParam(searchParams?.s_q).trim()
   const supplierStatus = normalizeSupplierStatus(strParam(searchParams?.s_status))
 
+  const catalogSort = normalizeProductSort(strParam(searchParams?.c_sort))
+  const catalogDir = normalizeSortDir(strParam(searchParams?.c_dir))
+  const supplierSort = normalizeSupplierSort(strParam(searchParams?.s_sort))
+  const supplierDir = normalizeSortDir(strParam(searchParams?.s_dir))
+
   const supa = getSupabaseAdminClientCached()
 
   let categoryRows: StoreProductCategoryRow[] = []
@@ -429,19 +571,22 @@ export default async function AdminStorePage({
       })
     : []
 
+  const sortedProducts = sortProducts(filteredProducts, catalogSort, catalogDir)
+  const sortedSupplierOrders = sortSupplierOrders(supplierOrders, supplierSort, supplierDir)
+
   const metrics = computeMetrics(allProducts, supplierOrders)
-  const totalFilteredProducts = filteredProducts.length
+  const totalFilteredProducts = sortedProducts.length
   const totalProductPages = Math.max(1, Math.ceil(totalFilteredProducts / pageSize))
   const safeProductPage = Math.min(page, totalProductPages)
   const productStart = (safeProductPage - 1) * pageSize
-  const pagedProducts = filteredProducts.slice(productStart, productStart + pageSize)
+  const pagedProducts = sortedProducts.slice(productStart, productStart + pageSize)
   const hasMoreProducts = safeProductPage < totalProductPages
 
-  const totalSupplierOrders = supplierOrders.length
+  const totalSupplierOrders = sortedSupplierOrders.length
   const totalSupplierPages = Math.max(1, Math.ceil(totalSupplierOrders / supplierPageSize))
   const safeSupplierPage = Math.min(supplierPage, totalSupplierPages)
   const supplierStart = (safeSupplierPage - 1) * supplierPageSize
-  const pagedSupplierOrders = supplierOrders.slice(supplierStart, supplierStart + supplierPageSize)
+  const pagedSupplierOrders = sortedSupplierOrders.slice(supplierStart, supplierStart + supplierPageSize)
   const hasMoreSupplierOrders = safeSupplierPage < totalSupplierPages
 
   const catalogBaseParams = {
@@ -452,6 +597,14 @@ export default async function AdminStorePage({
     stock: stock === 'all' ? '' : stock,
     preorder: preorder === 'all' ? '' : preorder,
     page_size: String(pageSize),
+    c_sort: catalogSort,
+    c_dir: catalogDir,
+    s_page: String(supplierPage),
+    s_q: supplierQ,
+    s_status: supplierStatus === 'all' ? '' : supplierStatus,
+    s_page_size: String(supplierPageSize),
+    s_sort: supplierSort,
+    s_dir: supplierDir,
   }
 
   const supplierBaseParams = {
@@ -459,6 +612,17 @@ export default async function AdminStorePage({
     s_q: supplierQ,
     s_status: supplierStatus === 'all' ? '' : supplierStatus,
     s_page_size: String(supplierPageSize),
+    s_sort: supplierSort,
+    s_dir: supplierDir,
+    page: String(page),
+    q,
+    category: category === 'all' ? '' : category,
+    active: active === 'all' ? '' : active,
+    stock: stock === 'all' ? '' : stock,
+    preorder: preorder === 'all' ? '' : preorder,
+    page_size: String(pageSize),
+    c_sort: catalogSort,
+    c_dir: catalogDir,
   }
 
   const canSeeDashboard = canAccessStoreDashboard(me.role)
@@ -618,6 +782,13 @@ export default async function AdminStorePage({
                         {PREORDER_FILTERS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
                       </select>
                     </label>
+                    <input type="hidden" name="c_sort" value={catalogSort} />
+                    <input type="hidden" name="c_dir" value={catalogDir} />
+                    <input type="hidden" name="s_q" value={supplierQ} />
+                    <input type="hidden" name="s_status" value={supplierStatus === 'all' ? '' : supplierStatus} />
+                    <input type="hidden" name="s_page_size" value={String(supplierPageSize)} />
+                    <input type="hidden" name="s_sort" value={supplierSort} />
+                    <input type="hidden" name="s_dir" value={supplierDir} />
                     <div className="flex items-end gap-2">
                       <button className="min-h-[42px] rounded-xl bg-black px-4 py-2 text-sm font-medium text-white">Apply</button>
                       <Link href="/admin/store?tab=catalog" className="inline-flex min-h-[42px] items-center rounded-xl border px-4 py-2 text-sm font-medium hover:bg-gray-50">Reset</Link>
@@ -634,7 +805,7 @@ export default async function AdminStorePage({
                 <Card>
                   <CardHeader>
                     <CardTitle>Catalog & stock</CardTitle>
-                    <div className="text-xs text-[hsl(var(--muted))]">{totalFilteredProducts} product(s) · dense row list for desktop</div>
+                    <div className="text-xs text-[hsl(var(--muted))]">{totalFilteredProducts} product(s) · dense row list for desktop · click desktop headers to sort</div>
                   </CardHeader>
                   <CardContent className="space-y-4">
                     {pagedProducts.length === 0 ? (
@@ -642,12 +813,12 @@ export default async function AdminStorePage({
                     ) : (
                       <>
                         <div className="hidden xl:grid grid-cols-[minmax(0,2fr)_minmax(0,1.1fr)_100px_120px_130px_130px_96px] gap-3 rounded-2xl border bg-[hsl(var(--card))] px-4 py-3 text-[11px] font-semibold uppercase tracking-[0.14em] text-[hsl(var(--muted))]">
-                          <div>Product</div>
-                          <div>Category</div>
-                          <div>Stock</div>
-                          <div>Price</div>
+                          {renderSortLink('/admin/store', catalogBaseParams, 'name', catalogSort, catalogDir, 'Product')}
+                          {renderSortLink('/admin/store', catalogBaseParams, 'category', catalogSort, catalogDir, 'Category')}
+                          {renderSortLink('/admin/store', catalogBaseParams, 'inventory_qty', catalogSort, catalogDir, 'Stock', 'desc')}
+                          {renderSortLink('/admin/store', catalogBaseParams, 'price_cents', catalogSort, catalogDir, 'Price', 'desc')}
                           <div>Status</div>
-                          <div>Created</div>
+                          {renderSortLink('/admin/store', catalogBaseParams, 'created_at', catalogSort, catalogDir, 'Created', 'desc')}
                           <div className="text-right">Open</div>
                         </div>
 
@@ -796,6 +967,16 @@ export default async function AdminStorePage({
                         {SUPPLIER_STATUS_FILTERS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
                       </select>
                     </label>
+                    <input type="hidden" name="q" value={q} />
+                    <input type="hidden" name="category" value={category === 'all' ? '' : category} />
+                    <input type="hidden" name="active" value={active === 'all' ? '' : active} />
+                    <input type="hidden" name="stock" value={stock === 'all' ? '' : stock} />
+                    <input type="hidden" name="preorder" value={preorder === 'all' ? '' : preorder} />
+                    <input type="hidden" name="page_size" value={String(pageSize)} />
+                    <input type="hidden" name="c_sort" value={catalogSort} />
+                    <input type="hidden" name="c_dir" value={catalogDir} />
+                    <input type="hidden" name="s_sort" value={supplierSort} />
+                    <input type="hidden" name="s_dir" value={supplierDir} />
                     <div className="flex items-end gap-2">
                       <button className="min-h-[42px] rounded-xl bg-black px-4 py-2 text-sm font-medium text-white">Apply</button>
                       <Link href="/admin/store?tab=supplier-orders" className="inline-flex min-h-[42px] items-center rounded-xl border px-4 py-2 text-sm font-medium hover:bg-gray-50">Reset</Link>
@@ -812,7 +993,7 @@ export default async function AdminStorePage({
                 <Card>
                   <CardHeader>
                     <CardTitle>Supplier orders</CardTitle>
-                    <div className="text-xs text-[hsl(var(--muted))]">{totalSupplierOrders} order(s) · dense row list for desktop</div>
+                    <div className="text-xs text-[hsl(var(--muted))]">{totalSupplierOrders} order(s) · dense row list for desktop · click desktop headers to sort</div>
                   </CardHeader>
                   <CardContent className="space-y-4">
                     {pagedSupplierOrders.length === 0 ? (
@@ -820,13 +1001,13 @@ export default async function AdminStorePage({
                     ) : (
                       <>
                         <div className="hidden xl:grid grid-cols-[minmax(0,1.6fr)_130px_140px_100px_100px_130px_130px_96px] gap-3 rounded-2xl border bg-[hsl(var(--card))] px-4 py-3 text-[11px] font-semibold uppercase tracking-[0.14em] text-[hsl(var(--muted))]">
-                          <div>Supplier</div>
-                          <div>Reference</div>
-                          <div>Status</div>
-                          <div>Ordered</div>
-                          <div>Received</div>
-                          <div>Estimated cost</div>
-                          <div>Expected</div>
+                          {renderSortLink('/admin/store', supplierBaseParams, 'supplier_name', supplierSort, supplierDir, 'Supplier', 'asc', 'left', 's_page')}
+                          {renderSortLink('/admin/store', supplierBaseParams, 'reference', supplierSort, supplierDir, 'Reference', 'asc', 'left', 's_page')}
+                          {renderSortLink('/admin/store', supplierBaseParams, 'status', supplierSort, supplierDir, 'Status', 'asc', 'left', 's_page')}
+                          {renderSortLink('/admin/store', supplierBaseParams, 'ordered_qty', supplierSort, supplierDir, 'Ordered', 'desc', 'left', 's_page')}
+                          {renderSortLink('/admin/store', supplierBaseParams, 'received_qty', supplierSort, supplierDir, 'Received', 'desc', 'left', 's_page')}
+                          {renderSortLink('/admin/store', supplierBaseParams, 'estimated_cost', supplierSort, supplierDir, 'Estimated cost', 'desc', 'left', 's_page')}
+                          {renderSortLink('/admin/store', supplierBaseParams, 'expected_at', supplierSort, supplierDir, 'Expected', 'desc', 'left', 's_page')}
                           <div className="text-right">Open</div>
                         </div>
 
