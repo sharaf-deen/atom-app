@@ -419,7 +419,7 @@ export default async function AdminStorePreordersPage({
                 <div className="rounded-2xl border border-dashed p-4 text-sm text-[hsl(var(--muted))]">No preorders match the current filters.</div>
               ) : (
                 <>
-                  <div className="hidden xl:grid grid-cols-[minmax(0,2fr)_minmax(0,1.6fr)_140px_80px_120px_120px_150px_96px] gap-3 rounded-2xl border bg-[hsl(var(--card))] px-4 py-3 text-[11px] font-semibold uppercase tracking-[0.14em] text-[hsl(var(--muted))]">
+                  <div className="hidden lg:grid sticky top-16 z-20 grid-cols-[minmax(0,2fr)_minmax(0,1.6fr)_140px_80px_120px_120px_150px_96px] gap-3 rounded-2xl border bg-[hsl(var(--card))]/95 px-4 py-3 text-[11px] font-semibold uppercase tracking-[0.14em] text-[hsl(var(--muted))] shadow-sm backdrop-blur supports-[backdrop-filter]:bg-[hsl(var(--card))]/90">
                     {renderSortLink('/admin/store/preorders', baseParams, 'product_name', sort, dir, 'Product')}
                     {renderSortLink('/admin/store/preorders', baseParams, 'buyer', sort, dir, 'Buyer')}
                     {renderSortLink('/admin/store/preorders', baseParams, 'status', sort, dir, 'Status')}
@@ -430,11 +430,12 @@ export default async function AdminStorePreordersPage({
                     <div className="text-right">Open</div>
                   </div>
 
-                  <div className="grid gap-3">
-                    {items.map((row) => (
+                  <div className="overflow-x-auto">
+                    <div className="min-w-[1120px] space-y-3">
+                      {items.map((row) => (
                       <details key={row.id} className="group overflow-hidden rounded-2xl border bg-white shadow-sm">
                         <summary className="list-none cursor-pointer">
-                          <div className="xl:hidden p-4">
+                          <div className="lg:hidden p-4">
                             <div className="flex items-start justify-between gap-3">
                               <div className="min-w-0">
                                 <div className="truncate text-sm font-semibold">{row.product_name}</div>
@@ -456,7 +457,7 @@ export default async function AdminStorePreordersPage({
                             <div className="mt-3 hidden text-right text-xs font-medium text-[hsl(var(--muted))] group-open:block">Tap to close</div>
                           </div>
 
-                          <div className="hidden xl:grid grid-cols-[minmax(0,2fr)_minmax(0,1.6fr)_140px_80px_120px_120px_150px_96px] items-center gap-3 px-4 py-3">
+                          <div className="hidden lg:grid grid-cols-[minmax(0,2fr)_minmax(0,1.6fr)_140px_80px_120px_120px_150px_96px] items-center gap-3 px-4 py-3">
                             <div className="min-w-0">
                               <div className="truncate text-sm font-semibold">{row.product_name}</div>
                               <div className="mt-1 flex flex-wrap gap-2 text-[11px] text-[hsl(var(--muted))]">
@@ -533,6 +534,7 @@ export default async function AdminStorePreordersPage({
                         </div>
                       </details>
                     ))}
+                    </div>
                   </div>
                 </>
               )}
