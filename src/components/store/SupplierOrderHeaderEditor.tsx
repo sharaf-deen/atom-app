@@ -7,7 +7,6 @@ import Button from '@/components/ui/Button'
 import InlineAlert from '@/components/ui/InlineAlert'
 import Input from '@/components/ui/Input'
 import Select from '@/components/ui/Select'
-import Textarea from '@/components/ui/Textarea'
 
 type EditableStatus = 'draft' | 'ordered' | 'canceled'
 type Status = EditableStatus | 'partially_received' | 'received'
@@ -26,7 +25,7 @@ export default function SupplierOrderHeaderEditor({
   notes,
   status,
   canDelete = true,
-  deleteBlockedReason = null,
+  deleteBlockedReason,
 }: {
   id: string
   reference: string | null
@@ -105,11 +104,9 @@ export default function SupplierOrderHeaderEditor({
     }
   }
 
-  async function removeSupplierOrder() {
-    if (!canDelete || deleting || busy) return
-    const confirmed = window.confirm(
-      'Delete this supplier order? Orders with received quantities cannot be deleted because stock was already added.'
-    )
+  async function removeOrder() {
+    if (!canDelete || busy || deleting) return
+    const confirmed = window.confirm('Delete this supplier order? This action cannot be undone.')
     if (!confirmed) return
 
     setDeleting(true)
@@ -141,46 +138,44 @@ export default function SupplierOrderHeaderEditor({
 
   return (
     <div className="grid gap-3 rounded-2xl border border-[hsl(var(--border))] bg-white p-3">
-      <div className="grid gap-3 xl:grid-cols-2">
+      <div className="grid grid-cols-1 gap-3 xl:grid-cols-4">
+        <Input label="Supplier" value={nextSupplierName} onChange={(e) => setNextSupplierName(e.target.value)} disabled={busy || deleting} />
         <Input label="Reference" value={nextReference} onChange={(e) => setNextReference(e.target.value)} disabled={busy || deleting} />
-        <Input label="Supplier name" value={nextSupplierName} onChange={(e) => setNextSupplierName(e.target.value)} disabled={busy || deleting} />
+        <Input label="Expected date" type="date" value={nextExpectedAt} onChange={(e) => setNextExpectedAt(e.target.value)} disabled={busy || deleting} />
+        {statusEditable ? (
+          <Select label="Status" value={nextStatus} onChange={(e) => setNextStatus(e.target.value as EditableStatus)} disabled={busy || deleting}>
+            {EDITABLE_STATUS_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </Select>
+        ) : (
+          <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] px-3 py-2 text-sm">
+            <div className="mb-1 text-xs text-[hsl(var(--muted))]">Status</div>
+            <div className="font-medium">{status.replaceAll('_', ' ')}</div>
+          </div>
+        )}
       </div>
 
-      <div className="grid gap-3 xl:grid-cols-[180px_minmax(0,220px)] xl:items-end">
-        <Input label="Expected at" type="date" value={nextExpectedAt} onChange={(e) => setNextExpectedAt(e.target.value)} disabled={busy || deleting} />
-        <Select
-          label="Status"
-          value={nextStatus}
-          onChange={(e) => setNextStatus(e.target.value as EditableStatus)}
-          disabled={!statusEditable || busy || deleting}
-        >
-          {EDITABLE_STATUS_OPTIONS.map((option) => (
-            <option key={option.value} value={option.value}>
-              {option.label}
-            </option>
-          ))}
-        </Select>
-      </div>
+      <Input label="Notes" value={nextNotes} onChange={(e) => setNextNotes(e.target.value)} disabled={busy || deleting} />
 
-      <Textarea label="Notes" rows={3} value={nextNotes} onChange={(e) => setNextNotes(e.target.value)} disabled={busy || deleting} />
-
-      {!canDelete && deleteBlockedReason ? <InlineAlert compact variant="info">{deleteBlockedReason}</InlineAlert> : null}
-      {feedback.msg ? <InlineAlert compact variant={feedback.kind === 'error' ? 'error' : 'success'}>{feedback.msg}</InlineAlert> : null}
+      {deleteBlockedReason ? <InlineAlert compact variant="info">{deleteBlockedReason}</InlineAlert> : null}
+      {feedback.msg ? <InlineAlert variant={feedback.kind === 'error' ? 'error' : 'success'}>{feedback.msg}</InlineAlert> : null}
 
       <div className="flex flex-wrap items-center gap-2">
-        <Button onClick={save} disabled={!dirty || busy || deleting} loading={busy} loadingText="Saving…">
-          Save supplier order
+        <Button type="button" onClick={save} disabled={!dirty || busy || deleting} loading={busy} loadingText="Saving…">
+          Save header
         </Button>
         <Button
           type="button"
           variant="outline"
-          className="border-rose-200 text-rose-700 hover:bg-rose-50"
-          onClick={removeSupplierOrder}
+          onClick={removeOrder}
           disabled={!canDelete || busy || deleting}
           loading={deleting}
           loadingText="Deleting…"
         >
-          Delete supplier order
+          Delete order
         </Button>
       </div>
     </div>

@@ -7,13 +7,14 @@ import { revalidatePath, revalidateTag } from 'next/cache'
 import { createSupabaseServerActionClient } from '@/lib/supabaseServer'
 import { createSupabaseAdminClient } from '@/lib/supabaseAdmin'
 
+type SupplierOrderItemRow = {
+  id: string
+  received_qty: number | null
+}
+
 function noStore(res: NextResponse) {
   res.headers.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate')
   return res
-}
-
-type SupplierOrderItemRow = {
-  received_qty: number | null
 }
 
 export async function DELETE(req: NextRequest) {
@@ -48,43 +49,50 @@ export async function DELETE(req: NextRequest) {
 
     const admin = createSupabaseAdminClient()
 
-    const { data: existing, error: loadErr } = await admin
+    const { data: order, error: orderErr } = await admin
       .from('store_supplier_orders')
       .select('id')
       .eq('id', id)
       .maybeSingle<{ id: string }>()
-    if (loadErr) {
-      return noStore(NextResponse.json({ ok: false, error: 'LOAD_FAILED', details: loadErr.message }, { status: 500 }))
+    if (orderErr) {
+      return noStore(NextResponse.json({ ok: false, error: 'LOAD_FAILED', details: orderErr.message }, { status: 500 }))
     }
-    if (!existing?.id) {
+    if (!order?.id) {
       return noStore(NextResponse.json({ ok: false, error: 'NOT_FOUND' }, { status: 404 }))
     }
 
     const { data: items, error: itemsErr } = await admin
       .from('store_supplier_order_items')
-      .select('received_qty')
+      .select('id, received_qty')
       .eq('supplier_order_id', id)
     if (itemsErr) {
       return noStore(NextResponse.json({ ok: false, error: 'ITEMS_LOAD_FAILED', details: itemsErr.message }, { status: 500 }))
     }
 
-    const hasReceivedQty = (Array.isArray(items) ? (items as SupplierOrderItemRow[]) : []).some((item) => Number(item.received_qty || 0) > 0)
+    const hasReceivedQty = (Array.isArray(items) ? (items as SupplierOrderItemRow[]) : []).some(
+      (item) => Math.max(0, Number(item.received_qty ?? 0)) > 0
+    )
     if (hasReceivedQty) {
       return noStore(
         NextResponse.json(
           {
             ok: false,
             error: 'DELETE_NOT_ALLOWED',
-            details: 'This supplier order cannot be deleted because received quantities already increased stock.',
+            details: 'This supplier order cannot be deleted because received quantities already impacted stock.',
           },
           { status: 400 }
         )
       )
     }
 
-    const { error: deleteErr } = await admin.from('store_supplier_orders').delete().eq('id', id)
-    if (deleteErr) {
-      return noStore(NextResponse.json({ ok: false, error: 'DELETE_FAILED', details: deleteErr.message }, { status: 500 }))
+    const { error: deleteItemsErr } = await admin.from('store_supplier_order_items').delete().eq('supplier_order_id', id)
+    if (deleteItemsErr) {
+      return noStore(NextResponse.json({ ok: false, error: 'DELETE_ITEMS_FAILED', details: deleteItemsErr.message }, { status: 500 }))
+    }
+
+    const { error: deleteOrderErr } = await admin.from('store_supplier_orders').delete().eq('id', id)
+    if (deleteOrderErr) {
+      return noStore(NextResponse.json({ ok: false, error: 'DELETE_FAILED', details: deleteOrderErr.message }, { status: 500 }))
     }
 
     revalidateTag('store-products')
@@ -94,6 +102,6 @@ export async function DELETE(req: NextRequest) {
 
     return noStore(NextResponse.json({ ok: true }))
   } catch (e: any) {
-    return noStore(NextResponse.json({ ok: false, error: 'SERVER_ERROR', details: e?.message ?? String(e) }, { status: 500 }))
+    return noStore(NextResponse.json({ ok: false, error: 'SERVER_ERROR', details: e?.message || String(e) }, { status: 500 }))
   }
 }
