@@ -374,8 +374,8 @@ export default async function AdminStoreSalesPage({ searchParams }: { searchPara
                   ? null
                   : 'Only draft or canceled sales can be deleted.'
             return (
-              <Card key={sale.id}>
-                <CardContent className="space-y-4">
+              <details key={sale.id} className="overflow-hidden rounded-2xl border bg-white">
+                <summary className="cursor-pointer list-none p-4 [&::-webkit-details-marker]:hidden">
                   <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                     <div className="min-w-0 space-y-1">
                       <div className="flex flex-wrap items-center gap-2">
@@ -390,13 +390,27 @@ export default async function AdminStoreSalesPage({ searchParams }: { searchPara
                       <div className="text-xs text-[hsl(var(--muted))]">Created {fmtDateTime(sale.created_at)}{sale.delivered_at ? ` · Delivered ${fmtDateTime(sale.delivered_at)}` : ''}</div>
                     </div>
 
-                    <div className="flex flex-wrap items-center gap-2">
-                      {sale.buyer_user_id ? (
-                        <Button asChild variant="outline" size="sm" href={`/members/${sale.buyer_user_id}`}>
-                          Open member
-                        </Button>
-                      ) : null}
+                    <div className="flex flex-wrap items-center justify-end gap-2">
+                      <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-medium text-slate-700">
+                        Total {formatCurrency(sale.total_cents, 'en-EG', sale.currency || 'EGP')}
+                      </span>
+                      <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-medium text-slate-700">
+                        Paid {formatCurrency(sale.paid_cents, 'en-EG', sale.currency || 'EGP')}
+                      </span>
+                      <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-medium text-slate-700">
+                        Debt {formatCurrency(sale.debt_cents, 'en-EG', sale.currency || 'EGP')}
+                      </span>
                     </div>
+                  </div>
+                </summary>
+
+                <div className="border-t p-4">
+                  <div className="flex flex-wrap items-center gap-2 pb-4">
+                    {sale.buyer_user_id ? (
+                      <Button asChild variant="outline" size="sm" href={`/members/${sale.buyer_user_id}`}>
+                        Open member
+                      </Button>
+                    ) : null}
                   </div>
 
                   <div className="grid grid-cols-1 gap-3 xl:grid-cols-3">
@@ -443,8 +457,8 @@ export default async function AdminStoreSalesPage({ searchParams }: { searchPara
                       deleteBlockedReason={deleteBlockedReason}
                     />
                   </div>
-                </CardContent>
-              </Card>
+                </div>
+              </details>
             )
           })}
         </div>
