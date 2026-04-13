@@ -1,6 +1,7 @@
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
+import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { getSessionUserCached, getSupabaseAdminClientCached } from '@/lib/requestCache'
 import PageHeader from '@/components/layout/PageHeader'
@@ -16,6 +17,9 @@ import AdminSaleQuickEdit from '@/components/store/AdminSaleQuickEdit'
 import StoreAdminNav from '@/components/store/StoreAdminNav'
 
 type SearchParams = Record<string, string | string[] | undefined>
+
+type SortDir = 'asc' | 'desc'
+type SaleSortKey = 'created_at' | 'buyer_full_name' | 'status' | 'total_cents' | 'paid_cents' | 'debt_cents'
 
 type SaleStatus = 'draft' | 'partial_paid' | 'paid' | 'delivered' | 'canceled'
 type PaymentMethod = 'cash' | 'card' | 'bank_transfer' | 'instapay'
@@ -76,6 +80,30 @@ const PAYMENTS: Array<{ value: 'all' | PaymentMethod; label: string }> = [
   { value: 'bank_transfer', label: 'Bank transfer' },
   { value: 'card', label: 'Card' },
 ]
+
+
+function normalizeSortDir(v: string): SortDir {
+  return v === 'asc' ? 'asc' : 'desc'
+}
+
+function normalizeSaleSort(v: string): SaleSortKey {
+  return v === 'buyer_full_name' || v === 'status' || v === 'total_cents' || v === 'paid_cents' || v === 'debt_cents' ? v : 'created_at'
+}
+
+function renderSortLink(basePath: string, params: Record<string, string>, column: SaleSortKey, currentSort: SaleSortKey, currentDir: SortDir, label: string, defaultDir: SortDir = 'asc') {
+  const isActive = currentSort === column
+  const nextDir: SortDir = isActive ? (currentDir === 'asc' ? 'desc' : 'asc') : defaultDir
+  return (
+    <Link
+      prefetch={false}
+      href={buildUrl(basePath, { ...params, sort: column, dir: nextDir, page: '1' })}
+      className="inline-flex items-center gap-1 hover:text-black"
+    >
+      <span>{label}</span>
+      <span className="text-[10px]">{isActive ? (currentDir === 'asc' ? '↑' : '↓') : '↕'}</span>
+    </Link>
+  )
+}
 
 function strParam(v: unknown) {
   const s = Array.isArray(v) ? v[0] : v
@@ -175,6 +203,8 @@ export default async function AdminStoreSalesPage({ searchParams }: { searchPara
   const paymentRaw = strParam(searchParams?.payment)
   const page = clampInt(searchParams?.page, 1, 1, 9999)
   const pageSize = clampInt(searchParams?.page_size, 12, 6, 50)
+  const sort = normalizeSaleSort(strParam(searchParams?.sort))
+  const dir = normalizeSortDir(strParam(searchParams?.dir))
 
   const status = (STATUSES.map((s) => s.value) as string[]).includes(statusRaw) ? statusRaw : 'all'
   const payment = (PAYMENTS.map((p) => p.value) as string[]).includes(paymentRaw) ? paymentRaw : 'all'
@@ -227,8 +257,13 @@ export default async function AdminStoreSalesPage({ searchParams }: { searchPara
     let salesQ = supa
       .from('store_sales')
       .select('id,buyer_user_id,buyer_member_id,buyer_full_name,buyer_email,buyer_phone,status,payment_method,currency,total_cents,paid_cents,debt_cents,note,delivered_at,created_at')
-      .order('created_at', { ascending: false })
-      .range((page - 1) * pageSize, page * pageSize - 1)
+      .order(sort, { ascending: dir === 'asc' })
+
+    if (sort !== 'created_at') {
+      salesQ = salesQ.order('created_at', { ascending: false })
+    }
+
+    salesQ = salesQ.range((page - 1) * pageSize, page * pageSize - 1)
 
     if (status !== 'all') {
       countQ = countQ.eq('status', status)
@@ -277,6 +312,8 @@ export default async function AdminStoreSalesPage({ searchParams }: { searchPara
     status,
     payment,
     page_size: String(pageSize),
+    sort,
+    dir,
   }
 
   return (
@@ -335,6 +372,8 @@ export default async function AdminStoreSalesPage({ searchParams }: { searchPara
                 </select>
               </label>
               <input type="hidden" name="page_size" value={String(pageSize)} />
+              <input type="hidden" name="sort" value={sort} />
+              <input type="hidden" name="dir" value={dir} />
               <div className="flex flex-wrap items-center gap-2 md:col-span-4">
                 <Button type="submit">Apply filters</Button>
                 <Button asChild variant="outline" href="/admin/store/sales">
@@ -360,16 +399,16 @@ export default async function AdminStoreSalesPage({ searchParams }: { searchPara
           {sales.length > 0 ? (
             <Card>
               <CardContent className="space-y-4">
-                <div className="text-xs text-[hsl(var(--muted))]">Ultra-dense desktop row list. Open only the sales you need to inspect or edit.</div>
+                <div className="text-xs text-[hsl(var(--muted))]">Ultra-dense desktop row list. Open only the sales you need to inspect or edit. Click desktop headers to sort.</div>
 
                 <div className="hidden xl:grid grid-cols-[minmax(0,1.8fr)_minmax(0,1.8fr)_140px_120px_120px_120px_150px_96px] gap-3 rounded-2xl border bg-[hsl(var(--card))] px-4 py-3 text-[11px] font-semibold uppercase tracking-[0.14em] text-[hsl(var(--muted))]">
-                  <div>Buyer</div>
+                  {renderSortLink('/admin/store/sales', baseParams, 'buyer_full_name', sort, dir, 'Buyer')}
                   <div>Items</div>
-                  <div>Status</div>
-                  <div>Total</div>
-                  <div>Paid</div>
-                  <div>Debt</div>
-                  <div>Created</div>
+                  {renderSortLink('/admin/store/sales', baseParams, 'status', sort, dir, 'Status')}
+                  {renderSortLink('/admin/store/sales', baseParams, 'total_cents', sort, dir, 'Total', 'desc')}
+                  {renderSortLink('/admin/store/sales', baseParams, 'paid_cents', sort, dir, 'Paid', 'desc')}
+                  {renderSortLink('/admin/store/sales', baseParams, 'debt_cents', sort, dir, 'Debt', 'desc')}
+                  {renderSortLink('/admin/store/sales', baseParams, 'created_at', sort, dir, 'Created', 'desc')}
                   <div className="text-right">Open</div>
                 </div>
 

@@ -15,6 +15,8 @@ import StoreAdminNav from '@/components/store/StoreAdminNav'
 
 type PreorderStatus = 'pending' | 'confirmed' | 'ordered_from_supplier' | 'ready' | 'completed' | 'canceled'
 type PreorderStatusFilter = 'all' | PreorderStatus
+type SortDir = 'asc' | 'desc'
+type PreorderSortKey = 'updated_at' | 'product_name' | 'buyer' | 'status' | 'qty' | 'total_cents' | 'deposit_cents'
 
 type PreorderRow = {
   id: string
@@ -60,6 +62,87 @@ const PREORDER_STATUS_FILTERS: Array<{ value: PreorderStatusFilter; label: strin
   { value: 'completed', label: 'Completed' },
   { value: 'canceled', label: 'Canceled' },
 ]
+
+
+const PREORDER_STATUS_ORDER: Record<PreorderStatus, number> = {
+  pending: 0,
+  confirmed: 1,
+  ordered_from_supplier: 2,
+  ready: 3,
+  completed: 4,
+  canceled: 5,
+}
+
+function normalizeSort(v: string): PreorderSortKey {
+  return v === 'product_name' || v === 'buyer' || v === 'status' || v === 'qty' || v === 'total_cents' || v === 'deposit_cents' ? v : 'updated_at'
+}
+
+function normalizeDir(v: string): SortDir {
+  return v === 'asc' ? 'asc' : 'desc'
+}
+
+function compareText(a: string | null | undefined, b: string | null | undefined) {
+  return String(a || '').localeCompare(String(b || ''), 'en', { numeric: true, sensitivity: 'base' })
+}
+
+function compareNumber(a: number | null | undefined, b: number | null | undefined) {
+  return Number(a || 0) - Number(b || 0)
+}
+
+function compareDate(a: string | null | undefined, b: string | null | undefined) {
+  return new Date(a || 0).getTime() - new Date(b || 0).getTime()
+}
+
+function sortPreorders(rows: PreorderRow[], sort: PreorderSortKey, dir: SortDir) {
+  const factor = dir === 'asc' ? 1 : -1
+  return [...rows].sort((a, b) => {
+    let result = 0
+    switch (sort) {
+      case 'product_name':
+        result = compareText(a.product_name, b.product_name)
+        break
+      case 'buyer':
+        result = compareText(a.buyer_full_name || a.buyer_email || a.buyer_phone, b.buyer_full_name || b.buyer_email || b.buyer_phone)
+        break
+      case 'status':
+        result = compareNumber(PREORDER_STATUS_ORDER[a.status], PREORDER_STATUS_ORDER[b.status])
+        break
+      case 'qty':
+        result = compareNumber(a.qty, b.qty)
+        break
+      case 'total_cents':
+        result = compareNumber(a.total_cents, b.total_cents)
+        break
+      case 'deposit_cents':
+        result = compareNumber(a.deposit_cents, b.deposit_cents)
+        break
+      case 'updated_at':
+      default:
+        result = compareDate(a.updated_at, b.updated_at)
+        break
+    }
+    if (result === 0) {
+      result = compareDate(a.updated_at, b.updated_at)
+      if (result === 0) result = compareText(a.id, b.id)
+    }
+    return result * factor
+  })
+}
+
+function renderSortLink(basePath: string, params: Record<string, string>, column: PreorderSortKey, currentSort: PreorderSortKey, currentDir: SortDir, label: string, defaultDir: SortDir = 'asc', align: 'left' | 'right' = 'left') {
+  const isActive = currentSort === column
+  const nextDir: SortDir = isActive ? (currentDir === 'asc' ? 'desc' : 'asc') : defaultDir
+  return (
+    <Link
+      prefetch={false}
+      href={buildUrl(basePath, { ...params, sort: column, dir: nextDir, page: '1' })}
+      className={`inline-flex w-full items-center gap-1 hover:text-black ${align === 'right' ? 'justify-end' : ''}`}
+    >
+      <span>{label}</span>
+      <span className="text-[10px]">{isActive ? (currentDir === 'asc' ? '↑' : '↓') : '↕'}</span>
+    </Link>
+  )
+}
 
 function clampInt(v: unknown, def: number, min: number, max: number) {
   const raw = Array.isArray(v) ? v[0] : v
@@ -188,6 +271,8 @@ export default async function AdminStorePreordersPage({
   const pageSize = clampInt(searchParams?.page_size, 12, 6, 40)
   const q = strParam(searchParams?.q).trim()
   const status = normalizeStatus(strParam(searchParams?.status))
+  const sort = normalizeSort(strParam(searchParams?.sort))
+  const dir = normalizeDir(strParam(searchParams?.dir))
 
   const supa = getSupabaseAdminClientCached()
   let rows: PreorderRow[] = []
@@ -214,16 +299,19 @@ export default async function AdminStorePreordersPage({
   }
 
   const metrics = computeMetrics(rows)
-  const totalPages = Math.max(1, Math.ceil(rows.length / pageSize))
+  const sortedRows = sortPreorders(rows, sort, dir)
+  const totalPages = Math.max(1, Math.ceil(sortedRows.length / pageSize))
   const safePage = Math.min(page, totalPages)
   const start = (safePage - 1) * pageSize
-  const items = rows.slice(start, start + pageSize)
+  const items = sortedRows.slice(start, start + pageSize)
   const hasMore = safePage < totalPages
 
   const baseParams = {
     q,
     status: status === 'all' ? '' : status,
     page_size: String(pageSize),
+    sort,
+    dir,
   }
 
   return (
@@ -306,6 +394,8 @@ export default async function AdminStorePreordersPage({
                   {PREORDER_STATUS_FILTERS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
                 </select>
               </label>
+              <input type="hidden" name="sort" value={sort} />
+              <input type="hidden" name="dir" value={dir} />
               <div className="flex items-end gap-2">
                 <button className="min-h-[42px] rounded-xl bg-black px-4 py-2 text-sm font-medium text-white">Apply</button>
                 <Link href="/admin/store/preorders" className="inline-flex min-h-[42px] items-center rounded-xl border px-4 py-2 text-sm font-medium hover:bg-gray-50">Reset</Link>
@@ -322,7 +412,7 @@ export default async function AdminStorePreordersPage({
           <Card>
             <CardHeader>
               <CardTitle>Admin preorders</CardTitle>
-              <div className="text-xs text-[hsl(var(--muted))]">{rows.length} preorder(s) · dense row view for desktop</div>
+              <div className="text-xs text-[hsl(var(--muted))]">{rows.length} preorder(s) · dense row view for desktop · click desktop headers to sort</div>
             </CardHeader>
             <CardContent className="space-y-4">
               {items.length === 0 ? (
@@ -330,13 +420,13 @@ export default async function AdminStorePreordersPage({
               ) : (
                 <>
                   <div className="hidden xl:grid grid-cols-[minmax(0,2fr)_minmax(0,1.6fr)_140px_80px_120px_120px_150px_96px] gap-3 rounded-2xl border bg-[hsl(var(--card))] px-4 py-3 text-[11px] font-semibold uppercase tracking-[0.14em] text-[hsl(var(--muted))]">
-                    <div>Product</div>
-                    <div>Buyer</div>
-                    <div>Status</div>
-                    <div>Qty</div>
-                    <div>Total</div>
-                    <div>Deposit</div>
-                    <div>Updated</div>
+                    {renderSortLink('/admin/store/preorders', baseParams, 'product_name', sort, dir, 'Product')}
+                    {renderSortLink('/admin/store/preorders', baseParams, 'buyer', sort, dir, 'Buyer')}
+                    {renderSortLink('/admin/store/preorders', baseParams, 'status', sort, dir, 'Status')}
+                    {renderSortLink('/admin/store/preorders', baseParams, 'qty', sort, dir, 'Qty')}
+                    {renderSortLink('/admin/store/preorders', baseParams, 'total_cents', sort, dir, 'Total', 'desc')}
+                    {renderSortLink('/admin/store/preorders', baseParams, 'deposit_cents', sort, dir, 'Deposit', 'desc')}
+                    {renderSortLink('/admin/store/preorders', baseParams, 'updated_at', sort, dir, 'Updated', 'desc')}
                     <div className="text-right">Open</div>
                   </div>
 
