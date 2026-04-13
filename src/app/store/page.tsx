@@ -9,7 +9,6 @@ import { getSessionUserCached, getSupabaseAdminClientCached } from '@/lib/reques
 import PageHeader from '@/components/layout/PageHeader'
 import Section from '@/components/layout/Section'
 import { Card, CardContent } from '@/components/ui/Card'
-import StoreCatalogModelCard from '@/components/store/StoreCatalogModelCard'
 import { canAccessStore, canAccessStoreAdmin } from '@/lib/rbac'
 import {
   FALLBACK_STORE_PRODUCT_CATEGORIES,
@@ -17,6 +16,7 @@ import {
   storeCategoryLabelMap,
   type StoreProductCategoryRow,
 } from '@/lib/storeCategories'
+import StoreCatalogModelCard from '@/components/store/StoreCatalogModelCard'
 
 type Category = string
 
@@ -49,18 +49,6 @@ type ProductRow = {
   created_at?: string | null
 }
 
-type ProductModelGroup = {
-  key: string
-  category: Category
-  name: string
-  color: string | null
-  image_path: string | null
-  priceMinCents: number
-  priceMaxCents: number
-  currency: string
-  created_at: string | null
-  variants: ProductRow[]
-}
 
 const STORE_PRODUCT_BUCKET = 'store-product-images'
 const SUPABASE_URL = (process.env.NEXT_PUBLIC_SUPABASE_URL || '').replace(/\/+$/, '')
@@ -73,12 +61,7 @@ function storeProductImageUrl(path: string | null | undefined) {
 }
 
 const listStoreProductsCached = unstable_cache(
-  async (
-    isSuperAdmin: boolean,
-    showPreorderOnly: boolean,
-    category: string,
-    q: string
-  ) => {
+  async (isSuperAdmin: boolean, showPreorderOnly: boolean, category: string, q: string) => {
     const supa = getSupabaseAdminClientCached()
 
     let qry = supa
@@ -104,10 +87,10 @@ const listStoreProductsCached = unstable_cache(
       }
     }
 
-    const { data, error } = await qry.limit(240)
+    const { data, error } = await qry
     if (error) throw new Error(error.message)
 
-    return { items: ((data ?? []) as any[]) as ProductRow[] }
+    return { items: ((data ?? []) as ProductRow[]) }
   },
   ['store_products_user_preorders_v3'],
   { revalidate: 120, tags: ['store-products'] }
@@ -137,46 +120,116 @@ function buildUrl(base: string, params: Record<string, string>) {
   return s ? `${base}?${s}` : base
 }
 
-
 function categoryLabel(category: Category | 'all', labels: Map<string, string>) {
   if (category === 'all') return 'All'
   return labels.get(category) ?? category
 }
 
-function buildModelGroups(items: ProductRow[]) {
-  const groups = new Map<string, ProductModelGroup>()
+
+type StoreModelVariant = {
+  id: string
+  category: Category
+  name: string
+  color: string | null
+  size: string | null
+  price_cents: number
+  currency: string | null
+  is_active: boolean
+  allow_preorder: boolean
+  image_url: string | null
+}
+
+type StoreModelCard = {
+  key: string
+  category: Category
+  categoryLabel: string
+  name: string
+  priceFromCents: number
+  priceToCents: number
+  currency: string
+  colorGroups: Array<{
+    key: string
+    label: string
+    image_url: string | null
+    variants: StoreModelVariant[]
+  }>
+  previewImageUrl: string | null
+}
+
+function normalizeKeyPart(value: string | null | undefined, fallback: string) {
+  const clean = String(value ?? '').trim().toLowerCase()
+  return clean || fallback
+}
+
+function labelOrFallback(value: string | null | undefined, fallback: string) {
+  const clean = String(value ?? '').trim()
+  return clean || fallback
+}
+
+function buildStoreModelCards(items: ProductRow[], categoryLabels: Map<string, string>) {
+  const grouped = new Map<string, { category: Category; name: string; variants: StoreModelVariant[] }>()
 
   for (const item of items) {
-    const key = [item.category, item.name.trim().toLowerCase(), (item.color ?? '').trim().toLowerCase()].join('::')
-    const currency = item.currency ?? 'EGP'
-    const createdAt = item.created_at ?? null
-    const existing = groups.get(key)
-
-    if (!existing) {
-      groups.set(key, {
-        key,
-        category: item.category,
-        name: item.name,
-        color: item.color,
-        image_path: item.image_path,
-        priceMinCents: item.price_cents ?? 0,
-        priceMaxCents: item.price_cents ?? 0,
-        currency,
-        created_at: createdAt,
-        variants: [item],
-      })
-      continue
-    }
-
-    existing.variants.push(item)
-    existing.priceMinCents = Math.min(existing.priceMinCents, item.price_cents ?? 0)
-    existing.priceMaxCents = Math.max(existing.priceMaxCents, item.price_cents ?? 0)
-
-    if (!existing.image_path && item.image_path) existing.image_path = item.image_path
-    if ((createdAt ?? '') > (existing.created_at ?? '')) existing.created_at = createdAt
+    const name = String(item.name ?? '').trim()
+    if (!name) continue
+    const key = `${item.category}__${normalizeKeyPart(name, 'item')}`
+    const current = grouped.get(key) ?? { category: item.category, name, variants: [] }
+    current.variants.push({
+      id: item.id,
+      category: item.category,
+      name,
+      color: item.color,
+      size: item.size,
+      price_cents: Number(item.price_cents ?? 0),
+      currency: item.currency ?? 'EGP',
+      is_active: Boolean(item.is_active),
+      allow_preorder: Boolean(item.allow_preorder),
+      image_url: storeProductImageUrl(item.image_path),
+    })
+    grouped.set(key, current)
   }
 
-  return Array.from(groups.values()).sort((a, b) => (b.created_at ?? '').localeCompare(a.created_at ?? ''))
+  return Array.from(grouped.entries())
+    .map(([key, model]) => {
+      const colorMap = new Map<string, { key: string; label: string; image_url: string | null; variants: StoreModelVariant[] }>()
+
+      for (const variant of model.variants) {
+        const colorKey = normalizeKeyPart(variant.color, '__default')
+        const colorLabel = labelOrFallback(variant.color, 'Standard')
+        const bucket = colorMap.get(colorKey) ?? {
+          key: colorKey,
+          label: colorLabel,
+          image_url: variant.image_url,
+          variants: [],
+        }
+        bucket.variants.push(variant)
+        if (!bucket.image_url && variant.image_url) bucket.image_url = variant.image_url
+        colorMap.set(colorKey, bucket)
+      }
+
+      const colorGroups = Array.from(colorMap.values())
+        .map((group) => ({
+          ...group,
+          variants: [...group.variants].sort((a, b) => labelOrFallback(a.size, 'One size').localeCompare(labelOrFallback(b.size, 'One size'), undefined, { numeric: true, sensitivity: 'base' })),
+        }))
+        .sort((a, b) => a.label.localeCompare(b.label, undefined, { numeric: true, sensitivity: 'base' }))
+
+      const prices = model.variants.map((variant) => Number(variant.price_cents ?? 0))
+      const fallbackCurrency = model.variants.find((variant) => variant.currency)?.currency ?? 'EGP'
+
+      return {
+        key,
+        category: model.category,
+        categoryLabel: categoryLabel(model.category, categoryLabels),
+        name: model.name,
+        priceFromCents: prices.length ? Math.min(...prices) : 0,
+        priceToCents: prices.length ? Math.max(...prices) : 0,
+        currency: fallbackCurrency,
+        colorGroups,
+        previewImageUrl: colorGroups.find((group) => group.image_url)?.image_url ?? null,
+      } satisfies StoreModelCard
+    })
+    .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }))
 }
 
 export default async function StorePage({
@@ -217,6 +270,9 @@ export default async function StorePage({
   const category = normalizeCat(strParam(searchParams?.category), categoryKeys)
   const q = strParam(searchParams?.q).trim()
 
+  const fromRow = (page - 1) * pageSize
+  const toRow = fromRow + pageSize - 1
+
   let items: ProductRow[] = []
   let errorMsg: string | null = null
 
@@ -227,11 +283,9 @@ export default async function StorePage({
     errorMsg = e?.message || String(e)
   }
 
-  const modelGroups = buildModelGroups(items)
-  const totalGroups = modelGroups.length
-  const fromRow = totalGroups > 0 ? (page - 1) * pageSize : 0
-  const pagedGroups = modelGroups.slice(fromRow, fromRow + pageSize)
-  const hasMore = fromRow + pageSize < totalGroups
+  const modelCards = buildStoreModelCards(items, categoryLabels)
+  const pagedModels = modelCards.slice(fromRow, toRow + 1)
+  const hasMore = modelCards.length > toRow + 1
 
   const baseParams = {
     category: category === 'all' ? '' : category,
@@ -293,16 +347,16 @@ export default async function StorePage({
 
               <div className="grid gap-2 text-sm sm:grid-cols-3">
                 <div className="rounded-2xl border border-[hsl(var(--border))] bg-white/70 px-3 py-3">
-                  <div className="font-medium">1. Choose</div>
-                  <div className="mt-1 text-xs text-[hsl(var(--muted))]">Pick the product, color and size that suit you.</div>
+                  <div className="font-medium">1. Choose model</div>
+                  <div className="mt-1 text-xs text-[hsl(var(--muted))]">Open the model you want from the selected category.</div>
                 </div>
                 <div className="rounded-2xl border border-[hsl(var(--border))] bg-white/70 px-3 py-3">
-                  <div className="font-medium">2. Send request</div>
-                  <div className="mt-1 text-xs text-[hsl(var(--muted))]">Set the quantity and add an optional note.</div>
+                  <div className="font-medium">2. Choose color / size</div>
+                  <div className="mt-1 text-xs text-[hsl(var(--muted))]">Pick the exact color first, then the right size.</div>
                 </div>
                 <div className="rounded-2xl border border-[hsl(var(--border))] bg-white/70 px-3 py-3">
-                  <div className="font-medium">3. Pay later</div>
-                  <div className="mt-1 text-xs text-[hsl(var(--muted))]">Deposit and final payment stay managed offline.</div>
+                  <div className="font-medium">3. Send request</div>
+                  <div className="mt-1 text-xs text-[hsl(var(--muted))]">Confirm quantity, add an optional note, then pay later offline.</div>
                 </div>
               </div>
 
@@ -356,7 +410,7 @@ export default async function StorePage({
                   name="q"
                   defaultValue={q}
                   className="rounded-xl border bg-white px-3 py-2 text-sm"
-                  placeholder="Search by item, color or size"
+                  placeholder="Search by model, color or size"
                 />
               </div>
 
@@ -371,12 +425,12 @@ export default async function StorePage({
               ) : null}
 
               <div className="ml-auto text-xs text-[hsl(var(--muted))]">
-                {totalGroups > 0 ? (
+                {modelCards.length > 0 ? (
                   <>
-                    Showing <b>{fromRow + 1}</b>–<b>{Math.min(totalGroups, fromRow + pagedGroups.length)}</b> of <b>{totalGroups}</b>
+                    Showing <b>{fromRow + 1}</b>–<b>{Math.min(fromRow + pagedModels.length, modelCards.length)}</b> model{modelCards.length > 1 ? 's' : ''}
                   </>
                 ) : (
-                  <>No products.</>
+                  <>No models.</>
                 )}
               </div>
             </form>
@@ -413,7 +467,7 @@ export default async function StorePage({
               <div className="text-sm text-red-600">Failed to load products: {errorMsg}</div>
             </CardContent>
           </Card>
-        ) : pagedGroups.length === 0 ? (
+        ) : modelCards.length === 0 ? (
           <Card>
             <CardContent>
               <div className="text-sm text-[hsl(var(--muted))]">
@@ -423,31 +477,8 @@ export default async function StorePage({
           </Card>
         ) : (
           <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
-            {pagedGroups.map((model) => (
-              <StoreCatalogModelCard
-                key={model.key}
-                model={{
-                  key: model.key,
-                  categoryLabel: categoryLabel(model.category, categoryLabels),
-                  name: model.name,
-                  color: model.color,
-                  imageUrl: storeProductImageUrl(model.image_path),
-                  priceMinCents: model.priceMinCents,
-                  priceMaxCents: model.priceMaxCents,
-                  currency: model.currency,
-                  variants: model.variants.map((variant) => ({
-                    id: variant.id,
-                    category: variant.category,
-                    name: variant.name,
-                    color: variant.color,
-                    size: variant.size,
-                    price_cents: variant.price_cents,
-                    currency: variant.currency,
-                    is_active: variant.is_active,
-                    allow_preorder: variant.allow_preorder,
-                  })),
-                }}
-              />
+            {pagedModels.map((model) => (
+              <StoreCatalogModelCard key={model.key} model={model} canPreorder={canPreorder} />
             ))}
           </div>
         )}
