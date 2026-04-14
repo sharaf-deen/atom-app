@@ -112,6 +112,13 @@ export default function StoreModelManager() {
   const [variantsLoadingId, setVariantsLoadingId] = useState('')
   const [variantsErrorByModel, setVariantsErrorByModel] = useState<Record<string, string>>({})
   const [createVariantTarget, setCreateVariantTarget] = useState<StoreProductModelRow | null>(null)
+  const [showUnlinkedQueue, setShowUnlinkedQueue] = useState(true)
+  const [unlinkedItems, setUnlinkedItems] = useState<LinkedVariantRow[]>([])
+  const [unlinkedTotal, setUnlinkedTotal] = useState(0)
+  const [unlinkedLoading, setUnlinkedLoading] = useState(false)
+  const [unlinkedError, setUnlinkedError] = useState('')
+  const [unlinkedCategory, setUnlinkedCategory] = useState('')
+  const [unlinkedQuery, setUnlinkedQuery] = useState('')
 
   const isBusy = busyAction !== null
   const createBusy = busyAction?.type === 'create'
@@ -123,6 +130,16 @@ export default function StoreModelManager() {
   const inactiveCount = useMemo(() => items.filter((item) => !item.is_active).length, [items])
   const usedCount = useMemo(() => items.filter((item) => Number(item.linked_product_count || 0) > 0).length, [items])
   const featuredCount = useMemo(() => items.filter((item) => item.is_featured).length, [items])
+  const linkedVariantCount = useMemo(() => items.reduce((sum, item) => sum + Number(item.linked_product_count || 0), 0), [items])
+  const unlinkedActiveCount = useMemo(() => unlinkedItems.filter((item) => item.is_active).length, [unlinkedItems])
+  const unlinkedLowStockCount = useMemo(
+    () => unlinkedItems.filter((item) => Number(item.inventory_qty || 0) <= Number(item.low_stock_threshold || 0)).length,
+    [unlinkedItems]
+  )
+  const coveragePercent = useMemo(() => {
+    const total = linkedVariantCount + unlinkedTotal
+    return total > 0 ? Math.round((linkedVariantCount / total) * 100) : 0
+  }, [linkedVariantCount, unlinkedTotal])
   const nextCreateSlug = useMemo(() => normalizeStoreModelSlug(form.slug || form.name), [form.slug, form.name])
   const nextEditSlug = useMemo(() => normalizeStoreModelSlug(editForm.slug || editForm.name), [editForm.slug, editForm.name])
 
@@ -178,6 +195,10 @@ export default function StoreModelManager() {
     void load()
   }, [])
 
+  useEffect(() => {
+    void loadUnlinkedQueue()
+  }, [unlinkedCategory, unlinkedQuery])
+
   async function loadVariants(modelId: string, force = false) {
     if (!modelId) return
     if (!force && variantsByModel[modelId]) return
@@ -207,6 +228,41 @@ export default function StoreModelManager() {
       }))
     } finally {
       setVariantsLoadingId('')
+    }
+  }
+
+  async function loadUnlinkedQueue(nextCategory = unlinkedCategory, nextQuery = unlinkedQuery) {
+    setUnlinkedLoading(true)
+    setUnlinkedError('')
+    try {
+      const params = new URLSearchParams({
+        all: '1',
+        page: '1',
+        limit: '200',
+        linked_state: 'unlinked',
+      })
+      if (String(nextCategory || '').trim()) params.set('category', String(nextCategory).trim())
+      if (String(nextQuery || '').trim()) params.set('q', String(nextQuery).trim())
+
+      const res = await fetch(`/api/store/products/list?${params.toString()}`, {
+        cache: 'no-store',
+        credentials: 'include',
+      })
+      const json = await res.json().catch(() => ({}))
+      if (!res.ok || !json?.ok) {
+        setUnlinkedItems([])
+        setUnlinkedTotal(0)
+        setUnlinkedError(json?.details || json?.error || 'Could not load unlinked variants.')
+        return
+      }
+      setUnlinkedItems(Array.isArray(json.items) ? (json.items as LinkedVariantRow[]) : [])
+      setUnlinkedTotal(Number(json.total || 0))
+    } catch (e: any) {
+      setUnlinkedItems([])
+      setUnlinkedTotal(0)
+      setUnlinkedError(e?.message || 'Could not load unlinked variants.')
+    } finally {
+      setUnlinkedLoading(false)
     }
   }
 
@@ -405,22 +461,30 @@ export default function StoreModelManager() {
     <div className="space-y-4">
       {status.kind ? <InlineAlert variant={status.kind === 'error' ? 'error' : 'success'}>{status.msg}</InlineAlert> : null}
 
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
         <div className="rounded-2xl border bg-white px-4 py-3">
-          <div className="text-xs text-[hsl(var(--muted))]">Total</div>
+          <div className="text-xs text-[hsl(var(--muted))]">Models</div>
           <div className="mt-1 text-xl font-semibold">{items.length}</div>
         </div>
         <div className="rounded-2xl border bg-white px-4 py-3">
-          <div className="text-xs text-[hsl(var(--muted))]">Active</div>
+          <div className="text-xs text-[hsl(var(--muted))]">Active models</div>
           <div className="mt-1 text-xl font-semibold">{activeCount}</div>
         </div>
         <div className="rounded-2xl border bg-white px-4 py-3">
-          <div className="text-xs text-[hsl(var(--muted))]">Inactive</div>
+          <div className="text-xs text-[hsl(var(--muted))]">Inactive models</div>
           <div className="mt-1 text-xl font-semibold">{inactiveCount}</div>
         </div>
         <div className="rounded-2xl border bg-white px-4 py-3">
-          <div className="text-xs text-[hsl(var(--muted))]">Linked to products</div>
+          <div className="text-xs text-[hsl(var(--muted))]">Models with variants</div>
           <div className="mt-1 text-xl font-semibold">{usedCount}</div>
+        </div>
+        <div className="rounded-2xl border bg-white px-4 py-3">
+          <div className="text-xs text-[hsl(var(--muted))]">Linked variants</div>
+          <div className="mt-1 text-xl font-semibold">{linkedVariantCount}</div>
+        </div>
+        <div className="rounded-2xl border bg-white px-4 py-3">
+          <div className="text-xs text-[hsl(var(--muted))]">Coverage</div>
+          <div className="mt-1 text-xl font-semibold">{coveragePercent}%</div>
         </div>
       </div>
 
@@ -498,6 +562,127 @@ export default function StoreModelManager() {
           <Button type="button" variant="outline" onClick={resetCreateForm} disabled={isBusy}>Reset</Button>
         </div>
       </form>
+
+      <div className="rounded-2xl border bg-white p-4">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <div className="text-sm font-semibold text-black">Variant linking queue</div>
+            <div className="mt-1 text-xs text-[hsl(var(--muted))]">Find legacy variants that still need a Store V3 model link, then use Edit details to attach them safely.</div>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Button type="button" variant="outline" size="sm" onClick={() => setShowUnlinkedQueue((current) => !current)}>
+              {showUnlinkedQueue ? 'Hide queue' : 'Show queue'}
+            </Button>
+            <Button type="button" variant="outline" size="sm" onClick={() => void loadUnlinkedQueue()} disabled={unlinkedLoading}>
+              {unlinkedLoading ? 'Refreshing…' : 'Refresh queue'}
+            </Button>
+          </div>
+        </div>
+
+        <div className="mt-3 grid gap-3 lg:grid-cols-[220px_minmax(0,1fr)_auto]">
+          <label className="block">
+            <span className="mb-1.5 block text-sm font-semibold text-black">Category filter</span>
+            <select
+              value={unlinkedCategory}
+              onChange={(e) => setUnlinkedCategory(e.target.value)}
+              className="min-h-[44px] w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3.5 py-2.5 text-sm text-black shadow-soft outline-none transition focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+            >
+              <option value="">All categories</option>
+              {categoryOptions.map((option) => (
+                <option key={option.value} value={option.value}>{option.label}</option>
+              ))}
+            </select>
+          </label>
+
+          <Input
+            label="Search unlinked variants"
+            value={unlinkedQuery}
+            onChange={(e) => setUnlinkedQuery(e.target.value)}
+            placeholder="Variant name, color, size"
+          />
+
+          <div className="flex items-end gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => {
+                setUnlinkedCategory('')
+                setUnlinkedQuery('')
+              }}
+              disabled={!unlinkedCategory && !unlinkedQuery}
+            >
+              Reset filters
+            </Button>
+          </div>
+        </div>
+
+        <div className="mt-3 flex flex-wrap gap-2 text-xs text-[hsl(var(--muted))]">
+          <span className="rounded-full border bg-slate-50 px-2 py-1">Unlinked variants: {unlinkedTotal}</span>
+          <span className="rounded-full border bg-slate-50 px-2 py-1">Active in queue: {unlinkedActiveCount}</span>
+          <span className="rounded-full border bg-slate-50 px-2 py-1">Low stock in queue: {unlinkedLowStockCount}</span>
+          <span className="rounded-full border bg-slate-50 px-2 py-1">Featured models: {featuredCount}</span>
+        </div>
+
+        {showUnlinkedQueue ? (
+          <div className="mt-3">
+            {unlinkedError ? <InlineAlert variant="error">{unlinkedError}</InlineAlert> : null}
+
+            {unlinkedLoading ? (
+              <div className="rounded-2xl border border-dashed p-4 text-sm text-[hsl(var(--muted))]">Loading unlinked variants…</div>
+            ) : unlinkedItems.length === 0 ? (
+              <div className="rounded-2xl border border-dashed p-4 text-sm text-[hsl(var(--muted))]">No unlinked variants match the current filters.</div>
+            ) : (
+              <div className="space-y-3">
+                {unlinkedItems.map((variant) => (
+                  <div key={variant.id} className="rounded-2xl border bg-slate-50/70 p-3">
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div>
+                        <div className="text-sm font-semibold">{toVariantLabel(variant)}</div>
+                        <div className="mt-1 flex flex-wrap gap-2 text-xs text-[hsl(var(--muted))]">
+                          <span className="rounded-full border bg-white px-2 py-1">{categoryLabelMap.get(variant.category) || variant.category}</span>
+                          <span className="rounded-full border bg-white px-2 py-1">{formatPrice(variant.price_cents, variant.currency)}</span>
+                          <span className="rounded-full border bg-white px-2 py-1">Stock: {variant.inventory_qty}</span>
+                          <span className={`rounded-full border px-2 py-1 ${variant.is_active ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-slate-200 bg-slate-50 text-slate-700'}`}>
+                            {variant.is_active ? 'Active' : 'Inactive'}
+                          </span>
+                          <span className={`rounded-full border px-2 py-1 ${variant.allow_preorder ? 'border-blue-200 bg-blue-50 text-blue-700' : 'border-slate-200 bg-slate-50 text-slate-700'}`}>
+                            {variant.allow_preorder ? 'Preorder on' : 'Preorder off'}
+                          </span>
+                        </div>
+                        <div className="mt-2 text-xs text-[hsl(var(--muted))]">Use Edit details to assign this variant to a Store V3 model.</div>
+                      </div>
+                    </div>
+                    <div className="mt-3">
+                      <AdminProductQuickEdit
+                        id={variant.id}
+                        category={variant.category}
+                        modelId={variant.model_id}
+                        name={variant.name}
+                        color={variant.color}
+                        size={variant.size}
+                        priceCents={variant.price_cents}
+                        currency={variant.currency}
+                        inventoryQty={variant.inventory_qty}
+                        isActive={variant.is_active}
+                        allowPreorder={variant.allow_preorder}
+                        lowStockThreshold={variant.low_stock_threshold}
+                        onSaved={() => {
+                          void load()
+                          void loadUnlinkedQueue()
+                        }}
+                        onDeleted={() => {
+                          void load()
+                          void loadUnlinkedQueue()
+                        }}
+                      />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        ) : null}
+      </div>
 
       {loading ? (
         <div className="rounded-2xl border border-dashed p-4 text-sm text-[hsl(var(--muted))]">Loading models…</div>
@@ -629,10 +814,12 @@ export default function StoreModelManager() {
                                 onSaved={() => {
                                   void load()
                                   void loadVariants(item.id, true)
+                                  void loadUnlinkedQueue()
                                 }}
                                 onDeleted={() => {
                                   void load()
                                   void loadVariants(item.id, true)
+                                  void loadUnlinkedQueue()
                                 }}
                               />
                             </div>
@@ -717,6 +904,7 @@ export default function StoreModelManager() {
                 void load()
                 setExpandedModelId(target.id)
                 void loadVariants(target.id, true)
+                void loadUnlinkedQueue()
               }
               router.refresh()
             }}
@@ -751,7 +939,7 @@ export default function StoreModelManager() {
       </Modal>
 
       <div className="rounded-2xl border border-dashed p-4 text-sm text-[hsl(var(--muted))]">
-        Featured models: <span className="font-medium text-black">{featuredCount}</span>. Linked variants can now be created and managed directly from each model card.
+        Featured models: <span className="font-medium text-black">{featuredCount}</span>. Coverage now tracks linked vs unlinked variants so you can finish the Store V3 migration before any future enforcement step.
       </div>
     </div>
   )

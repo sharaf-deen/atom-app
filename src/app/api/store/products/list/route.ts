@@ -46,6 +46,13 @@ function safeSearch(q: string | null) {
   return q.trim().replace(/,/g, ' ').slice(0, 60)
 }
 
+function normLinkedState(v: string | null): 'all' | 'linked' | 'unlinked' {
+  const s = (v || '').trim().toLowerCase()
+  if (s === 'linked') return 'linked'
+  if (s === 'unlinked') return 'unlinked'
+  return 'all'
+}
+
 function createSupabaseFromRoute(req: NextRequest, res: NextResponse) {
   return createServerClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
     cookies: {
@@ -106,6 +113,7 @@ export async function GET(req: NextRequest) {
     const all = url.searchParams.get('all') === '1'
     const active = normActive(url.searchParams.get('active'))
     const preorder = normPreorder(url.searchParams.get('preorder'))
+    const linkedState = normLinkedState(url.searchParams.get('linked_state'))
     const q = safeSearch(url.searchParams.get('q'))
 
 
@@ -151,6 +159,14 @@ export async function GET(req: NextRequest) {
     if (modelId) {
       dataQuery = dataQuery.eq('model_id', modelId)
       countQuery = countQuery.eq('model_id', modelId)
+    }
+
+    if (linkedState === 'linked') {
+      dataQuery = dataQuery.not('model_id', 'is', null)
+      countQuery = countQuery.not('model_id', 'is', null)
+    } else if (linkedState === 'unlinked') {
+      dataQuery = dataQuery.is('model_id', null)
+      countQuery = countQuery.is('model_id', null)
     }
 
     if (q) {
