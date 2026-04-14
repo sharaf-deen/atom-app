@@ -109,7 +109,7 @@ export async function GET(req: NextRequest) {
 
 
     const selectCols =
-      'id, category, name, color, size, price_cents, currency, inventory_qty, is_active, allow_preorder, low_stock_threshold, created_at'
+      'id, category, model_id, name, color, size, price_cents, currency, inventory_qty, is_active, allow_preorder, low_stock_threshold, created_at, model:store_product_models(id,name,slug,category_key)'
 
     let dataQuery = supa
       .from('store_products')
