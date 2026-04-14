@@ -367,9 +367,12 @@ export default async function AdminPaymentsPage({
           </p>
         </div>
 
-        <div className="flex gap-2">
+        <div className="flex gap-2 flex-wrap">
           <Link prefetch={false} href="/admin" className="border px-4 py-2 rounded-lg hover:bg-gray-50">
             ← Admin
+          </Link>
+          <Link prefetch={false} href="/admin/payments/reconciliation" className="border px-4 py-2 rounded-lg hover:bg-gray-50">
+            Reconciliation
           </Link>
           <Link prefetch={false} href={cashReportHref} className="border px-4 py-2 rounded-lg hover:bg-gray-50">
             Filtered Cash Report
