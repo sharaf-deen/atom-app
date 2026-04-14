@@ -7,6 +7,8 @@ import Button from '@/components/ui/Button'
 import Input from '@/components/ui/Input'
 import InlineAlert from '@/components/ui/InlineAlert'
 import Modal from '@/components/ui/Modal'
+import StoreProductForm from '@/components/StoreProductForm'
+import AdminProductQuickEdit from '@/components/store/AdminProductQuickEdit'
 import { buildStoreCategoryOptions, sortStoreProductCategories, type StoreProductCategoryRow } from '@/lib/storeCategories'
 import {
   normalizeStoreModelSlug,
@@ -30,6 +32,22 @@ type BusyAction =
   | { type: 'save'; id: string }
   | { type: 'delete'; id: string }
   | null
+
+type LinkedVariantRow = {
+  id: string
+  category: string
+  model_id: string | null
+  name: string
+  color: string | null
+  size: string | null
+  price_cents: number
+  currency: string | null
+  inventory_qty: number
+  is_active: boolean
+  allow_preorder: boolean
+  low_stock_threshold: number
+  created_at: string
+}
 
 const EMPTY_FORM: ModelFormState = {
   category_key: '',
@@ -70,6 +88,14 @@ function buildFriendlyModelError(message: string, action: 'create' | 'update' | 
   return source
 }
 
+function toVariantLabel(item: Pick<LinkedVariantRow, 'name' | 'color' | 'size'>) {
+  return [item.name, item.color, item.size].filter(Boolean).join(' · ') || 'Unnamed variant'
+}
+
+function formatPrice(cents: number, currency?: string | null) {
+  return `${currency || 'EGP'} ${(Number(cents || 0) / 100).toFixed(2)}`
+}
+
 export default function StoreModelManager() {
   const router = useRouter()
   const [categories, setCategories] = useState<StoreProductCategoryRow[]>([])
@@ -81,6 +107,11 @@ export default function StoreModelManager() {
   const [editingId, setEditingId] = useState('')
   const [editForm, setEditForm] = useState<ModelFormState>(EMPTY_FORM)
   const [deleteTarget, setDeleteTarget] = useState<StoreProductModelRow | null>(null)
+  const [expandedModelId, setExpandedModelId] = useState('')
+  const [variantsByModel, setVariantsByModel] = useState<Record<string, LinkedVariantRow[]>>({})
+  const [variantsLoadingId, setVariantsLoadingId] = useState('')
+  const [variantsErrorByModel, setVariantsErrorByModel] = useState<Record<string, string>>({})
+  const [createVariantTarget, setCreateVariantTarget] = useState<StoreProductModelRow | null>(null)
 
   const isBusy = busyAction !== null
   const createBusy = busyAction?.type === 'create'
@@ -146,6 +177,38 @@ export default function StoreModelManager() {
   useEffect(() => {
     void load()
   }, [])
+
+  async function loadVariants(modelId: string, force = false) {
+    if (!modelId) return
+    if (!force && variantsByModel[modelId]) return
+    setVariantsLoadingId(modelId)
+    setVariantsErrorByModel((current) => ({ ...current, [modelId]: '' }))
+    try {
+      const res = await fetch(`/api/store/products/list?all=1&page=1&limit=100&model_id=${encodeURIComponent(modelId)}`, {
+        cache: 'no-store',
+        credentials: 'include',
+      })
+      const json = await res.json().catch(() => ({}))
+      if (!res.ok || !json?.ok) {
+        setVariantsByModel((current) => ({ ...current, [modelId]: [] }))
+        setVariantsErrorByModel((current) => ({
+          ...current,
+          [modelId]: json?.details || json?.error || 'Could not load linked variants.',
+        }))
+        return
+      }
+      const rows = Array.isArray(json.items) ? (json.items as LinkedVariantRow[]) : []
+      setVariantsByModel((current) => ({ ...current, [modelId]: rows }))
+    } catch (e: any) {
+      setVariantsByModel((current) => ({ ...current, [modelId]: [] }))
+      setVariantsErrorByModel((current) => ({
+        ...current,
+        [modelId]: e?.message || 'Could not load linked variants.',
+      }))
+    } finally {
+      setVariantsLoadingId('')
+    }
+  }
 
   function resetCreateForm() {
     setForm({
@@ -316,6 +379,16 @@ export default function StoreModelManager() {
       }
       setItems((current) => current.filter((item) => item.id !== deleteTarget.id))
       setDeleteTarget(null)
+      setVariantsByModel((current) => {
+        const next = { ...current }
+        delete next[deleteTarget.id]
+        return next
+      })
+      setVariantsErrorByModel((current) => {
+        const next = { ...current }
+        delete next[deleteTarget.id]
+        return next
+      })
       setStatus({ kind: 'success', msg: 'Model deleted successfully.' })
       toast.success('Model deleted')
       router.refresh()
@@ -435,6 +508,13 @@ export default function StoreModelManager() {
           {items.map((item) => {
             const isEditing = editingId === item.id
             const isDeleteBusy = busyAction?.type === 'delete' && busyAction.id === item.id
+            const isExpanded = expandedModelId === item.id
+            const variants = variantsByModel[item.id] || []
+            const variantsLoading = variantsLoadingId === item.id
+            const variantsError = variantsErrorByModel[item.id] || ''
+            const activeVariants = variants.filter((variant) => variant.is_active).length
+            const totalStock = variants.reduce((sum, variant) => sum + Number(variant.inventory_qty || 0), 0)
+            const lowStockCount = variants.filter((variant) => Number(variant.inventory_qty || 0) <= Number(variant.low_stock_threshold || 0)).length
             return (
               <div key={item.id} className="rounded-2xl border bg-white p-4">
                 <div className="flex flex-wrap items-start justify-between gap-3">
@@ -453,6 +533,21 @@ export default function StoreModelManager() {
                     </div>
                   </div>
                   <div className="flex flex-wrap gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={async () => {
+                        const nextOpen = expandedModelId === item.id ? '' : item.id
+                        setExpandedModelId(nextOpen)
+                        if (nextOpen) await loadVariants(item.id)
+                      }}
+                    >
+                      {isExpanded ? 'Hide variants' : 'Variants'}
+                    </Button>
+                    <Button type="button" variant="outline" size="sm" onClick={() => setCreateVariantTarget(item)} disabled={isBusy}>
+                      Add variant
+                    </Button>
                     <Button type="button" variant="outline" size="sm" onClick={() => startEdit(item)} disabled={isBusy}>Edit</Button>
                     <Button type="button" variant="outline" size="sm" onClick={() => setDeleteTarget(item)} disabled={isBusy || isDeleteBusy}>Delete</Button>
                   </div>
@@ -465,6 +560,88 @@ export default function StoreModelManager() {
                 </div>
 
                 {item.description ? <div className="mt-3 text-sm text-[hsl(var(--muted))]">{item.description}</div> : null}
+
+                {isExpanded ? (
+                  <div className="mt-4 rounded-2xl border bg-slate-50/70 p-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="flex flex-wrap gap-2 text-xs text-[hsl(var(--muted))]">
+                        <span className="rounded-full border bg-white px-2 py-1">Variants: {variants.length}</span>
+                        <span className="rounded-full border bg-white px-2 py-1">Active: {activeVariants}</span>
+                        <span className="rounded-full border bg-white px-2 py-1">Total stock: {totalStock}</span>
+                        <span className="rounded-full border bg-white px-2 py-1">Low stock: {lowStockCount}</span>
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        <Button type="button" variant="outline" size="sm" onClick={() => loadVariants(item.id, true)} disabled={variantsLoading}>
+                          {variantsLoading ? 'Refreshing…' : 'Refresh'}
+                        </Button>
+                        <Button type="button" variant="outline" size="sm" onClick={() => setCreateVariantTarget(item)}>
+                          Add variant
+                        </Button>
+                      </div>
+                    </div>
+
+                    {variantsError ? (
+                      <div className="mt-3">
+                        <InlineAlert variant="error">{variantsError}</InlineAlert>
+                      </div>
+                    ) : null}
+
+                    {variantsLoading ? (
+                      <div className="mt-3 rounded-2xl border border-dashed bg-white p-4 text-sm text-[hsl(var(--muted))]">Loading linked variants…</div>
+                    ) : variants.length === 0 ? (
+                      <div className="mt-3 rounded-2xl border border-dashed bg-white p-4 text-sm text-[hsl(var(--muted))]">
+                        No linked variants yet. Create the first variant for this model.
+                      </div>
+                    ) : (
+                      <div className="mt-3 space-y-3">
+                        {variants.map((variant) => (
+                          <div key={variant.id} className="rounded-2xl border bg-white p-3">
+                            <div className="flex flex-wrap items-start justify-between gap-3">
+                              <div>
+                                <div className="text-sm font-semibold">{toVariantLabel(variant)}</div>
+                                <div className="mt-1 flex flex-wrap gap-2 text-xs text-[hsl(var(--muted))]">
+                                  <span className={`rounded-full border px-2 py-1 ${variant.is_active ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-slate-200 bg-slate-50 text-slate-700'}`}>
+                                    {variant.is_active ? 'Active' : 'Inactive'}
+                                  </span>
+                                  <span className="rounded-full border px-2 py-1">{formatPrice(variant.price_cents, variant.currency)}</span>
+                                  <span className="rounded-full border px-2 py-1">Stock: {variant.inventory_qty}</span>
+                                  <span className={`rounded-full border px-2 py-1 ${variant.allow_preorder ? 'border-blue-200 bg-blue-50 text-blue-700' : 'border-slate-200 bg-slate-50 text-slate-700'}`}>
+                                    {variant.allow_preorder ? 'Preorder on' : 'Preorder off'}
+                                  </span>
+                                </div>
+                              </div>
+                            </div>
+                            <div className="mt-3">
+                              <AdminProductQuickEdit
+                                id={variant.id}
+                                category={variant.category}
+                                modelId={variant.model_id}
+                                modelName={item.name}
+                                name={variant.name}
+                                color={variant.color}
+                                size={variant.size}
+                                priceCents={variant.price_cents}
+                                currency={variant.currency}
+                                inventoryQty={variant.inventory_qty}
+                                isActive={variant.is_active}
+                                allowPreorder={variant.allow_preorder}
+                                lowStockThreshold={variant.low_stock_threshold}
+                                onSaved={() => {
+                                  void load()
+                                  void loadVariants(item.id, true)
+                                }}
+                                onDeleted={() => {
+                                  void load()
+                                  void loadVariants(item.id, true)
+                                }}
+                              />
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                ) : null}
 
                 <Modal open={isEditing} onClose={cancelEdit} title="Edit model" className="w-[min(92vw,44rem)]">
                   <div className="grid gap-3">
@@ -518,6 +695,36 @@ export default function StoreModelManager() {
         </div>
       )}
 
+      <Modal open={!!createVariantTarget} onClose={() => setCreateVariantTarget(null)} title={createVariantTarget ? `Add variant — ${createVariantTarget.name}` : 'Add variant'} className="w-[min(96vw,42rem)]">
+        {createVariantTarget ? (
+          <StoreProductForm
+            product={{
+              category: createVariantTarget.category_key,
+              model_id: createVariantTarget.id,
+              model_name: createVariantTarget.name,
+              name: '',
+              color: '',
+              size: '',
+              price_cents: 0,
+              currency: 'EGP',
+              inventory_qty: 0,
+              is_active: true,
+            }}
+            onSaved={() => {
+              const target = createVariantTarget
+              setCreateVariantTarget(null)
+              if (target) {
+                void load()
+                setExpandedModelId(target.id)
+                void loadVariants(target.id, true)
+              }
+              router.refresh()
+            }}
+            onCancel={() => setCreateVariantTarget(null)}
+          />
+        ) : null}
+      </Modal>
+
       <Modal open={!!deleteTarget} onClose={() => (isBusy ? null : setDeleteTarget(null))} title="Delete model?">
         <div className="space-y-4">
           <p className="text-sm text-[hsl(var(--muted))]">
@@ -544,7 +751,7 @@ export default function StoreModelManager() {
       </Modal>
 
       <div className="rounded-2xl border border-dashed p-4 text-sm text-[hsl(var(--muted))]">
-        Featured models: <span className="font-medium text-black">{featuredCount}</span>. Linked products remain managed in Store V2 for now.
+        Featured models: <span className="font-medium text-black">{featuredCount}</span>. Linked variants can now be created and managed directly from each model card.
       </div>
     </div>
   )

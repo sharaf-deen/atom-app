@@ -21,6 +21,8 @@ type Props = {
   isActive: boolean
   allowPreorder: boolean
   lowStockThreshold: number
+  onSaved?: () => void
+  onDeleted?: () => void
 }
 
 export default function AdminProductQuickEdit({
@@ -37,6 +39,8 @@ export default function AdminProductQuickEdit({
   isActive,
   allowPreorder,
   lowStockThreshold,
+  onSaved,
+  onDeleted,
 }: Props) {
   const router = useRouter()
   const [qty, setQty] = useState<number>(Number.isFinite(inventoryQty) ? inventoryQty : 0)
@@ -85,6 +89,7 @@ export default function AdminProductQuickEdit({
       }
 
       toast.success('Product updated')
+      onSaved?.()
       router.refresh()
       setTimeout(() => router.refresh(), 250)
     } catch (e: any) {
@@ -113,6 +118,7 @@ export default function AdminProductQuickEdit({
         return
       }
       toast.success('Product deleted')
+      onDeleted?.()
       router.refresh()
       setTimeout(() => router.refresh(), 250)
     } catch (e: any) {
@@ -211,6 +217,7 @@ export default function AdminProductQuickEdit({
           }}
           onSaved={() => {
             setEditOpen(false)
+            onSaved?.()
             router.refresh()
             setTimeout(() => router.refresh(), 250)
           }}
