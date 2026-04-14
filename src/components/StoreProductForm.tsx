@@ -1,5 +1,6 @@
 'use client'
 
+import Link from 'next/link'
 import { useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
 import { parsePriceToCents, toPriceString } from '@/lib/money'
@@ -12,10 +13,17 @@ import {
   FALLBACK_STORE_PRODUCT_CATEGORIES,
   type StoreProductCategoryRow,
 } from '@/lib/storeCategories'
+import {
+  buildStoreModelOptionLabel,
+  sortStoreModels,
+  type StoreProductModelRow,
+} from '@/lib/storeModels'
 
 type Product = {
   id?: string
   category?: string
+  model_id?: string | null
+  model_name?: string | null
   name: string
   color?: string | null
   size?: string | null
@@ -42,7 +50,11 @@ export default function StoreProductForm({
     ensureCategoryInList(FALLBACK_STORE_PRODUCT_CATEGORIES, product?.category, product?.category)
   )
   const [categoriesLoading, setCategoriesLoading] = useState(true)
+  const [models, setModels] = useState<StoreProductModelRow[]>([])
+  const [modelsLoading, setModelsLoading] = useState(false)
+
   const [category, setCategory] = useState<string>(product?.category ?? FALLBACK_STORE_PRODUCT_CATEGORIES[0]?.key ?? 'kimono')
+  const [modelId, setModelId] = useState<string>(product?.model_id ?? '')
   const [name, setName] = useState(product?.name ?? '')
   const [color, setColor] = useState(product?.color ?? '')
   const [size, setSize] = useState(product?.size ?? '')
@@ -63,6 +75,16 @@ export default function StoreProductForm({
     return URL.createObjectURL(imageFile)
   }, [imageFile])
 
+  const modelOptions = useMemo(
+    () => sortStoreModels(models.filter((item) => item.category_key === category)),
+    [models, category]
+  )
+
+  const selectedModel = useMemo(
+    () => modelOptions.find((item) => item.id === modelId) ?? null,
+    [modelOptions, modelId]
+  )
+
   useEffect(() => {
     return () => {
       if (imagePreviewUrl) URL.revokeObjectURL(imagePreviewUrl)
@@ -72,6 +94,7 @@ export default function StoreProductForm({
   useEffect(() => {
     if (!product) return
     setCategory(product.category ?? FALLBACK_STORE_PRODUCT_CATEGORIES[0]?.key ?? 'kimono')
+    setModelId(product.model_id ?? '')
     setName(product.name ?? '')
     setColor(product.color ?? '')
     setSize(product.size ?? '')
@@ -112,6 +135,37 @@ export default function StoreProductForm({
       cancelled = true
     }
   }, [product?.category])
+
+  useEffect(() => {
+    let cancelled = false
+    async function loadModels() {
+      setModelsLoading(true)
+      try {
+        const res = await fetch('/api/store/models/list', {
+          cache: 'no-store',
+          credentials: 'include',
+        })
+        const json = await res.json().catch(() => ({}))
+        const rows = Array.isArray(json?.items) ? (json.items as StoreProductModelRow[]) : []
+        if (!cancelled) setModels(sortStoreModels(rows))
+      } catch {
+        if (!cancelled) setModels([])
+      } finally {
+        if (!cancelled) setModelsLoading(false)
+      }
+    }
+    void loadModels()
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!modelId || modelsLoading) return
+    if (!modelOptions.some((item) => item.id === modelId)) {
+      setModelId('')
+    }
+  }, [category, modelId, modelOptions, modelsLoading])
 
   function validateImage(file: File | null) {
     if (!file) return null
@@ -156,6 +210,7 @@ export default function StoreProductForm({
         body = JSON.stringify({
           id: product.id,
           category: category.trim(),
+          model_id: modelId || null,
           name: name.trim(),
           color: color.trim() || null,
           size: size.trim() || null,
@@ -168,6 +223,7 @@ export default function StoreProductForm({
       } else {
         const fd = new FormData()
         fd.set('category', category.trim())
+        fd.set('model_id', modelId || '')
         fd.set('name', name.trim())
         fd.set('color', color.trim())
         fd.set('size', size.trim())
@@ -187,7 +243,7 @@ export default function StoreProductForm({
       const j = await r.json().catch(() => ({}))
       if (!r.ok || !j?.ok) {
         setStatus({ kind: 'error', msg: j?.details || j?.error || 'Save failed' })
-        toast.error('Save failed')
+        toast.error(j?.details || j?.error || 'Save failed')
         return
       }
 
@@ -223,13 +279,50 @@ export default function StoreProductForm({
         </Select>
 
         <Input
-          label="Name *"
+          label="Variant name *"
           required
           value={name}
           onChange={(e) => setName(e.target.value)}
           disabled={busy}
           aria-label="Name"
         />
+      </div>
+
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <Select
+          label="Linked model"
+          value={modelId}
+          onChange={(e) => setModelId(e.target.value)}
+          disabled={busy || modelsLoading}
+          aria-label="Linked model"
+        >
+          <option value="">No linked model yet</option>
+          {modelOptions.map((option) => (
+            <option key={option.id} value={option.id}>
+              {buildStoreModelOptionLabel(option)}
+            </option>
+          ))}
+        </Select>
+
+        <div className="rounded-2xl border bg-[hsl(var(--card))] px-3 py-2 text-xs text-[hsl(var(--muted))]">
+          {selectedModel ? (
+            <div className="space-y-1">
+              <div className="font-medium text-[hsl(var(--foreground))]">Linked to: {selectedModel.name}</div>
+              <div>Future Store V3 flow will use this parent model for model → color → size browsing.</div>
+            </div>
+          ) : (
+            <div className="space-y-1">
+              <div>No parent model linked yet.</div>
+              <div>
+                Create models first in{' '}
+                <Link href="/admin/store/models" className="font-medium underline underline-offset-2">
+                  Store Models
+                </Link>
+                .
+              </div>
+            </div>
+          )}
+        </div>
       </div>
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">

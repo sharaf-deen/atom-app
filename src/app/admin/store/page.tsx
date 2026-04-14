@@ -62,6 +62,8 @@ type Tab = 'catalog' | 'supplier-orders'
 type ProductRow = {
   id: string
   category: Category
+  model_id: string | null
+  model: { id: string; name: string; slug: string | null; category_key: string | null } | null
   name: string
   color: string | null
   size: string | null
@@ -72,6 +74,20 @@ type ProductRow = {
   allow_preorder: boolean
   low_stock_threshold: number
   created_at: string | null
+}
+
+type ProductQueryRow = Omit<ProductRow, 'model'> & {
+  model:
+    | ProductRow['model']
+    | Array<NonNullable<ProductRow['model']>>
+}
+
+function normalizeProductRow(row: ProductQueryRow): ProductRow {
+  const model = Array.isArray(row.model) ? row.model[0] ?? null : row.model ?? null
+  return {
+    ...row,
+    model,
+  }
 }
 
 type SupplierOrderItemRow = {
@@ -375,8 +391,8 @@ export default async function AdminStorePage({
 
   try {
     let productQuery = supa
-      .from('store_products')
-      .select('id, category, name, color, size, price_cents, currency, inventory_qty, is_active, allow_preorder, low_stock_threshold, created_at')
+.from('store_products')
+      .select('id, category, model_id, model:store_product_models(id,name,slug,category_key), name, color, size, price_cents, currency, inventory_qty, is_active, allow_preorder, low_stock_threshold, created_at')
       .order('created_at', { ascending: false })
       .limit(1000)
 
@@ -392,7 +408,7 @@ export default async function AdminStorePage({
 
     const { data, error } = await productQuery
     if (error) throw new Error(error.message)
-    allProducts = (Array.isArray(data) ? data : []) as ProductRow[]
+    allProducts = (Array.isArray(data) ? (data as ProductQueryRow[]).map(normalizeProductRow) : [])
   } catch (error: any) {
     productsError = error?.message || String(error)
   }
@@ -668,6 +684,11 @@ export default async function AdminStorePage({
                               <div className="mt-1 flex flex-wrap gap-2 text-xs text-[hsl(var(--muted))]">
                                 <span className="rounded-full border px-2 py-1">ID: {shortId(product.id)}</span>
                                 <span className="rounded-full border px-2 py-1">{categoryLabels.get(product.category) ?? product.category}</span>
+                                {product.model?.name ? (
+                                  <span className="rounded-full border border-sky-200 bg-sky-50 px-2 py-1 text-sky-700">Model: {product.model.name}</span>
+                                ) : (
+                                  <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-1 text-amber-700">Unlinked model</span>
+                                )}
                                 {product.size ? <span className="rounded-full border px-2 py-1">Size: {product.size}</span> : null}
                                 {product.color ? <span className="rounded-full border px-2 py-1">Color: {product.color}</span> : null}
                               </div>
@@ -692,6 +713,8 @@ export default async function AdminStorePage({
                               <AdminProductQuickEdit
                                 id={product.id}
                                 category={product.category}
+                                modelId={product.model_id}
+                                modelName={product.model?.name ?? null}
                                 name={product.name}
                                 color={product.color}
                                 size={product.size}
