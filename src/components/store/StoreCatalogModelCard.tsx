@@ -30,11 +30,13 @@ type Model = {
   category: string
   categoryLabel: string
   name: string
+  description: string | null
   priceFromCents: number
   priceToCents: number
   currency: string
   colorGroups: ColorGroup[]
   previewImageUrl: string | null
+  sortOrder?: number
 }
 
 function sortByLabel<T extends { label: string }>(items: T[]) {
@@ -143,7 +145,7 @@ export default function StoreCatalogModelCard({
             >
               <div className="text-base font-semibold leading-snug">{model.name}</div>
               <div className="mt-1 text-sm text-[hsl(var(--muted))]">
-                {hasMultipleColors ? 'Choose color, then size.' : 'Choose your size.'}
+                {String(model.description || '').trim() || (hasMultipleColors ? 'Choose color, then size.' : 'Choose your size.')}
               </div>
             </button>
           </div>
