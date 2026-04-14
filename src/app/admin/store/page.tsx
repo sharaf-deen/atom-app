@@ -687,7 +687,10 @@ export default async function AdminStorePage({
                                 {product.model?.name ? (
                                   <span className="rounded-full border border-sky-200 bg-sky-50 px-2 py-1 text-sky-700">Model: {product.model.name}</span>
                                 ) : (
-                                  <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-1 text-amber-700">Unlinked model</span>
+                                  <>
+                                    <span className="rounded-full border border-amber-300 bg-amber-100 px-2 py-1 font-medium text-amber-900">Unlinked model · V3 fix needed</span>
+                                    <Link href="/admin/store/models" className="rounded-full border border-amber-200 bg-white px-2 py-1 text-amber-800 hover:bg-amber-50">Fix V3 linking</Link>
+                                  </>
                                 )}
                                 {product.size ? <span className="rounded-full border px-2 py-1">Size: {product.size}</span> : null}
                                 {product.color ? <span className="rounded-full border px-2 py-1">Color: {product.color}</span> : null}

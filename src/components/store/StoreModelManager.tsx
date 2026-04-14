@@ -11,9 +11,11 @@ import StoreProductForm from '@/components/StoreProductForm'
 import AdminProductQuickEdit from '@/components/store/AdminProductQuickEdit'
 import { buildStoreCategoryOptions, sortStoreProductCategories, type StoreProductCategoryRow } from '@/lib/storeCategories'
 import {
-  getStoreModelSuggestions,
+  buildStoreModelOptionLabel,
+  getStoreModelSuggestionMatches,
   normalizeStoreModelSlug,
   sortStoreModels,
+  type StoreModelSuggestionMatch,
   type StoreProductModelRow,
 } from '@/lib/storeModels'
 
@@ -97,6 +99,16 @@ function formatPrice(cents: number, currency?: string | null) {
   return `${currency || 'EGP'} ${(Number(cents || 0) / 100).toFixed(2)}`
 }
 
+function getSuggestionBadgeClasses(confidence: StoreModelSuggestionMatch['confidence']) {
+  return confidence === 'high'
+    ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+    : 'border-amber-200 bg-amber-50 text-amber-700'
+}
+
+function getSuggestionBadgeLabel(confidence: StoreModelSuggestionMatch['confidence']) {
+  return confidence === 'high' ? 'Confident suggestion' : 'Needs review'
+}
+
 export default function StoreModelManager() {
   const router = useRouter()
   const [categories, setCategories] = useState<StoreProductCategoryRow[]>([])
@@ -121,6 +133,9 @@ export default function StoreModelManager() {
   const [unlinkedCategory, setUnlinkedCategory] = useState('')
   const [unlinkedQuery, setUnlinkedQuery] = useState('')
   const [quickLinkingVariantId, setQuickLinkingVariantId] = useState('')
+  const [selectedUnlinkedIds, setSelectedUnlinkedIds] = useState<string[]>([])
+  const [bulkModelId, setBulkModelId] = useState('')
+  const [bulkLinkBusy, setBulkLinkBusy] = useState(false)
 
   const isBusy = busyAction !== null
   const createBusy = busyAction?.type === 'create'
@@ -142,6 +157,18 @@ export default function StoreModelManager() {
     const total = linkedVariantCount + unlinkedTotal
     return total > 0 ? Math.round((linkedVariantCount / total) * 100) : 0
   }, [linkedVariantCount, unlinkedTotal])
+  const selectedUnlinkedItems = useMemo(
+    () => unlinkedItems.filter((item) => selectedUnlinkedIds.includes(item.id)),
+    [selectedUnlinkedIds, unlinkedItems]
+  )
+  const selectedUnlinkedCategoryKey = useMemo(() => {
+    const keys = [...new Set(selectedUnlinkedItems.map((item) => String(item.category || '').trim()).filter(Boolean))]
+    return keys.length === 1 ? keys[0] : ''
+  }, [selectedUnlinkedItems])
+  const bulkModelOptions = useMemo(
+    () => sortStoreModels(items.filter((item) => !selectedUnlinkedCategoryKey || item.category_key === selectedUnlinkedCategoryKey)),
+    [items, selectedUnlinkedCategoryKey]
+  )
   const nextCreateSlug = useMemo(() => normalizeStoreModelSlug(form.slug || form.name), [form.slug, form.name])
   const nextEditSlug = useMemo(() => normalizeStoreModelSlug(editForm.slug || editForm.name), [editForm.slug, editForm.name])
 
@@ -200,6 +227,17 @@ export default function StoreModelManager() {
   useEffect(() => {
     void loadUnlinkedQueue()
   }, [unlinkedCategory, unlinkedQuery])
+
+  useEffect(() => {
+    setSelectedUnlinkedIds((current) => current.filter((id) => unlinkedItems.some((item) => item.id === id)))
+  }, [unlinkedItems])
+
+  useEffect(() => {
+    if (!bulkModelId) return
+    if (!bulkModelOptions.some((item) => item.id === bulkModelId)) {
+      setBulkModelId('')
+    }
+  }, [bulkModelId, bulkModelOptions])
 
   async function loadVariants(modelId: string, force = false) {
     if (!modelId) return
@@ -297,6 +335,81 @@ export default function StoreModelManager() {
       toast.error(e?.message || 'Could not link this variant to the selected model.')
     } finally {
       setQuickLinkingVariantId('')
+    }
+  }
+
+  function toggleUnlinkedSelection(variantId: string) {
+    setSelectedUnlinkedIds((current) =>
+      current.includes(variantId) ? current.filter((id) => id !== variantId) : [...current, variantId]
+    )
+  }
+
+  function selectAllVisibleUnlinked() {
+    setSelectedUnlinkedIds(unlinkedItems.map((item) => item.id))
+  }
+
+  function selectConfidentVisibleUnlinked() {
+    const confidentIds = unlinkedItems
+      .filter((variant) => {
+        const topMatch = getStoreModelSuggestionMatches(items, variant, 1)[0]
+        return topMatch?.confidence === 'high'
+      })
+      .map((variant) => variant.id)
+    setSelectedUnlinkedIds(confidentIds)
+  }
+
+  function clearUnlinkedSelection() {
+    setSelectedUnlinkedIds([])
+    setBulkModelId('')
+  }
+
+  async function bulkLinkSelectedVariants() {
+    if (bulkLinkBusy) return
+    if (selectedUnlinkedItems.length === 0) {
+      toast.error('Select at least one unlinked variant first.')
+      return
+    }
+    if (!selectedUnlinkedCategoryKey) {
+      toast.error('Bulk link only works when all selected variants belong to the same category. Filter or select a single category first.')
+      return
+    }
+    const model = bulkModelOptions.find((item) => item.id === bulkModelId)
+    if (!model) {
+      toast.error('Choose the target model before bulk linking.')
+      return
+    }
+
+    setBulkLinkBusy(true)
+    try {
+      let successCount = 0
+      for (const variant of selectedUnlinkedItems) {
+        const res = await fetch('/api/store/products/update', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            id: variant.id,
+            category: variant.category,
+            model_id: model.id,
+          }),
+        })
+        const json = await res.json().catch(() => ({}))
+        if (!res.ok || !json?.ok) {
+          throw new Error(json?.details || json?.error || `Could not link ${toVariantLabel(variant)}.`)
+        }
+        successCount += 1
+      }
+
+      toast.success(`${successCount} variant(s) linked to ${model.name}`)
+      clearUnlinkedSelection()
+      await Promise.all([load(), loadUnlinkedQueue()])
+      if (expandedModelId === model.id) {
+        await loadVariants(model.id, true)
+      }
+      router.refresh()
+    } catch (e: any) {
+      toast.error(e?.message || 'Could not bulk-link the selected variants.')
+    } finally {
+      setBulkLinkBusy(false)
     }
   }
 
@@ -654,11 +767,78 @@ export default function StoreModelManager() {
           <span className="rounded-full border bg-slate-50 px-2 py-1">Unlinked variants: {unlinkedTotal}</span>
           <span className="rounded-full border bg-slate-50 px-2 py-1">Active in queue: {unlinkedActiveCount}</span>
           <span className="rounded-full border bg-slate-50 px-2 py-1">Low stock in queue: {unlinkedLowStockCount}</span>
+          <span className="rounded-full border bg-slate-50 px-2 py-1">Selected: {selectedUnlinkedItems.length}</span>
           <span className="rounded-full border bg-slate-50 px-2 py-1">Featured models: {featuredCount}</span>
         </div>
 
+        {unlinkedActiveCount > 0 ? (
+          <div className="mt-3">
+            <InlineAlert variant="error">
+              Soft enforcement: {unlinkedActiveCount} active variant(s) are still missing a Store V3 model link. Fix these before the future hard-enforcement lot.
+            </InlineAlert>
+          </div>
+        ) : null}
+
         {showUnlinkedQueue ? (
           <div className="mt-3">
+            {selectedUnlinkedItems.length > 0 ? (
+              <div className="mb-3 rounded-2xl border border-amber-200 bg-amber-50/70 p-3">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div className="space-y-1 text-sm">
+                    <div className="font-semibold text-amber-950">Bulk link selected variants</div>
+                    <div className="text-[hsl(var(--muted))]">
+                      {selectedUnlinkedItems.length} selected variant(s)
+                      {selectedUnlinkedCategoryKey ? ` in ${categoryLabelMap.get(selectedUnlinkedCategoryKey) || selectedUnlinkedCategoryKey}` : ' across multiple categories'}.
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <Button type="button" size="sm" variant="outline" onClick={selectAllVisibleUnlinked} disabled={unlinkedItems.length === 0 || bulkLinkBusy}>
+                      Select visible
+                    </Button>
+                    <Button type="button" size="sm" variant="outline" onClick={selectConfidentVisibleUnlinked} disabled={unlinkedItems.length === 0 || bulkLinkBusy}>
+                      Select confident
+                    </Button>
+                    <Button type="button" size="sm" variant="outline" onClick={clearUnlinkedSelection} disabled={bulkLinkBusy}>
+                      Clear
+                    </Button>
+                  </div>
+                </div>
+                <div className="mt-3 grid gap-3 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
+                  <label className="block">
+                    <span className="mb-1 block text-sm font-medium">Target model</span>
+                    <select
+                      value={bulkModelId}
+                      onChange={(e) => setBulkModelId(e.target.value)}
+                      disabled={!selectedUnlinkedCategoryKey || bulkLinkBusy}
+                      className="min-h-[44px] w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3.5 py-2.5 text-sm text-black shadow-soft outline-none transition focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:opacity-60"
+                    >
+                      <option value="">Choose a model…</option>
+                      {bulkModelOptions.map((option) => (
+                        <option key={option.id} value={option.id}>{buildStoreModelOptionLabel(option)}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <div className="flex flex-wrap gap-2">
+                    <Button type="button" onClick={() => void bulkLinkSelectedVariants()} disabled={!selectedUnlinkedCategoryKey || !bulkModelId || bulkLinkBusy}>
+                      {bulkLinkBusy ? 'Linking…' : `Bulk link ${selectedUnlinkedItems.length}`}
+                    </Button>
+                  </div>
+                </div>
+                {!selectedUnlinkedCategoryKey ? (
+                  <div className="mt-2 text-xs text-amber-900">Bulk linking only works when all selected variants belong to the same category. Filter the queue or keep the selection to one category.</div>
+                ) : null}
+              </div>
+            ) : (
+              <div className="mb-3 flex flex-wrap gap-2">
+                <Button type="button" size="sm" variant="outline" onClick={selectAllVisibleUnlinked} disabled={unlinkedItems.length === 0 || bulkLinkBusy}>
+                  Select visible
+                </Button>
+                <Button type="button" size="sm" variant="outline" onClick={selectConfidentVisibleUnlinked} disabled={unlinkedItems.length === 0 || bulkLinkBusy}>
+                  Select confident
+                </Button>
+              </div>
+            )}
+
             {unlinkedError ? <InlineAlert variant="error">{unlinkedError}</InlineAlert> : null}
 
             {unlinkedLoading ? (
@@ -668,41 +848,64 @@ export default function StoreModelManager() {
             ) : (
               <div className="space-y-3">
                 {unlinkedItems.map((variant) => {
-                  const suggestions = getStoreModelSuggestions(items, variant, 3)
-                  const quickLinkBusy = quickLinkingVariantId === variant.id
+                  const suggestionMatches = getStoreModelSuggestionMatches(items, variant, 3)
+                  const topMatch = suggestionMatches[0] || null
+                  const quickLinkBusy = quickLinkingVariantId === variant.id || bulkLinkBusy
+                  const isSelected = selectedUnlinkedIds.includes(variant.id)
                   return (
-                  <div key={variant.id} className="rounded-2xl border bg-slate-50/70 p-3">
+                  <div key={variant.id} className={`rounded-2xl border p-3 ${isSelected ? 'border-amber-300 bg-amber-50/70' : 'bg-slate-50/70'}`}>
                     <div className="flex flex-wrap items-start justify-between gap-3">
-                      <div>
-                        <div className="text-sm font-semibold">{toVariantLabel(variant)}</div>
-                        <div className="mt-1 flex flex-wrap gap-2 text-xs text-[hsl(var(--muted))]">
-                          <span className="rounded-full border bg-white px-2 py-1">{categoryLabelMap.get(variant.category) || variant.category}</span>
-                          <span className="rounded-full border bg-white px-2 py-1">{formatPrice(variant.price_cents, variant.currency)}</span>
-                          <span className="rounded-full border bg-white px-2 py-1">Stock: {variant.inventory_qty}</span>
-                          <span className={`rounded-full border px-2 py-1 ${variant.is_active ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-slate-200 bg-slate-50 text-slate-700'}`}>
-                            {variant.is_active ? 'Active' : 'Inactive'}
-                          </span>
-                          <span className={`rounded-full border px-2 py-1 ${variant.allow_preorder ? 'border-blue-200 bg-blue-50 text-blue-700' : 'border-slate-200 bg-slate-50 text-slate-700'}`}>
-                            {variant.allow_preorder ? 'Preorder on' : 'Preorder off'}
-                          </span>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-start gap-3">
+                          <label className="mt-0.5 flex items-center gap-2 text-sm font-medium text-black">
+                            <input
+                              type="checkbox"
+                              checked={isSelected}
+                              onChange={() => toggleUnlinkedSelection(variant.id)}
+                              disabled={quickLinkBusy}
+                              aria-label={`Select ${toVariantLabel(variant)}`}
+                            />
+                            <span className="sr-only">Select variant</span>
+                          </label>
+                          <div className="min-w-0 flex-1">
+                            <div className="text-sm font-semibold">{toVariantLabel(variant)}</div>
+                            <div className="mt-1 flex flex-wrap gap-2 text-xs text-[hsl(var(--muted))]">
+                              <span className="rounded-full border bg-white px-2 py-1">{categoryLabelMap.get(variant.category) || variant.category}</span>
+                              <span className="rounded-full border bg-white px-2 py-1">{formatPrice(variant.price_cents, variant.currency)}</span>
+                              <span className="rounded-full border bg-white px-2 py-1">Stock: {variant.inventory_qty}</span>
+                              <span className={`rounded-full border px-2 py-1 ${variant.is_active ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-slate-200 bg-slate-50 text-slate-700'}`}>
+                                {variant.is_active ? 'Active' : 'Inactive'}
+                              </span>
+                              <span className={`rounded-full border px-2 py-1 ${variant.allow_preorder ? 'border-blue-200 bg-blue-50 text-blue-700' : 'border-slate-200 bg-slate-50 text-slate-700'}`}>
+                                {variant.allow_preorder ? 'Preorder on' : 'Preorder off'}
+                              </span>
+                              {topMatch ? (
+                                <span className={`rounded-full border px-2 py-1 ${getSuggestionBadgeClasses(topMatch.confidence)}`}>
+                                  {getSuggestionBadgeLabel(topMatch.confidence)}
+                                </span>
+                              ) : (
+                                <span className="rounded-full border border-slate-200 bg-slate-100 px-2 py-1 text-slate-700">Needs manual review</span>
+                              )}
+                            </div>
+                          </div>
                         </div>
                         <div className="mt-3 rounded-2xl border bg-white p-3">
                           <div className="flex flex-wrap items-center justify-between gap-2">
                             <div className="text-xs font-semibold text-black">Suggested models</div>
                             <div className="text-[11px] text-[hsl(var(--muted))]">Quick-link only when the match is clearly correct.</div>
                           </div>
-                          {suggestions.length > 0 ? (
+                          {suggestionMatches.length > 0 ? (
                             <div className="mt-2 flex flex-wrap gap-2">
-                              {suggestions.map((suggestion) => (
+                              {suggestionMatches.map((entry) => (
                                 <Button
-                                  key={suggestion.id}
+                                  key={entry.model.id}
                                   type="button"
                                   size="sm"
                                   variant="outline"
                                   disabled={quickLinkBusy}
-                                  onClick={() => void quickLinkVariant(variant, suggestion)}
+                                  onClick={() => void quickLinkVariant(variant, entry.model)}
                                 >
-                                  {quickLinkBusy ? 'Linking…' : `Link to ${suggestion.name}`}
+                                  {quickLinkBusy ? 'Linking…' : `Link to ${entry.model.name}`}
                                 </Button>
                               ))}
                             </div>
