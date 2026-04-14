@@ -85,6 +85,14 @@ export default function StoreProductForm({
     [modelOptions, modelId]
   )
 
+  const missingModelWarning = useMemo(() => {
+    if (selectedModel) return ''
+    if (active) {
+      return 'Soft enforcement: this active variant is still unlinked from a Store V3 model. Link it now so it is ready before final enforcement.'
+    }
+    return 'Soft enforcement: this variant has no Store V3 model link yet. You can still save it, but linking now will keep the V3 migration clean.'
+  }, [active, selectedModel])
+
   useEffect(() => {
     return () => {
       if (imagePreviewUrl) URL.revokeObjectURL(imagePreviewUrl)
@@ -324,6 +332,12 @@ export default function StoreProductForm({
           )}
         </div>
       </div>
+
+      {!selectedModel ? (
+        <InlineAlert variant="error" compact>
+          {missingModelWarning}
+        </InlineAlert>
+      ) : null}
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
         <Input label="Color" value={color} onChange={(e) => setColor(e.target.value)} disabled={busy} />

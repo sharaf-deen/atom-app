@@ -16,7 +16,7 @@ export type StoreProductModelRow = {
   category_label?: string | null
 }
 
-type ModelSuggestionVariantLike = {
+export type ModelSuggestionVariantLike = {
   category?: string | null
   name?: string | null
   color?: string | null
@@ -63,6 +63,13 @@ function countSharedTokens(left: string[], right: string[]) {
   return score
 }
 
+
+export type StoreModelSuggestionMatch = {
+  model: StoreProductModelRow
+  score: number
+  confidence: 'high' | 'medium'
+}
+
 export function scoreStoreModelSuggestion(model: StoreProductModelRow, variant: ModelSuggestionVariantLike) {
   if (!model?.id) return -1
   if (String(model.category_key || '') !== String(variant.category || '')) return -1
@@ -102,13 +109,20 @@ export function scoreStoreModelSuggestion(model: StoreProductModelRow, variant: 
   return score
 }
 
-export function getStoreModelSuggestions(
+export function getStoreModelSuggestionMatches(
   models: StoreProductModelRow[],
   variant: ModelSuggestionVariantLike,
   limit = 3
-) {
+): StoreModelSuggestionMatch[] {
   return [...models]
-    .map((model) => ({ model, score: scoreStoreModelSuggestion(model, variant) }))
+    .map((model) => {
+      const score = scoreStoreModelSuggestion(model, variant)
+      return {
+        model,
+        score,
+        confidence: score >= 120 ? 'high' : 'medium',
+      } satisfies StoreModelSuggestionMatch
+    })
     .filter((entry) => entry.score > 0)
     .sort((a, b) => {
       if (b.score !== a.score) return b.score - a.score
@@ -118,9 +132,15 @@ export function getStoreModelSuggestions(
       return String(a.model.name || '').localeCompare(String(b.model.name || ''), 'en', { sensitivity: 'base' })
     })
     .slice(0, Math.max(1, limit))
-    .map((entry) => entry.model)
 }
 
+export function getStoreModelSuggestions(
+  models: StoreProductModelRow[],
+  variant: ModelSuggestionVariantLike,
+  limit = 3
+) {
+  return getStoreModelSuggestionMatches(models, variant, limit).map((entry) => entry.model)
+}
 
 export function buildStoreModelOptionLabel(item: Pick<StoreProductModelRow, 'name' | 'slug' | 'is_active'>) {
   const parts = [String(item.name || '').trim()]
