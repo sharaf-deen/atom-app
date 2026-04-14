@@ -97,20 +97,32 @@ export async function PATCH(req: NextRequest) {
       return noStore(NextResponse.json({ ok: false, error: 'NO_FIELDS_TO_UPDATE' }, { status: 400 }))
     }
 
+    let currentProductModelId: string | null = null
     let targetCategory = typeof patch.category === 'string' ? patch.category : null
 
-    if (!targetCategory && patch.model_id !== undefined) {
+    if (!targetCategory || patch.model_id !== undefined) {
       const { data: currentProduct, error: currentErr } = await admin
         .from('store_products')
-        .select('category')
+        .select('category,model_id')
         .eq('id', id)
-        .maybeSingle<{ category: string | null }>()
+        .maybeSingle<{ category: string | null; model_id: string | null }>()
 
       if (currentErr) {
         return noStore(NextResponse.json({ ok: false, error: 'PRODUCT_LOOKUP_FAILED', details: currentErr.message }, { status: 500 }))
       }
-      targetCategory = String(currentProduct?.category || '').trim() || null
+      targetCategory = targetCategory || String(currentProduct?.category || '').trim() || null
+      currentProductModelId = String(currentProduct?.model_id || '').trim() || null
     }
+
+    const resolvedModelId = patch.model_id !== undefined
+      ? (isNonEmptyStr(patch.model_id) ? patch.model_id.trim() : null)
+      : currentProductModelId
+
+    if (!resolvedModelId) {
+      return noStore(NextResponse.json({ ok: false, error: 'MODEL_REQUIRED', details: 'Linked model is required under Store V3 hard enforcement.' }, { status: 400 }))
+    }
+
+    patch.model_id = resolvedModelId
 
     if (typeof patch.category === 'string') {
       const { data: categoryRow, error: categoryErr } = await admin
