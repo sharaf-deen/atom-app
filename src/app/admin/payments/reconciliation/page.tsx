@@ -1,10 +1,15 @@
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
+import { revalidatePath } from 'next/cache'
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import AccessDeniedCard from '@/components/AccessDeniedCard'
 import Badge from '@/components/ui/Badge'
+import Button from '@/components/ui/Button'
+import InlineAlert from '@/components/ui/InlineAlert'
+import Input from '@/components/ui/Input'
+import Textarea from '@/components/ui/Textarea'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card'
 import { Table } from '@/components/ui/Table'
 import { canAccessPayments } from '@/lib/rbac'
@@ -61,6 +66,23 @@ type BatchRow = {
   validator: ProfileMini | null
 }
 
+type ValidationResultRow = {
+  batch_id: string
+  line_count: number
+  expected_amount: number
+  counted_amount: number
+  difference_amount: number
+}
+
+type RangeLabelRow = {
+  validation_mode: ValidationMode
+  business_date?: string | null
+  first_business_date?: string | null
+  last_business_date?: string | null
+  period_from?: string | null
+  period_to?: string | null
+}
+
 const METHODS: Array<Method | 'all'> = ['all', 'cash', 'instapay', 'card', 'bank_transfer']
 
 function formatEGP(n: number) {
@@ -70,6 +92,11 @@ function formatEGP(n: number) {
   } catch {
     return `${v.toFixed(2)} EGP`
   }
+}
+
+function amountInputValue(n: number) {
+  const v = Number(n ?? 0)
+  return Number.isFinite(v) ? v.toFixed(2) : '0.00'
 }
 
 function labelMethod(m: Method | string) {
@@ -94,6 +121,38 @@ function labelMode(mode: ValidationMode) {
 
 function safeMethod(v: string | null | undefined): Method | 'all' {
   return METHODS.includes(v as any) ? (v as Method | 'all') : 'all'
+}
+
+function parseMethod(v: unknown): Method | null {
+  return v === 'cash' || v === 'instapay' || v === 'card' || v === 'bank_transfer' ? v : null
+}
+
+function parseValidationMode(v: unknown): ValidationMode | null {
+  return v === 'cash_period' || v === 'daily' ? v : null
+}
+
+function parseMoney(v: unknown) {
+  if (typeof v !== 'string') return NaN
+  const normalized = v.replace(/,/g, '').trim()
+  const n = Number(normalized)
+  return Number.isFinite(n) ? Math.round(n * 100) / 100 : NaN
+}
+
+function parsePositiveInt(v: unknown) {
+  if (typeof v !== 'string') return NaN
+  const n = Number.parseInt(v, 10)
+  return Number.isFinite(n) && n > 0 ? n : NaN
+}
+
+function sp1(sp: Record<string, string | string[] | undefined>, key: string): string | null {
+  const v = sp[key]
+  if (typeof v === 'string') return v
+  if (Array.isArray(v) && typeof v[0] === 'string') return v[0]
+  return null
+}
+
+function safeFlash(v: unknown) {
+  return typeof v === 'string' ? v.slice(0, 220) : ''
 }
 
 function formatCairoDateTime(iso?: string | null) {
@@ -123,15 +182,6 @@ function formatDateOnly(isoDate?: string | null) {
     month: '2-digit',
     day: '2-digit',
   }).format(dt)
-}
-
-type RangeLabelRow = {
-  validation_mode: ValidationMode
-  business_date?: string | null
-  first_business_date?: string | null
-  last_business_date?: string | null
-  period_from?: string | null
-  period_to?: string | null
 }
 
 function formatRangeLabel(row: RangeLabelRow) {
@@ -167,6 +217,22 @@ function buildQS(params: Record<string, string>) {
   return sp.toString()
 }
 
+function withFlash(returnQS: string, params: Record<string, string>) {
+  const sp = new URLSearchParams(returnQS)
+  for (const [k, v] of Object.entries(params)) {
+    const value = String(v ?? '')
+    if (value.length) sp.set(k, value)
+  }
+  const qs = sp.toString()
+  return `/admin/payments/reconciliation${qs ? `?${qs}` : ''}`
+}
+
+function approverHelperText(canCreateValidations: boolean, role: string) {
+  if (canCreateValidations) return role === 'super_admin' ? 'Super Admin can validate directly.' : 'This admin account is an active payment approver.'
+  if (role === 'admin') return 'Read-only mode: this admin account is not yet active in payment_validation_approvers.'
+  return 'Read-only mode.'
+}
+
 export default async function AdminPaymentsReconciliationPage({
   searchParams,
 }: {
@@ -192,8 +258,82 @@ export default async function AdminPaymentsReconciliationPage({
     )
   }
 
-  const methodFilter = safeMethod(typeof searchParams.method === 'string' ? searchParams.method : null)
+  const methodFilter = safeMethod(sp1(searchParams, 'method'))
+  const flashError = safeFlash(sp1(searchParams, 'error'))
+  const flashCreated = sp1(searchParams, 'created') === '1'
+  const flashBatch = safeFlash(sp1(searchParams, 'batch'))
   const admin = getSupabaseAdminClientCached()
+
+  const { data: approverRow } = me.role === 'super_admin'
+    ? { data: { user_id: me.id } as { user_id: string } | null }
+    : await admin
+        .from('payment_validation_approvers')
+        .select('user_id')
+        .eq('user_id', me.id)
+        .eq('is_active', true)
+        .maybeSingle()
+
+  const canCreateValidations = me.role === 'super_admin' || !!approverRow?.user_id
+
+  async function createValidationAction(formData: FormData) {
+    'use server'
+
+    const actor = await getSessionUserCached()
+    const returnQS = String(formData.get('return_qs') ?? '')
+    if (!actor) redirect(`/login?next=/admin/payments/reconciliation`)
+    if (!canAccessPayments(actor.role)) redirect(withFlash(returnQS, { error: 'Only Admin / Super Admin can access reconciliation.' }))
+
+    const paymentMethod = parseMethod(formData.get('payment_method'))
+    const validationMode = parseValidationMode(formData.get('validation_mode'))
+    const businessDateRaw = String(formData.get('business_date') ?? '').trim()
+    const businessDate = businessDateRaw || null
+    const countedAmount = parseMoney(formData.get('counted_amount'))
+    const expectedAmount = parseMoney(formData.get('expected_amount'))
+    const lineCount = parsePositiveInt(formData.get('line_count'))
+    const note = String(formData.get('note') ?? '').trim()
+
+    if (!paymentMethod) redirect(withFlash(returnQS, { error: 'Invalid payment method.' }))
+    if (!validationMode) redirect(withFlash(returnQS, { error: 'Invalid validation mode.' }))
+    if (validationMode === 'daily' && !businessDate) redirect(withFlash(returnQS, { error: 'Business date is required.' }))
+    if (!Number.isFinite(expectedAmount) || expectedAmount < 0) redirect(withFlash(returnQS, { error: 'Expected amount snapshot is missing.' }))
+    if (!Number.isFinite(countedAmount) || countedAmount < 0) redirect(withFlash(returnQS, { error: 'Counted amount must be 0 or greater.' }))
+    if (!Number.isFinite(lineCount) || lineCount <= 0) redirect(withFlash(returnQS, { error: 'Line count snapshot is missing.' }))
+
+    const actionAdmin = getSupabaseAdminClientCached()
+
+    if (actor.role !== 'super_admin') {
+      const { data: isApprover } = await actionAdmin
+        .from('payment_validation_approvers')
+        .select('user_id')
+        .eq('user_id', actor.id)
+        .eq('is_active', true)
+        .maybeSingle()
+
+      if (!isApprover?.user_id) {
+        redirect(withFlash(returnQS, { error: 'Only active payment approvers can validate.' }))
+      }
+    }
+
+    const { data, error } = await actionAdmin.rpc('create_payment_validation_batch_v1', {
+      p_payment_method: paymentMethod,
+      p_validation_mode: validationMode,
+      p_business_date: validationMode === 'daily' ? businessDate : null,
+      p_expected_amount: expectedAmount,
+      p_line_count: lineCount,
+      p_counted_amount: countedAmount,
+      p_note: note || null,
+      p_actor: actor.id,
+    })
+
+    if (error) redirect(withFlash(returnQS, { error: error.message || 'Could not create validation batch.' }))
+
+    const row = (Array.isArray(data) ? data[0] : data) as ValidationResultRow | null
+    revalidatePath('/admin/payments/reconciliation')
+    redirect(withFlash(returnQS, {
+      created: '1',
+      batch: row?.batch_id ? String(row.batch_id).slice(0, 8) : 'saved',
+    }))
+  }
 
   let groupsQuery = admin
     .from('payment_validation_open_groups_v1')
@@ -291,6 +431,7 @@ export default async function AdminPaymentsReconciliationPage({
 
   const cashOpen = openGroups.find((row) => row.payment_method === 'cash' && row.validation_mode === 'cash_period') ?? null
   const dailyOpenRows = openGroups.filter((row) => row.validation_mode === 'daily')
+  const createGroups = [cashOpen, ...dailyOpenRows].filter(Boolean) as OpenGroupRow[]
 
   const filterQS = buildQS(methodFilter === 'all' ? {} : { method: methodFilter })
   const methodHref = (method: Method | 'all') =>
@@ -425,7 +566,7 @@ export default async function AdminPaymentsReconciliationPage({
         <div className="space-y-1">
           <h1 className="text-2xl font-semibold">Admin · Payments Reconciliation</h1>
           <p className="text-sm text-[hsl(var(--muted))]">
-            Read-only reconciliation overview based on unreconciled income events and validated batches.
+            Reconcile unreconciled income events into validation batches without editing the original source records.
           </p>
           <p className="text-sm text-[hsl(var(--muted))]">
             Cash stays period-based since the last closure. Instapay, Card, and Bank transfer stay daily.
@@ -448,10 +589,22 @@ export default async function AdminPaymentsReconciliationPage({
         </div>
       </div>
 
+      {flashError ? (
+        <InlineAlert variant="error" title="Validation failed">
+          {flashError}
+        </InlineAlert>
+      ) : null}
+
+      {flashCreated ? (
+        <InlineAlert variant="success" title="Validation saved">
+          Validation batch {flashBatch || 'created'} was saved successfully.
+        </InlineAlert>
+      ) : null}
+
       <Card>
         <CardHeader>
           <CardTitle>Method filter</CardTitle>
-          <div className="text-sm text-[hsl(var(--muted))]">Keep the page read-only and narrow the view only when needed.</div>
+          <div className="text-sm text-[hsl(var(--muted))]">Keep the page narrow only when needed.</div>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="flex flex-wrap gap-2">
@@ -486,6 +639,105 @@ export default async function AdminPaymentsReconciliationPage({
           </Card>
         ))}
       </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Create validation batches</CardTitle>
+          <div className="text-sm text-[hsl(var(--muted))]">
+            {approverHelperText(canCreateValidations, me.role)} Leave counted amount equal to expected when everything matches. Add a note when there is any difference.
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {!canCreateValidations ? (
+            <InlineAlert variant="warning" title="Read-only access">
+              Only active approvers or Super Admin can create validation batches. Admin users who should validate must first be added to <code>payment_validation_approvers</code>.
+            </InlineAlert>
+          ) : null}
+
+          {!createGroups.length ? (
+            <div className="rounded-2xl border border-dashed border-[hsl(var(--border))] bg-[hsl(var(--bg))] p-4 text-sm text-[hsl(var(--muted))]">
+              No open scopes are available for validation right now.
+            </div>
+          ) : null}
+
+          <div className="grid gap-4 xl:grid-cols-2">
+            {createGroups.map((row) => {
+              const scopeKey = `${row.payment_method}:${row.validation_mode}:${row.business_date ?? 'open'}`
+              const scopeLabel = row.validation_mode === 'cash_period' ? formatRangeLabel(row) : formatDateOnly(row.business_date)
+              const hiddenBusinessDate = row.validation_mode === 'daily' ? row.business_date ?? '' : ''
+              return (
+                <Card key={scopeKey}>
+                  <CardHeader>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <CardTitle>{labelMethod(row.payment_method)}</CardTitle>
+                      <Badge className={badgeClassForMethod(row.payment_method)}>{labelMode(row.validation_mode)}</Badge>
+                    </div>
+                    <div className="text-sm text-[hsl(var(--muted))]">Scope: {scopeLabel}</div>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <div>
+                        <div className="text-xs text-[hsl(var(--muted))]">Expected amount</div>
+                        <div className="mt-1 font-semibold">{formatEGP(row.expected_amount)}</div>
+                      </div>
+                      <div>
+                        <div className="text-xs text-[hsl(var(--muted))]">Open entries</div>
+                        <div className="mt-1 font-semibold">{row.line_count}</div>
+                      </div>
+                      <div>
+                        <div className="text-xs text-[hsl(var(--muted))]">Business scope</div>
+                        <div className="mt-1 text-sm text-[hsl(var(--muted))]">{scopeLabel}</div>
+                      </div>
+                      <div>
+                        <div className="text-xs text-[hsl(var(--muted))]">Event window</div>
+                        <div className="mt-1 text-sm text-[hsl(var(--muted))]">{formatCairoDateTime(row.period_from)} → {formatCairoDateTime(row.period_to)}</div>
+                      </div>
+                    </div>
+
+                    <form action={createValidationAction} className="space-y-3">
+                      <input type="hidden" name="return_qs" value={filterQS} />
+                      <input type="hidden" name="payment_method" value={row.payment_method} />
+                      <input type="hidden" name="validation_mode" value={row.validation_mode} />
+                      <input type="hidden" name="business_date" value={hiddenBusinessDate} />
+                      <input type="hidden" name="expected_amount" value={amountInputValue(row.expected_amount)} />
+                      <input type="hidden" name="line_count" value={String(row.line_count)} />
+
+                      <Input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        name="counted_amount"
+                        label="Counted amount"
+                        defaultValue={amountInputValue(row.expected_amount)}
+                        hint="Keep this equal to expected when there is no difference."
+                        required
+                        disabled={!canCreateValidations}
+                      />
+
+                      <Textarea
+                        name="note"
+                        label="Note"
+                        rows={3}
+                        placeholder="Optional when counted amount matches expected. Required when there is a difference."
+                        disabled={!canCreateValidations}
+                      />
+
+                      <div className="flex items-center justify-between gap-3 flex-wrap">
+                        <div className="text-xs text-[hsl(var(--muted))]">
+                          This creates one validation batch and consumes the currently open lines for this scope only.
+                        </div>
+                        <Button type="submit" disabled={!canCreateValidations}>
+                          Validate {labelMethod(row.payment_method)}
+                        </Button>
+                      </div>
+                    </form>
+                  </CardContent>
+                </Card>
+              )
+            })}
+          </div>
+        </CardContent>
+      </Card>
 
       {hasErrors ? (
         <Card>
@@ -549,7 +801,7 @@ export default async function AdminPaymentsReconciliationPage({
       <Card>
         <CardHeader>
           <CardTitle>Latest open entries</CardTitle>
-          <div className="text-sm text-[hsl(var(--muted))]">Latest 100 unreconciled income lines to inspect before write actions are added in the next lot.</div>
+          <div className="text-sm text-[hsl(var(--muted))]">Latest 100 unreconciled income lines before validation.</div>
         </CardHeader>
         <CardContent>
           {!openEventsTableRows.length ? (
@@ -559,7 +811,7 @@ export default async function AdminPaymentsReconciliationPage({
           ) : null}
           <Table columns={openEventsColumns} rows={openEventsTableRows as any} keyField="id" stickyTopClassName="top-0" />
           <div className="mt-3 text-xs text-[hsl(var(--muted))]">
-            Showing the latest 100 open lines{filterQS ? ` for ${labelMethod(methodFilter)}` : ''}. The future validation action will consume these lines into a batch without editing the source records.
+            Showing the latest 100 open lines{filterQS ? ` for ${labelMethod(methodFilter)}` : ''}. Validation creates a batch and links these lines without editing the source records.
           </div>
         </CardContent>
       </Card>
@@ -567,7 +819,7 @@ export default async function AdminPaymentsReconciliationPage({
       <Card>
         <CardHeader>
           <CardTitle>Recent validation history</CardTitle>
-          <div className="text-sm text-[hsl(var(--muted))]">Read-only list of the latest non-deleted validation batches.</div>
+          <div className="text-sm text-[hsl(var(--muted))]">Latest non-deleted validation batches.</div>
         </CardHeader>
         <CardContent>
           {!historyTableRows.length ? (
