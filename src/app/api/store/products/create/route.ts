@@ -128,6 +128,9 @@ export async function POST(req: Request) {
     if (!payload.name) {
       return noStore(NextResponse.json({ ok: false, error: 'INVALID_INPUT', details: 'Name is required.' }, { status: 400 }))
     }
+    if (!payload.model_id) {
+      return noStore(NextResponse.json({ ok: false, error: 'MODEL_REQUIRED', details: 'Linked model is required under Store V3 hard enforcement.' }, { status: 400 }))
+    }
 
     const { data: categoryRow, error: categoryErr } = await admin
       .from('store_product_categories')

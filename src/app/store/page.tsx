@@ -102,6 +102,7 @@ const listStoreProductsCached = unstable_cache(
 
     if (!isStoreAdmin) qry = qry.eq('is_active', true)
     if (showPreorderOnly) qry = qry.eq('allow_preorder', true)
+    qry = qry.not('model_id', 'is', null)
     if (category && category !== 'all') qry = qry.eq('category', category)
 
     const { data, error } = await qry
@@ -226,22 +227,18 @@ function buildStoreModelCards(items: ProductRow[], categoryLabels: Map<string, s
 
   for (const item of items) {
     const linkedModel = item.model_id && item.model?.id ? item.model : null
-    const fallbackName = String(item.name ?? '').trim()
-    const displayName = String(linkedModel?.name ?? fallbackName).trim()
-    if (!displayName) continue
+    if (!linkedModel) continue
 
-    const modelCategory = String(linkedModel?.category_key ?? item.category).trim() || item.category
-    const key = linkedModel
-      ? `model:${linkedModel.id}`
-      : `legacy:${item.category}__${normalizeKeyPart(fallbackName, 'item')}`
+    const key = `model:${linkedModel.id}`
+    const modelCategory = String(linkedModel.category_key ?? item.category).trim() || item.category
 
     const current = grouped.get(key) ?? {
       category: modelCategory,
       categoryLabel: categoryLabel(modelCategory, categoryLabels),
-      name: displayName,
-      description: String(linkedModel?.description ?? '').trim() || null,
-      sortOrder: linkedModel ? Number(linkedModel.sort_order ?? 0) : 9999,
-      coverImageUrl: resolveStoreCatalogImageUrl(linkedModel?.cover_image_path),
+      name: String(linkedModel.name || '').trim(),
+      description: String(linkedModel.description ?? '').trim() || null,
+      sortOrder: Number(linkedModel.sort_order ?? 0),
+      coverImageUrl: resolveStoreCatalogImageUrl(linkedModel.cover_image_path),
       variants: [],
     }
 
@@ -259,7 +256,7 @@ function buildStoreModelCards(items: ProductRow[], categoryLabels: Map<string, s
     })
 
     if (!current.coverImageUrl) {
-      current.coverImageUrl = resolveStoreCatalogImageUrl(linkedModel?.cover_image_path)
+      current.coverImageUrl = resolveStoreCatalogImageUrl(linkedModel.cover_image_path)
     }
 
     grouped.set(key, current)
@@ -369,6 +366,8 @@ export default async function StorePage({
   } catch (e: any) {
     errorMsg = e?.message || String(e)
   }
+
+  items = items.filter((item) => item.model_id && item.model?.id)
 
   if (!isStoreAdmin) {
     items = items.filter((item) => item.model?.is_active !== false)

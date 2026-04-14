@@ -85,13 +85,10 @@ export default function StoreProductForm({
     [modelOptions, modelId]
   )
 
-  const missingModelWarning = useMemo(() => {
+  const modelRequirementMessage = useMemo(() => {
     if (selectedModel) return ''
-    if (active) {
-      return 'Soft enforcement: this active variant is still unlinked from a Store V3 model. Link it now so it is ready before final enforcement.'
-    }
-    return 'Soft enforcement: this variant has no Store V3 model link yet. You can still save it, but linking now will keep the V3 migration clean.'
-  }, [active, selectedModel])
+    return 'Hard enforcement: every Store variant must now be linked to a Store V3 model before it can be saved.'
+  }, [selectedModel])
 
   useEffect(() => {
     return () => {
@@ -206,6 +203,11 @@ export default function StoreProductForm({
         toast.error('Category is required')
         return
       }
+      if (!modelId.trim()) {
+        setStatus({ kind: 'error', msg: 'Linked model is required under Store V3 hard enforcement.' })
+        toast.error('Linked model is required')
+        return
+      }
 
       let url = '/api/store/products/create'
       let method: 'POST' | 'PATCH' = 'POST'
@@ -298,13 +300,13 @@ export default function StoreProductForm({
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <Select
-          label="Linked model"
+          label="Linked model *"
           value={modelId}
           onChange={(e) => setModelId(e.target.value)}
           disabled={busy || modelsLoading}
           aria-label="Linked model"
         >
-          <option value="">No linked model yet</option>
+          <option value="">Select a linked model</option>
           {modelOptions.map((option) => (
             <option key={option.id} value={option.id}>
               {buildStoreModelOptionLabel(option)}
@@ -322,7 +324,7 @@ export default function StoreProductForm({
             <div className="space-y-1">
               <div>No parent model linked yet.</div>
               <div>
-                Create models first in{' '}
+                Hard enforcement is now active. Create or select the parent model in{' '}
                 <Link href="/admin/store/models" className="font-medium underline underline-offset-2">
                   Store Models
                 </Link>
@@ -335,7 +337,7 @@ export default function StoreProductForm({
 
       {!selectedModel ? (
         <InlineAlert variant="error" compact>
-          {missingModelWarning}
+          {modelRequirementMessage}
         </InlineAlert>
       ) : null}
 
