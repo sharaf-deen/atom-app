@@ -32,3 +32,10 @@ export function sortStoreModels<T extends Pick<StoreProductModelRow, 'sort_order
     return String(a.name || '').localeCompare(String(b.name || ''), 'en', { sensitivity: 'base' })
   })
 }
+
+export function buildStoreModelOptionLabel(item: Pick<StoreProductModelRow, 'name' | 'slug' | 'is_active'>) {
+  const parts = [String(item.name || '').trim()]
+  if (item.slug && item.slug !== item.name) parts.push(`(${item.slug})`)
+  if (!item.is_active) parts.push('inactive')
+  return parts.filter(Boolean).join(' ')
+}

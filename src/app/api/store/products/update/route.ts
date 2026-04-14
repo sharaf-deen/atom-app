@@ -55,6 +55,7 @@ export async function PATCH(req: NextRequest) {
     const patch: Record<string, any> = {}
 
     if (typeof body?.category === 'string') patch.category = normalizeStoreCategoryKey(body.category)
+    if (body?.model_id !== undefined) patch.model_id = isNonEmptyStr(body.model_id) ? body.model_id.trim() : null
     if (typeof body?.name === 'string') patch.name = body.name.trim()
     if (typeof body?.color === 'string') patch.color = body.color.trim()
     if (typeof body?.size === 'string') patch.size = body.size.trim()
@@ -96,6 +97,21 @@ export async function PATCH(req: NextRequest) {
       return noStore(NextResponse.json({ ok: false, error: 'NO_FIELDS_TO_UPDATE' }, { status: 400 }))
     }
 
+    let targetCategory = typeof patch.category === 'string' ? patch.category : null
+
+    if (!targetCategory && patch.model_id !== undefined) {
+      const { data: currentProduct, error: currentErr } = await admin
+        .from('store_products')
+        .select('category')
+        .eq('id', id)
+        .maybeSingle<{ category: string | null }>()
+
+      if (currentErr) {
+        return noStore(NextResponse.json({ ok: false, error: 'PRODUCT_LOOKUP_FAILED', details: currentErr.message }, { status: 500 }))
+      }
+      targetCategory = String(currentProduct?.category || '').trim() || null
+    }
+
     if (typeof patch.category === 'string') {
       const { data: categoryRow, error: categoryErr } = await admin
         .from('store_product_categories')
@@ -108,6 +124,27 @@ export async function PATCH(req: NextRequest) {
       }
       if (!categoryRow?.key) {
         return noStore(NextResponse.json({ ok: false, error: 'INVALID_CATEGORY', details: 'Selected category was not found.' }, { status: 400 }))
+      }
+    }
+
+    if (patch.model_id) {
+      const { data: modelRow, error: modelErr } = await admin
+        .from('store_product_models')
+        .select('id,category_key')
+        .eq('id', patch.model_id)
+        .maybeSingle<{ id: string; category_key: string }>()
+
+      if (modelErr) {
+        return noStore(NextResponse.json({ ok: false, error: 'MODEL_LOOKUP_FAILED', details: modelErr.message }, { status: 500 }))
+      }
+      if (!modelRow?.id) {
+        return noStore(NextResponse.json({ ok: false, error: 'INVALID_MODEL', details: 'Selected model was not found.' }, { status: 400 }))
+      }
+      if (!targetCategory) {
+        return noStore(NextResponse.json({ ok: false, error: 'MODEL_CATEGORY_UNKNOWN', details: 'Could not resolve the product category for this model link.' }, { status: 400 }))
+      }
+      if (modelRow.category_key !== targetCategory) {
+        return noStore(NextResponse.json({ ok: false, error: 'MODEL_CATEGORY_MISMATCH', details: 'Selected model must belong to the same category as the product variant.' }, { status: 400 }))
       }
     }
 
@@ -129,6 +166,7 @@ export async function PATCH(req: NextRequest) {
     try { revalidatePath('/admin/store') } catch {}
     try { revalidatePath('/admin/store/dashboard') } catch {}
     try { revalidatePath('/admin/store/sales') } catch {}
+    try { revalidatePath('/admin/store/models') } catch {}
 
     return noStore(NextResponse.json({ ok: true, item: data }))
   } catch (e: any) {

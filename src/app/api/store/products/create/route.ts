@@ -9,6 +9,7 @@ import { normalizeStoreCategoryKey } from '@/lib/storeCategories'
 
 type JsonBody = {
   category: string
+  model_id?: string | null
   name: string
   color?: string | null
   size?: string | null
@@ -30,6 +31,11 @@ function noStore(res: NextResponse) {
 function toCleanString(value: FormDataEntryValue | string | null | undefined) {
   if (typeof value !== 'string') return ''
   return value.trim()
+}
+
+function toNullableString(value: FormDataEntryValue | string | null | undefined) {
+  const clean = toCleanString(value)
+  return clean || null
 }
 
 function toNonNegativeInt(value: FormDataEntryValue | string | number | null | undefined) {
@@ -68,6 +74,7 @@ async function parsePayload(req: Request): Promise<{ fields: JsonBody; imageFile
     return {
       fields: {
         category: normalizeStoreCategoryKey(toCleanString(fd.get('category')) || 'kimono'),
+        model_id: toNullableString(fd.get('model_id')),
         name: toCleanString(fd.get('name')),
         color: toCleanString(fd.get('color')) || null,
         size: toCleanString(fd.get('size')) || null,
@@ -106,6 +113,7 @@ export async function POST(req: Request) {
 
     const payload = {
       category: normalizeStoreCategoryKey(fields.category || 'kimono'),
+      model_id: typeof fields.model_id === 'string' && fields.model_id.trim() ? fields.model_id.trim() : null,
       name: (fields.name || '').trim(),
       color: (fields.color || '').trim() || null,
       size: (fields.size || '').trim() || null,
@@ -132,6 +140,24 @@ export async function POST(req: Request) {
     }
     if (!categoryRow?.key || categoryRow.is_active !== true) {
       return noStore(NextResponse.json({ ok: false, error: 'INVALID_CATEGORY', details: 'Select an active product category.' }, { status: 400 }))
+    }
+
+    if (payload.model_id) {
+      const { data: modelRow, error: modelErr } = await admin
+        .from('store_product_models')
+        .select('id,category_key')
+        .eq('id', payload.model_id)
+        .maybeSingle<{ id: string; category_key: string }>()
+
+      if (modelErr) {
+        return noStore(NextResponse.json({ ok: false, error: 'MODEL_LOOKUP_FAILED', details: modelErr.message }, { status: 500 }))
+      }
+      if (!modelRow?.id) {
+        return noStore(NextResponse.json({ ok: false, error: 'INVALID_MODEL', details: 'Selected model was not found.' }, { status: 400 }))
+      }
+      if (modelRow.category_key !== payload.category) {
+        return noStore(NextResponse.json({ ok: false, error: 'MODEL_CATEGORY_MISMATCH', details: 'Selected model must belong to the same category as the product variant.' }, { status: 400 }))
+      }
     }
 
     if (imageFile) {

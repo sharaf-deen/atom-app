@@ -10,6 +10,8 @@ import StoreProductForm from '@/components/StoreProductForm'
 type Props = {
   id: string
   category: string
+  modelId?: string | null
+  modelName?: string | null
   name: string
   color: string | null
   size: string | null
@@ -24,6 +26,8 @@ type Props = {
 export default function AdminProductQuickEdit({
   id,
   category,
+  modelId,
+  modelName,
   name,
   color,
   size,
@@ -195,6 +199,8 @@ export default function AdminProductQuickEdit({
           product={{
             id,
             category,
+            model_id: modelId ?? null,
+            model_name: modelName ?? null,
             name,
             color,
             size,
