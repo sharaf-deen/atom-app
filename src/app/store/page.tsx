@@ -34,9 +34,22 @@ const StoreMyPreorders = dynamicImport(() => import('@/components/store/StoreMyP
   loading: () => <div className="text-sm text-gray-500">Loading my preorders…</div>,
 })
 
+type ProductModelRef = {
+  id: string
+  name: string
+  slug: string | null
+  description: string | null
+  cover_image_path: string | null
+  sort_order: number | null
+  category_key: string | null
+  is_active: boolean | null
+}
+
 type ProductRow = {
   id: string
   category: Category
+  model_id: string | null
+  model: ProductModelRef | null
   name: string
   color: string | null
   size: string | null
@@ -49,6 +62,9 @@ type ProductRow = {
   created_at?: string | null
 }
 
+type ProductQueryRow = Omit<ProductRow, 'model'> & {
+  model: ProductRow['model'] | Array<NonNullable<ProductRow['model']>> | null
+}
 
 const STORE_PRODUCT_BUCKET = 'store-product-images'
 const SUPABASE_URL = (process.env.NEXT_PUBLIC_SUPABASE_URL || '').replace(/\/+$/, '')
@@ -60,40 +76,42 @@ function storeProductImageUrl(path: string | null | undefined) {
   return `${SUPABASE_URL}/storage/v1/object/public/${STORE_PRODUCT_BUCKET}/${encodedPath}`
 }
 
+function resolveStoreCatalogImageUrl(path: string | null | undefined) {
+  const clean = String(path ?? '').trim()
+  if (!clean) return null
+  if (/^https?:\/\//i.test(clean)) return clean
+  return storeProductImageUrl(clean) || null
+}
+
+function normalizeProductRow(row: ProductQueryRow): ProductRow {
+  const model = Array.isArray(row.model) ? row.model[0] ?? null : row.model ?? null
+  return {
+    ...row,
+    model,
+  }
+}
+
 const listStoreProductsCached = unstable_cache(
-  async (isSuperAdmin: boolean, showPreorderOnly: boolean, category: string, q: string) => {
+  async (isStoreAdmin: boolean, showPreorderOnly: boolean, category: string) => {
     const supa = getSupabaseAdminClientCached()
 
     let qry = supa
       .from('store_products')
-      .select('id, category, name, color, size, price_cents, currency, inventory_qty, is_active, allow_preorder, image_path, created_at')
+      .select('id, category, model_id, name, color, size, price_cents, currency, inventory_qty, is_active, allow_preorder, image_path, created_at, model:store_product_models(id,name,slug,description,cover_image_path,sort_order,category_key,is_active)')
       .order('created_at', { ascending: false })
 
-    if (!isSuperAdmin) qry = qry.eq('is_active', true)
+    if (!isStoreAdmin) qry = qry.eq('is_active', true)
     if (showPreorderOnly) qry = qry.eq('allow_preorder', true)
     if (category && category !== 'all') qry = qry.eq('category', category)
-
-    if (q) {
-      if (q.length >= 3) {
-        qry = qry.textSearch('search_tsv', q, { type: 'websearch', config: 'simple' })
-      } else {
-        const safe = q.replace(/,/g, ' ').trim()
-        qry = qry.or([
-          `name.ilike.%${safe}%`,
-          `color.ilike.%${safe}%`,
-          `size.ilike.%${safe}%`,
-          `category.ilike.%${safe}%`,
-        ].join(','))
-      }
-    }
 
     const { data, error } = await qry
     if (error) throw new Error(error.message)
 
-    return { items: ((data ?? []) as ProductRow[]) }
+    const items = (Array.isArray(data) ? data : []).map((row) => normalizeProductRow(row as ProductQueryRow))
+    return { items }
   },
-  ['store_products_user_preorders_v3'],
-  { revalidate: 120, tags: ['store-products'] }
+  ['store_products_user_catalog_v4'],
+  { revalidate: 120, tags: ['store-products', 'store-models'] }
 )
 
 function clampInt(v: unknown, def: number, min: number, max: number) {
@@ -125,7 +143,6 @@ function categoryLabel(category: Category | 'all', labels: Map<string, string>) 
   return labels.get(category) ?? category
 }
 
-
 type StoreModelVariant = {
   id: string
   category: Category
@@ -144,6 +161,7 @@ type StoreModelCard = {
   category: Category
   categoryLabel: string
   name: string
+  description: string | null
   priceFromCents: number
   priceToCents: number
   currency: string
@@ -154,6 +172,7 @@ type StoreModelCard = {
     variants: StoreModelVariant[]
   }>
   previewImageUrl: string | null
+  sortOrder: number
 }
 
 function normalizeKeyPart(value: string | null | undefined, fallback: string) {
@@ -166,26 +185,83 @@ function labelOrFallback(value: string | null | undefined, fallback: string) {
   return clean || fallback
 }
 
+function normalizeSearchText(value: string | null | undefined) {
+  return String(value ?? '')
+    .toLowerCase()
+    .replace(/[_-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function matchesStoreSearch(item: ProductRow, q: string, categoryLabels: Map<string, string>) {
+  const needle = normalizeSearchText(q)
+  if (!needle) return true
+
+  const haystack = normalizeSearchText(
+    [
+      item.model?.name,
+      item.model?.slug,
+      item.model?.description,
+      item.name,
+      item.color,
+      item.size,
+      item.category,
+      categoryLabels.get(item.category),
+    ].filter(Boolean).join(' ')
+  )
+
+  return haystack.includes(needle)
+}
+
 function buildStoreModelCards(items: ProductRow[], categoryLabels: Map<string, string>) {
-  const grouped = new Map<string, { category: Category; name: string; variants: StoreModelVariant[] }>()
+  const grouped = new Map<string, {
+    category: Category
+    categoryLabel: string
+    name: string
+    description: string | null
+    sortOrder: number
+    coverImageUrl: string | null
+    variants: StoreModelVariant[]
+  }>()
 
   for (const item of items) {
-    const name = String(item.name ?? '').trim()
-    if (!name) continue
-    const key = `${item.category}__${normalizeKeyPart(name, 'item')}`
-    const current = grouped.get(key) ?? { category: item.category, name, variants: [] }
+    const linkedModel = item.model_id && item.model?.id ? item.model : null
+    const fallbackName = String(item.name ?? '').trim()
+    const displayName = String(linkedModel?.name ?? fallbackName).trim()
+    if (!displayName) continue
+
+    const modelCategory = String(linkedModel?.category_key ?? item.category).trim() || item.category
+    const key = linkedModel
+      ? `model:${linkedModel.id}`
+      : `legacy:${item.category}__${normalizeKeyPart(fallbackName, 'item')}`
+
+    const current = grouped.get(key) ?? {
+      category: modelCategory,
+      categoryLabel: categoryLabel(modelCategory, categoryLabels),
+      name: displayName,
+      description: String(linkedModel?.description ?? '').trim() || null,
+      sortOrder: linkedModel ? Number(linkedModel.sort_order ?? 0) : 9999,
+      coverImageUrl: resolveStoreCatalogImageUrl(linkedModel?.cover_image_path),
+      variants: [],
+    }
+
     current.variants.push({
       id: item.id,
       category: item.category,
-      name,
+      name: item.name,
       color: item.color,
       size: item.size,
       price_cents: Number(item.price_cents ?? 0),
       currency: item.currency ?? 'EGP',
       is_active: Boolean(item.is_active),
       allow_preorder: Boolean(item.allow_preorder),
-      image_url: storeProductImageUrl(item.image_path),
+      image_url: resolveStoreCatalogImageUrl(item.image_path),
     })
+
+    if (!current.coverImageUrl) {
+      current.coverImageUrl = resolveStoreCatalogImageUrl(linkedModel?.cover_image_path)
+    }
+
     grouped.set(key, current)
   }
 
@@ -210,7 +286,12 @@ function buildStoreModelCards(items: ProductRow[], categoryLabels: Map<string, s
       const colorGroups = Array.from(colorMap.values())
         .map((group) => ({
           ...group,
-          variants: [...group.variants].sort((a, b) => labelOrFallback(a.size, 'One size').localeCompare(labelOrFallback(b.size, 'One size'), undefined, { numeric: true, sensitivity: 'base' })),
+          variants: [...group.variants].sort((a, b) =>
+            labelOrFallback(a.size, 'One size').localeCompare(labelOrFallback(b.size, 'One size'), undefined, {
+              numeric: true,
+              sensitivity: 'base',
+            })
+          ),
         }))
         .sort((a, b) => a.label.localeCompare(b.label, undefined, { numeric: true, sensitivity: 'base' }))
 
@@ -220,16 +301,22 @@ function buildStoreModelCards(items: ProductRow[], categoryLabels: Map<string, s
       return {
         key,
         category: model.category,
-        categoryLabel: categoryLabel(model.category, categoryLabels),
+        categoryLabel: model.categoryLabel,
         name: model.name,
+        description: model.description,
         priceFromCents: prices.length ? Math.min(...prices) : 0,
         priceToCents: prices.length ? Math.max(...prices) : 0,
         currency: fallbackCurrency,
         colorGroups,
-        previewImageUrl: colorGroups.find((group) => group.image_url)?.image_url ?? null,
+        previewImageUrl: model.coverImageUrl || colorGroups.find((group) => group.image_url)?.image_url || null,
+        sortOrder: model.sortOrder,
       } satisfies StoreModelCard
     })
-    .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }))
+    .sort((a, b) => {
+      const sortDelta = Number(a.sortOrder ?? 0) - Number(b.sortOrder ?? 0)
+      if (sortDelta !== 0) return sortDelta
+      return a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' })
+    })
 }
 
 export default async function StorePage({
@@ -241,7 +328,7 @@ export default async function StorePage({
   if (!me) redirect('/login?next=/store')
 
   const role = me.role
-  const isSuperAdmin = canAccessStoreAdmin(role)
+  const isStoreAdmin = canAccessStoreAdmin(role)
   const canPreorder = USER_PREORDER_ROLES.has(role)
 
   if (!canAccessStore(role)) redirect('/')
@@ -277,10 +364,17 @@ export default async function StorePage({
   let errorMsg: string | null = null
 
   try {
-    const res = await listStoreProductsCached(isSuperAdmin, canPreorder, category, q)
+    const res = await listStoreProductsCached(isStoreAdmin, canPreorder, category)
     items = res.items
   } catch (e: any) {
     errorMsg = e?.message || String(e)
+  }
+
+  if (!isStoreAdmin) {
+    items = items.filter((item) => item.model?.is_active !== false)
+  }
+  if (q) {
+    items = items.filter((item) => matchesStoreSearch(item, q, categoryLabels))
   }
 
   const modelCards = buildStoreModelCards(items, categoryLabels)
@@ -299,16 +393,16 @@ export default async function StorePage({
       <PageHeader
         title="Store"
         subtitle={
-          isSuperAdmin
-            ? 'Browse the catalog or open Store Admin.'
+          isStoreAdmin
+            ? 'Browse the model catalog or open Store Admin.'
             : canPreorder
-              ? 'Browse the catalog and send a preorder quickly.'
-              : 'Browse the catalog.'
+              ? 'Browse by model, pick the exact variant, then send your preorder quickly.'
+              : 'Browse the model catalog.'
         }
       />
 
       <Section className="space-y-6">
-        {isSuperAdmin ? (
+        {isStoreAdmin ? (
           <Card>
             <CardContent className="flex flex-wrap items-center gap-3">
               <div>
@@ -333,7 +427,7 @@ export default async function StorePage({
                 <div className="min-w-0 flex-1">
                   <div className="font-semibold">Pre-order gear</div>
                   <div className="mt-1 text-sm text-[hsl(var(--muted))]">
-                    Choose your item, send your request, then confirm the rest later with the store admin.
+                    Choose your model, then confirm the exact color and size before sending the request.
                   </div>
                 </div>
                 <Link
@@ -390,7 +484,7 @@ export default async function StorePage({
               <div className="min-w-0 flex-1">
                 <div className="font-semibold">Browse catalog</div>
                 <div className="mt-1 text-sm text-[hsl(var(--muted))]">
-                  Quick search, clean cards and simple category shortcuts.
+                  Model-first browsing by category, then exact color and size selection.
                 </div>
               </div>
               <div className="rounded-full border border-[hsl(var(--border))] bg-white px-3 py-1 text-xs font-medium text-[hsl(var(--muted))]">
@@ -471,7 +565,7 @@ export default async function StorePage({
           <Card>
             <CardContent>
               <div className="text-sm text-[hsl(var(--muted))]">
-                {canPreorder ? 'No preorderable products match your search right now.' : 'No products match your search right now.'}
+                {canPreorder ? 'No preorderable models match your search right now.' : 'No models match your search right now.'}
               </div>
             </CardContent>
           </Card>
