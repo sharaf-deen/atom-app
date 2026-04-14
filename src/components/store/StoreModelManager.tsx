@@ -11,6 +11,7 @@ import StoreProductForm from '@/components/StoreProductForm'
 import AdminProductQuickEdit from '@/components/store/AdminProductQuickEdit'
 import { buildStoreCategoryOptions, sortStoreProductCategories, type StoreProductCategoryRow } from '@/lib/storeCategories'
 import {
+  getStoreModelSuggestions,
   normalizeStoreModelSlug,
   sortStoreModels,
   type StoreProductModelRow,
@@ -119,6 +120,7 @@ export default function StoreModelManager() {
   const [unlinkedError, setUnlinkedError] = useState('')
   const [unlinkedCategory, setUnlinkedCategory] = useState('')
   const [unlinkedQuery, setUnlinkedQuery] = useState('')
+  const [quickLinkingVariantId, setQuickLinkingVariantId] = useState('')
 
   const isBusy = busyAction !== null
   const createBusy = busyAction?.type === 'create'
@@ -263,6 +265,38 @@ export default function StoreModelManager() {
       setUnlinkedError(e?.message || 'Could not load unlinked variants.')
     } finally {
       setUnlinkedLoading(false)
+    }
+  }
+
+  async function quickLinkVariant(variant: LinkedVariantRow, model: StoreProductModelRow) {
+    if (!variant?.id || !model?.id || quickLinkingVariantId) return
+    setQuickLinkingVariantId(variant.id)
+    try {
+      const res = await fetch('/api/store/products/update', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: variant.id,
+          category: variant.category,
+          model_id: model.id,
+        }),
+      })
+      const json = await res.json().catch(() => ({}))
+      if (!res.ok || !json?.ok) {
+        const msg = json?.details || json?.error || 'Could not link this variant to the selected model.'
+        toast.error(msg)
+        return
+      }
+      toast.success(`Linked to ${model.name}`)
+      await Promise.all([load(), loadUnlinkedQueue()])
+      if (expandedModelId === model.id) {
+        await loadVariants(model.id, true)
+      }
+      router.refresh()
+    } catch (e: any) {
+      toast.error(e?.message || 'Could not link this variant to the selected model.')
+    } finally {
+      setQuickLinkingVariantId('')
     }
   }
 
@@ -567,7 +601,7 @@ export default function StoreModelManager() {
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <div className="text-sm font-semibold text-black">Variant linking queue</div>
-            <div className="mt-1 text-xs text-[hsl(var(--muted))]">Find legacy variants that still need a Store V3 model link, then use Edit details to attach them safely.</div>
+            <div className="mt-1 text-xs text-[hsl(var(--muted))]">Find legacy variants that still need a Store V3 model link. Use the suggested quick-link buttons when the match looks right, or fall back to Edit details for a manual attach.</div>
           </div>
           <div className="flex flex-wrap gap-2">
             <Button type="button" variant="outline" size="sm" onClick={() => setShowUnlinkedQueue((current) => !current)}>
@@ -633,7 +667,10 @@ export default function StoreModelManager() {
               <div className="rounded-2xl border border-dashed p-4 text-sm text-[hsl(var(--muted))]">No unlinked variants match the current filters.</div>
             ) : (
               <div className="space-y-3">
-                {unlinkedItems.map((variant) => (
+                {unlinkedItems.map((variant) => {
+                  const suggestions = getStoreModelSuggestions(items, variant, 3)
+                  const quickLinkBusy = quickLinkingVariantId === variant.id
+                  return (
                   <div key={variant.id} className="rounded-2xl border bg-slate-50/70 p-3">
                     <div className="flex flex-wrap items-start justify-between gap-3">
                       <div>
@@ -649,7 +686,31 @@ export default function StoreModelManager() {
                             {variant.allow_preorder ? 'Preorder on' : 'Preorder off'}
                           </span>
                         </div>
-                        <div className="mt-2 text-xs text-[hsl(var(--muted))]">Use Edit details to assign this variant to a Store V3 model.</div>
+                        <div className="mt-3 rounded-2xl border bg-white p-3">
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <div className="text-xs font-semibold text-black">Suggested models</div>
+                            <div className="text-[11px] text-[hsl(var(--muted))]">Quick-link only when the match is clearly correct.</div>
+                          </div>
+                          {suggestions.length > 0 ? (
+                            <div className="mt-2 flex flex-wrap gap-2">
+                              {suggestions.map((suggestion) => (
+                                <Button
+                                  key={suggestion.id}
+                                  type="button"
+                                  size="sm"
+                                  variant="outline"
+                                  disabled={quickLinkBusy}
+                                  onClick={() => void quickLinkVariant(variant, suggestion)}
+                                >
+                                  {quickLinkBusy ? 'Linking…' : `Link to ${suggestion.name}`}
+                                </Button>
+                              ))}
+                            </div>
+                          ) : (
+                            <div className="mt-2 text-xs text-[hsl(var(--muted))]">No strong automatic match found. Use Edit details for a manual link.</div>
+                          )}
+                        </div>
+                        <div className="mt-2 text-xs text-[hsl(var(--muted))]">Use Edit details to review the variant and attach a model manually when needed.</div>
                       </div>
                     </div>
                     <div className="mt-3">
@@ -677,7 +738,7 @@ export default function StoreModelManager() {
                       />
                     </div>
                   </div>
-                ))}
+                )})}
               </div>
             )}
           </div>
@@ -939,7 +1000,7 @@ export default function StoreModelManager() {
       </Modal>
 
       <div className="rounded-2xl border border-dashed p-4 text-sm text-[hsl(var(--muted))]">
-        Featured models: <span className="font-medium text-black">{featuredCount}</span>. Coverage now tracks linked vs unlinked variants so you can finish the Store V3 migration before any future enforcement step.
+        Featured models: <span className="font-medium text-black">{featuredCount}</span>. Coverage now tracks linked vs unlinked variants, and the queue can suggest quick links to help finish the Store V3 migration before any future enforcement step.
       </div>
     </div>
   )
