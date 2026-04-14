@@ -102,6 +102,7 @@ export async function GET(req: NextRequest) {
     const from = (page - 1) * limit
     const to = from + limit - 1
     const category = (url.searchParams.get('category') || '').trim()
+    const modelId = (url.searchParams.get('model_id') || '').trim()
     const all = url.searchParams.get('all') === '1'
     const active = normActive(url.searchParams.get('active'))
     const preorder = normPreorder(url.searchParams.get('preorder'))
@@ -145,6 +146,11 @@ export async function GET(req: NextRequest) {
     if (category) {
       dataQuery = dataQuery.eq('category', category)
       countQuery = countQuery.eq('category', category)
+    }
+
+    if (modelId) {
+      dataQuery = dataQuery.eq('model_id', modelId)
+      countQuery = countQuery.eq('model_id', modelId)
     }
 
     if (q) {
