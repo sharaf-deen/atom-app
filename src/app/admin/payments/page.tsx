@@ -40,6 +40,12 @@ type PaymentRow = {
   actor: { user_id: string; email: string | null; first_name: string | null; last_name: string | null } | null
 }
 
+type PaymentLockRow = {
+  source_id: string
+  batch_id: string
+  validated_at: string
+}
+
 function formatEGP(n: number) {
   const v = Number(n ?? 0)
   try {
@@ -239,6 +245,27 @@ export default async function AdminPaymentsPage({
     actor: (r.actor ?? null) as any,
   }))
 
+
+  const paymentIds = rows.map((row) => row.id)
+  const { data: locksRaw } = paymentIds.length
+    ? await admin
+        .from('payment_validation_active_source_locks_v1')
+        .select('source_id,batch_id,validated_at')
+        .eq('source_kind', 'subscription_payment')
+        .in('source_id', paymentIds)
+    : { data: [] as PaymentLockRow[] }
+
+  const paymentLockMap = new Map(
+    ((locksRaw ?? []) as any[]).map((row) => [
+      String(row.source_id),
+      {
+        source_id: String(row.source_id),
+        batch_id: String(row.batch_id),
+        validated_at: String(row.validated_at),
+      } satisfies PaymentLockRow,
+    ])
+  )
+
   let totals = { all: 0, cash: 0, instapay: 0, card: 0, bank_transfer: 0 }
 
   try {
@@ -317,6 +344,10 @@ export default async function AdminPaymentsPage({
     const name = `${r.member?.first_name ?? ''} ${r.member?.last_name ?? ''}`.trim() || r.member?.email || '—'
     const by = `${r.actor?.first_name ?? ''} ${r.actor?.last_name ?? ''}`.trim() || r.actor?.email || '—'
     const memberLabel = `${name}${r.member?.member_id ? ` · ${r.member.member_id}` : ''}`
+    const lock = paymentLockMap.get(r.id) ?? null
+    const lockReason = lock
+      ? `Already reconciled in batch ${lock.batch_id.slice(0, 8)}. Delete that validation batch first, then edit the payment date.`
+      : null
     return {
       id: r.id,
       paid_when: <span className="font-medium">{formatCairoDateTime(r.paid_at)}</span>,
@@ -333,13 +364,24 @@ export default async function AdminPaymentsPage({
       ),
       amount: <span className="font-semibold">{formatEGP(r.amount)}</span>,
       method: <Badge className={badgeClassForMethod(r.payment_method)}>{labelMethod(r.payment_method)}</Badge>,
-      note: <span className="text-sm text-[hsl(var(--muted))]">{r.note ?? '—'}</span>,
+      note: (
+        <div className="space-y-1">
+          <span className="text-sm text-[hsl(var(--muted))]">{r.note ?? '—'}</span>
+          {lock ? (
+            <div className="text-xs font-medium text-amber-700">
+              Reconciled · Batch {lock.batch_id.slice(0, 8)} · {formatCairoDateTime(lock.validated_at)}
+            </div>
+          ) : null}
+        </div>
+      ),
       by: <span className="text-sm">{by}</span>,
       edit_date: (
         <EditPaymentDateButton
           paymentId={r.id}
           memberLabel={memberLabel}
           currentPaidAt={r.paid_at || r.created_at}
+          disabled={!!lock}
+          disabledReason={lockReason}
         />
       ),
       open: (
@@ -507,7 +549,7 @@ export default async function AdminPaymentsPage({
         <CardContent className="py-4 space-y-1">
           <div className="text-sm text-[hsl(var(--muted))]">
             <strong>Payment date</strong> is the real accounting date. <strong>Recorded at</strong> is when the payment was entered in ATOM App.
-            Use <strong>Edit date</strong> for historical imports already entered with today&apos;s date.
+            Use <strong>Edit date</strong> for historical imports already entered with today&apos;s date. Reconciled payments are locked until their validation batch is deleted.
           </div>
           <div className="text-xs text-[hsl(var(--muted))]">
             Filtered CSV/PDF exports and the Cash Report shortcut always follow the current filtered result, not only the visible page.

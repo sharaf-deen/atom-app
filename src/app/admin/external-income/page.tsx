@@ -46,6 +46,12 @@ type ProfileMini = {
   email: string | null
 }
 
+type SourceLockRow = {
+  source_id: string
+  batch_id: string
+  validated_at: string
+}
+
 const PER_PAGE = 20
 const ATTACHMENT_MAX_BYTES = 8 * 1024 * 1024
 const ALLOWED_PAYMENT_METHODS = new Set(['cash', 'visa', 'instapay', 'bank_transfer'])
@@ -262,6 +268,12 @@ function canManageEntry(actorRole: Role, actorUserId: string, creatorProfile: Pr
   return normalizeRole(creatorProfile?.role) !== 'super_admin'
 }
 
+
+function sourceLockedMessage(lock?: SourceLockRow | null) {
+  if (!lock?.batch_id) return 'This entry is already reconciled. Delete the validation batch first, then edit or delete the source entry.'
+  return `This entry is already reconciled in batch ${lock.batch_id.slice(0, 8)}. Delete that validation batch first, then edit or delete the source entry.`
+}
+
 async function addEntryAction(formData: FormData) {
   'use server'
 
@@ -372,6 +384,16 @@ async function updateEntryAction(formData: FormData) {
     redirect(withFlash(returnQS, { error: 'Only Super Admin can edit this entry.' }))
   }
 
+  const { data: lockRow, error: lockErr } = await admin
+    .from('payment_validation_active_source_locks_v1')
+    .select('source_id,batch_id,validated_at')
+    .eq('source_kind', 'external_income')
+    .eq('source_id', id)
+    .maybeSingle<SourceLockRow>()
+
+  if (lockErr) redirect(withFlash(returnQS, { error: lockErr.message || 'Could not verify reconciliation lock.' }))
+  if (lockRow?.batch_id) redirect(withFlash(returnQS, { error: sourceLockedMessage(lockRow) }))
+
   let attachment_path: string | null = existing.attachment_path
   let attachment_mime: string | null = existing.attachment_mime
   let attachment_filename: string | null = existing.attachment_filename
@@ -455,6 +477,16 @@ async function deleteEntryAction(formData: FormData) {
   if (!canManageEntry(me.role, me.id, creatorProfile, existing.created_by)) {
     redirect(withFlash(returnQS, { error: 'Only Super Admin can delete this entry.' }))
   }
+
+  const { data: lockRow, error: lockErr } = await admin
+    .from('payment_validation_active_source_locks_v1')
+    .select('source_id,batch_id,validated_at')
+    .eq('source_kind', 'external_income')
+    .eq('source_id', id)
+    .maybeSingle<SourceLockRow>()
+
+  if (lockErr) redirect(withFlash(returnQS, { error: lockErr.message || 'Could not verify reconciliation lock.' }))
+  if (lockRow?.batch_id) redirect(withFlash(returnQS, { error: sourceLockedMessage(lockRow) }))
 
   const { error } = await admin.from('external_income_entries').delete().eq('id', id)
   if (error) redirect(withFlash(returnQS, { error: error.message || 'Could not delete entry.' }))
@@ -579,7 +611,27 @@ export default async function ExternalIncomePage({
   const { data: profiles } = profileIds.length
     ? await admin.from('profiles').select('user_id,role,first_name,last_name,email').in('user_id', profileIds)
     : { data: [] as ProfileMini[] }
-  const profileMap = new Map((profiles ?? []).map((p: ProfileMini) => [p.user_id, p]))
+  const profileMap = new Map<string, ProfileMini>(((profiles ?? []) as ProfileMini[]).map((p) => [p.user_id, p] as [string, ProfileMini]))
+
+  const entryIds = entries.map((row) => row.id)
+  const { data: entryLocksRaw } = entryIds.length
+    ? await admin
+        .from('payment_validation_active_source_locks_v1')
+        .select('source_id,batch_id,validated_at')
+        .eq('source_kind', 'external_income')
+        .in('source_id', entryIds)
+    : { data: [] as SourceLockRow[] }
+
+  const entryLockMap = new Map(
+    ((entryLocksRaw ?? []) as any[]).map((row) => [
+      String(row.source_id),
+      {
+        source_id: String(row.source_id),
+        batch_id: String(row.batch_id),
+        validated_at: String(row.validated_at),
+      } satisfies SourceLockRow,
+    ])
+  )
 
   const totalAmount = summary.reduce((sum, row) => sum + Number(row.amount || 0), 0)
   const barAmount = summary.filter((r) => r.source_key === 'bar').reduce((sum, row) => sum + Number(row.amount || 0), 0)
@@ -588,7 +640,8 @@ export default async function ExternalIncomePage({
 
   const editEntry = edit ? entries.find((row) => row.id === edit) ?? null : null
   const editCreator = editEntry?.created_by ? profileMap.get(editEntry.created_by) ?? null : null
-  const canEditEntry = editEntry ? canManageEntry(me.role, me.id, editCreator, editEntry.created_by) : false
+  const editEntryLock = editEntry ? entryLockMap.get(editEntry.id) ?? null : null
+  const canEditEntry = editEntry ? canManageEntry(me.role, me.id, editCreator, editEntry.created_by) && !editEntryLock : false
 
   const returnParams = {
     preset,
@@ -709,6 +762,23 @@ export default async function ExternalIncomePage({
       </Section>
 
       <Section className="space-y-6">
+        {editEntry && editEntryLock ? (
+          <Card>
+            <CardHeader>
+              <CardTitle>Edit entry</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <InlineAlert variant="warning">{sourceLockedMessage(editEntryLock)}</InlineAlert>
+              <div className="text-sm text-[hsl(var(--muted))]">
+                Delete the related validation batch first, then come back to edit this source entry.
+              </div>
+              <div>
+                <Button asChild variant="outline" href={`/admin/external-income?${returnQS}`}>Back to list</Button>
+              </div>
+            </CardContent>
+          </Card>
+        ) : null}
+
         {editEntry && canEditEntry ? (
           <Card>
             <CardHeader>
@@ -770,7 +840,9 @@ export default async function ExternalIncomePage({
               const creator = entry.created_by ? profileMap.get(entry.created_by) ?? null : null
               const updater = entry.updated_by ? profileMap.get(entry.updated_by) ?? null : null
               const canManage = canManageEntry(me.role, me.id, creator, entry.created_by)
+              const reconciliationLock = entryLockMap.get(entry.id) ?? null
               const isLockedForAdmin = me.role === 'admin' && !canManage
+              const isReconciledLocked = !!reconciliationLock
               return (
                 <div key={entry.id} className="rounded-3xl border border-[hsl(var(--border))] bg-white p-4 shadow-soft">
                   <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
@@ -780,6 +852,7 @@ export default async function ExternalIncomePage({
                         <span className="text-xs font-medium text-[hsl(var(--muted))]">{entry.entry_date}</span>
                         <span className="inline-flex rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-xs font-semibold text-emerald-800">{formatEGP(entry.amount)}</span>
                         {isLockedForAdmin ? <span className="inline-flex rounded-full border border-rose-200 bg-rose-50 px-2 py-0.5 text-xs font-medium text-rose-800">Locked to Super Admin</span> : null}
+                        {isReconciledLocked ? <span className="inline-flex rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-800">Reconciled</span> : null}
                       </div>
                       <div>
                         <div className="text-lg font-semibold tracking-tight">{entry.title}</div>
@@ -793,21 +866,25 @@ export default async function ExternalIncomePage({
                         <div>Created by {profileDisplayName(creator)}</div>
                         <div>{profileMetaLine(creator)} · {formatDateTimeInCairo(entry.created_at)}</div>
                         {entry.updated_at ? <div className="mt-1">Updated by {profileDisplayName(updater)} · {formatDateTimeInCairo(entry.updated_at)}</div> : null}
+                        {reconciliationLock ? <div className="mt-1 text-amber-700">Batch {reconciliationLock.batch_id.slice(0, 8)} · {formatDateTimeInCairo(reconciliationLock.validated_at)}</div> : null}
                       </div>
                     </div>
                   </div>
                   <div className="mt-4 flex flex-wrap gap-2">
-                    {canManage ? (
+                    {canManage && !isReconciledLocked ? (
                       <Button asChild variant="outline" href={`/admin/external-income?${buildQS({ ...returnParams, page: String(safePage), edit: entry.id })}`}>
                         Edit
                       </Button>
                     ) : null}
-                    {canManage ? (
+                    {canManage && !isReconciledLocked ? (
                       <form action={deleteEntryAction}>
                         <input type="hidden" name="return_qs" value={returnQS} />
                         <input type="hidden" name="id" value={entry.id} />
                         <Button type="submit" variant="ghost">Delete</Button>
                       </form>
+                    ) : null}
+                    {isReconciledLocked ? (
+                      <div className="text-xs text-[hsl(var(--muted))]">Delete the validation batch first to edit or delete this entry.</div>
                     ) : null}
                   </div>
                 </div>
