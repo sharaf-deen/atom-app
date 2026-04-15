@@ -156,6 +156,14 @@ function badgeClassForMethod(m: Method | string) {
   return ''
 }
 
+function methodBarClass(m: Method | string) {
+  if (m === 'cash') return 'bg-emerald-500/70'
+  if (m === 'instapay') return 'bg-sky-500/70'
+  if (m === 'card') return 'bg-violet-500/70'
+  if (m === 'bank_transfer') return 'bg-amber-500/70'
+  return 'bg-slate-400/70'
+}
+
 function summaryToneClass(method: Method | 'all' | 'open_entries') {
   if (method === 'cash') return 'border-emerald-200 bg-emerald-50/40'
   if (method === 'instapay') return 'border-sky-200 bg-sky-50/40'
@@ -806,6 +814,79 @@ export default async function AdminPaymentsReconciliationPage({
   }
   const validatorOptions = Array.from(validatorOptionsMap.values())
 
+  const dailyValidationSections = (['instapay', 'card', 'bank_transfer'] as Method[])
+    .map((method) => {
+      const rows = dailyOpenRows.filter((row) => row.payment_method === method)
+      return {
+        method,
+        rows,
+        groupCount: rows.length,
+        totalAmount: rows.reduce((sum, row) => sum + row.expected_amount, 0),
+        totalLines: rows.reduce((sum, row) => sum + row.line_count, 0),
+        earliestBusinessDate: rows.length ? rows[rows.length - 1]?.business_date ?? null : null,
+        latestBusinessDate: rows.length ? rows[0]?.business_date ?? null : null,
+      }
+    })
+    .filter((section) => section.rows.length > 0)
+
+  const validateSummaryRows = [
+    cashOpen
+      ? {
+          method: cashOpen.payment_method,
+          title: 'Cash closure',
+          helper: formatRangeLabel(cashOpen),
+          groupCount: 1,
+          lineCount: cashOpen.line_count,
+          expectedAmount: cashOpen.expected_amount,
+        }
+      : null,
+    ...dailyValidationSections.map((section) => ({
+      method: section.method,
+      title: labelMethod(section.method),
+      helper:
+        section.groupCount > 1
+          ? `${formatDateOnly(section.earliestBusinessDate)} → ${formatDateOnly(section.latestBusinessDate)}`
+          : formatDateOnly(section.latestBusinessDate),
+      groupCount: section.groupCount,
+      lineCount: section.totalLines,
+      expectedAmount: section.totalAmount,
+    })),
+  ].filter(Boolean) as Array<{
+    method: Method
+    title: string
+    helper: string
+    groupCount: number
+    lineCount: number
+    expectedAmount: number
+  }>
+
+  const openScopeSummaryRows = (['cash', 'instapay', 'card', 'bank_transfer'] as Method[])
+    .map((method) => {
+      const rows = openGroups.filter((row) => row.payment_method === method)
+      const expectedAmount = rows.reduce((sum, row) => sum + row.expected_amount, 0)
+      const lineCount = rows.reduce((sum, row) => sum + row.line_count, 0)
+      const firstRow = rows[0] ?? null
+      const lastRow = rows.length ? rows[rows.length - 1] : null
+      const scopeLabel =
+        method === 'cash'
+          ? firstRow
+            ? formatRangeLabel(firstRow)
+            : 'No open cash period'
+          : rows.length
+            ? rows.length === 1
+              ? formatDateOnly(firstRow?.business_date ?? null)
+              : `${formatDateOnly(lastRow?.business_date ?? null)} → ${formatDateOnly(firstRow?.business_date ?? null)}`
+            : 'No open daily groups'
+      return {
+        method,
+        groupCount: rows.length,
+        lineCount,
+        expectedAmount,
+        scopeLabel,
+      }
+    })
+    .filter((row) => row.groupCount > 0)
+
   const openDailyColumns = [
     { key: 'date', header: 'Business date' },
     { key: 'method', header: 'Method' },
@@ -823,6 +904,10 @@ export default async function AdminPaymentsReconciliationPage({
     window: <span className="text-sm text-[hsl(var(--muted))]">{formatCairoDateTime(row.period_from)} → {formatCairoDateTime(row.period_to)}</span>,
   }))
 
+  const openEventsPreviewLimit = 20
+  const openEventsPreviewSource = openEvents.slice(0, openEventsPreviewLimit)
+  const openEventsOverflowSource = openEvents.slice(openEventsPreviewLimit)
+
   const openEventsColumns = [
     { key: 'event_at', header: 'Event at (EG)' },
     { key: 'business_date', header: 'Business date', hideOnMobile: true },
@@ -834,17 +919,15 @@ export default async function AdminPaymentsReconciliationPage({
     { key: 'open', header: '' },
   ]
 
-  const openEventsTableRows = openEvents.map((row) => ({
+  const mapOpenEventRow = (row: OpenEventRow) => ({
     id: row.source_id,
     event_at: <span className="font-medium">{formatCairoDateTime(row.event_at)}</span>,
     business_date: <span className="text-sm text-[hsl(var(--muted))]">{formatDateOnly(row.business_date)}</span>,
-    source: <span className="text-sm">{eventSourceLabel(row)}</span>,
+    source: <Badge className="bg-slate-100 text-slate-700">{eventSourceLabel(row)}</Badge>,
     title: (
       <div className="space-y-0.5">
         <div className="font-medium">{row.title}</div>
-        {row.payment_method_raw && row.payment_method_raw !== row.payment_method_norm ? (
-          <div className="text-xs text-[hsl(var(--muted))]">Raw method: {row.payment_method_raw}</div>
-        ) : null}
+        <div className="text-xs text-[hsl(var(--muted))]">{row.source_id.slice(0, 8)}</div>
       </div>
     ),
     amount: <span className="font-semibold">{formatEGP(row.amount)}</span>,
@@ -859,7 +942,10 @@ export default async function AdminPaymentsReconciliationPage({
         Open
       </Link>
     ),
-  }))
+  })
+
+  const openEventsTableRows = openEventsPreviewSource.map(mapOpenEventRow)
+  const openEventsOverflowTableRows = openEventsOverflowSource.map(mapOpenEventRow)
 
   const historyColumns = [
     { key: 'validated_at', header: 'Validated at (EG)' },
@@ -1086,7 +1172,7 @@ export default async function AdminPaymentsReconciliationPage({
           <CardHeader>
             <CardTitle>Validate now</CardTitle>
             <div className="text-sm text-[hsl(var(--muted))]">
-              Create reconciliation batches from the currently open scopes only. Leave counted amount equal to expected when everything matches.
+              Same reconciliation logic as before, but grouped to stay operational when many scopes are still open. Cash stays one open closure. Digital methods stay daily inside each method block.
             </div>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -1102,84 +1188,246 @@ export default async function AdminPaymentsReconciliationPage({
               </div>
             ) : null}
 
-            <div className="grid gap-4 xl:grid-cols-2">
-              {createGroups.map((row) => {
-                const scopeKey = `${row.payment_method}:${row.validation_mode}:${row.business_date ?? 'open'}`
-                const scopeLabel = row.validation_mode === 'cash_period' ? formatRangeLabel(row) : formatDateOnly(row.business_date)
-                const hiddenBusinessDate = row.validation_mode === 'daily' ? row.business_date ?? '' : ''
-                return (
-                  <Card key={scopeKey} className="overflow-hidden border-black/10">
-                    <div className={`h-1.5 w-full ${row.payment_method === 'cash' ? 'bg-emerald-500/70' : row.payment_method === 'instapay' ? 'bg-sky-500/70' : row.payment_method === 'card' ? 'bg-violet-500/70' : 'bg-amber-500/70'}`} />
+            {createGroups.length ? (
+              <>
+                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                  {validateSummaryRows.map((row) => (
+                    <div key={`${row.method}:${row.title}`} className={`rounded-2xl border p-4 ${summaryToneClass(row.method)}`}>
+                      <div className="flex items-center justify-between gap-3">
+                        <div>
+                          <div className="text-xs text-[hsl(var(--muted))]">{row.title}</div>
+                          <div className="mt-1 text-lg font-semibold">{formatEGP(row.expectedAmount)}</div>
+                        </div>
+                        <Badge className={badgeClassForMethod(row.method)}>{labelMethod(row.method)}</Badge>
+                      </div>
+                      <div className="mt-2 text-xs text-[hsl(var(--muted))]">{row.helper}</div>
+                      <div className="mt-2 text-xs text-[hsl(var(--muted))]">{row.groupCount} scope{row.groupCount === 1 ? '' : 's'} · {row.lineCount} entr{row.lineCount === 1 ? 'y' : 'ies'}</div>
+                    </div>
+                  ))}
+                </div>
+
+                {cashOpen ? (
+                  <Card className="overflow-hidden border-black/10">
+                    <div className={`h-1.5 w-full ${methodBarClass('cash')}`} />
                     <CardHeader>
                       <div className="flex items-center gap-2 flex-wrap">
-                        <CardTitle>{labelMethod(row.payment_method)}</CardTitle>
-                        <Badge className={badgeClassForMethod(row.payment_method)}>{labelMode(row.validation_mode)}</Badge>
-                        <Badge className="bg-slate-100 text-slate-700">{differenceStatusLabel(0)} target</Badge>
+                        <CardTitle>Cash closure</CardTitle>
+                        <Badge className={badgeClassForMethod('cash')}>Cash</Badge>
+                        <Badge className="bg-slate-100 text-slate-700">{formatRangeLabel(cashOpen)}</Badge>
                       </div>
-                      <div className="text-sm text-[hsl(var(--muted))]">{modeHelper(row.validation_mode)} · {scopeLabel}</div>
+                      <div className="text-sm text-[hsl(var(--muted))]">One open cash scope since the last cash validation.</div>
                     </CardHeader>
                     <CardContent className="space-y-4">
-                      <div className="grid gap-3 sm:grid-cols-2">
+                      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
                         <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))]/40 p-3">
                           <div className="text-xs text-[hsl(var(--muted))]">Expected amount</div>
-                          <div className="mt-1 font-semibold">{formatEGP(row.expected_amount)}</div>
+                          <div className="mt-1 font-semibold">{formatEGP(cashOpen.expected_amount)}</div>
                         </div>
                         <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))]/40 p-3">
                           <div className="text-xs text-[hsl(var(--muted))]">Open entries</div>
-                          <div className="mt-1 font-semibold">{row.line_count}</div>
+                          <div className="mt-1 font-semibold">{cashOpen.line_count}</div>
                         </div>
                         <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))]/40 p-3">
                           <div className="text-xs text-[hsl(var(--muted))]">Business scope</div>
-                          <div className="mt-1 text-sm text-[hsl(var(--muted))]">{scopeLabel}</div>
+                          <div className="mt-1 text-sm text-[hsl(var(--muted))]">{formatRangeLabel(cashOpen)}</div>
                         </div>
                         <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))]/40 p-3">
                           <div className="text-xs text-[hsl(var(--muted))]">Event window</div>
-                          <div className="mt-1 text-sm text-[hsl(var(--muted))]">{formatCairoDateTime(row.period_from)} → {formatCairoDateTime(row.period_to)}</div>
+                          <div className="mt-1 text-sm text-[hsl(var(--muted))]">{formatCairoDateTime(cashOpen.period_from)} → {formatCairoDateTime(cashOpen.period_to)}</div>
                         </div>
                       </div>
 
-                      <form action={createValidationAction} className="space-y-3 rounded-2xl border border-[hsl(var(--border))] p-4">
+                      <form action={createValidationAction} className="grid gap-3 rounded-2xl border border-[hsl(var(--border))] p-4 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.2fr)_auto] lg:items-end">
                         <input type="hidden" name="return_qs" value={filterQS} />
-                        <input type="hidden" name="payment_method" value={row.payment_method} />
-                        <input type="hidden" name="validation_mode" value={row.validation_mode} />
-                        <input type="hidden" name="business_date" value={hiddenBusinessDate} />
-                        <input type="hidden" name="expected_amount" value={amountInputValue(row.expected_amount)} />
-                        <input type="hidden" name="line_count" value={String(row.line_count)} />
+                        <input type="hidden" name="payment_method" value={cashOpen.payment_method} />
+                        <input type="hidden" name="validation_mode" value={cashOpen.validation_mode} />
+                        <input type="hidden" name="business_date" value="" />
+                        <input type="hidden" name="expected_amount" value={amountInputValue(cashOpen.expected_amount)} />
+                        <input type="hidden" name="line_count" value={String(cashOpen.line_count)} />
 
-                        <Input
-                          type="number"
-                          step="0.01"
-                          min="0"
-                          name="counted_amount"
-                          label="Counted amount"
-                          defaultValue={amountInputValue(row.expected_amount)}
-                          hint="Keep this equal to expected when there is no difference."
-                          required
-                          disabled={!canCreateValidations}
-                        />
+                        <label className="space-y-1 text-sm">
+                          <span className="font-medium">Counted amount</span>
+                          <input
+                            type="number"
+                            step="0.01"
+                            min="0"
+                            name="counted_amount"
+                            defaultValue={amountInputValue(cashOpen.expected_amount)}
+                            required
+                            disabled={!canCreateValidations}
+                            className="w-full rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2"
+                          />
+                        </label>
 
-                        <Textarea
-                          name="note"
-                          label="Note"
-                          rows={3}
-                          placeholder="Optional when counted amount matches expected. Required when there is a difference."
-                          disabled={!canCreateValidations}
-                        />
+                        <label className="space-y-1 text-sm">
+                          <span className="font-medium">Note</span>
+                          <textarea
+                            name="note"
+                            rows={2}
+                            placeholder="Optional when counted amount matches expected. Required when there is a difference."
+                            disabled={!canCreateValidations}
+                            className="w-full rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2"
+                          />
+                        </label>
 
-                        <div className="flex items-center justify-between gap-3 flex-wrap">
-                          <div className="text-xs text-[hsl(var(--muted))]">
-                            This creates one validation batch and consumes the currently open lines for this scope only.
-                          </div>
-                          <Button type="submit" disabled={!canCreateValidations}>
-                            Validate {labelMethod(row.payment_method)}
-                          </Button>
-                        </div>
+                        <Button type="submit" disabled={!canCreateValidations}>
+                          Validate cash
+                        </Button>
                       </form>
                     </CardContent>
                   </Card>
-                )
-              })}
-            </div>
+                ) : null}
+
+                {dailyValidationSections.length ? (
+                  <div className="grid gap-4 xl:grid-cols-3">
+                    {dailyValidationSections.map((section) => {
+                      const visibleRows = section.rows.slice(0, 3)
+                      const hiddenRows = section.rows.slice(3)
+                      return (
+                        <Card key={section.method} className="overflow-hidden border-black/10">
+                          <div className={`h-1.5 w-full ${methodBarClass(section.method)}`} />
+                          <CardHeader>
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <CardTitle>{labelMethod(section.method)}</CardTitle>
+                              <Badge className={badgeClassForMethod(section.method)}>{section.groupCount} open day{section.groupCount === 1 ? '' : 's'}</Badge>
+                            </div>
+                            <div className="text-sm text-[hsl(var(--muted))]">
+                              {section.groupCount === 1 ? formatDateOnly(section.latestBusinessDate) : `${formatDateOnly(section.earliestBusinessDate)} → ${formatDateOnly(section.latestBusinessDate)}`} · {section.totalLines} entr{section.totalLines === 1 ? 'y' : 'ies'} · {formatEGP(section.totalAmount)}
+                            </div>
+                          </CardHeader>
+                          <CardContent className="space-y-3">
+                            {visibleRows.map((row) => {
+                              const hiddenBusinessDate = row.business_date ?? ''
+                              return (
+                                <div key={`${section.method}:${row.business_date}`} className="rounded-2xl border border-[hsl(var(--border))] bg-white p-3">
+                                  <div className="flex items-start justify-between gap-3 flex-wrap">
+                                    <div>
+                                      <div className="font-medium">{formatDateOnly(row.business_date)}</div>
+                                      <div className="text-xs text-[hsl(var(--muted))]">{row.line_count} entr{row.line_count === 1 ? 'y' : 'ies'} · {formatEGP(row.expected_amount)}</div>
+                                    </div>
+                                    <div className="text-right text-xs text-[hsl(var(--muted))]">
+                                      <div>{formatCairoDateTime(row.period_from)}</div>
+                                      <div>{formatCairoDateTime(row.period_to)}</div>
+                                    </div>
+                                  </div>
+
+                                  <form action={createValidationAction} className="mt-3 grid gap-3">
+                                    <input type="hidden" name="return_qs" value={filterQS} />
+                                    <input type="hidden" name="payment_method" value={row.payment_method} />
+                                    <input type="hidden" name="validation_mode" value={row.validation_mode} />
+                                    <input type="hidden" name="business_date" value={hiddenBusinessDate} />
+                                    <input type="hidden" name="expected_amount" value={amountInputValue(row.expected_amount)} />
+                                    <input type="hidden" name="line_count" value={String(row.line_count)} />
+
+                                    <div className="grid gap-3 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.2fr)_auto] lg:items-end">
+                                      <label className="space-y-1 text-sm">
+                                        <span className="font-medium">Counted amount</span>
+                                        <input
+                                          type="number"
+                                          step="0.01"
+                                          min="0"
+                                          name="counted_amount"
+                                          defaultValue={amountInputValue(row.expected_amount)}
+                                          required
+                                          disabled={!canCreateValidations}
+                                          className="w-full rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2"
+                                        />
+                                      </label>
+
+                                      <label className="space-y-1 text-sm">
+                                        <span className="font-medium">Note</span>
+                                        <textarea
+                                          name="note"
+                                          rows={2}
+                                          placeholder="Optional when counted matches expected. Required on a difference."
+                                          disabled={!canCreateValidations}
+                                          className="w-full rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2"
+                                        />
+                                      </label>
+
+                                      <Button type="submit" disabled={!canCreateValidations}>
+                                        Validate day
+                                      </Button>
+                                    </div>
+                                  </form>
+                                </div>
+                              )
+                            })}
+
+                            {hiddenRows.length ? (
+                              <details className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))]/30 p-3">
+                                <summary className="cursor-pointer list-none text-sm font-medium">
+                                  Show {hiddenRows.length} more open day{hiddenRows.length === 1 ? '' : 's'}
+                                </summary>
+                                <div className="mt-3 space-y-3">
+                                  {hiddenRows.map((row) => {
+                                    const hiddenBusinessDate = row.business_date ?? ''
+                                    return (
+                                      <div key={`${section.method}:${row.business_date}:hidden`} className="rounded-2xl border border-[hsl(var(--border))] bg-white p-3">
+                                        <div className="flex items-start justify-between gap-3 flex-wrap">
+                                          <div>
+                                            <div className="font-medium">{formatDateOnly(row.business_date)}</div>
+                                            <div className="text-xs text-[hsl(var(--muted))]">{row.line_count} entr{row.line_count === 1 ? 'y' : 'ies'} · {formatEGP(row.expected_amount)}</div>
+                                          </div>
+                                          <div className="text-right text-xs text-[hsl(var(--muted))]">
+                                            <div>{formatCairoDateTime(row.period_from)}</div>
+                                            <div>{formatCairoDateTime(row.period_to)}</div>
+                                          </div>
+                                        </div>
+
+                                        <form action={createValidationAction} className="mt-3 grid gap-3">
+                                          <input type="hidden" name="return_qs" value={filterQS} />
+                                          <input type="hidden" name="payment_method" value={row.payment_method} />
+                                          <input type="hidden" name="validation_mode" value={row.validation_mode} />
+                                          <input type="hidden" name="business_date" value={hiddenBusinessDate} />
+                                          <input type="hidden" name="expected_amount" value={amountInputValue(row.expected_amount)} />
+                                          <input type="hidden" name="line_count" value={String(row.line_count)} />
+
+                                          <div className="grid gap-3 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.2fr)_auto] lg:items-end">
+                                            <label className="space-y-1 text-sm">
+                                              <span className="font-medium">Counted amount</span>
+                                              <input
+                                                type="number"
+                                                step="0.01"
+                                                min="0"
+                                                name="counted_amount"
+                                                defaultValue={amountInputValue(row.expected_amount)}
+                                                required
+                                                disabled={!canCreateValidations}
+                                                className="w-full rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2"
+                                              />
+                                            </label>
+
+                                            <label className="space-y-1 text-sm">
+                                              <span className="font-medium">Note</span>
+                                              <textarea
+                                                name="note"
+                                                rows={2}
+                                                placeholder="Optional when counted matches expected. Required on a difference."
+                                                disabled={!canCreateValidations}
+                                                className="w-full rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2"
+                                              />
+                                            </label>
+
+                                            <Button type="submit" disabled={!canCreateValidations}>
+                                              Validate day
+                                            </Button>
+                                          </div>
+                                        </form>
+                                      </div>
+                                    )
+                                  })}
+                                </div>
+                              </details>
+                            ) : null}
+                          </CardContent>
+                        </Card>
+                      )
+                    })}
+                  </div>
+                ) : null}
+              </>
+            ) : null}
           </CardContent>
         </Card>
       </section>
@@ -1202,35 +1450,50 @@ export default async function AdminPaymentsReconciliationPage({
       <section id="open-scopes" className="space-y-4">
         <div className="space-y-1">
           <h2 className="text-xl font-semibold">Open scopes</h2>
-          <p className="text-sm text-[hsl(var(--muted))]">Read-only visibility of what is still unreconciled before validation.</p>
+          <p className="text-sm text-[hsl(var(--muted))]">Same open backlog as before, but summarized first so the page stays readable when the cash period is large or many daily groups are waiting.</p>
+        </div>
+
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+          {openScopeSummaryRows.length ? openScopeSummaryRows.map((row) => (
+            <div key={`open-scope:${row.method}`} className={`rounded-2xl border p-4 ${summaryToneClass(row.method)}`}>
+              <div className="flex items-center justify-between gap-3">
+                <div className="text-sm font-semibold">{labelMethod(row.method)}</div>
+                <Badge className={badgeClassForMethod(row.method)}>{row.groupCount} scope{row.groupCount === 1 ? '' : 's'}</Badge>
+              </div>
+              <div className="mt-2 text-lg font-semibold">{formatEGP(row.expectedAmount)}</div>
+              <div className="mt-1 text-xs text-[hsl(var(--muted))]">{row.lineCount} entr{row.lineCount === 1 ? 'y' : 'ies'} · {row.scopeLabel}</div>
+            </div>
+          )) : (
+            <div className="rounded-2xl border border-dashed border-[hsl(var(--border))] bg-[hsl(var(--bg))] p-4 text-sm text-[hsl(var(--muted))] md:col-span-2 xl:col-span-4">
+              No open scopes right now for the current filter.
+            </div>
+          )}
         </div>
 
         <div className="grid gap-4 xl:grid-cols-[0.9fr_1.1fr]">
           <Card>
             <CardHeader>
               <CardTitle>Open cash closure</CardTitle>
-              <div className="text-sm text-[hsl(var(--muted))]">One open cash window since the last cash validation.</div>
+              <div className="text-sm text-[hsl(var(--muted))]">Cash remains one open period since the last cash validation.</div>
             </CardHeader>
-            <CardContent>
+            <CardContent className="space-y-3">
               {cashOpen ? (
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <div className="rounded-2xl border border-[hsl(var(--border))] bg-emerald-50/40 p-3">
-                    <div className="text-xs text-[hsl(var(--muted))]">Business range</div>
-                    <div className="mt-1 font-semibold">{formatRangeLabel(cashOpen)}</div>
+                <>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div className="rounded-2xl border border-[hsl(var(--border))] bg-emerald-50/40 p-3">
+                      <div className="text-xs text-[hsl(var(--muted))]">Business range</div>
+                      <div className="mt-1 font-semibold">{formatRangeLabel(cashOpen)}</div>
+                    </div>
+                    <div className="rounded-2xl border border-[hsl(var(--border))] bg-emerald-50/40 p-3">
+                      <div className="text-xs text-[hsl(var(--muted))]">Expected / entries</div>
+                      <div className="mt-1 font-semibold">{formatEGP(cashOpen.expected_amount)} · {cashOpen.line_count}</div>
+                    </div>
                   </div>
-                  <div className="rounded-2xl border border-[hsl(var(--border))] bg-emerald-50/40 p-3">
-                    <div className="text-xs text-[hsl(var(--muted))]">Entries</div>
-                    <div className="mt-1 font-semibold">{cashOpen.line_count}</div>
-                  </div>
-                  <div className="rounded-2xl border border-[hsl(var(--border))] bg-emerald-50/40 p-3">
-                    <div className="text-xs text-[hsl(var(--muted))]">Expected amount</div>
-                    <div className="mt-1 font-semibold">{formatEGP(cashOpen.expected_amount)}</div>
-                  </div>
-                  <div className="rounded-2xl border border-[hsl(var(--border))] bg-emerald-50/40 p-3">
-                    <div className="text-xs text-[hsl(var(--muted))]">Event window</div>
-                    <div className="mt-1 text-sm text-[hsl(var(--muted))]">{formatCairoDateTime(cashOpen.period_from)} → {formatCairoDateTime(cashOpen.period_to)}</div>
-                  </div>
-                </div>
+                  <details className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))]/30 p-3">
+                    <summary className="cursor-pointer list-none text-sm font-medium">Show cash period window</summary>
+                    <div className="mt-3 text-sm text-[hsl(var(--muted))]">{formatCairoDateTime(cashOpen.period_from)} → {formatCairoDateTime(cashOpen.period_to)}</div>
+                  </details>
+                </>
               ) : (
                 <div className="rounded-2xl border border-dashed border-[hsl(var(--border))] bg-[hsl(var(--bg))] p-4 text-sm text-[hsl(var(--muted))]">
                   No open cash period right now for the current filter.
@@ -1242,37 +1505,54 @@ export default async function AdminPaymentsReconciliationPage({
           <Card>
             <CardHeader>
               <CardTitle>Open daily groups</CardTitle>
-              <div className="text-sm text-[hsl(var(--muted))]">Instapay, Card, and Bank transfer stay grouped by Cairo business date.</div>
+              <div className="text-sm text-[hsl(var(--muted))]">Instapay, Card, and Bank transfer still reconcile daily. The detailed table is collapsed by default to reduce noise.</div>
             </CardHeader>
-            <CardContent>
+            <CardContent className="space-y-3">
               {!openDailyTableRows.length ? (
                 <div className="rounded-2xl border border-dashed border-[hsl(var(--border))] bg-[hsl(var(--bg))] p-4 text-sm text-[hsl(var(--muted))]">
                   No open daily groups right now for the current filter.
                 </div>
-              ) : null}
-              <Table columns={openDailyColumns} rows={openDailyTableRows as any} keyField="id" stickyTopClassName="top-0" />
+              ) : (
+                <details className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))]/30 p-3" open={openDailyTableRows.length <= 6}>
+                  <summary className="cursor-pointer list-none text-sm font-medium">Show {openDailyTableRows.length} open daily group{openDailyTableRows.length === 1 ? '' : 's'}</summary>
+                  <div className="mt-3">
+                    <Table columns={openDailyColumns} rows={openDailyTableRows as any} keyField="id" stickyTopClassName="top-0" />
+                  </div>
+                </details>
+              )}
             </CardContent>
           </Card>
         </div>
-      </section>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Latest open entries</CardTitle>
-          <div className="text-sm text-[hsl(var(--muted))]">Latest 100 unreconciled income lines before validation.</div>
-        </CardHeader>
-        <CardContent>
-          {!openEventsTableRows.length ? (
-            <div className="rounded-2xl border border-dashed border-[hsl(var(--border))] bg-[hsl(var(--bg))] p-4 text-sm text-[hsl(var(--muted))]">
-              No open entries right now for the current filter.
+        <Card>
+          <CardHeader>
+            <CardTitle>Open entry preview</CardTitle>
+            <div className="text-sm text-[hsl(var(--muted))]">Preview only, capped to keep the page light. Validation still uses all open lines inside the selected scope.</div>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {!openEventsTableRows.length ? (
+              <div className="rounded-2xl border border-dashed border-[hsl(var(--border))] bg-[hsl(var(--bg))] p-4 text-sm text-[hsl(var(--muted))]">
+                No open entries right now for the current filter.
+              </div>
+            ) : (
+              <>
+                <Table columns={openEventsColumns} rows={openEventsTableRows as any} keyField="id" stickyTopClassName="top-0" />
+                {openEventsOverflowTableRows.length ? (
+                  <details className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))]/30 p-3">
+                    <summary className="cursor-pointer list-none text-sm font-medium">Show {openEventsOverflowTableRows.length} more open entr{openEventsOverflowTableRows.length === 1 ? 'y' : 'ies'}</summary>
+                    <div className="mt-3">
+                      <Table columns={openEventsColumns} rows={openEventsOverflowTableRows as any} keyField="id" stickyTopClassName="top-0" />
+                    </div>
+                  </details>
+                ) : null}
+              </>
+            )}
+            <div className="text-xs text-[hsl(var(--muted))]">
+              Showing {Math.min(openEvents.length, openEventsPreviewLimit)} of {openEvents.length} open line{openEvents.length === 1 ? '' : 's'}{filterQS ? ` for ${labelMethod(methodFilter)}` : ''}. Validation creates a batch and links the current open lines without editing the source records.
             </div>
-          ) : null}
-          <Table columns={openEventsColumns} rows={openEventsTableRows as any} keyField="id" stickyTopClassName="top-0" />
-          <div className="mt-3 text-xs text-[hsl(var(--muted))]">
-            Showing the latest 100 open lines{filterQS ? ` for ${labelMethod(methodFilter)}` : ''}. Validation creates a batch and links these lines without editing the source records.
-          </div>
-        </CardContent>
-      </Card>
+          </CardContent>
+        </Card>
+      </section>
 
       <section id="history" className="space-y-4">
         <div className="space-y-1">
