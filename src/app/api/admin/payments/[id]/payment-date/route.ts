@@ -125,6 +125,32 @@ export async function POST(req: Request, { params }: { params: { id: string } })
       return noStore(NextResponse.json({ ok: false, error: 'PAYMENT_NOT_FOUND' }, { status: 404 }))
     }
 
+    const { data: lockRow, error: lockErr } = await admin
+      .from('payment_validation_active_source_locks_v1')
+      .select('batch_id, validated_at')
+      .eq('source_kind', 'subscription_payment')
+      .eq('source_id', paymentId)
+      .maybeSingle<{ batch_id: string; validated_at: string }>()
+
+    if (lockErr) {
+      return noStore(
+        NextResponse.json({ ok: false, error: 'PAYMENT_LOCK_LOOKUP_ERROR', details: lockErr.message }, { status: 500 }),
+      )
+    }
+
+    if (lockRow?.batch_id) {
+      return noStore(
+        NextResponse.json(
+          {
+            ok: false,
+            error: 'PAYMENT_RECONCILED_LOCKED',
+            details: `This payment is already reconciled in batch ${String(lockRow.batch_id).slice(0, 8)}. Delete that validation batch first, then edit the payment date.`,
+          },
+          { status: 409 },
+        ),
+      )
+    }
+
     const currentBase = payment.paid_at || payment.created_at || null
     const clock = cairoClockParts(currentBase)
     const newPaidAt = cairoLocalToUTC({
