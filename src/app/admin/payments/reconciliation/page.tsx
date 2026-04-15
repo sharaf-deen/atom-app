@@ -51,6 +51,19 @@ type ProfileMini = {
   last_name: string | null
 }
 
+type ApproverRow = {
+  user_id: string
+  is_active: boolean
+  note: string | null
+  role: string | null
+  email: string | null
+  first_name: string | null
+  last_name: string | null
+  display_name: string
+  named_key: 'sharaf_deen' | 'shehab' | 'shawki' | null
+  is_super_admin: boolean
+}
+
 type BatchRow = {
   id: string
   payment_method: Method
@@ -217,6 +230,17 @@ function profileLabel(profile?: ProfileMini | null) {
   return full || profile?.email || '—'
 }
 
+function approverLabel(profile?: Pick<ApproverRow, 'display_name' | 'email' | 'first_name' | 'last_name'> | null) {
+  const full = `${profile?.first_name ?? ''} ${profile?.last_name ?? ''}`.trim()
+  return full || profile?.display_name || profile?.email || '—'
+}
+
+function roleLabel(role?: string | null) {
+  const raw = String(role ?? '').trim()
+  if (!raw) return 'Unknown role'
+  return raw.replace(/_/g, ' ').replace(/\b\w/g, (m) => m.toUpperCase())
+}
+
 function eventSourceLabel(row: OpenEventRow) {
   if (row.source_kind === 'subscription_payment') return 'Subscription'
   if (row.source_key === 'bar') return 'Other income · Bar'
@@ -294,6 +318,33 @@ export default async function AdminPaymentsReconciliationPage({
         .maybeSingle()
 
   const canCreateValidations = me.role === 'super_admin' || !!approverRow?.user_id
+
+  const { data: approversRaw, error: approversErr } = await admin
+    .from('payment_validation_approver_profiles_v1')
+    .select('user_id, is_active, note, role, email, first_name, last_name, display_name, named_key, is_super_admin')
+    .order('is_super_admin', { ascending: false })
+    .order('first_name', { ascending: true, nullsFirst: false })
+    .order('email', { ascending: true, nullsFirst: false })
+
+  const approvers: ApproverRow[] = ((approversRaw ?? []) as any[]).map((row) => ({
+    user_id: String(row.user_id),
+    is_active: Boolean(row.is_active),
+    note: row.note ?? null,
+    role: row.role ?? null,
+    email: row.email ?? null,
+    first_name: row.first_name ?? null,
+    last_name: row.last_name ?? null,
+    display_name: String(row.display_name ?? row.email ?? row.user_id),
+    named_key: row.named_key === 'sharaf_deen' || row.named_key === 'shehab' || row.named_key === 'shawki' ? row.named_key : null,
+    is_super_admin: Boolean(row.is_super_admin),
+  }))
+
+  const approverByNamedKey = new Map(approvers.filter((row) => row.named_key).map((row) => [row.named_key as NonNullable<ApproverRow['named_key']>, row]))
+  const namedApproverTargets: Array<{ key: NonNullable<ApproverRow['named_key']>; label: string; expectedRole: string; hint: string }> = [
+    { key: 'sharaf_deen', label: 'Sharaf Deen', expectedRole: 'Super Admin', hint: 'Super Admin can validate directly. Keeping this profile active in the approvers list makes the governance list explicit.' },
+    { key: 'shehab', label: 'Shehab', expectedRole: 'Admin approver', hint: 'Should appear as an active admin approver once the profile first name matches Shehab.' },
+    { key: 'shawki', label: 'Shawki', expectedRole: 'Admin approver', hint: 'Should appear as an active admin approver once the profile first name matches Shawki.' },
+  ]
 
   async function assertActorCanWriteValidation(actorId: string, actorRole: string, returnQS: string) {
     const actionAdmin = getSupabaseAdminClientCached()
@@ -646,7 +697,7 @@ export default async function AdminPaymentsReconciliationPage({
     }
   })
 
-  const hasErrors = groupsErr || eventsErr || historyErr || batchItemsErr
+  const hasErrors = groupsErr || eventsErr || historyErr || batchItemsErr || approversErr
 
   return (
     <main className="p-4 sm:p-6 max-w-6xl mx-auto space-y-6">
@@ -738,6 +789,68 @@ export default async function AdminPaymentsReconciliationPage({
             </CardContent>
           </Card>
         ))}
+      </div>
+
+      <div className="grid gap-4 xl:grid-cols-[1.2fr_0.8fr]">
+        <Card>
+          <CardHeader>
+            <CardTitle>Active approvers</CardTitle>
+            <div className="text-sm text-[hsl(var(--muted))]">These accounts can validate batches right now. Super Admin remains allowed even without a row, but this list makes the governance explicit.</div>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {!approvers.length ? (
+              <div className="rounded-2xl border border-dashed border-[hsl(var(--border))] bg-[hsl(var(--bg))] p-4 text-sm text-[hsl(var(--muted))]">
+                No active approvers are listed yet. Super Admin can still validate directly.
+              </div>
+            ) : null}
+
+            <div className="grid gap-3 md:grid-cols-2">
+              {approvers.map((row) => (
+                <div key={row.user_id} className="rounded-2xl border border-[hsl(var(--border))] bg-white p-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <div className="font-semibold">{approverLabel(row)}</div>
+                      <div className="text-xs text-[hsl(var(--muted))]">{roleLabel(row.role)}{row.email ? ` · ${row.email}` : ''}</div>
+                    </div>
+                    <Badge className={row.is_super_admin ? 'bg-black text-white' : 'bg-emerald-50 text-emerald-700'}>
+                      {row.is_super_admin ? 'Super Admin' : 'Active approver'}
+                    </Badge>
+                  </div>
+                  {row.note ? <div className="mt-3 text-xs text-[hsl(var(--muted))]">{row.note}</div> : null}
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Named approver coverage</CardTitle>
+            <div className="text-sm text-[hsl(var(--muted))]">Target operating owners for this reconciliation flow.</div>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {namedApproverTargets.map((target) => {
+              const row = approverByNamedKey.get(target.key)
+              const active = Boolean(row?.user_id)
+              return (
+                <div key={target.key} className="rounded-2xl border border-[hsl(var(--border))] bg-white p-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <div className="font-semibold">{target.label}</div>
+                      <div className="text-xs text-[hsl(var(--muted))]">{target.expectedRole}{row?.email ? ` · ${row.email}` : ''}</div>
+                    </div>
+                    <Badge className={active ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-800'}>
+                      {active ? 'Ready' : 'Pending match'}
+                    </Badge>
+                  </div>
+                  <div className="mt-3 text-xs text-[hsl(var(--muted))]">
+                    {active ? `${approverLabel(row)} is active for validation batches.` : target.hint}
+                  </div>
+                </div>
+              )
+            })}
+          </CardContent>
+        </Card>
       </div>
 
       <Card>
@@ -846,6 +959,7 @@ export default async function AdminPaymentsReconciliationPage({
             {eventsErr ? <div>Open entries failed to load: {eventsErr.message}</div> : null}
             {historyErr ? <div>History failed to load: {historyErr.message}</div> : null}
             {batchItemsErr ? <div>History item counts failed to load: {batchItemsErr.message}</div> : null}
+            {approversErr ? <div>Approvers failed to load: {approversErr.message}</div> : null}
           </CardContent>
         </Card>
       ) : null}
