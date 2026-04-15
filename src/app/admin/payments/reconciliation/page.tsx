@@ -66,6 +66,7 @@ type ApproverRow = {
 
 type BatchRow = {
   id: string
+  validated_by: string | null
   payment_method: Method
   validation_mode: ValidationMode
   business_date: string | null
@@ -96,6 +97,22 @@ type UpdateResultRow = {
 type DeleteResultRow = {
   batch_id: string
   released_count: number
+}
+
+type HistoryStatus = 'all' | 'matched' | 'over' | 'short'
+
+type BatchItemRow = {
+  id: string
+  batch_id: string
+  source_kind: 'subscription_payment' | 'external_income'
+  source_id: string
+  amount_snapshot: number
+  business_date_snapshot: string
+  event_at_snapshot: string
+  title: string
+  note: string | null
+  source_key: string | null
+  member_id: string | null
 }
 
 type RangeLabelRow = {
@@ -158,6 +175,32 @@ function modeHelper(mode: ValidationMode) {
 
 function safeMethod(v: string | null | undefined): Method | 'all' {
   return METHODS.includes(v as any) ? (v as Method | 'all') : 'all'
+}
+
+function safeHistoryStatus(v: string | null | undefined): HistoryStatus {
+  return v === 'matched' || v === 'over' || v === 'short' ? v : 'all'
+}
+
+function parseIsoDateOnly(v: string | null | undefined) {
+  const raw = String(v ?? '').trim()
+  return /^\d{4}-\d{2}-\d{2}$/.test(raw) ? raw : ''
+}
+
+function formatCairoDateKey(iso?: string | null) {
+  const raw = String(iso ?? '').trim()
+  if (!raw) return ''
+  const dt = new Date(raw)
+  if (Number.isNaN(dt.getTime())) return ''
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Africa/Cairo',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(dt)
+  const y = parts.find((p) => p.type === 'year')?.value ?? ''
+  const m = parts.find((p) => p.type === 'month')?.value ?? ''
+  const d = parts.find((p) => p.type === 'day')?.value ?? ''
+  return y && m && d ? `${y}-${m}-${d}` : ''
 }
 
 function parseMethod(v: unknown): Method | null {
@@ -332,6 +375,11 @@ export default async function AdminPaymentsReconciliationPage({
   }
 
   const methodFilter = safeMethod(sp1(searchParams, 'method'))
+  const historyStatus = safeHistoryStatus(sp1(searchParams, 'history_status'))
+  const historyByRaw = sp1(searchParams, 'history_by')
+  const historyFrom = parseIsoDateOnly(sp1(searchParams, 'history_from'))
+  const historyTo = parseIsoDateOnly(sp1(searchParams, 'history_to'))
+  const focusBatchId = parseUuid(sp1(searchParams, 'focus_batch'))
   const flashError = safeFlash(sp1(searchParams, 'error'))
   const flashCreated = sp1(searchParams, 'created') === '1'
   const flashUpdated = sp1(searchParams, 'updated') === '1'
@@ -555,18 +603,19 @@ export default async function AdminPaymentsReconciliationPage({
   let historyQuery = admin
     .from('payment_validation_batches')
     .select(
-      'id, payment_method, validation_mode, business_date, period_from, period_to, expected_amount, counted_amount, difference_amount, note, validated_at, validator:profiles!payment_validation_batches_validated_by_fkey(user_id,email,first_name,last_name)'
+      'id, payment_method, validation_mode, business_date, period_from, period_to, expected_amount, counted_amount, difference_amount, note, validated_at, validated_by, validator:profiles!payment_validation_batches_validated_by_fkey(user_id,email,first_name,last_name)'
     )
     .is('deleted_at', null)
     .order('validated_at', { ascending: false })
-    .limit(50)
+    .limit(200)
 
   if (methodFilter !== 'all') historyQuery = historyQuery.eq('payment_method', methodFilter)
 
   const { data: historyRaw, error: historyErr } = await historyQuery
 
-  const historyRows: BatchRow[] = ((historyRaw ?? []) as any[]).map((row) => ({
+  const allHistoryRows: BatchRow[] = ((historyRaw ?? []) as any[]).map((row) => ({
     id: String(row.id),
+    validated_by: row.validated_by ? String(row.validated_by) : null,
     payment_method: row.payment_method as Method,
     validation_mode: row.validation_mode as ValidationMode,
     business_date: row.business_date ?? null,
@@ -580,6 +629,21 @@ export default async function AdminPaymentsReconciliationPage({
     validator: (row.validator ?? null) as ProfileMini | null,
   }))
 
+  const historyBy = historyByRaw === 'me' ? 'me' : parseUuid(historyByRaw)
+  const historyRows = allHistoryRows.filter((row) => {
+    if (historyStatus === 'matched' && row.difference_amount !== 0) return false
+    if (historyStatus === 'over' && row.difference_amount <= 0) return false
+    if (historyStatus === 'short' && row.difference_amount >= 0) return false
+
+    if (historyBy === 'me' && row.validated_by !== me.id) return false
+    if (typeof historyBy === 'string' && historyBy !== 'me' && row.validated_by !== historyBy) return false
+
+    const key = formatCairoDateKey(row.validated_at)
+    if (historyFrom && key && key < historyFrom) return false
+    if (historyTo && key && key > historyTo) return false
+    return true
+  })
+
   const historyIds = historyRows.map((row) => row.id)
   const { data: batchItemsRaw, error: batchItemsErr } = historyIds.length
     ? await admin.from('payment_validation_batch_items').select('batch_id').in('batch_id', historyIds)
@@ -590,6 +654,67 @@ export default async function AdminPaymentsReconciliationPage({
     const id = String(row.batch_id)
     itemsCountByBatchId.set(id, (itemsCountByBatchId.get(id) ?? 0) + 1)
   }
+
+  const focusBatch = focusBatchId ? historyRows.find((row) => row.id === focusBatchId) ?? null : null
+
+  const { data: focusItemsRaw, error: focusItemsErr } = focusBatch
+    ? await admin
+        .from('payment_validation_batch_items')
+        .select('id, batch_id, source_kind, source_id, amount_snapshot, business_date_snapshot, event_at_snapshot')
+        .eq('batch_id', focusBatch.id)
+        .order('event_at_snapshot', { ascending: false })
+    : { data: [], error: null as any }
+
+  const focusSubIds = ((focusItemsRaw ?? []) as any[])
+    .filter((row) => row.source_kind === 'subscription_payment')
+    .map((row) => String(row.source_id))
+  const focusExternalIds = ((focusItemsRaw ?? []) as any[])
+    .filter((row) => row.source_kind === 'external_income')
+    .map((row) => String(row.source_id))
+
+  const { data: focusSubEventsRaw, error: focusSubEventsErr } = focusSubIds.length
+    ? await admin
+        .from('admin_income_events_v1')
+        .select('source_kind, source_id, member_id, source_key, title, note')
+        .eq('source_kind', 'subscription_payment')
+        .in('source_id', focusSubIds)
+    : { data: [], error: null as any }
+
+  const { data: focusExternalEventsRaw, error: focusExternalEventsErr } = focusExternalIds.length
+    ? await admin
+        .from('admin_income_events_v1')
+        .select('source_kind, source_id, member_id, source_key, title, note')
+        .eq('source_kind', 'external_income')
+        .in('source_id', focusExternalIds)
+    : { data: [], error: null as any }
+
+  const focusEventByKey = new Map<string, { title: string; note: string | null; source_key: string | null; member_id: string | null }>()
+  for (const row of ([...((focusSubEventsRaw ?? []) as any[]), ...((focusExternalEventsRaw ?? []) as any[])])) {
+    focusEventByKey.set(`${String(row.source_kind)}:${String(row.source_id)}`, {
+      title: String(row.title ?? 'Untitled'),
+      note: row.note ?? null,
+      source_key: row.source_key ?? null,
+      member_id: row.member_id ? String(row.member_id) : null,
+    })
+  }
+
+  const focusItems: BatchItemRow[] = ((focusItemsRaw ?? []) as any[]).map((row) => {
+    const key = `${String(row.source_kind)}:${String(row.source_id)}`
+    const meta = focusEventByKey.get(key)
+    return {
+      id: String(row.id),
+      batch_id: String(row.batch_id),
+      source_kind: row.source_kind === 'subscription_payment' ? 'subscription_payment' : 'external_income',
+      source_id: String(row.source_id),
+      amount_snapshot: Number(row.amount_snapshot ?? 0),
+      business_date_snapshot: String(row.business_date_snapshot),
+      event_at_snapshot: String(row.event_at_snapshot),
+      title: meta?.title ?? 'Untitled',
+      note: meta?.note ?? null,
+      source_key: meta?.source_key ?? null,
+      member_id: meta?.member_id ?? null,
+    }
+  })
 
   const totalsByMethod: Record<Method, number> = { cash: 0, instapay: 0, card: 0, bank_transfer: 0 }
   let openTotal = 0
@@ -604,9 +729,27 @@ export default async function AdminPaymentsReconciliationPage({
   const dailyOpenRows = openGroups.filter((row) => row.validation_mode === 'daily')
   const createGroups = [cashOpen, ...dailyOpenRows].filter(Boolean) as OpenGroupRow[]
 
-  const filterQS = buildQS(methodFilter === 'all' ? {} : { method: methodFilter })
-  const methodHref = (method: Method | 'all') =>
-    method === 'all' ? '/admin/payments/reconciliation' : `/admin/payments/reconciliation?${buildQS({ method })}`
+  const stateParams: Record<string, string> = {}
+  if (methodFilter !== 'all') stateParams.method = methodFilter
+  if (historyStatus !== 'all') stateParams.history_status = historyStatus
+  if (historyByRaw) stateParams.history_by = historyByRaw
+  if (historyFrom) stateParams.history_from = historyFrom
+  if (historyTo) stateParams.history_to = historyTo
+  if (focusBatch?.id) stateParams.focus_batch = focusBatch.id
+
+  const filterQS = buildQS(stateParams)
+  const methodHref = (method: Method | 'all') => {
+    const params: Record<string, string> = {}
+    if (method !== 'all') params.method = method
+    if (historyStatus !== 'all') params.history_status = historyStatus
+    if (historyByRaw) params.history_by = historyByRaw
+    if (historyFrom) params.history_from = historyFrom
+    if (historyTo) params.history_to = historyTo
+    const qs = buildQS(params)
+    return `/admin/payments/reconciliation${qs ? `?${qs}` : ''}`
+  }
+
+  const historyFilterResetHref = methodFilter === 'all' ? '/admin/payments/reconciliation#history' : `/admin/payments/reconciliation?${buildQS({ method: methodFilter })}#history`
 
   const summaryCards: Array<{ label: string; value: string; sub: string; tone: Method | 'all' | 'open_entries' }> = [
     {
@@ -646,6 +789,22 @@ export default async function AdminPaymentsReconciliationPage({
       tone: 'bank_transfer',
     },
   ]
+
+  const historyMatchedCount = historyRows.filter((row) => row.difference_amount === 0).length
+  const historyDifferenceCount = historyRows.length - historyMatchedCount
+  const historyOverCount = historyRows.filter((row) => row.difference_amount > 0).length
+  const historyShortCount = historyRows.filter((row) => row.difference_amount < 0).length
+
+  const validatorOptionsMap = new Map<string, { value: string; label: string }>()
+  for (const row of approvers) {
+    validatorOptionsMap.set(row.user_id, { value: row.user_id, label: approverLabel(row) })
+  }
+  for (const row of allHistoryRows) {
+    if (row.validated_by && !validatorOptionsMap.has(row.validated_by)) {
+      validatorOptionsMap.set(row.validated_by, { value: row.validated_by, label: profileLabel(row.validator) })
+    }
+  }
+  const validatorOptions = Array.from(validatorOptionsMap.values())
 
   const openDailyColumns = [
     { key: 'date', header: 'Business date' },
@@ -713,6 +872,7 @@ export default async function AdminPaymentsReconciliationPage({
     { key: 'entries', header: 'Entries', hideOnMobile: true },
     { key: 'by', header: 'By', hideOnMobile: true },
     { key: 'note', header: 'Note', hideOnMobile: true },
+    { key: 'details', header: '' },
   ]
 
   const historyTableRows = historyRows.map((row) => ({
@@ -732,9 +892,18 @@ export default async function AdminPaymentsReconciliationPage({
     entries: <span className="text-sm">{itemsCountByBatchId.get(row.id) ?? 0}</span>,
     by: <span className="text-sm">{profileLabel(row.validator)}</span>,
     note: <span className="text-sm text-[hsl(var(--muted))]">{row.note ?? '—'}</span>,
+    details: (
+      <Link
+        prefetch={false}
+        className="inline-flex items-center justify-center rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm font-semibold hover:bg-black/[0.03]"
+        href={`/admin/payments/reconciliation?${buildQS({ ...(methodFilter !== 'all' ? { method: methodFilter } : {}), ...(historyStatus !== 'all' ? { history_status: historyStatus } : {}), ...(historyByRaw ? { history_by: historyByRaw } : {}), ...(historyFrom ? { history_from: historyFrom } : {}), ...(historyTo ? { history_to: historyTo } : {}), focus_batch: row.id })}#history-details`}
+      >
+        Details
+      </Link>
+    ),
   }))
 
-  const hasErrors = groupsErr || eventsErr || historyErr || batchItemsErr || approversErr
+  const hasErrors = groupsErr || eventsErr || historyErr || batchItemsErr || approversErr || focusItemsErr || focusSubEventsErr || focusExternalEventsErr
 
   return (
     <main className="mx-auto max-w-6xl space-y-6 p-4 sm:p-6">
@@ -1023,6 +1192,9 @@ export default async function AdminPaymentsReconciliationPage({
             {historyErr ? <div>History failed to load: {historyErr.message}</div> : null}
             {batchItemsErr ? <div>History item counts failed to load: {batchItemsErr.message}</div> : null}
             {approversErr ? <div>Approvers failed to load: {approversErr.message}</div> : null}
+            {focusItemsErr ? <div>Focused batch items failed to load: {focusItemsErr.message}</div> : null}
+            {focusSubEventsErr ? <div>Focused subscription items failed to load: {focusSubEventsErr.message}</div> : null}
+            {focusExternalEventsErr ? <div>Focused external-income items failed to load: {focusExternalEventsErr.message}</div> : null}
           </CardContent>
         </Card>
       ) : null}
@@ -1105,24 +1277,165 @@ export default async function AdminPaymentsReconciliationPage({
       <section id="history" className="space-y-4">
         <div className="space-y-1">
           <h2 className="text-xl font-semibold">History</h2>
-          <p className="text-sm text-[hsl(var(--muted))]">Latest non-deleted reconciliation batches with clear status visibility.</p>
+          <p className="text-sm text-[hsl(var(--muted))]">Filter recent reconciliation batches, inspect who validated them, and open one batch in detail when you need audit visibility.</p>
         </div>
 
         <Card>
           <CardHeader>
+            <CardTitle>History filters</CardTitle>
+            <div className="text-sm text-[hsl(var(--muted))]">These filters affect the history table and the batch-management list below.</div>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <form method="get" className="grid gap-3 lg:grid-cols-5">
+              {methodFilter !== 'all' ? <input type="hidden" name="method" value={methodFilter} /> : null}
+              <div className="space-y-1">
+                <label htmlFor="history_status" className="text-sm font-medium">Status</label>
+                <select id="history_status" name="history_status" defaultValue={historyStatus} className="w-full rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm">
+                  <option value="all">All statuses</option>
+                  <option value="matched">Matched</option>
+                  <option value="over">Over</option>
+                  <option value="short">Short</option>
+                </select>
+              </div>
+
+              <div className="space-y-1">
+                <label htmlFor="history_by" className="text-sm font-medium">Validated by</label>
+                <select id="history_by" name="history_by" defaultValue={historyByRaw ?? 'all'} className="w-full rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm">
+                  <option value="all">All approvers</option>
+                  <option value="me">Me</option>
+                  {validatorOptions.map((option) => (
+                    <option key={option.value} value={option.value}>{option.label}</option>
+                  ))}
+                </select>
+              </div>
+
+              <Input id="history_from" name="history_from" type="date" label="From" defaultValue={historyFrom} />
+              <Input id="history_to" name="history_to" type="date" label="To" defaultValue={historyTo} />
+
+              <div className="flex items-end gap-2">
+                <Button type="submit">Apply</Button>
+                <Link prefetch={false} href={historyFilterResetHref} className="inline-flex items-center justify-center rounded-xl border px-4 py-2 text-sm font-medium hover:bg-black/[0.03]">
+                  Reset
+                </Link>
+              </div>
+            </form>
+
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+              <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))]/30 p-3">
+                <div className="text-xs text-[hsl(var(--muted))]">Filtered batches</div>
+                <div className="mt-1 text-lg font-semibold">{historyRows.length}</div>
+              </div>
+              <div className="rounded-2xl border border-emerald-200 bg-emerald-50/40 p-3">
+                <div className="text-xs text-[hsl(var(--muted))]">Matched</div>
+                <div className="mt-1 text-lg font-semibold">{historyMatchedCount}</div>
+              </div>
+              <div className="rounded-2xl border border-sky-200 bg-sky-50/40 p-3">
+                <div className="text-xs text-[hsl(var(--muted))]">Over</div>
+                <div className="mt-1 text-lg font-semibold">{historyOverCount}</div>
+              </div>
+              <div className="rounded-2xl border border-rose-200 bg-rose-50/40 p-3">
+                <div className="text-xs text-[hsl(var(--muted))]">Short</div>
+                <div className="mt-1 text-lg font-semibold">{historyShortCount}</div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
             <CardTitle>Recent validation history</CardTitle>
-            <div className="text-sm text-[hsl(var(--muted))]">Matched means counted amount equals expected amount.</div>
+            <div className="text-sm text-[hsl(var(--muted))]">Matched means counted amount equals expected amount. Use Details to inspect the linked source lines snapshot for one batch.</div>
           </CardHeader>
           <CardContent>
             {!historyTableRows.length ? (
               <div className="rounded-2xl border border-dashed border-[hsl(var(--border))] bg-[hsl(var(--bg))] p-4 text-sm text-[hsl(var(--muted))]">
-                No validation history yet.
+                No validation history matches the current filters.
               </div>
             ) : null}
             <Table columns={historyColumns} rows={historyTableRows as any} keyField="id" stickyTopClassName="top-0" />
           </CardContent>
         </Card>
       </section>
+
+      {focusBatch ? (
+        <section id="history-details">
+          <Card>
+            <CardHeader>
+              <CardTitle>Selected batch details</CardTitle>
+              <div className="text-sm text-[hsl(var(--muted))]">Batch {String(focusBatch.id).slice(0, 8)} · {labelMethod(focusBatch.payment_method)} · {labelMode(focusBatch.validation_mode)}</div>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+                <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))]/30 p-3">
+                  <div className="text-xs text-[hsl(var(--muted))]">Scope</div>
+                  <div className="mt-1 font-semibold">{focusBatch.validation_mode === 'cash_period' ? formatRangeLabel(focusBatch) : formatDateOnly(focusBatch.business_date)}</div>
+                </div>
+                <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))]/30 p-3">
+                  <div className="text-xs text-[hsl(var(--muted))]">Validated at</div>
+                  <div className="mt-1 font-semibold">{formatCairoDateTime(focusBatch.validated_at)}</div>
+                </div>
+                <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))]/30 p-3">
+                  <div className="text-xs text-[hsl(var(--muted))]">Validated by</div>
+                  <div className="mt-1 font-semibold">{profileLabel(focusBatch.validator)}</div>
+                </div>
+                <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))]/30 p-3">
+                  <div className="text-xs text-[hsl(var(--muted))]">Expected / counted</div>
+                  <div className="mt-1 font-semibold">{formatEGP(focusBatch.expected_amount)} / {formatEGP(focusBatch.counted_amount)}</div>
+                </div>
+                <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))]/30 p-3">
+                  <div className="text-xs text-[hsl(var(--muted))]">Difference</div>
+                  <div className={`mt-1 font-semibold ${differenceTextClass(focusBatch.difference_amount)}`}>{formatEGP(focusBatch.difference_amount)}</div>
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))]/20 p-3 text-sm text-[hsl(var(--muted))]">
+                Current note: <span className="font-medium text-[hsl(var(--fg))]">{focusBatch.note ?? '—'}</span>
+              </div>
+
+              {!focusItems.length ? (
+                <div className="rounded-2xl border border-dashed border-[hsl(var(--border))] bg-[hsl(var(--bg))] p-4 text-sm text-[hsl(var(--muted))]">
+                  No linked items were found for this batch.
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  <div className="text-sm text-[hsl(var(--muted))]">Linked items snapshot ({focusItems.length})</div>
+                  <div className="space-y-3">
+                    {focusItems.map((item) => (
+                      <div key={item.id} className="rounded-2xl border border-[hsl(var(--border))] bg-white p-4">
+                        <div className="flex flex-wrap items-start justify-between gap-3">
+                          <div className="space-y-1 min-w-0">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <Badge className={badgeClassForMethod(focusBatch.payment_method)}>{labelMethod(focusBatch.payment_method)}</Badge>
+                              <Badge className="bg-slate-100 text-slate-700">{eventSourceLabel({ source_kind: item.source_kind, source_id: item.source_id, member_id: item.member_id, source_key: item.source_key, title: item.title, note: item.note, amount: item.amount_snapshot, payment_method_norm: focusBatch.payment_method, payment_method_raw: null, business_date: item.business_date_snapshot, event_at: item.event_at_snapshot })}</Badge>
+                            </div>
+                            <div className="font-semibold">{item.title}</div>
+                            <div className="text-xs text-[hsl(var(--muted))]">Business date {formatDateOnly(item.business_date_snapshot)} · Event {formatCairoDateTime(item.event_at_snapshot)}</div>
+                            <div className="text-xs text-[hsl(var(--muted))]">Source id {item.source_id.slice(0, 8)}</div>
+                          </div>
+                          <div className="text-right shrink-0">
+                            <div className="text-xs text-[hsl(var(--muted))]">Amount snapshot</div>
+                            <div className="font-semibold">{formatEGP(item.amount_snapshot)}</div>
+                          </div>
+                        </div>
+                        <div className="mt-3 flex items-center justify-between gap-3 flex-wrap">
+                          <div className="text-sm text-[hsl(var(--muted))]">{item.note ?? 'No note on this source line.'}</div>
+                          <Link
+                            prefetch={false}
+                            className="inline-flex items-center justify-center rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm font-semibold hover:bg-black/[0.03]"
+                            href={item.source_kind === 'subscription_payment' && item.member_id ? `/members/${item.member_id}` : '/admin/external-income'}
+                          >
+                            Open source
+                          </Link>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </section>
+      ) : null}
 
       <section id="manage">
         <Card>
