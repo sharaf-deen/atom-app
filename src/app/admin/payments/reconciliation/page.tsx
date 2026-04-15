@@ -139,8 +139,21 @@ function badgeClassForMethod(m: Method | string) {
   return ''
 }
 
+function summaryToneClass(method: Method | 'all' | 'open_entries') {
+  if (method === 'cash') return 'border-emerald-200 bg-emerald-50/40'
+  if (method === 'instapay') return 'border-sky-200 bg-sky-50/40'
+  if (method === 'card') return 'border-violet-200 bg-violet-50/40'
+  if (method === 'bank_transfer') return 'border-amber-200 bg-amber-50/40'
+  if (method === 'open_entries') return 'border-slate-200 bg-slate-50/60'
+  return 'border-black/10 bg-black/[0.03]'
+}
+
 function labelMode(mode: ValidationMode) {
-  return mode === 'cash_period' ? 'Cash period' : 'Daily'
+  return mode === 'cash_period' ? 'Cash closure' : 'Daily reconciliation'
+}
+
+function modeHelper(mode: ValidationMode) {
+  return mode === 'cash_period' ? 'Since the last cash closure' : 'One Cairo business date'
 }
 
 function safeMethod(v: string | null | undefined): Method | 'all' {
@@ -272,6 +285,25 @@ function approverHelperText(canCreateValidations: boolean, role: string) {
   if (canCreateValidations) return role === 'super_admin' ? 'Super Admin can validate directly.' : 'This admin account is an active payment approver.'
   if (role === 'admin') return 'Read-only mode: this admin account is not yet active in payment_validation_approvers.'
   return 'Read-only mode.'
+}
+
+function differenceStatusLabel(difference: number) {
+  if (difference === 0) return 'Matched'
+  return difference > 0 ? 'Over' : 'Short'
+}
+
+function differenceTextClass(difference: number) {
+  if (difference === 0) return 'text-emerald-700'
+  return difference > 0 ? 'text-sky-700' : 'text-rose-700'
+}
+
+function differenceBadgeClass(difference: number) {
+  if (difference === 0) return 'bg-emerald-50 text-emerald-700'
+  return difference > 0 ? 'bg-sky-50 text-sky-700' : 'bg-rose-50 text-rose-700'
+}
+
+function sectionLinkClass(active: boolean) {
+  return `inline-flex items-center justify-center rounded-2xl border px-4 py-2 text-sm font-medium ${active ? 'border-black bg-black text-white' : 'border-[hsl(var(--border))] bg-white hover:bg-black/[0.03]'}`
 }
 
 export default async function AdminPaymentsReconciliationPage({
@@ -576,36 +608,42 @@ export default async function AdminPaymentsReconciliationPage({
   const methodHref = (method: Method | 'all') =>
     method === 'all' ? '/admin/payments/reconciliation' : `/admin/payments/reconciliation?${buildQS({ method })}`
 
-  const summaryCards: Array<{ label: string; value: string; sub: string }> = [
+  const summaryCards: Array<{ label: string; value: string; sub: string; tone: Method | 'all' | 'open_entries' }> = [
     {
       label: 'Open total',
       value: formatEGP(openTotal),
       sub: `${openGroups.length} open group${openGroups.length === 1 ? '' : 's'}`,
+      tone: 'all',
     },
     {
       label: 'Open entries',
       value: String(openLines),
       sub: 'Unreconciled income lines',
+      tone: 'open_entries',
     },
     {
       label: 'Cash',
       value: formatEGP(totalsByMethod.cash),
       sub: cashOpen ? `Open period · ${cashOpen.line_count} line${cashOpen.line_count === 1 ? '' : 's'}` : 'No open cash period',
+      tone: 'cash',
     },
     {
       label: 'Instapay',
       value: formatEGP(totalsByMethod.instapay),
       sub: `${dailyOpenRows.filter((row) => row.payment_method === 'instapay').length} daily group(s)`,
+      tone: 'instapay',
     },
     {
       label: 'Card',
       value: formatEGP(totalsByMethod.card),
       sub: `${dailyOpenRows.filter((row) => row.payment_method === 'card').length} daily group(s)`,
+      tone: 'card',
     },
     {
       label: 'Bank transfer',
       value: formatEGP(totalsByMethod.bank_transfer),
       sub: `${dailyOpenRows.filter((row) => row.payment_method === 'bank_transfer').length} daily group(s)`,
+      tone: 'bank_transfer',
     },
   ]
 
@@ -668,6 +706,7 @@ export default async function AdminPaymentsReconciliationPage({
     { key: 'validated_at', header: 'Validated at (EG)' },
     { key: 'method', header: 'Method' },
     { key: 'scope', header: 'Scope' },
+    { key: 'status', header: 'Status' },
     { key: 'expected', header: 'Expected' },
     { key: 'counted', header: 'Counted' },
     { key: 'difference', header: 'Difference' },
@@ -676,57 +715,71 @@ export default async function AdminPaymentsReconciliationPage({
     { key: 'note', header: 'Note', hideOnMobile: true },
   ]
 
-  const historyTableRows = historyRows.map((row) => {
-    const differenceTone = row.difference_amount === 0 ? 'text-emerald-700' : row.difference_amount > 0 ? 'text-sky-700' : 'text-rose-700'
-    return {
-      id: row.id,
-      validated_at: <span className="font-medium">{formatCairoDateTime(row.validated_at)}</span>,
-      method: <Badge className={badgeClassForMethod(row.payment_method)}>{labelMethod(row.payment_method)}</Badge>,
-      scope: (
-        <div className="space-y-0.5">
-          <div className="font-medium">{labelMode(row.validation_mode)}</div>
-          <div className="text-xs text-[hsl(var(--muted))]">{row.validation_mode === 'cash_period' ? formatRangeLabel(row) : formatDateOnly(row.business_date)}</div>
-        </div>
-      ),
-      expected: <span className="font-semibold">{formatEGP(row.expected_amount)}</span>,
-      counted: <span className="font-semibold">{formatEGP(row.counted_amount)}</span>,
-      difference: <span className={`font-semibold ${differenceTone}`}>{formatEGP(row.difference_amount)}</span>,
-      entries: <span className="text-sm">{itemsCountByBatchId.get(row.id) ?? 0}</span>,
-      by: <span className="text-sm">{profileLabel(row.validator)}</span>,
-      note: <span className="text-sm text-[hsl(var(--muted))]">{row.note ?? '—'}</span>,
-    }
-  })
+  const historyTableRows = historyRows.map((row) => ({
+    id: row.id,
+    validated_at: <span className="font-medium">{formatCairoDateTime(row.validated_at)}</span>,
+    method: <Badge className={badgeClassForMethod(row.payment_method)}>{labelMethod(row.payment_method)}</Badge>,
+    scope: (
+      <div className="space-y-0.5">
+        <div className="font-medium">{labelMode(row.validation_mode)}</div>
+        <div className="text-xs text-[hsl(var(--muted))]">{row.validation_mode === 'cash_period' ? formatRangeLabel(row) : formatDateOnly(row.business_date)}</div>
+      </div>
+    ),
+    status: <Badge className={differenceBadgeClass(row.difference_amount)}>{differenceStatusLabel(row.difference_amount)}</Badge>,
+    expected: <span className="font-semibold">{formatEGP(row.expected_amount)}</span>,
+    counted: <span className="font-semibold">{formatEGP(row.counted_amount)}</span>,
+    difference: <span className={`font-semibold ${differenceTextClass(row.difference_amount)}`}>{formatEGP(row.difference_amount)}</span>,
+    entries: <span className="text-sm">{itemsCountByBatchId.get(row.id) ?? 0}</span>,
+    by: <span className="text-sm">{profileLabel(row.validator)}</span>,
+    note: <span className="text-sm text-[hsl(var(--muted))]">{row.note ?? '—'}</span>,
+  }))
 
   const hasErrors = groupsErr || eventsErr || historyErr || batchItemsErr || approversErr
 
   return (
-    <main className="p-4 sm:p-6 max-w-6xl mx-auto space-y-6">
-      <div className="flex items-center justify-between gap-3 flex-wrap">
-        <div className="space-y-1">
-          <h1 className="text-2xl font-semibold">Admin · Payments Reconciliation</h1>
-          <p className="text-sm text-[hsl(var(--muted))]">
-            Reconcile unreconciled income events into validation batches without editing the original source records.
-          </p>
-          <p className="text-sm text-[hsl(var(--muted))]">
-            Cash stays period-based since the last closure. Instapay, Card, and Bank transfer stay daily.
-          </p>
-          <p className="text-sm text-[hsl(var(--muted))]">
-            Signed in as <span className="font-medium">{me.email || 'unknown'}</span>
-          </p>
-        </div>
+    <main className="mx-auto max-w-6xl space-y-6 p-4 sm:p-6">
+      <Card className="border-black/10 bg-gradient-to-br from-white to-black/[0.02]">
+        <CardContent className="space-y-5 py-5 sm:py-6">
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div className="max-w-3xl space-y-2">
+              <div className="flex items-center gap-2 flex-wrap">
+                <Badge className="bg-black text-white">Payments</Badge>
+                <Badge className={canCreateValidations ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-800'}>
+                  {canCreateValidations ? 'Can validate' : 'Read-only'}
+                </Badge>
+              </div>
+              <h1 className="text-2xl font-semibold sm:text-3xl">Admin · Payments Reconciliation</h1>
+              <p className="text-sm text-[hsl(var(--muted))] sm:text-base">
+                Validate open income scopes into reconciliation batches without editing the original source records. Cash stays closure-based. Instapay, Card, and Bank transfer stay daily.
+              </p>
+              <div className="text-sm text-[hsl(var(--muted))]">
+                Signed in as <span className="font-medium text-[hsl(var(--fg))]">{me.email || 'unknown'}</span> · {approverHelperText(canCreateValidations, me.role)}
+              </div>
+            </div>
 
-        <div className="flex gap-2 flex-wrap">
-          <Link prefetch={false} href="/admin" className="border px-4 py-2 rounded-lg hover:bg-gray-50">
-            ← Admin
-          </Link>
-          <Link prefetch={false} href="/admin/payments" className="border px-4 py-2 rounded-lg hover:bg-gray-50">
-            Payments
-          </Link>
-          <Link prefetch={false} href="/admin/external-income" className="border px-4 py-2 rounded-lg hover:bg-gray-50">
-            Other Income
-          </Link>
-        </div>
-      </div>
+            <div className="flex gap-2 flex-wrap">
+              <Link prefetch={false} href="/admin" className="border px-4 py-2 rounded-xl hover:bg-gray-50">
+                ← Admin
+              </Link>
+              <Link prefetch={false} href="/admin/payments" className="border px-4 py-2 rounded-xl hover:bg-gray-50">
+                Payments
+              </Link>
+              <Link prefetch={false} href="/admin/external-income" className="border px-4 py-2 rounded-xl hover:bg-gray-50">
+                Other Income
+              </Link>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap gap-2">
+            <a href="#overview" className={sectionLinkClass(true)}>Overview</a>
+            <a href="#governance" className={sectionLinkClass(false)}>Governance</a>
+            <a href="#validate" className={sectionLinkClass(false)}>Validate now</a>
+            <a href="#open-scopes" className={sectionLinkClass(false)}>Open scopes</a>
+            <a href="#history" className={sectionLinkClass(false)}>History</a>
+            <a href="#manage" className={sectionLinkClass(false)}>Manage batches</a>
+          </div>
+        </CardContent>
+      </Card>
 
       {flashError ? (
         <InlineAlert variant="error" title="Validation failed">
@@ -755,7 +808,7 @@ export default async function AdminPaymentsReconciliationPage({
       <Card>
         <CardHeader>
           <CardTitle>Method filter</CardTitle>
-          <div className="text-sm text-[hsl(var(--muted))]">Keep the page narrow only when needed.</div>
+          <div className="text-sm text-[hsl(var(--muted))]">Use this only when you want to narrow the view to one payment method.</div>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="flex flex-wrap gap-2">
@@ -774,28 +827,34 @@ export default async function AdminPaymentsReconciliationPage({
             })}
           </div>
           <div className="text-xs text-[hsl(var(--muted))]">
-            Current filter: <span className="font-medium">{methodFilter === 'all' ? 'All methods' : labelMethod(methodFilter)}</span>
+            Current filter: <span className="font-medium text-[hsl(var(--fg))]">{methodFilter === 'all' ? 'All methods' : labelMethod(methodFilter)}</span>
           </div>
         </CardContent>
       </Card>
 
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6">
-        {summaryCards.map((card) => (
-          <Card key={card.label}>
-            <CardContent className="py-4">
-              <div className="text-xs text-[hsl(var(--muted))]">{card.label}</div>
-              <div className="mt-1 text-xl font-semibold">{card.value}</div>
-              <div className="mt-1 text-xs text-[hsl(var(--muted))]">{card.sub}</div>
-            </CardContent>
-          </Card>
-        ))}
-      </div>
+      <section id="overview" className="space-y-4">
+        <div className="space-y-1">
+          <h2 className="text-xl font-semibold">Overview</h2>
+          <p className="text-sm text-[hsl(var(--muted))]">Fast totals for what is still open before reconciliation.</p>
+        </div>
+        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6">
+          {summaryCards.map((card) => (
+            <Card key={card.label} className={summaryToneClass(card.tone)}>
+              <CardContent className="py-4">
+                <div className="text-xs text-[hsl(var(--muted))]">{card.label}</div>
+                <div className="mt-1 text-xl font-semibold">{card.value}</div>
+                <div className="mt-1 text-xs text-[hsl(var(--muted))]">{card.sub}</div>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      </section>
 
-      <div className="grid gap-4 xl:grid-cols-[1.2fr_0.8fr]">
+      <section id="governance" className="grid gap-4 xl:grid-cols-[1.2fr_0.8fr]">
         <Card>
           <CardHeader>
             <CardTitle>Active approvers</CardTitle>
-            <div className="text-sm text-[hsl(var(--muted))]">These accounts can validate batches right now. Super Admin remains allowed even without a row, but this list makes the governance explicit.</div>
+            <div className="text-sm text-[hsl(var(--muted))]">Accounts that can validate batches right now.</div>
           </CardHeader>
           <CardContent className="space-y-3">
             {!approvers.length ? (
@@ -807,7 +866,7 @@ export default async function AdminPaymentsReconciliationPage({
             <div className="grid gap-3 md:grid-cols-2">
               {approvers.map((row) => (
                 <div key={row.user_id} className="rounded-2xl border border-[hsl(var(--border))] bg-white p-4">
-                  <div className="flex items-center justify-between gap-3">
+                  <div className="flex items-start justify-between gap-3">
                     <div>
                       <div className="font-semibold">{approverLabel(row)}</div>
                       <div className="text-xs text-[hsl(var(--muted))]">{roleLabel(row.role)}{row.email ? ` · ${row.email}` : ''}</div>
@@ -826,7 +885,7 @@ export default async function AdminPaymentsReconciliationPage({
         <Card>
           <CardHeader>
             <CardTitle>Named approver coverage</CardTitle>
-            <div className="text-sm text-[hsl(var(--muted))]">Target operating owners for this reconciliation flow.</div>
+            <div className="text-sm text-[hsl(var(--muted))]">Target operating owners for this workflow.</div>
           </CardHeader>
           <CardContent className="space-y-3">
             {namedApproverTargets.map((target) => {
@@ -834,7 +893,7 @@ export default async function AdminPaymentsReconciliationPage({
               const active = Boolean(row?.user_id)
               return (
                 <div key={target.key} className="rounded-2xl border border-[hsl(var(--border))] bg-white p-4">
-                  <div className="flex items-center justify-between gap-3">
+                  <div className="flex items-start justify-between gap-3">
                     <div>
                       <div className="font-semibold">{target.label}</div>
                       <div className="text-xs text-[hsl(var(--muted))]">{target.expectedRole}{row?.email ? ` · ${row.email}` : ''}</div>
@@ -851,110 +910,114 @@ export default async function AdminPaymentsReconciliationPage({
             })}
           </CardContent>
         </Card>
-      </div>
+      </section>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Create validation batches</CardTitle>
-          <div className="text-sm text-[hsl(var(--muted))]">
-            {approverHelperText(canCreateValidations, me.role)} Leave counted amount equal to expected when everything matches. Add a note when there is any difference.
-          </div>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          {!canCreateValidations ? (
-            <InlineAlert variant="warning" title="Read-only access">
-              Only active approvers or Super Admin can create validation batches. Admin users who should validate must first be added to <code>payment_validation_approvers</code>.
-            </InlineAlert>
-          ) : null}
-
-          {!createGroups.length ? (
-            <div className="rounded-2xl border border-dashed border-[hsl(var(--border))] bg-[hsl(var(--bg))] p-4 text-sm text-[hsl(var(--muted))]">
-              No open scopes are available for validation right now.
+      <section id="validate">
+        <Card>
+          <CardHeader>
+            <CardTitle>Validate now</CardTitle>
+            <div className="text-sm text-[hsl(var(--muted))]">
+              Create reconciliation batches from the currently open scopes only. Leave counted amount equal to expected when everything matches.
             </div>
-          ) : null}
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {!canCreateValidations ? (
+              <InlineAlert variant="warning" title="Read-only access">
+                Only active approvers or Super Admin can create validation batches. Admin users who should validate must first be added to <code>payment_validation_approvers</code>.
+              </InlineAlert>
+            ) : null}
 
-          <div className="grid gap-4 xl:grid-cols-2">
-            {createGroups.map((row) => {
-              const scopeKey = `${row.payment_method}:${row.validation_mode}:${row.business_date ?? 'open'}`
-              const scopeLabel = row.validation_mode === 'cash_period' ? formatRangeLabel(row) : formatDateOnly(row.business_date)
-              const hiddenBusinessDate = row.validation_mode === 'daily' ? row.business_date ?? '' : ''
-              return (
-                <Card key={scopeKey}>
-                  <CardHeader>
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <CardTitle>{labelMethod(row.payment_method)}</CardTitle>
-                      <Badge className={badgeClassForMethod(row.payment_method)}>{labelMode(row.validation_mode)}</Badge>
-                    </div>
-                    <div className="text-sm text-[hsl(var(--muted))]">Scope: {scopeLabel}</div>
-                  </CardHeader>
-                  <CardContent className="space-y-4">
-                    <div className="grid gap-3 sm:grid-cols-2">
-                      <div>
-                        <div className="text-xs text-[hsl(var(--muted))]">Expected amount</div>
-                        <div className="mt-1 font-semibold">{formatEGP(row.expected_amount)}</div>
+            {!createGroups.length ? (
+              <div className="rounded-2xl border border-dashed border-[hsl(var(--border))] bg-[hsl(var(--bg))] p-4 text-sm text-[hsl(var(--muted))]">
+                No open scopes are available for validation right now.
+              </div>
+            ) : null}
+
+            <div className="grid gap-4 xl:grid-cols-2">
+              {createGroups.map((row) => {
+                const scopeKey = `${row.payment_method}:${row.validation_mode}:${row.business_date ?? 'open'}`
+                const scopeLabel = row.validation_mode === 'cash_period' ? formatRangeLabel(row) : formatDateOnly(row.business_date)
+                const hiddenBusinessDate = row.validation_mode === 'daily' ? row.business_date ?? '' : ''
+                return (
+                  <Card key={scopeKey} className="overflow-hidden border-black/10">
+                    <div className={`h-1.5 w-full ${row.payment_method === 'cash' ? 'bg-emerald-500/70' : row.payment_method === 'instapay' ? 'bg-sky-500/70' : row.payment_method === 'card' ? 'bg-violet-500/70' : 'bg-amber-500/70'}`} />
+                    <CardHeader>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <CardTitle>{labelMethod(row.payment_method)}</CardTitle>
+                        <Badge className={badgeClassForMethod(row.payment_method)}>{labelMode(row.validation_mode)}</Badge>
+                        <Badge className="bg-slate-100 text-slate-700">{differenceStatusLabel(0)} target</Badge>
                       </div>
-                      <div>
-                        <div className="text-xs text-[hsl(var(--muted))]">Open entries</div>
-                        <div className="mt-1 font-semibold">{row.line_count}</div>
-                      </div>
-                      <div>
-                        <div className="text-xs text-[hsl(var(--muted))]">Business scope</div>
-                        <div className="mt-1 text-sm text-[hsl(var(--muted))]">{scopeLabel}</div>
-                      </div>
-                      <div>
-                        <div className="text-xs text-[hsl(var(--muted))]">Event window</div>
-                        <div className="mt-1 text-sm text-[hsl(var(--muted))]">{formatCairoDateTime(row.period_from)} → {formatCairoDateTime(row.period_to)}</div>
-                      </div>
-                    </div>
-
-                    <form action={createValidationAction} className="space-y-3">
-                      <input type="hidden" name="return_qs" value={filterQS} />
-                      <input type="hidden" name="payment_method" value={row.payment_method} />
-                      <input type="hidden" name="validation_mode" value={row.validation_mode} />
-                      <input type="hidden" name="business_date" value={hiddenBusinessDate} />
-                      <input type="hidden" name="expected_amount" value={amountInputValue(row.expected_amount)} />
-                      <input type="hidden" name="line_count" value={String(row.line_count)} />
-
-                      <Input
-                        type="number"
-                        step="0.01"
-                        min="0"
-                        name="counted_amount"
-                        label="Counted amount"
-                        defaultValue={amountInputValue(row.expected_amount)}
-                        hint="Keep this equal to expected when there is no difference."
-                        required
-                        disabled={!canCreateValidations}
-                      />
-
-                      <Textarea
-                        name="note"
-                        label="Note"
-                        rows={3}
-                        placeholder="Optional when counted amount matches expected. Required when there is a difference."
-                        disabled={!canCreateValidations}
-                      />
-
-                      <div className="flex items-center justify-between gap-3 flex-wrap">
-                        <div className="text-xs text-[hsl(var(--muted))]">
-                          This creates one validation batch and consumes the currently open lines for this scope only.
+                      <div className="text-sm text-[hsl(var(--muted))]">{modeHelper(row.validation_mode)} · {scopeLabel}</div>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))]/40 p-3">
+                          <div className="text-xs text-[hsl(var(--muted))]">Expected amount</div>
+                          <div className="mt-1 font-semibold">{formatEGP(row.expected_amount)}</div>
                         </div>
-                        <Button type="submit" disabled={!canCreateValidations}>
-                          Validate {labelMethod(row.payment_method)}
-                        </Button>
+                        <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))]/40 p-3">
+                          <div className="text-xs text-[hsl(var(--muted))]">Open entries</div>
+                          <div className="mt-1 font-semibold">{row.line_count}</div>
+                        </div>
+                        <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))]/40 p-3">
+                          <div className="text-xs text-[hsl(var(--muted))]">Business scope</div>
+                          <div className="mt-1 text-sm text-[hsl(var(--muted))]">{scopeLabel}</div>
+                        </div>
+                        <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))]/40 p-3">
+                          <div className="text-xs text-[hsl(var(--muted))]">Event window</div>
+                          <div className="mt-1 text-sm text-[hsl(var(--muted))]">{formatCairoDateTime(row.period_from)} → {formatCairoDateTime(row.period_to)}</div>
+                        </div>
                       </div>
-                    </form>
-                  </CardContent>
-                </Card>
-              )
-            })}
-          </div>
-        </CardContent>
-      </Card>
+
+                      <form action={createValidationAction} className="space-y-3 rounded-2xl border border-[hsl(var(--border))] p-4">
+                        <input type="hidden" name="return_qs" value={filterQS} />
+                        <input type="hidden" name="payment_method" value={row.payment_method} />
+                        <input type="hidden" name="validation_mode" value={row.validation_mode} />
+                        <input type="hidden" name="business_date" value={hiddenBusinessDate} />
+                        <input type="hidden" name="expected_amount" value={amountInputValue(row.expected_amount)} />
+                        <input type="hidden" name="line_count" value={String(row.line_count)} />
+
+                        <Input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          name="counted_amount"
+                          label="Counted amount"
+                          defaultValue={amountInputValue(row.expected_amount)}
+                          hint="Keep this equal to expected when there is no difference."
+                          required
+                          disabled={!canCreateValidations}
+                        />
+
+                        <Textarea
+                          name="note"
+                          label="Note"
+                          rows={3}
+                          placeholder="Optional when counted amount matches expected. Required when there is a difference."
+                          disabled={!canCreateValidations}
+                        />
+
+                        <div className="flex items-center justify-between gap-3 flex-wrap">
+                          <div className="text-xs text-[hsl(var(--muted))]">
+                            This creates one validation batch and consumes the currently open lines for this scope only.
+                          </div>
+                          <Button type="submit" disabled={!canCreateValidations}>
+                            Validate {labelMethod(row.payment_method)}
+                          </Button>
+                        </div>
+                      </form>
+                    </CardContent>
+                  </Card>
+                )
+              })}
+            </div>
+          </CardContent>
+        </Card>
+      </section>
 
       {hasErrors ? (
         <Card>
-          <CardContent className="py-4 space-y-1 text-sm text-rose-700">
+          <CardContent className="space-y-1 py-4 text-sm text-rose-700">
             {groupsErr ? <div>Open groups failed to load: {groupsErr.message}</div> : null}
             {eventsErr ? <div>Open entries failed to load: {eventsErr.message}</div> : null}
             {historyErr ? <div>History failed to load: {historyErr.message}</div> : null}
@@ -964,53 +1027,62 @@ export default async function AdminPaymentsReconciliationPage({
         </Card>
       ) : null}
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Open cash period</CardTitle>
-          <div className="text-sm text-[hsl(var(--muted))]">One open cash window since the last cash validation.</div>
-        </CardHeader>
-        <CardContent>
-          {cashOpen ? (
-            <div className="grid gap-4 md:grid-cols-4">
-              <div>
-                <div className="text-xs text-[hsl(var(--muted))]">Business range</div>
-                <div className="mt-1 font-semibold">{formatRangeLabel(cashOpen)}</div>
-              </div>
-              <div>
-                <div className="text-xs text-[hsl(var(--muted))]">Entries</div>
-                <div className="mt-1 font-semibold">{cashOpen.line_count}</div>
-              </div>
-              <div>
-                <div className="text-xs text-[hsl(var(--muted))]">Expected amount</div>
-                <div className="mt-1 font-semibold">{formatEGP(cashOpen.expected_amount)}</div>
-              </div>
-              <div>
-                <div className="text-xs text-[hsl(var(--muted))]">Event window</div>
-                <div className="mt-1 text-sm text-[hsl(var(--muted))]">{formatCairoDateTime(cashOpen.period_from)} → {formatCairoDateTime(cashOpen.period_to)}</div>
-              </div>
-            </div>
-          ) : (
-            <div className="rounded-2xl border border-dashed border-[hsl(var(--border))] bg-[hsl(var(--bg))] p-4 text-sm text-[hsl(var(--muted))]">
-              No open cash period right now for the current filter.
-            </div>
-          )}
-        </CardContent>
-      </Card>
+      <section id="open-scopes" className="space-y-4">
+        <div className="space-y-1">
+          <h2 className="text-xl font-semibold">Open scopes</h2>
+          <p className="text-sm text-[hsl(var(--muted))]">Read-only visibility of what is still unreconciled before validation.</p>
+        </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Open daily groups</CardTitle>
-          <div className="text-sm text-[hsl(var(--muted))]">Instapay, Card, and Bank transfer stay grouped by Cairo business date.</div>
-        </CardHeader>
-        <CardContent>
-          {!openDailyTableRows.length ? (
-            <div className="rounded-2xl border border-dashed border-[hsl(var(--border))] bg-[hsl(var(--bg))] p-4 text-sm text-[hsl(var(--muted))]">
-              No open daily groups right now for the current filter.
-            </div>
-          ) : null}
-          <Table columns={openDailyColumns} rows={openDailyTableRows as any} keyField="id" stickyTopClassName="top-0" />
-        </CardContent>
-      </Card>
+        <div className="grid gap-4 xl:grid-cols-[0.9fr_1.1fr]">
+          <Card>
+            <CardHeader>
+              <CardTitle>Open cash closure</CardTitle>
+              <div className="text-sm text-[hsl(var(--muted))]">One open cash window since the last cash validation.</div>
+            </CardHeader>
+            <CardContent>
+              {cashOpen ? (
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="rounded-2xl border border-[hsl(var(--border))] bg-emerald-50/40 p-3">
+                    <div className="text-xs text-[hsl(var(--muted))]">Business range</div>
+                    <div className="mt-1 font-semibold">{formatRangeLabel(cashOpen)}</div>
+                  </div>
+                  <div className="rounded-2xl border border-[hsl(var(--border))] bg-emerald-50/40 p-3">
+                    <div className="text-xs text-[hsl(var(--muted))]">Entries</div>
+                    <div className="mt-1 font-semibold">{cashOpen.line_count}</div>
+                  </div>
+                  <div className="rounded-2xl border border-[hsl(var(--border))] bg-emerald-50/40 p-3">
+                    <div className="text-xs text-[hsl(var(--muted))]">Expected amount</div>
+                    <div className="mt-1 font-semibold">{formatEGP(cashOpen.expected_amount)}</div>
+                  </div>
+                  <div className="rounded-2xl border border-[hsl(var(--border))] bg-emerald-50/40 p-3">
+                    <div className="text-xs text-[hsl(var(--muted))]">Event window</div>
+                    <div className="mt-1 text-sm text-[hsl(var(--muted))]">{formatCairoDateTime(cashOpen.period_from)} → {formatCairoDateTime(cashOpen.period_to)}</div>
+                  </div>
+                </div>
+              ) : (
+                <div className="rounded-2xl border border-dashed border-[hsl(var(--border))] bg-[hsl(var(--bg))] p-4 text-sm text-[hsl(var(--muted))]">
+                  No open cash period right now for the current filter.
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Open daily groups</CardTitle>
+              <div className="text-sm text-[hsl(var(--muted))]">Instapay, Card, and Bank transfer stay grouped by Cairo business date.</div>
+            </CardHeader>
+            <CardContent>
+              {!openDailyTableRows.length ? (
+                <div className="rounded-2xl border border-dashed border-[hsl(var(--border))] bg-[hsl(var(--bg))] p-4 text-sm text-[hsl(var(--muted))]">
+                  No open daily groups right now for the current filter.
+                </div>
+              ) : null}
+              <Table columns={openDailyColumns} rows={openDailyTableRows as any} keyField="id" stickyTopClassName="top-0" />
+            </CardContent>
+          </Card>
+        </div>
+      </section>
 
       <Card>
         <CardHeader>
@@ -1030,157 +1102,167 @@ export default async function AdminPaymentsReconciliationPage({
         </CardContent>
       </Card>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Recent validation history</CardTitle>
-          <div className="text-sm text-[hsl(var(--muted))]">Latest non-deleted validation batches.</div>
-        </CardHeader>
-        <CardContent>
-          {!historyTableRows.length ? (
-            <div className="rounded-2xl border border-dashed border-[hsl(var(--border))] bg-[hsl(var(--bg))] p-4 text-sm text-[hsl(var(--muted))]">
-              No validation history yet.
+      <section id="history" className="space-y-4">
+        <div className="space-y-1">
+          <h2 className="text-xl font-semibold">History</h2>
+          <p className="text-sm text-[hsl(var(--muted))]">Latest non-deleted reconciliation batches with clear status visibility.</p>
+        </div>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Recent validation history</CardTitle>
+            <div className="text-sm text-[hsl(var(--muted))]">Matched means counted amount equals expected amount.</div>
+          </CardHeader>
+          <CardContent>
+            {!historyTableRows.length ? (
+              <div className="rounded-2xl border border-dashed border-[hsl(var(--border))] bg-[hsl(var(--bg))] p-4 text-sm text-[hsl(var(--muted))]">
+                No validation history yet.
+              </div>
+            ) : null}
+            <Table columns={historyColumns} rows={historyTableRows as any} keyField="id" stickyTopClassName="top-0" />
+          </CardContent>
+        </Card>
+      </section>
+
+      <section id="manage">
+        <Card>
+          <CardHeader>
+            <CardTitle>Manage recent batches</CardTitle>
+            <div className="text-sm text-[hsl(var(--muted))]">
+              Edit only the counted amount and note. Delete a batch to reopen its linked entries for reconciliation. Source payment records stay unchanged.
             </div>
-          ) : null}
-          <Table columns={historyColumns} rows={historyTableRows as any} keyField="id" stickyTopClassName="top-0" />
-        </CardContent>
-      </Card>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {!canCreateValidations ? (
+              <InlineAlert variant="warning" title="Read-only access">
+                Only active approvers or Super Admin can edit or delete validation batches.
+              </InlineAlert>
+            ) : null}
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Edit / delete recent validation batches</CardTitle>
-          <div className="text-sm text-[hsl(var(--muted))]">
-            Edit only the counted amount and note. Delete a batch to reopen its linked entries for reconciliation. Source payment records stay unchanged.
-          </div>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          {!canCreateValidations ? (
-            <InlineAlert variant="warning" title="Read-only access">
-              Only active approvers or Super Admin can edit or delete validation batches.
-            </InlineAlert>
-          ) : null}
+            {!historyRows.length ? (
+              <div className="rounded-2xl border border-dashed border-[hsl(var(--border))] bg-[hsl(var(--bg))] p-4 text-sm text-[hsl(var(--muted))]">
+                No validation batches are available to manage right now.
+              </div>
+            ) : null}
 
-          {!historyRows.length ? (
-            <div className="rounded-2xl border border-dashed border-[hsl(var(--border))] bg-[hsl(var(--bg))] p-4 text-sm text-[hsl(var(--muted))]">
-              No validation batches are available to manage right now.
-            </div>
-          ) : null}
-
-          <div className="space-y-3">
-            {historyRows.map((row) => {
-              const batchLabel = String(row.id).slice(0, 8)
-              const entriesCount = itemsCountByBatchId.get(row.id) ?? 0
-              const differenceTone = row.difference_amount === 0 ? 'text-emerald-700' : row.difference_amount > 0 ? 'text-sky-700' : 'text-rose-700'
-              return (
-                <details key={`manage-${row.id}`} className="overflow-hidden rounded-2xl border border-[hsl(var(--border))] bg-white">
-                  <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3">
-                    <div className="min-w-0 space-y-1">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <Badge className={badgeClassForMethod(row.payment_method)}>{labelMethod(row.payment_method)}</Badge>
-                        <span className="text-sm font-semibold">Batch {batchLabel}</span>
-                        <span className="text-xs text-[hsl(var(--muted))]">{labelMode(row.validation_mode)} · {row.validation_mode === 'cash_period' ? formatRangeLabel(row) : formatDateOnly(row.business_date)}</span>
+            <div className="space-y-3">
+              {historyRows.map((row) => {
+                const batchLabel = String(row.id).slice(0, 8)
+                const entriesCount = itemsCountByBatchId.get(row.id) ?? 0
+                const differenceTone = differenceTextClass(row.difference_amount)
+                return (
+                  <details key={`manage-${row.id}`} className="overflow-hidden rounded-2xl border border-[hsl(var(--border))] bg-white">
+                    <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3">
+                      <div className="min-w-0 space-y-1">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <Badge className={badgeClassForMethod(row.payment_method)}>{labelMethod(row.payment_method)}</Badge>
+                          <Badge className={differenceBadgeClass(row.difference_amount)}>{differenceStatusLabel(row.difference_amount)}</Badge>
+                          <span className="text-sm font-semibold">Batch {batchLabel}</span>
+                          <span className="text-xs text-[hsl(var(--muted))]">{labelMode(row.validation_mode)} · {row.validation_mode === 'cash_period' ? formatRangeLabel(row) : formatDateOnly(row.business_date)}</span>
+                        </div>
+                        <div className="text-xs text-[hsl(var(--muted))]">Validated {formatCairoDateTime(row.validated_at)} · {entriesCount} entr{entriesCount === 1 ? 'y' : 'ies'} · by {profileLabel(row.validator)}</div>
                       </div>
-                      <div className="text-xs text-[hsl(var(--muted))]">Validated {formatCairoDateTime(row.validated_at)} · {entriesCount} entr{entriesCount === 1 ? 'y' : 'ies'} · by {profileLabel(row.validator)}</div>
-                    </div>
-                    <div className="shrink-0 text-right">
-                      <div className="text-xs text-[hsl(var(--muted))]">Current counted</div>
-                      <div className="font-semibold">{formatEGP(row.counted_amount)}</div>
-                    </div>
-                  </summary>
-
-                  <div className="border-t border-[hsl(var(--border))] p-4 space-y-4">
-                    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
-                      <div>
-                        <div className="text-xs text-[hsl(var(--muted))]">Expected</div>
-                        <div className="mt-1 font-semibold">{formatEGP(row.expected_amount)}</div>
-                      </div>
-                      <div>
+                      <div className="shrink-0 text-right">
                         <div className="text-xs text-[hsl(var(--muted))]">Current counted</div>
-                        <div className="mt-1 font-semibold">{formatEGP(row.counted_amount)}</div>
+                        <div className="font-semibold">{formatEGP(row.counted_amount)}</div>
                       </div>
-                      <div>
-                        <div className="text-xs text-[hsl(var(--muted))]">Difference</div>
-                        <div className={`mt-1 font-semibold ${differenceTone}`}>{formatEGP(row.difference_amount)}</div>
-                      </div>
-                      <div>
-                        <div className="text-xs text-[hsl(var(--muted))]">Entries</div>
-                        <div className="mt-1 font-semibold">{entriesCount}</div>
-                      </div>
-                      <div>
-                        <div className="text-xs text-[hsl(var(--muted))]">Current note</div>
-                        <div className="mt-1 text-sm text-[hsl(var(--muted))]">{row.note ?? '—'}</div>
-                      </div>
-                    </div>
+                    </summary>
 
-                    <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
-                      <form action={updateValidationBatchAction} className="space-y-3 rounded-2xl border border-[hsl(var(--border))] p-4">
-                        <input type="hidden" name="return_qs" value={filterQS} />
-                        <input type="hidden" name="batch_id" value={row.id} />
-
-                        <div className="grid gap-3 sm:grid-cols-2">
-                          <Input
-                            type="number"
-                            step="0.01"
-                            min="0"
-                            name="counted_amount"
-                            label="Counted amount"
-                            defaultValue={amountInputValue(row.counted_amount)}
-                            hint={`Expected stays ${amountInputValue(row.expected_amount)} EGP.`}
-                            required
-                            disabled={!canCreateValidations}
-                          />
-
-                          <Textarea
-                            name="note"
-                            label="Note"
-                            rows={4}
-                            defaultValue={row.note ?? ''}
-                            placeholder="Required when counted amount differs from expected."
-                            disabled={!canCreateValidations}
-                          />
+                    <div className="space-y-4 border-t border-[hsl(var(--border))] p-4">
+                      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+                        <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))]/40 p-3">
+                          <div className="text-xs text-[hsl(var(--muted))]">Expected</div>
+                          <div className="mt-1 font-semibold">{formatEGP(row.expected_amount)}</div>
                         </div>
+                        <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))]/40 p-3">
+                          <div className="text-xs text-[hsl(var(--muted))]">Current counted</div>
+                          <div className="mt-1 font-semibold">{formatEGP(row.counted_amount)}</div>
+                        </div>
+                        <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))]/40 p-3">
+                          <div className="text-xs text-[hsl(var(--muted))]">Difference</div>
+                          <div className={`mt-1 font-semibold ${differenceTone}`}>{formatEGP(row.difference_amount)}</div>
+                        </div>
+                        <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))]/40 p-3">
+                          <div className="text-xs text-[hsl(var(--muted))]">Entries</div>
+                          <div className="mt-1 font-semibold">{entriesCount}</div>
+                        </div>
+                        <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))]/40 p-3">
+                          <div className="text-xs text-[hsl(var(--muted))]">Current note</div>
+                          <div className="mt-1 text-sm text-[hsl(var(--muted))]">{row.note ?? '—'}</div>
+                        </div>
+                      </div>
 
-                        <div className="flex items-center justify-between gap-3 flex-wrap">
-                          <div className="text-xs text-[hsl(var(--muted))]">
-                            Editing a batch updates only its counted amount and note. Linked source lines stay the same.
+                      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
+                        <form action={updateValidationBatchAction} className="space-y-3 rounded-2xl border border-[hsl(var(--border))] p-4">
+                          <input type="hidden" name="return_qs" value={filterQS} />
+                          <input type="hidden" name="batch_id" value={row.id} />
+
+                          <div className="grid gap-3 sm:grid-cols-2">
+                            <Input
+                              type="number"
+                              step="0.01"
+                              min="0"
+                              name="counted_amount"
+                              label="Counted amount"
+                              defaultValue={amountInputValue(row.counted_amount)}
+                              hint={`Expected stays ${amountInputValue(row.expected_amount)} EGP.`}
+                              required
+                              disabled={!canCreateValidations}
+                            />
+
+                            <Textarea
+                              name="note"
+                              label="Note"
+                              rows={4}
+                              defaultValue={row.note ?? ''}
+                              placeholder="Required when counted amount differs from expected."
+                              disabled={!canCreateValidations}
+                            />
                           </div>
-                          <Button type="submit" disabled={!canCreateValidations}>
-                            Save changes
+
+                          <div className="flex items-center justify-between gap-3 flex-wrap">
+                            <div className="text-xs text-[hsl(var(--muted))]">
+                              Editing a batch updates only its counted amount and note. Linked source lines stay the same.
+                            </div>
+                            <Button type="submit" disabled={!canCreateValidations}>
+                              Save changes
+                            </Button>
+                          </div>
+                        </form>
+
+                        <form action={deleteValidationBatchAction} className="space-y-3 rounded-2xl border border-rose-200 bg-rose-50/40 p-4">
+                          <input type="hidden" name="return_qs" value={filterQS} />
+                          <input type="hidden" name="batch_id" value={row.id} />
+
+                          <div className="space-y-1">
+                            <div className="font-semibold text-rose-900">Delete validation batch</div>
+                            <div className="text-sm text-rose-800">
+                              This soft-deletes batch {batchLabel} and reopens its linked entries for reconciliation. Source payment records are not edited.
+                            </div>
+                          </div>
+
+                          <div className="text-xs text-rose-800">
+                            Reopened scope will show again in the open groups section after deletion.
+                          </div>
+
+                          <Button
+                            type="submit"
+                            variant="outline"
+                            disabled={!canCreateValidations}
+                            className="border-rose-300 text-rose-700 hover:bg-rose-50"
+                          >
+                            Delete batch
                           </Button>
-                        </div>
-                      </form>
-
-                      <form action={deleteValidationBatchAction} className="space-y-3 rounded-2xl border border-rose-200 bg-rose-50/40 p-4">
-                        <input type="hidden" name="return_qs" value={filterQS} />
-                        <input type="hidden" name="batch_id" value={row.id} />
-
-                        <div className="space-y-1">
-                          <div className="font-semibold text-rose-900">Delete validation batch</div>
-                          <div className="text-sm text-rose-800">
-                            This soft-deletes batch {batchLabel} and reopens its linked entries for reconciliation. Source payment records are not edited.
-                          </div>
-                        </div>
-
-                        <div className="text-xs text-rose-800">
-                          Reopened scope will show again in the open groups section after deletion.
-                        </div>
-
-                        <Button
-                          type="submit"
-                          variant="outline"
-                          disabled={!canCreateValidations}
-                          className="border-rose-300 text-rose-700 hover:bg-rose-50"
-                        >
-                          Delete batch
-                        </Button>
-                      </form>
+                        </form>
+                      </div>
                     </div>
-                  </div>
-                </details>
-              )
-            })}
-          </div>
-        </CardContent>
-      </Card>
+                  </details>
+                )
+              })}
+            </div>
+          </CardContent>
+        </Card>
+      </section>
     </main>
   )
 }
