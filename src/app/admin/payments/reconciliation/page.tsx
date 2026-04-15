@@ -74,6 +74,17 @@ type ValidationResultRow = {
   difference_amount: number
 }
 
+type UpdateResultRow = {
+  batch_id: string
+  counted_amount: number
+  difference_amount: number
+}
+
+type DeleteResultRow = {
+  batch_id: string
+  released_count: number
+}
+
 type RangeLabelRow = {
   validation_mode: ValidationMode
   business_date?: string | null
@@ -142,6 +153,12 @@ function parsePositiveInt(v: unknown) {
   if (typeof v !== 'string') return NaN
   const n = Number.parseInt(v, 10)
   return Number.isFinite(n) && n > 0 ? n : NaN
+}
+
+function parseUuid(v: unknown) {
+  if (typeof v !== 'string') return null
+  const s = v.trim()
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(s) ? s : null
 }
 
 function sp1(sp: Record<string, string | string[] | undefined>, key: string): string | null {
@@ -261,7 +278,10 @@ export default async function AdminPaymentsReconciliationPage({
   const methodFilter = safeMethod(sp1(searchParams, 'method'))
   const flashError = safeFlash(sp1(searchParams, 'error'))
   const flashCreated = sp1(searchParams, 'created') === '1'
+  const flashUpdated = sp1(searchParams, 'updated') === '1'
+  const flashDeleted = sp1(searchParams, 'deleted') === '1'
   const flashBatch = safeFlash(sp1(searchParams, 'batch'))
+  const flashReleased = safeFlash(sp1(searchParams, 'released'))
   const admin = getSupabaseAdminClientCached()
 
   const { data: approverRow } = me.role === 'super_admin'
@@ -274,6 +294,24 @@ export default async function AdminPaymentsReconciliationPage({
         .maybeSingle()
 
   const canCreateValidations = me.role === 'super_admin' || !!approverRow?.user_id
+
+  async function assertActorCanWriteValidation(actorId: string, actorRole: string, returnQS: string) {
+    const actionAdmin = getSupabaseAdminClientCached()
+    if (actorRole === 'super_admin') return actionAdmin
+
+    const { data: isApprover } = await actionAdmin
+      .from('payment_validation_approvers')
+      .select('user_id')
+      .eq('user_id', actorId)
+      .eq('is_active', true)
+      .maybeSingle()
+
+    if (!isApprover?.user_id) {
+      redirect(withFlash(returnQS, { error: 'Only active payment approvers can manage validation batches.' }))
+    }
+
+    return actionAdmin
+  }
 
   async function createValidationAction(formData: FormData) {
     'use server'
@@ -299,20 +337,7 @@ export default async function AdminPaymentsReconciliationPage({
     if (!Number.isFinite(countedAmount) || countedAmount < 0) redirect(withFlash(returnQS, { error: 'Counted amount must be 0 or greater.' }))
     if (!Number.isFinite(lineCount) || lineCount <= 0) redirect(withFlash(returnQS, { error: 'Line count snapshot is missing.' }))
 
-    const actionAdmin = getSupabaseAdminClientCached()
-
-    if (actor.role !== 'super_admin') {
-      const { data: isApprover } = await actionAdmin
-        .from('payment_validation_approvers')
-        .select('user_id')
-        .eq('user_id', actor.id)
-        .eq('is_active', true)
-        .maybeSingle()
-
-      if (!isApprover?.user_id) {
-        redirect(withFlash(returnQS, { error: 'Only active payment approvers can validate.' }))
-      }
-    }
+    const actionAdmin = await assertActorCanWriteValidation(actor.id, actor.role, returnQS)
 
     const { data, error } = await actionAdmin.rpc('create_payment_validation_batch_v1', {
       p_payment_method: paymentMethod,
@@ -332,6 +357,69 @@ export default async function AdminPaymentsReconciliationPage({
     redirect(withFlash(returnQS, {
       created: '1',
       batch: row?.batch_id ? String(row.batch_id).slice(0, 8) : 'saved',
+    }))
+  }
+
+  async function updateValidationBatchAction(formData: FormData) {
+    'use server'
+
+    const actor = await getSessionUserCached()
+    const returnQS = String(formData.get('return_qs') ?? '')
+    if (!actor) redirect(`/login?next=/admin/payments/reconciliation`)
+    if (!canAccessPayments(actor.role)) redirect(withFlash(returnQS, { error: 'Only Admin / Super Admin can access reconciliation.' }))
+
+    const batchId = parseUuid(formData.get('batch_id'))
+    const countedAmount = parseMoney(formData.get('counted_amount'))
+    const note = String(formData.get('note') ?? '').trim()
+
+    if (!batchId) redirect(withFlash(returnQS, { error: 'Invalid batch id.' }))
+    if (!Number.isFinite(countedAmount) || countedAmount < 0) redirect(withFlash(returnQS, { error: 'Counted amount must be 0 or greater.' }))
+
+    const actionAdmin = await assertActorCanWriteValidation(actor.id, actor.role, returnQS)
+
+    const { data, error } = await actionAdmin.rpc('update_payment_validation_batch_v1', {
+      p_batch_id: batchId,
+      p_counted_amount: countedAmount,
+      p_note: note || null,
+      p_actor: actor.id,
+    })
+
+    if (error) redirect(withFlash(returnQS, { error: error.message || 'Could not update validation batch.' }))
+
+    const row = (Array.isArray(data) ? data[0] : data) as UpdateResultRow | null
+    revalidatePath('/admin/payments/reconciliation')
+    redirect(withFlash(returnQS, {
+      updated: '1',
+      batch: row?.batch_id ? String(row.batch_id).slice(0, 8) : 'saved',
+    }))
+  }
+
+  async function deleteValidationBatchAction(formData: FormData) {
+    'use server'
+
+    const actor = await getSessionUserCached()
+    const returnQS = String(formData.get('return_qs') ?? '')
+    if (!actor) redirect(`/login?next=/admin/payments/reconciliation`)
+    if (!canAccessPayments(actor.role)) redirect(withFlash(returnQS, { error: 'Only Admin / Super Admin can access reconciliation.' }))
+
+    const batchId = parseUuid(formData.get('batch_id'))
+    if (!batchId) redirect(withFlash(returnQS, { error: 'Invalid batch id.' }))
+
+    const actionAdmin = await assertActorCanWriteValidation(actor.id, actor.role, returnQS)
+
+    const { data, error } = await actionAdmin.rpc('delete_payment_validation_batch_v1', {
+      p_batch_id: batchId,
+      p_actor: actor.id,
+    })
+
+    if (error) redirect(withFlash(returnQS, { error: error.message || 'Could not delete validation batch.' }))
+
+    const row = (Array.isArray(data) ? data[0] : data) as DeleteResultRow | null
+    revalidatePath('/admin/payments/reconciliation')
+    redirect(withFlash(returnQS, {
+      deleted: '1',
+      batch: row?.batch_id ? String(row.batch_id).slice(0, 8) : 'deleted',
+      released: row?.released_count != null ? String(row.released_count) : '0',
     }))
   }
 
@@ -601,6 +689,18 @@ export default async function AdminPaymentsReconciliationPage({
         </InlineAlert>
       ) : null}
 
+      {flashUpdated ? (
+        <InlineAlert variant="success" title="Validation updated">
+          Validation batch {flashBatch || 'updated'} was updated successfully.
+        </InlineAlert>
+      ) : null}
+
+      {flashDeleted ? (
+        <InlineAlert variant="success" title="Validation deleted">
+          Validation batch {flashBatch || 'deleted'} was deleted and {flashReleased || '0'} linked entr{flashReleased === '1' ? 'y was' : 'ies were'} reopened for reconciliation.
+        </InlineAlert>
+      ) : null}
+
       <Card>
         <CardHeader>
           <CardTitle>Method filter</CardTitle>
@@ -828,6 +928,143 @@ export default async function AdminPaymentsReconciliationPage({
             </div>
           ) : null}
           <Table columns={historyColumns} rows={historyTableRows as any} keyField="id" stickyTopClassName="top-0" />
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Edit / delete recent validation batches</CardTitle>
+          <div className="text-sm text-[hsl(var(--muted))]">
+            Edit only the counted amount and note. Delete a batch to reopen its linked entries for reconciliation. Source payment records stay unchanged.
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {!canCreateValidations ? (
+            <InlineAlert variant="warning" title="Read-only access">
+              Only active approvers or Super Admin can edit or delete validation batches.
+            </InlineAlert>
+          ) : null}
+
+          {!historyRows.length ? (
+            <div className="rounded-2xl border border-dashed border-[hsl(var(--border))] bg-[hsl(var(--bg))] p-4 text-sm text-[hsl(var(--muted))]">
+              No validation batches are available to manage right now.
+            </div>
+          ) : null}
+
+          <div className="space-y-3">
+            {historyRows.map((row) => {
+              const batchLabel = String(row.id).slice(0, 8)
+              const entriesCount = itemsCountByBatchId.get(row.id) ?? 0
+              const differenceTone = row.difference_amount === 0 ? 'text-emerald-700' : row.difference_amount > 0 ? 'text-sky-700' : 'text-rose-700'
+              return (
+                <details key={`manage-${row.id}`} className="overflow-hidden rounded-2xl border border-[hsl(var(--border))] bg-white">
+                  <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3">
+                    <div className="min-w-0 space-y-1">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <Badge className={badgeClassForMethod(row.payment_method)}>{labelMethod(row.payment_method)}</Badge>
+                        <span className="text-sm font-semibold">Batch {batchLabel}</span>
+                        <span className="text-xs text-[hsl(var(--muted))]">{labelMode(row.validation_mode)} · {row.validation_mode === 'cash_period' ? formatRangeLabel(row) : formatDateOnly(row.business_date)}</span>
+                      </div>
+                      <div className="text-xs text-[hsl(var(--muted))]">Validated {formatCairoDateTime(row.validated_at)} · {entriesCount} entr{entriesCount === 1 ? 'y' : 'ies'} · by {profileLabel(row.validator)}</div>
+                    </div>
+                    <div className="shrink-0 text-right">
+                      <div className="text-xs text-[hsl(var(--muted))]">Current counted</div>
+                      <div className="font-semibold">{formatEGP(row.counted_amount)}</div>
+                    </div>
+                  </summary>
+
+                  <div className="border-t border-[hsl(var(--border))] p-4 space-y-4">
+                    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+                      <div>
+                        <div className="text-xs text-[hsl(var(--muted))]">Expected</div>
+                        <div className="mt-1 font-semibold">{formatEGP(row.expected_amount)}</div>
+                      </div>
+                      <div>
+                        <div className="text-xs text-[hsl(var(--muted))]">Current counted</div>
+                        <div className="mt-1 font-semibold">{formatEGP(row.counted_amount)}</div>
+                      </div>
+                      <div>
+                        <div className="text-xs text-[hsl(var(--muted))]">Difference</div>
+                        <div className={`mt-1 font-semibold ${differenceTone}`}>{formatEGP(row.difference_amount)}</div>
+                      </div>
+                      <div>
+                        <div className="text-xs text-[hsl(var(--muted))]">Entries</div>
+                        <div className="mt-1 font-semibold">{entriesCount}</div>
+                      </div>
+                      <div>
+                        <div className="text-xs text-[hsl(var(--muted))]">Current note</div>
+                        <div className="mt-1 text-sm text-[hsl(var(--muted))]">{row.note ?? '—'}</div>
+                      </div>
+                    </div>
+
+                    <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
+                      <form action={updateValidationBatchAction} className="space-y-3 rounded-2xl border border-[hsl(var(--border))] p-4">
+                        <input type="hidden" name="return_qs" value={filterQS} />
+                        <input type="hidden" name="batch_id" value={row.id} />
+
+                        <div className="grid gap-3 sm:grid-cols-2">
+                          <Input
+                            type="number"
+                            step="0.01"
+                            min="0"
+                            name="counted_amount"
+                            label="Counted amount"
+                            defaultValue={amountInputValue(row.counted_amount)}
+                            hint={`Expected stays ${amountInputValue(row.expected_amount)} EGP.`}
+                            required
+                            disabled={!canCreateValidations}
+                          />
+
+                          <Textarea
+                            name="note"
+                            label="Note"
+                            rows={4}
+                            defaultValue={row.note ?? ''}
+                            placeholder="Required when counted amount differs from expected."
+                            disabled={!canCreateValidations}
+                          />
+                        </div>
+
+                        <div className="flex items-center justify-between gap-3 flex-wrap">
+                          <div className="text-xs text-[hsl(var(--muted))]">
+                            Editing a batch updates only its counted amount and note. Linked source lines stay the same.
+                          </div>
+                          <Button type="submit" disabled={!canCreateValidations}>
+                            Save changes
+                          </Button>
+                        </div>
+                      </form>
+
+                      <form action={deleteValidationBatchAction} className="space-y-3 rounded-2xl border border-rose-200 bg-rose-50/40 p-4">
+                        <input type="hidden" name="return_qs" value={filterQS} />
+                        <input type="hidden" name="batch_id" value={row.id} />
+
+                        <div className="space-y-1">
+                          <div className="font-semibold text-rose-900">Delete validation batch</div>
+                          <div className="text-sm text-rose-800">
+                            This soft-deletes batch {batchLabel} and reopens its linked entries for reconciliation. Source payment records are not edited.
+                          </div>
+                        </div>
+
+                        <div className="text-xs text-rose-800">
+                          Reopened scope will show again in the open groups section after deletion.
+                        </div>
+
+                        <Button
+                          type="submit"
+                          variant="outline"
+                          disabled={!canCreateValidations}
+                          className="border-rose-300 text-rose-700 hover:bg-rose-50"
+                        >
+                          Delete batch
+                        </Button>
+                      </form>
+                    </div>
+                  </div>
+                </details>
+              )
+            })}
+          </div>
         </CardContent>
       </Card>
     </main>
