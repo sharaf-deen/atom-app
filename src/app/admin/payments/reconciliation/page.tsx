@@ -430,8 +430,8 @@ export default async function AdminPaymentsReconciliationPage({
   const approverByNamedKey = new Map(approvers.filter((row) => row.named_key).map((row) => [row.named_key as NonNullable<ApproverRow['named_key']>, row]))
   const namedApproverTargets: Array<{ key: NonNullable<ApproverRow['named_key']>; label: string; expectedRole: string; hint: string }> = [
     { key: 'sharaf_deen', label: 'Sharaf Deen', expectedRole: 'Super Admin', hint: 'Super Admin can validate directly. Keeping this profile active in the approvers list makes the governance list explicit.' },
-    { key: 'shehab', label: 'Shehab', expectedRole: 'Admin approver', hint: 'Should appear as an active admin approver once the profile first name matches Shehab.' },
-    { key: 'shawki', label: 'Shawki', expectedRole: 'Admin approver', hint: 'Should appear as an active admin approver once the profile first name matches Shawki.' },
+    { key: 'shehab', label: 'Shehab', expectedRole: 'Admin approver', hint: 'Should appear as an active admin approver once the known Shehab admin profile is matched.' },
+    { key: 'shawki', label: 'Shawki', expectedRole: 'Admin approver', hint: 'Should appear as an active admin approver once the known Shawki admin profile is matched.' },
   ]
 
   async function assertActorCanWriteValidation(actorId: string, actorRole: string, returnQS: string) {
