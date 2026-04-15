@@ -24,9 +24,18 @@ type Props = {
   memberLabel?: string | null
   currentPaidAt?: string | null
   className?: string
+  disabled?: boolean
+  disabledReason?: string | null
 }
 
-export default function EditPaymentDateButton({ paymentId, memberLabel, currentPaidAt, className }: Props) {
+export default function EditPaymentDateButton({
+  paymentId,
+  memberLabel,
+  currentPaidAt,
+  className,
+  disabled = false,
+  disabledReason,
+}: Props) {
   const router = useRouter()
   const [open, setOpen] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -38,7 +47,7 @@ export default function EditPaymentDateButton({ paymentId, memberLabel, currentP
   }, [memberLabel])
 
   async function onSave() {
-    if (busy) return
+    if (busy || disabled) return
     if (!paymentDate) {
       toast.error('Missing payment date')
       return
@@ -82,13 +91,18 @@ export default function EditPaymentDateButton({ paymentId, memberLabel, currentP
     return (
       <button
         type="button"
-        onClick={() => setOpen(true)}
+        onClick={() => {
+          if (disabled) return
+          setOpen(true)
+        }}
+        disabled={disabled}
+        title={disabledReason || undefined}
         className={
           (className ?? '') +
-          ' rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm font-semibold hover:bg-black/[0.03]'
+          ` rounded-xl border border-[hsl(var(--border))] px-3 py-2 text-sm font-semibold ${disabled ? 'cursor-not-allowed bg-[hsl(var(--bg))] text-[hsl(var(--muted))] opacity-70' : 'bg-white hover:bg-black/[0.03]'}`
         }
       >
-        Edit date
+        {disabled ? 'Locked' : 'Edit date'}
       </button>
     )
   }
@@ -128,7 +142,7 @@ export default function EditPaymentDateButton({ paymentId, memberLabel, currentP
         <button
           type="button"
           onClick={onSave}
-          disabled={!paymentDate || busy}
+          disabled={!paymentDate || busy || disabled}
           className="rounded-xl bg-black px-4 py-2 text-sm font-semibold text-white hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
         >
           {busy ? 'Saving…' : 'Save date'}
