@@ -1589,12 +1589,12 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
                             </div>
                           </div>
 
-                          {activeFreeze ? <TinyBadge tone="warning">Active freeze</TinyBadge> : null}
+                          {activeFreeze ? <TinyBadge tone="warning">{freezeSummary?.activeState === 'scheduled' ? 'Scheduled freeze' : 'Active freeze'}</TinyBadge> : null}
                         </div>
 
                         {activeFreeze && activeFreeze.freeze_from && activeFreezeEnd ? (
                           <div className="mt-3 text-sm text-[hsl(var(--muted))]">
-                            Current freeze: {fmtDate(activeFreeze.freeze_from)} → {fmtDate(activeFreezeEnd)}
+                            {freezeSummary?.activeState === 'scheduled' ? 'Scheduled freeze' : 'Current freeze'}: {fmtDate(activeFreeze.freeze_from)} → {fmtDate(activeFreezeEnd)}
                             {typeof activeFreeze.days === 'number' ? ` · ${activeFreeze.days} day(s)` : ''}
                           </div>
                         ) : freezeSummary && freezeSummary.used > 0 ? (
@@ -1612,7 +1612,7 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
                         <SubscriptionManageRowActions
                           sub={s}
                           canManageFreeze={me.role === 'super_admin'}
-                          freezeSummary={freezeSummary && freezeSummary.eligible ? { allowed: freezeSummary.allowed, used: freezeSummary.used, remaining: freezeSummary.remaining } : null}
+                          freezeSummary={freezeSummary && freezeSummary.eligible ? { allowed: freezeSummary.allowed, used: freezeSummary.used, remaining: freezeSummary.remaining, hasOpenFreeze: !!freezeSummary.active, activeState: freezeSummary.activeState } : null}
                         />
                       </div>
                     ) : null}
