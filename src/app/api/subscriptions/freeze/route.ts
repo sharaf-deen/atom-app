@@ -6,7 +6,14 @@ export const revalidate = 0
 import { NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { cairoTodayDateOnly, isISODateOnly } from '@/lib/cairoTime'
-import { getFreezeTokenAllowance, isSubscriptionFreezeOpen } from '@/lib/subscriptionFreeze'
+import {
+  getConsumptiveSubscriptionFreezeHistory,
+  getFreezeTokenAllowance,
+  isSubscriptionFreezeOpen,
+  subscriptionFreezeRangesOverlap,
+  sumConsumptiveSubscriptionFreezeDays,
+  type SubscriptionFreezeHistoryRow,
+} from '@/lib/subscriptionFreeze'
 import { createSupabaseServerActionClient } from '@/lib/supabaseServer'
 
 function json(status: number, body: any) {
@@ -33,13 +40,25 @@ function makeAdminClient() {
   return createClient(url, key, { auth: { persistSession: false } })
 }
 
+type FreezeAction = 'create' | 'update' | 'delete'
+
 type FreezePayload = {
   id?: string
+  action?: FreezeAction
+  freeze_id?: string
   // Controlled range: from/to are date-only strings; `to` is inclusive from the UI perspective.
   from?: string
   to?: string
-  // Clear any freeze (existing fallback path; not exposed as part of Freeze B create flow)
+  // Backward-compatible fallback from earlier lots.
   clear?: boolean
+}
+
+function resolveAction(payload: FreezePayload | null): FreezeAction {
+  if (payload?.clear) return 'delete'
+  if (payload?.action === 'update' || payload?.action === 'delete' || payload?.action === 'create') {
+    return payload.action
+  }
+  return payload?.freeze_id ? 'update' : 'create'
 }
 
 export async function POST(req: Request) {
@@ -71,17 +90,19 @@ export async function POST(req: Request) {
   const id = String(payload?.id || '')
   if (!id) return json(400, { ok: false, error: 'Missing subscription id' })
 
+  const action = resolveAction(payload)
   const today = cairoTodayDateOnly()
 
   const { data: current, error: readErr } = await admin
     .from('subscriptions')
-    .select('id, subscription_type, plan, status, end_date, frozen_from, frozen_until')
+    .select('id, subscription_type, plan, status, start_date, end_date, frozen_from, frozen_until')
     .eq('id', id)
     .maybeSingle<{
       id: string
       subscription_type: 'time' | 'sessions' | null
       plan: string | null
       status: string | null
+      start_date: string | null
       end_date: string | null
       frozen_from: string | null
       frozen_until: string | null
@@ -91,97 +112,52 @@ export async function POST(req: Request) {
   if (!current) return json(404, { ok: false, error: 'Subscription not found' })
 
   const stype = (current.subscription_type as any) as 'time' | 'sessions' | null
-  if (stype !== 'time') {
-    return json(400, { ok: false, error: 'Freeze is only available for time subscriptions.' })
-  }
-
   const plan = String(current.plan || '')
   const maxFreezeTokens = getFreezeTokenAllowance(plan, stype)
-  if (maxFreezeTokens < 1) {
-    return json(400, { ok: false, error: 'Freeze is only available for 3, 6, or 12 month subscriptions.' })
-  }
 
-  if (current.status !== 'active') {
-    return json(400, { ok: false, error: 'Freeze is only available for active subscriptions.' })
-  }
-
-  if (!isISODateOnly(current.end_date) || current.end_date < today) {
-    return json(400, { ok: false, error: 'Freeze is only available for subscriptions that are still active today.' })
+  if (!isISODateOnly(current.end_date)) {
+    return json(400, { ok: false, error: 'Subscription end date is invalid.' })
   }
 
   const currentEndDate = current.end_date
 
   const { data: freezeRows, error: freezeReadErr } = await admin
     .from('subscription_freezes')
-    .select('id, freeze_from, freeze_until, days, cleared_at')
+    .select('id, subscription_id, freeze_from, freeze_until, days, created_at, created_by, updated_at, updated_by, cleared_at, cleared_by')
     .eq('subscription_id', id)
+    .order('freeze_from', { ascending: false })
     .order('created_at', { ascending: false })
 
   if (freezeReadErr) return json(500, { ok: false, error: freezeReadErr.message })
 
-  const freezeHistory = Array.isArray(freezeRows) ? freezeRows : []
-  const openFreezeRow = freezeHistory.find((row: any) => isSubscriptionFreezeOpen(row, today)) ?? null
+  const freezeHistory = getConsumptiveSubscriptionFreezeHistory((freezeRows ?? []) as SubscriptionFreezeHistoryRow[])
   const usedFreezeTokens = freezeHistory.length
+  const totalFreezeDays = sumConsumptiveSubscriptionFreezeDays(freezeHistory)
+  const baseEndDate = addDays(currentEndDate, -totalFreezeDays)
+  const openFreezeRows = freezeHistory.filter((row) => isSubscriptionFreezeOpen(row, today))
+  const fallbackOpenFreezeRow = openFreezeRows[0] ?? null
 
-  const oldFrom = isISODateOnly(current.frozen_from) && current.frozen_until && current.frozen_until > today ? current.frozen_from : null
-  const oldUntil = isISODateOnly(current.frozen_until) && current.frozen_until > today ? current.frozen_until : null
+  const targetFreezeId = String(payload?.freeze_id || '')
+  const targetRow = action === 'create'
+    ? null
+    : (targetFreezeId ? freezeHistory.find((row) => row.id === targetFreezeId) ?? null : fallbackOpenFreezeRow)
 
-  let oldDays = 0
-  if (oldFrom && oldUntil && oldUntil > oldFrom) {
-    oldDays = Math.max(0, daysBetweenUTC(oldFrom, oldUntil))
-  } else if (!oldFrom && oldUntil && oldUntil > today) {
-    oldDays = Math.max(0, daysBetweenUTC(today, oldUntil))
+  if (action !== 'create' && !targetRow) {
+    return json(404, { ok: false, error: 'Freeze not found.' })
   }
 
-  const clear = !!payload?.clear
-  const from = payload?.from
-  const to = payload?.to
-
-  let newFrom: string | null = null
-  let newUntil: string | null = null
-  let newDays = 0
-
-  if (clear) {
-    if (!openFreezeRow) {
-      return json(400, { ok: false, error: 'No active or scheduled freeze found for this subscription.' })
+  if (action === 'create') {
+    if (stype !== 'time') {
+      return json(400, { ok: false, error: 'Freeze is only available for time subscriptions.' })
     }
-    newFrom = null
-    newUntil = null
-    newDays = 0
-  } else if (isISODateOnly(from) && isISODateOnly(to)) {
-    if (from < today) {
-      return json(400, { ok: false, error: 'Freeze start date cannot be in the past.' })
+    if (maxFreezeTokens < 1) {
+      return json(400, { ok: false, error: 'Freeze is only available for 3, 6, or 12 month subscriptions.' })
     }
-    if (from > to) return json(400, { ok: false, error: 'Freeze end date must be after start date.' })
-    if (from > currentEndDate) {
-      return json(400, { ok: false, error: 'Freeze start date must be within the current subscription coverage.' })
+    if (current.status !== 'active') {
+      return json(400, { ok: false, error: 'Freeze is only available for active subscriptions.' })
     }
-
-    const untilExclusive = addDays(to, 1)
-    newFrom = from
-    newUntil = untilExclusive
-    newDays = Math.max(0, daysBetweenUTC(from, untilExclusive))
-
-    if (newDays < 1) {
-      return json(400, { ok: false, error: 'Freeze must be at least 1 day.' })
-    }
-    if (newDays > 30) {
-      return json(400, { ok: false, error: 'Each freeze is limited to 30 days maximum.' })
-    }
-  } else {
-    return json(400, { ok: false, error: 'Provide a valid freeze date range.' })
-  }
-
-  const deltaDays = newDays - oldDays
-
-  let newEndDate: string | null = currentEndDate
-  if (deltaDays !== 0) {
-    newEndDate = addDays(currentEndDate, deltaDays)
-  }
-
-  if (!clear) {
-    if (openFreezeRow) {
-      return json(409, { ok: false, error: 'A freeze is already active or scheduled for this subscription.' })
+    if (currentEndDate < today) {
+      return json(400, { ok: false, error: 'Freeze is only available for subscriptions that are still active today.' })
     }
     if (usedFreezeTokens >= maxFreezeTokens) {
       return json(400, {
@@ -194,9 +170,108 @@ export async function POST(req: Request) {
     }
   }
 
+  const from = payload?.from
+  const to = payload?.to
+
+  let nextRow: SubscriptionFreezeHistoryRow | null = null
+
+  if (action === 'create' || action === 'update') {
+    if (!isISODateOnly(from) || !isISODateOnly(to)) {
+      return json(400, { ok: false, error: 'Provide a valid freeze date range.' })
+    }
+    if (from > to) {
+      return json(400, { ok: false, error: 'Freeze end date must be after start date.' })
+    }
+
+    if (action === 'create' && from < today) {
+      return json(400, { ok: false, error: 'Freeze start date cannot be in the past.' })
+    }
+
+    if (isISODateOnly(current.start_date) && from < current.start_date) {
+      return json(400, { ok: false, error: 'Freeze cannot start before the subscription start date.' })
+    }
+    if (from > currentEndDate) {
+      return json(400, { ok: false, error: 'Freeze start date must be within the current subscription coverage.' })
+    }
+
+    const untilExclusive = addDays(to, 1)
+    const newDays = Math.max(0, daysBetweenUTC(from, untilExclusive))
+    if (newDays < 1) {
+      return json(400, { ok: false, error: 'Freeze must be at least 1 day.' })
+    }
+    if (newDays > 30) {
+      return json(400, { ok: false, error: 'Each freeze is limited to 30 days maximum.' })
+    }
+
+    nextRow = {
+      id: targetRow?.id ?? 'pending-create',
+      subscription_id: id,
+      freeze_from: from,
+      freeze_until: untilExclusive,
+      days: newDays,
+      created_at: targetRow?.created_at ?? null,
+      created_by: targetRow?.created_by ?? null,
+      updated_at: null,
+      updated_by: null,
+      cleared_at: null,
+      cleared_by: null,
+    }
+  }
+
+  const projectedFreezeHistory =
+    action === 'create'
+      ? [...freezeHistory, nextRow!]
+      : action === 'update'
+        ? freezeHistory.map((row) => (row.id === targetRow!.id ? nextRow! : row))
+        : freezeHistory.filter((row) => row.id !== targetRow!.id)
+
+  if (nextRow) {
+    const overlapRow = projectedFreezeHistory.find((row) => {
+      if (row.id === nextRow?.id) return false
+      return subscriptionFreezeRangesOverlap(row, nextRow)
+    })
+    if (overlapRow) {
+      return json(409, { ok: false, error: 'Freeze dates cannot overlap with another freeze on the same subscription.' })
+    }
+  }
+
+  const projectedOpenFreezeRows = projectedFreezeHistory.filter((row) => isSubscriptionFreezeOpen(row, today))
+  if (projectedOpenFreezeRows.length > 1) {
+    return json(409, { ok: false, error: 'Only one active or scheduled freeze can exist at a time for a subscription.' })
+  }
+
+  const projectedTotalDays = sumConsumptiveSubscriptionFreezeDays(projectedFreezeHistory)
+  const newEndDate = addDays(baseEndDate, projectedTotalDays)
+  const projectedOpenRow = projectedOpenFreezeRows[0] ?? null
+
   const nowIso = new Date().toISOString()
 
-  if (clear && openFreezeRow) {
+  if (action === 'create') {
+    const { error: insertFreezeErr } = await admin
+      .from('subscription_freezes')
+      .insert({
+        subscription_id: id,
+        freeze_from: nextRow?.freeze_from,
+        freeze_until: nextRow?.freeze_until,
+        days: nextRow?.days,
+        created_by: me.data.user.id,
+        updated_at: nowIso,
+        updated_by: me.data.user.id,
+      })
+    if (insertFreezeErr) return json(500, { ok: false, error: insertFreezeErr.message })
+  } else if (action === 'update') {
+    const { error: updateFreezeErr } = await admin
+      .from('subscription_freezes')
+      .update({
+        freeze_from: nextRow?.freeze_from,
+        freeze_until: nextRow?.freeze_until,
+        days: nextRow?.days,
+        updated_at: nowIso,
+        updated_by: me.data.user.id,
+      })
+      .eq('id', targetRow!.id)
+    if (updateFreezeErr) return json(500, { ok: false, error: updateFreezeErr.message })
+  } else {
     const { error: clearFreezeErr } = await admin
       .from('subscription_freezes')
       .update({
@@ -205,26 +280,13 @@ export async function POST(req: Request) {
         updated_at: nowIso,
         updated_by: me.data.user.id,
       })
-      .eq('id', (openFreezeRow as any).id)
+      .eq('id', targetRow!.id)
     if (clearFreezeErr) return json(500, { ok: false, error: clearFreezeErr.message })
-  } else if (!clear) {
-    const { error: insertFreezeErr } = await admin
-      .from('subscription_freezes')
-      .insert({
-        subscription_id: id,
-        freeze_from: newFrom,
-        freeze_until: newUntil,
-        days: newDays,
-        created_by: me.data.user.id,
-        updated_at: nowIso,
-        updated_by: me.data.user.id,
-      })
-    if (insertFreezeErr) return json(500, { ok: false, error: insertFreezeErr.message })
   }
 
   const patch: any = {
-    frozen_from: newFrom,
-    frozen_until: newUntil,
+    frozen_from: projectedOpenRow?.freeze_from ?? null,
+    frozen_until: projectedOpenRow?.freeze_until ?? null,
     end_date: newEndDate,
   }
 
@@ -239,13 +301,14 @@ export async function POST(req: Request) {
 
   return json(200, {
     ok: true,
+    action,
     id,
-    subscription_type: (updated as any)?.subscription_type ?? 'time',
-    frozen_from: (updated as any)?.frozen_from ?? newFrom,
-    frozen_until: (updated as any)?.frozen_until ?? newUntil,
+    freeze_id: targetRow?.id ?? null,
+    subscription_type: (updated as any)?.subscription_type ?? current.subscription_type ?? 'time',
+    frozen_from: (updated as any)?.frozen_from ?? projectedOpenRow?.freeze_from ?? null,
+    frozen_until: (updated as any)?.frozen_until ?? projectedOpenRow?.freeze_until ?? null,
     end_date: (updated as any)?.end_date ?? newEndDate,
-    delta_days: deltaDays,
-    freeze_tokens_used: clear ? usedFreezeTokens : usedFreezeTokens + 1,
+    freeze_tokens_used: projectedFreezeHistory.length,
     freeze_tokens_allowed: maxFreezeTokens,
   })
 }

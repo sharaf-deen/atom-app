@@ -57,11 +57,17 @@ export function toInclusiveFreezeEnd(exclusiveEndDateOnly: string | null | undef
   return addDaysDateOnly(exclusiveEndDateOnly, -1)
 }
 
+export function isSubscriptionFreezeDeleted(
+  row: Pick<SubscriptionFreezeHistoryRow, 'cleared_at'> | null | undefined,
+): boolean {
+  return !!row?.cleared_at
+}
+
 export function isSubscriptionFreezeOpen(
   row: Pick<SubscriptionFreezeHistoryRow, 'freeze_until' | 'cleared_at'> | null | undefined,
   todayDateOnly = cairoTodayDateOnly(),
 ): boolean {
-  if (!row || !!row.cleared_at) return false
+  if (!row || isSubscriptionFreezeDeleted(row)) return false
   return !!row.freeze_until && isISODateOnly(row.freeze_until) && row.freeze_until > todayDateOnly
 }
 
@@ -74,6 +80,43 @@ export function getSubscriptionFreezeActiveState(
   return 'active'
 }
 
+export function getConsumptiveSubscriptionFreezeHistory(
+  freezeRows?: SubscriptionFreezeHistoryRow[] | null,
+): SubscriptionFreezeHistoryRow[] {
+  const rows = Array.isArray(freezeRows) ? [...freezeRows] : []
+
+  return rows
+    .filter((row) => !isSubscriptionFreezeDeleted(row))
+    .sort((a, b) => {
+      const aFrom = a.freeze_from ?? ''
+      const bFrom = b.freeze_from ?? ''
+      if (aFrom !== bFrom) return bFrom.localeCompare(aFrom)
+      const aCreated = a.created_at ?? ''
+      const bCreated = b.created_at ?? ''
+      return bCreated.localeCompare(aCreated)
+    })
+}
+
+export function sumConsumptiveSubscriptionFreezeDays(
+  freezeRows?: Pick<SubscriptionFreezeHistoryRow, 'days' | 'cleared_at'>[] | null,
+): number {
+  const rows = Array.isArray(freezeRows) ? freezeRows : []
+  return rows.reduce((sum, row) => {
+    if (isSubscriptionFreezeDeleted(row)) return sum
+    const days = Number(row.days ?? 0)
+    return sum + (Number.isFinite(days) && days > 0 ? days : 0)
+  }, 0)
+}
+
+export function subscriptionFreezeRangesOverlap(
+  left: Pick<SubscriptionFreezeHistoryRow, 'freeze_from' | 'freeze_until'>,
+  right: Pick<SubscriptionFreezeHistoryRow, 'freeze_from' | 'freeze_until'>,
+): boolean {
+  if (!isISODateOnly(left.freeze_from) || !isISODateOnly(left.freeze_until)) return false
+  if (!isISODateOnly(right.freeze_from) || !isISODateOnly(right.freeze_until)) return false
+  return left.freeze_from < right.freeze_until && right.freeze_from < left.freeze_until
+}
+
 export function buildSubscriptionFreezeTokenSummary(args: {
   plan: string | null | undefined
   subscriptionType?: FreezeSubscriptionType
@@ -81,7 +124,7 @@ export function buildSubscriptionFreezeTokenSummary(args: {
   todayDateOnly?: string
 }): SubscriptionFreezeTokenSummary {
   const allowed = getFreezeTokenAllowance(args.plan, args.subscriptionType)
-  const history = Array.isArray(args.freezeRows) ? [...args.freezeRows] : []
+  const history = getConsumptiveSubscriptionFreezeHistory(args.freezeRows)
   const todayDateOnly = args.todayDateOnly ?? cairoTodayDateOnly()
   const active = history.find((row) => isSubscriptionFreezeOpen(row, todayDateOnly)) ?? null
   const activeState = getSubscriptionFreezeActiveState(active, todayDateOnly)
