@@ -9,6 +9,7 @@ import Input from '@/components/ui/Input'
 import Select from '@/components/ui/Select'
 import SettleDueDialog from '@/components/SettleDueDialog'
 import SaveButton from '@/components/forms/SaveButton'
+import { freezePlanSummaryLabel, getFreezeTokenAllowance } from '@/lib/subscriptionFreeze'
 // Note: we intentionally avoid depending on a specific Alert component API here.
 // We'll render a lightweight inline message box to prevent TS prop mismatches.
 
@@ -40,6 +41,8 @@ function daysBetweenUTC(fromDateOnly: string, toDateOnly: string) {
 
 export default function SubscriptionManageRowActions({
   sub,
+  canManageFreeze = false,
+  freezeSummary,
 }: {
   sub: {
     id: string
@@ -58,6 +61,12 @@ export default function SubscriptionManageRowActions({
     amount_due?: number | null
     payment_method?: string | null
   }
+  canManageFreeze?: boolean
+  freezeSummary?: {
+    allowed: number
+    used: number
+    remaining: number
+  } | null
 }) {
   const router = useRouter()
 
@@ -70,8 +79,9 @@ export default function SubscriptionManageRowActions({
         : 'time'
   const isTime = stype === 'time'
   const currentPlanForFreeze = String(sub.plan ?? '')
-  const freezeTokensAllowed = currentPlanForFreeze === '3m' ? 1 : currentPlanForFreeze === '6m' ? 2 : currentPlanForFreeze === '12m' ? 3 : 0
+  const freezeTokensAllowed = getFreezeTokenAllowance(currentPlanForFreeze, stype)
   const canFreezePlan = isTime && freezeTokensAllowed > 0
+  const canManageFreezeAction = canFreezePlan && canManageFreeze
 
   const [openEdit, setOpenEdit] = useState(false)
   const [openFreeze, setOpenFreeze] = useState(false)
@@ -255,7 +265,7 @@ export default function SubscriptionManageRowActions({
     setStatus({ kind: 'info', msg: 'Saving freeze…' })
 
     try {
-      if (!canFreezePlan) {
+      if (!canManageFreezeAction) {
         setStatus({ kind: 'error', msg: 'Freeze is only available for 3, 6, or 12 month subscriptions.' })
         toast.error('Freeze failed')
         return
@@ -399,7 +409,7 @@ export default function SubscriptionManageRowActions({
         />
       ) : null}
 
-      {canFreezePlan ? (
+      {canManageFreezeAction ? (
         <Button size="sm" variant="outline" onClick={() => setOpenFreeze(true)} disabled={!canEdit}>
           {hasFreeze ? 'Edit freeze' : 'Freeze'}
         </Button>
@@ -523,7 +533,7 @@ export default function SubscriptionManageRowActions({
       )}
 
       {/* Freeze modal (time subscriptions only) */}
-      {openFreeze && canFreezePlan && (
+      {openFreeze && canManageFreezeAction && (
         <div className="fixed inset-0 z-[999] flex items-center justify-center bg-black/40 p-4">
           <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-soft">
             <div className="flex items-center justify-between">
@@ -544,8 +554,13 @@ export default function SubscriptionManageRowActions({
               <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))]/50 p-3 text-sm">
                 <div className="font-medium text-[hsl(var(--fg))]">Freeze tokens</div>
                 <div className="mt-1 text-[hsl(var(--muted))]">
-                  {currentPlanForFreeze === '3m' ? '3 months: 1 freeze token' : currentPlanForFreeze === '6m' ? '6 months: 2 freeze tokens' : '12 months: 3 freeze tokens'}
+                  {freezePlanSummaryLabel(currentPlanForFreeze, stype)}
                 </div>
+                {freezeSummary ? (
+                  <div className="mt-2 text-xs text-[hsl(var(--muted))]">
+                    Used {freezeSummary.used} / {freezeSummary.allowed} · Remaining {freezeSummary.remaining}
+                  </div>
+                ) : null}
               </div>
 
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
