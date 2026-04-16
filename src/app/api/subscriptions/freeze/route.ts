@@ -5,18 +5,12 @@ export const revalidate = 0
 
 import { NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
+import { cairoTodayDateOnly, isISODateOnly } from '@/lib/cairoTime'
+import { getFreezeTokenAllowance } from '@/lib/subscriptionFreeze'
 import { createSupabaseServerActionClient } from '@/lib/supabaseServer'
 
 function json(status: number, body: any) {
   return NextResponse.json(body, { status })
-}
-
-function isISODateOnly(s: unknown): s is string {
-  return typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s)
-}
-
-function todayDateOnlyUTC() {
-  return new Date().toISOString().slice(0, 10)
 }
 
 function addDays(dateOnly: string, days: number) {
@@ -55,7 +49,6 @@ export async function POST(req: Request) {
   const me = await supabase.auth.getUser()
   if (!me.data.user) return json(401, { ok: false, error: 'Not authenticated' })
 
-  // Only admin / super_admin
   const { data: prof } = await supabase
     .from('profiles')
     .select('role')
@@ -63,8 +56,8 @@ export async function POST(req: Request) {
     .maybeSingle<{ role: string | null }>()
 
   const role = prof?.role ?? 'member'
-  if (role !== 'admin' && role !== 'super_admin') {
-    return json(403, { ok: false, error: 'Forbidden' })
+  if (role !== 'super_admin') {
+    return json(403, { ok: false, error: 'Only super admins can manage subscription freezes.' })
   }
 
   const admin = makeAdminClient()
@@ -80,7 +73,7 @@ export async function POST(req: Request) {
   const id = String(payload?.id || '')
   if (!id) return json(400, { ok: false, error: 'Missing subscription id' })
 
-  const today = todayDateOnlyUTC()
+  const today = cairoTodayDateOnly()
 
   const { data: current, error: readErr } = await admin
     .from('subscriptions')
@@ -103,9 +96,8 @@ export async function POST(req: Request) {
     return json(400, { ok: false, error: 'Freeze is only available for time subscriptions.' })
   }
 
-  const plan = String((current as any).plan || '')
-  const freezeTokensByPlan: Record<string, number> = { '3m': 1, '6m': 2, '12m': 3 }
-  const maxFreezeTokens = freezeTokensByPlan[plan] ?? 0
+  const plan = String(current.plan || '')
+  const maxFreezeTokens = getFreezeTokenAllowance(plan, stype)
   if (maxFreezeTokens < 1) {
     return json(400, { ok: false, error: 'Freeze is only available for 3, 6, or 12 month subscriptions.' })
   }
@@ -122,21 +114,16 @@ export async function POST(req: Request) {
   const activeFreezeRow = freezeHistory.find((row: any) => row && !row.cleared_at) ?? null
   const usedFreezeTokens = freezeHistory.length
 
-  const oldFrom = isISODateOnly((current as any).frozen_from) ? (current as any).frozen_from : null
-  const oldUntil = isISODateOnly((current as any).frozen_until) ? (current as any).frozen_until : null
+  const oldFrom = isISODateOnly(current.frozen_from) ? current.frozen_from : null
+  const oldUntil = isISODateOnly(current.frozen_until) ? current.frozen_until : null
 
-  // Old duration (best-effort):
-  // - if we have a real range, use it (exclusive end)
-  // - if legacy (until only) and still in the future, use remaining days
-  // - otherwise 0
   let oldDays = 0
   if (oldFrom && oldUntil && oldUntil > oldFrom) {
-    oldDays = Math.max(0, daysBetweenUTC(oldFrom as string, oldUntil as string))
+    oldDays = Math.max(0, daysBetweenUTC(oldFrom, oldUntil))
   } else if (!oldFrom && oldUntil && oldUntil > today) {
-    oldDays = Math.max(0, daysBetweenUTC(today, oldUntil as string))
+    oldDays = Math.max(0, daysBetweenUTC(today, oldUntil))
   }
 
-  // New freeze
   const clear = !!payload?.clear
   const from = payload?.from
   const to = payload?.to
@@ -152,7 +139,6 @@ export async function POST(req: Request) {
     newDays = 0
   } else if (isISODateOnly(from) && isISODateOnly(to)) {
     if (from > to) return json(400, { ok: false, error: 'Freeze end date must be after start date.' })
-    // store exclusive end (UI 'to' is inclusive)
     const untilExclusive = addDays(to, 1)
     newFrom = from
     newUntil = untilExclusive
@@ -162,25 +148,23 @@ export async function POST(req: Request) {
     }
   } else if (Number.isFinite(Number(days)) && Number(days) > 0) {
     const add = Math.floor(Number(days))
-    // Legacy behavior: extend from later of today or current frozen_until (if in the future)
     const baseUntil = oldUntil && oldUntil > today ? oldUntil : today
     const nf = (oldFrom ?? today) as string
     const nu = addDays(baseUntil, add)
     newFrom = nf
     newUntil = nu
     newDays = oldFrom && oldUntil && oldUntil > oldFrom
-      ? Math.max(0, daysBetweenUTC(oldFrom as string, nu))
+      ? Math.max(0, daysBetweenUTC(oldFrom, nu))
       : Math.max(0, daysBetweenUTC(nf, nu))
   } else {
     return json(400, { ok: false, error: 'Provide either {from,to} or {days} or {clear:true}.' })
   }
 
-  // Adjust end_date by delta days so it can move backwards if freeze shrinks/clears.
   const deltaDays = newDays - oldDays
 
   let newEndDate: string | null = current.end_date
   if (deltaDays !== 0 && isISODateOnly(current.end_date)) {
-    newEndDate = addDays(current.end_date as string, deltaDays)
+    newEndDate = addDays(current.end_date, deltaDays)
   }
 
   if (!clear && !activeFreezeRow && usedFreezeTokens >= maxFreezeTokens) {
@@ -193,16 +177,29 @@ export async function POST(req: Request) {
     })
   }
 
+  const nowIso = new Date().toISOString()
+
   if (clear && activeFreezeRow) {
     const { error: clearFreezeErr } = await admin
       .from('subscription_freezes')
-      .update({ cleared_at: new Date().toISOString() })
+      .update({
+        cleared_at: nowIso,
+        cleared_by: me.data.user.id,
+        updated_at: nowIso,
+        updated_by: me.data.user.id,
+      })
       .eq('id', (activeFreezeRow as any).id)
     if (clearFreezeErr) return json(500, { ok: false, error: clearFreezeErr.message })
   } else if (!clear && activeFreezeRow) {
     const { error: updateFreezeErr } = await admin
       .from('subscription_freezes')
-      .update({ freeze_from: newFrom, freeze_until: newUntil, days: newDays })
+      .update({
+        freeze_from: newFrom,
+        freeze_until: newUntil,
+        days: newDays,
+        updated_at: nowIso,
+        updated_by: me.data.user.id,
+      })
       .eq('id', (activeFreezeRow as any).id)
     if (updateFreezeErr) return json(500, { ok: false, error: updateFreezeErr.message })
   } else if (!clear) {
@@ -214,6 +211,8 @@ export async function POST(req: Request) {
         freeze_until: newUntil,
         days: newDays,
         created_by: me.data.user.id,
+        updated_at: nowIso,
+        updated_by: me.data.user.id,
       })
     if (insertFreezeErr) return json(500, { ok: false, error: insertFreezeErr.message })
   }
