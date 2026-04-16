@@ -9,7 +9,7 @@ import Input from '@/components/ui/Input'
 import Select from '@/components/ui/Select'
 import SettleDueDialog from '@/components/SettleDueDialog'
 import SaveButton from '@/components/forms/SaveButton'
-import { freezePlanSummaryLabel, getFreezeTokenAllowance } from '@/lib/subscriptionFreeze'
+import { freezePlanSummaryLabel, getFreezeTokenAllowance, toInclusiveFreezeEnd, type SubscriptionFreezeHistoryRow } from '@/lib/subscriptionFreeze'
 import { cairoTodayDateOnly } from '@/lib/cairoTime'
 // Note: we intentionally avoid depending on a specific Alert component API here.
 // We'll render a lightweight inline message box to prevent TS prop mismatches.
@@ -44,6 +44,7 @@ export default function SubscriptionManageRowActions({
   sub,
   canManageFreeze = false,
   freezeSummary,
+  freezeHistory,
 }: {
   sub: {
     id: string
@@ -70,6 +71,7 @@ export default function SubscriptionManageRowActions({
     hasOpenFreeze?: boolean
     activeState?: 'active' | 'scheduled' | null
   } | null
+  freezeHistory?: SubscriptionFreezeHistoryRow[] | null
 }) {
   const router = useRouter()
 
@@ -84,7 +86,19 @@ export default function SubscriptionManageRowActions({
   const currentPlanForFreeze = String(sub.plan ?? '')
   const freezeTokensAllowed = getFreezeTokenAllowance(currentPlanForFreeze, stype)
   const canFreezePlan = isTime && freezeTokensAllowed > 0
-  const canManageFreezeAction = canFreezePlan && canManageFreeze
+  const manageableFreezeHistory = useMemo(() => {
+    const rows = Array.isArray(freezeHistory) ? [...freezeHistory] : []
+    return rows.sort((a, b) => {
+      const aFrom = a.freeze_from ?? ''
+      const bFrom = b.freeze_from ?? ''
+      if (aFrom !== bFrom) return bFrom.localeCompare(aFrom)
+      const aCreated = a.created_at ?? ''
+      const bCreated = b.created_at ?? ''
+      return bCreated.localeCompare(aCreated)
+    })
+  }, [freezeHistory])
+  const hasManagedFreezeHistory = manageableFreezeHistory.length > 0
+  const canManageFreezeAction = canManageFreeze && (canFreezePlan || hasManagedFreezeHistory)
 
   const [openEdit, setOpenEdit] = useState(false)
   const [openFreeze, setOpenFreeze] = useState(false)
@@ -115,6 +129,7 @@ export default function SubscriptionManageRowActions({
 
   const [freezeFrom, setFreezeFrom] = useState<string>(initialFreezeFrom)
   const [freezeTo, setFreezeTo] = useState<string>(initialFreezeTo)
+  const [editingFreezeId, setEditingFreezeId] = useState<string | null>(null)
 
   const [status, setStatus] = useState<{ kind: '' | 'info' | 'success' | 'error'; msg: string }>({
     kind: '',
@@ -164,7 +179,7 @@ export default function SubscriptionManageRowActions({
 
   const today = todayDateOnlyCairo()
   const hasOpenFreeze = canFreezePlan && (freezeSummary?.hasOpenFreeze ?? (isISODateOnly(sub.frozen_until) && sub.frozen_until > today))
-  const canCreateFreeze = canManageFreezeAction && !hasOpenFreeze && (freezeSummary ? freezeSummary.remaining > 0 : true) && sub.status === 'active' && (!isTime || (isISODateOnly(sub.end_date) && sub.end_date >= today))
+  const canCreateFreeze = canManageFreeze && canFreezePlan && !hasOpenFreeze && (freezeSummary ? freezeSummary.remaining > 0 : true) && sub.status === 'active' && (!isTime || (isISODateOnly(sub.end_date) && sub.end_date >= today))
 
   const freezeDurationDays = useMemo(() => {
     if (!isISODateOnly(freezeFrom) || !isISODateOnly(freezeTo)) return null
@@ -239,7 +254,7 @@ export default function SubscriptionManageRowActions({
       }
 
       setStatus({ kind: 'success', msg })
-      toast.success('Freeze created')
+      toast.success('Updated')
       setTimeout(() => {
         setOpenEdit(false)
         router.refresh()
@@ -252,14 +267,30 @@ export default function SubscriptionManageRowActions({
     }
   }
 
+  function resetFreezeEditor() {
+    setEditingFreezeId(null)
+    setFreezeFrom(initialFreezeFrom)
+    setFreezeTo(initialFreezeTo)
+  }
+
+  function startFreezeEdit(row: SubscriptionFreezeHistoryRow) {
+    if (busy) return
+    const nextFrom = isISODateOnly(row.freeze_from) ? row.freeze_from : initialFreezeFrom
+    const nextTo = toInclusiveFreezeEnd(row.freeze_until) ?? nextFrom
+    setEditingFreezeId(row.id)
+    setFreezeFrom(nextFrom)
+    setFreezeTo(nextTo)
+    setStatus({ kind: '', msg: '' })
+  }
+
   async function doFreezeSave() {
     if (busy) return
 
     setBusy(true)
-    setStatus({ kind: 'info', msg: 'Saving freeze…' })
+    setStatus({ kind: 'info', msg: editingFreezeId ? 'Saving freeze changes…' : 'Saving freeze…' })
 
     try {
-      if (!canCreateFreeze) {
+      if (!editingFreezeId && !canCreateFreeze) {
         setStatus({ kind: 'error', msg: 'Freeze cannot be created for this subscription right now.' })
         toast.error('Freeze failed')
         return
@@ -286,8 +317,13 @@ export default function SubscriptionManageRowActions({
       const r = await fetch('/api/subscriptions/freeze', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        // API accepts inclusive end date (to) and stores exclusive internally
-        body: JSON.stringify({ id: sub.id, from: freezeFrom, to: freezeTo }),
+        body: JSON.stringify({
+          id: sub.id,
+          action: editingFreezeId ? 'update' : 'create',
+          ...(editingFreezeId ? { freeze_id: editingFreezeId } : {}),
+          from: freezeFrom,
+          to: freezeTo,
+        }),
       })
 
       const j = await r.json().catch(() => ({}))
@@ -297,15 +333,52 @@ export default function SubscriptionManageRowActions({
         return
       }
 
-      setStatus({ kind: 'success', msg: 'Freeze created.' })
-      toast.success('Saved')
+      setStatus({ kind: 'success', msg: editingFreezeId ? 'Freeze updated.' : 'Freeze created.' })
+      toast.success(editingFreezeId ? 'Freeze updated' : 'Freeze created')
       setTimeout(() => {
+        resetFreezeEditor()
         setOpenFreeze(false)
         router.refresh()
       }, 450)
     } catch (e: any) {
       setStatus({ kind: 'error', msg: String(e?.message || e) })
       toast.error('Freeze failed')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function doFreezeDelete(freezeId: string) {
+    if (busy) return
+    if (!confirm('Delete this freeze? The freeze token will be restored.')) return
+
+    setBusy(true)
+    setStatus({ kind: 'info', msg: 'Deleting freeze…' })
+
+    try {
+      const r = await fetch('/api/subscriptions/freeze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: sub.id, action: 'delete', freeze_id: freezeId }),
+      })
+
+      const j = await r.json().catch(() => ({}))
+      if (!r.ok || !j?.ok) {
+        setStatus({ kind: 'error', msg: j?.details || j?.error || 'Freeze delete failed' })
+        toast.error('Freeze delete failed')
+        return
+      }
+
+      setStatus({ kind: 'success', msg: 'Freeze deleted.' })
+      toast.success('Freeze deleted')
+      setTimeout(() => {
+        resetFreezeEditor()
+        setOpenFreeze(false)
+        router.refresh()
+      }, 450)
+    } catch (e: any) {
+      setStatus({ kind: 'error', msg: String(e?.message || e) })
+      toast.error('Freeze delete failed')
     } finally {
       setBusy(false)
     }
@@ -370,8 +443,17 @@ export default function SubscriptionManageRowActions({
       ) : null}
 
       {canManageFreezeAction ? (
-        <Button size="sm" variant="outline" onClick={() => setOpenFreeze(true)} disabled={!canEdit || !canCreateFreeze}>
-          Freeze
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={() => {
+            setStatus({ kind: '', msg: '' })
+            resetFreezeEditor()
+            setOpenFreeze(true)
+          }}
+          disabled={!canEdit}
+        >
+          {hasManagedFreezeHistory ? 'Manage freeze' : 'Freeze'}
         </Button>
       ) : null}
 
@@ -495,10 +577,17 @@ export default function SubscriptionManageRowActions({
       {/* Freeze modal (time subscriptions only) */}
       {openFreeze && canManageFreezeAction && (
         <div className="fixed inset-0 z-[999] flex items-center justify-center bg-black/40 p-4">
-          <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-soft">
+          <div className="w-full max-w-2xl rounded-2xl bg-white p-6 shadow-soft">
             <div className="flex items-center justify-between">
-              <h3 className="text-lg font-semibold">Create freeze</h3>
-              <Button variant="ghost" onClick={() => !busy && setOpenFreeze(false)}>
+              <h3 className="text-lg font-semibold">{editingFreezeId ? 'Edit freeze' : 'Manage freeze'}</h3>
+              <Button
+                variant="ghost"
+                onClick={() => {
+                  if (busy) return
+                  resetFreezeEditor()
+                  setOpenFreeze(false)
+                }}
+              >
                 Close
               </Button>
             </div>
@@ -507,7 +596,7 @@ export default function SubscriptionManageRowActions({
 
             <div className="mt-4 space-y-4">
               <div className="text-sm text-[hsl(var(--muted))]">
-                Create one freeze token usage for this subscription. The subscription end date will be extended by the exact freeze duration. Each freeze is limited to 30 days maximum.
+                Manage freeze tokens for this subscription. Creating a freeze consumes 1 token. Editing keeps the same token. Deleting a freeze restores its token and recalculates the subscription end date.
               </div>
 
               <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))]/50 p-3 text-sm">
@@ -523,29 +612,88 @@ export default function SubscriptionManageRowActions({
                 ) : null}
               </div>
 
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <div>
-                  <div className="text-sm font-medium mb-1">Freeze start</div>
-                  <Input type="date" value={freezeFrom} onChange={(e) => setFreezeFrom(e.target.value)} disabled={busy} />
+              {manageableFreezeHistory.length > 0 ? (
+                <div className="rounded-2xl border border-[hsl(var(--border))] bg-white/70 p-3">
+                  <div className="text-sm font-medium">Existing freezes</div>
+                  <div className="mt-3 space-y-2">
+                    {manageableFreezeHistory.map((row) => {
+                      const rowEnd = toInclusiveFreezeEnd(row.freeze_until)
+                      const rowState = row.freeze_until && row.freeze_until > today ? (row.freeze_from && row.freeze_from > today ? 'scheduled' : 'active') : 'ended'
+                      return (
+                        <div key={row.id} className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))]/40 p-3">
+                          <div className="flex flex-wrap items-start justify-between gap-3">
+                            <div>
+                              <div className="text-sm font-medium">
+                                {row.freeze_from || '—'} → {rowEnd || '—'}
+                              </div>
+                              <div className="mt-1 text-xs text-[hsl(var(--muted))]">
+                                {typeof row.days === 'number' ? `${row.days} day(s)` : '—'} · {rowState === 'scheduled' ? 'Scheduled' : rowState === 'active' ? 'Active' : 'Ended'}
+                              </div>
+                            </div>
+                            <div className="flex gap-2">
+                              <Button type="button" size="sm" variant="outline" onClick={() => startFreezeEdit(row)} disabled={busy}>
+                                Edit
+                              </Button>
+                              <Button type="button" size="sm" variant="outline" onClick={() => doFreezeDelete(row.id)} disabled={busy} className="border-rose-300 text-rose-700 hover:bg-rose-50">
+                                Delete
+                              </Button>
+                            </div>
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
                 </div>
-                <div>
-                  <div className="text-sm font-medium mb-1">Freeze end</div>
-                  <Input type="date" value={freezeTo} onChange={(e) => setFreezeTo(e.target.value)} disabled={busy} />
+              ) : null}
+
+              <div className="rounded-2xl border border-[hsl(var(--border))] bg-white/70 p-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <div className="text-sm font-medium">{editingFreezeId ? 'Edit selected freeze' : 'Create new freeze'}</div>
+                    <div className="mt-1 text-xs text-[hsl(var(--muted))]">
+                      {editingFreezeId ? 'Update the selected freeze dates. The subscription end date will be recalculated.' : 'Each new freeze is limited to 30 days maximum.'}
+                    </div>
+                  </div>
+                  {editingFreezeId ? (
+                    <Button type="button" variant="outline" onClick={resetFreezeEditor} disabled={busy}>
+                      Cancel edit
+                    </Button>
+                  ) : null}
+                </div>
+
+                <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <div>
+                    <div className="text-sm font-medium mb-1">Freeze start</div>
+                    <Input type="date" value={freezeFrom} onChange={(e) => setFreezeFrom(e.target.value)} disabled={busy} />
+                  </div>
+                  <div>
+                    <div className="text-sm font-medium mb-1">Freeze end</div>
+                    <Input type="date" value={freezeTo} onChange={(e) => setFreezeTo(e.target.value)} disabled={busy} />
+                  </div>
+                </div>
+
+                <div className="mt-3">
+                  {typeof freezeDurationDays === 'number' ? (
+                    <div className="text-xs text-[hsl(var(--muted))]">Duration: {freezeDurationDays} day(s){freezeDurationDays > 30 ? ' · Max 30 days' : ''}</div>
+                  ) : (
+                    <div className="text-xs text-rose-700">Please choose a valid range.</div>
+                  )}
                 </div>
               </div>
 
-              {typeof freezeDurationDays === 'number' ? (
-                <div className="text-xs text-[hsl(var(--muted))]">Duration: {freezeDurationDays} day(s){freezeDurationDays > 30 ? ' · Max 30 days' : ''}</div>
-              ) : (
-                <div className="text-xs text-rose-700">Please choose a valid range.</div>
-              )}
-
               <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end sm:gap-2 pt-2">
                 <div className="flex justify-end gap-2">
-                  <Button variant="outline" onClick={() => setOpenFreeze(false)} disabled={busy}>
+                  <Button variant="outline" onClick={() => { resetFreezeEditor(); setOpenFreeze(false) }} disabled={busy}>
                     Cancel
                   </Button>
-                  <SaveButton onClick={doFreezeSave} type="button" loading={busy} disabled={busy || freezeDurationDays === null || !canCreateFreeze} idleLabel="Create freeze" pendingLabel="Saving..." />
+                  <SaveButton
+                    onClick={doFreezeSave}
+                    type="button"
+                    loading={busy}
+                    disabled={busy || freezeDurationDays === null || (!editingFreezeId && !canCreateFreeze)}
+                    idleLabel={editingFreezeId ? 'Save freeze changes' : 'Create freeze'}
+                    pendingLabel="Saving..."
+                  />
                 </div>
               </div>
             </div>
