@@ -10,6 +10,7 @@ import Select from '@/components/ui/Select'
 import SettleDueDialog from '@/components/SettleDueDialog'
 import SaveButton from '@/components/forms/SaveButton'
 import { freezePlanSummaryLabel, getFreezeTokenAllowance } from '@/lib/subscriptionFreeze'
+import { cairoTodayDateOnly } from '@/lib/cairoTime'
 // Note: we intentionally avoid depending on a specific Alert component API here.
 // We'll render a lightweight inline message box to prevent TS prop mismatches.
 
@@ -22,8 +23,8 @@ function isISODateOnly(s?: string | null): s is IsoDateOnly {
   return !!s && /^\d{4}-\d{2}-\d{2}$/.test(s)
 }
 
-function todayDateOnlyUTC() {
-  return new Date().toISOString().slice(0, 10)
+function todayDateOnlyCairo() {
+  return cairoTodayDateOnly()
 }
 
 function addDays(dateOnly: string, days: number) {
@@ -66,6 +67,8 @@ export default function SubscriptionManageRowActions({
     allowed: number
     used: number
     remaining: number
+    hasOpenFreeze?: boolean
+    activeState?: 'active' | 'scheduled' | null
   } | null
 }) {
   const router = useRouter()
@@ -102,24 +105,13 @@ export default function SubscriptionManageRowActions({
   const [emailInvoice, setEmailInvoice] = useState(true)
 
   const initialFreezeFrom = useMemo(() => {
-    const t = todayDateOnlyUTC()
-    if (!isTime) return t
-    if (isISODateOnly(sub.frozen_from)) return sub.frozen_from
-    // Legacy freezes had no start, assume "now" as a reasonable default for editing.
-    if (isISODateOnly(sub.frozen_until) && t < sub.frozen_until) return t
-    return t
-  }, [isTime, sub.frozen_from, sub.frozen_until])
+    return todayDateOnlyCairo()
+  }, [])
 
   const initialFreezeTo = useMemo(() => {
-    const t = todayDateOnlyUTC()
-    if (!isTime) return t
-    if (isISODateOnly(sub.frozen_until) && t <= sub.frozen_until) {
-      // stored exclusive end -> show inclusive end
-      return addDays(sub.frozen_until, -1)
-    }
-    // default: 7 days starting today
+    const t = todayDateOnlyCairo()
     return addDays(t, 6)
-  }, [isTime, sub.frozen_until])
+  }, [])
 
   const [freezeFrom, setFreezeFrom] = useState<string>(initialFreezeFrom)
   const [freezeTo, setFreezeTo] = useState<string>(initialFreezeTo)
@@ -170,7 +162,9 @@ export default function SubscriptionManageRowActions({
     return addMonthsSafe(startDate, months)
   }, [isTime, startDate, plan, sub.end_date])
 
-  const hasFreeze = canFreezePlan && isISODateOnly(sub.frozen_until)
+  const today = todayDateOnlyCairo()
+  const hasOpenFreeze = canFreezePlan && (freezeSummary?.hasOpenFreeze ?? (isISODateOnly(sub.frozen_until) && sub.frozen_until > today))
+  const canCreateFreeze = canManageFreezeAction && !hasOpenFreeze && (freezeSummary ? freezeSummary.remaining > 0 : true) && sub.status === 'active' && (!isTime || (isISODateOnly(sub.end_date) && sub.end_date >= today))
 
   const freezeDurationDays = useMemo(() => {
     if (!isISODateOnly(freezeFrom) || !isISODateOnly(freezeTo)) return null
@@ -245,7 +239,7 @@ export default function SubscriptionManageRowActions({
       }
 
       setStatus({ kind: 'success', msg })
-      toast.success('Saved')
+      toast.success('Freeze created')
       setTimeout(() => {
         setOpenEdit(false)
         router.refresh()
@@ -265,8 +259,8 @@ export default function SubscriptionManageRowActions({
     setStatus({ kind: 'info', msg: 'Saving freeze…' })
 
     try {
-      if (!canManageFreezeAction) {
-        setStatus({ kind: 'error', msg: 'Freeze is only available for 3, 6, or 12 month subscriptions.' })
+      if (!canCreateFreeze) {
+        setStatus({ kind: 'error', msg: 'Freeze cannot be created for this subscription right now.' })
         toast.error('Freeze failed')
         return
       }
@@ -303,7 +297,7 @@ export default function SubscriptionManageRowActions({
         return
       }
 
-      setStatus({ kind: 'success', msg: 'Freeze saved.' })
+      setStatus({ kind: 'success', msg: 'Freeze created.' })
       toast.success('Saved')
       setTimeout(() => {
         setOpenFreeze(false)
@@ -312,40 +306,6 @@ export default function SubscriptionManageRowActions({
     } catch (e: any) {
       setStatus({ kind: 'error', msg: String(e?.message || e) })
       toast.error('Freeze failed')
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  async function doFreezeClear() {
-    if (busy) return
-
-    setBusy(true)
-    setStatus({ kind: 'info', msg: 'Clearing freeze…' })
-
-    try {
-      const r = await fetch('/api/subscriptions/freeze', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: sub.id, clear: true }),
-      })
-
-      const j = await r.json().catch(() => ({}))
-      if (!r.ok || !j?.ok) {
-        setStatus({ kind: 'error', msg: j?.details || j?.error || 'Clear failed' })
-        toast.error('Clear failed')
-        return
-      }
-
-      setStatus({ kind: 'success', msg: 'Freeze cleared.' })
-      toast.success('Cleared')
-      setTimeout(() => {
-        setOpenFreeze(false)
-        router.refresh()
-      }, 450)
-    } catch (e: any) {
-      setStatus({ kind: 'error', msg: String(e?.message || e) })
-      toast.error('Clear failed')
     } finally {
       setBusy(false)
     }
@@ -410,8 +370,8 @@ export default function SubscriptionManageRowActions({
       ) : null}
 
       {canManageFreezeAction ? (
-        <Button size="sm" variant="outline" onClick={() => setOpenFreeze(true)} disabled={!canEdit}>
-          {hasFreeze ? 'Edit freeze' : 'Freeze'}
+        <Button size="sm" variant="outline" onClick={() => setOpenFreeze(true)} disabled={!canEdit || !canCreateFreeze}>
+          Freeze
         </Button>
       ) : null}
 
@@ -537,7 +497,7 @@ export default function SubscriptionManageRowActions({
         <div className="fixed inset-0 z-[999] flex items-center justify-center bg-black/40 p-4">
           <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-soft">
             <div className="flex items-center justify-between">
-              <h3 className="text-lg font-semibold">{hasFreeze ? 'Edit freeze' : 'Freeze subscription'}</h3>
+              <h3 className="text-lg font-semibold">Create freeze</h3>
               <Button variant="ghost" onClick={() => !busy && setOpenFreeze(false)}>
                 Close
               </Button>
@@ -547,8 +507,7 @@ export default function SubscriptionManageRowActions({
 
             <div className="mt-4 space-y-4">
               <div className="text-sm text-[hsl(var(--muted))]">
-                During the freeze period, the member will be marked inactive. The subscription end date will be adjusted by the
-                freeze duration. Each freeze is limited to 30 days maximum.
+                Create one freeze token usage for this subscription. The subscription end date will be extended by the exact freeze duration. Each freeze is limited to 30 days maximum.
               </div>
 
               <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))]/50 p-3 text-sm">
@@ -559,6 +518,7 @@ export default function SubscriptionManageRowActions({
                 {freezeSummary ? (
                   <div className="mt-2 text-xs text-[hsl(var(--muted))]">
                     Used {freezeSummary.used} / {freezeSummary.allowed} · Remaining {freezeSummary.remaining}
+                    {freezeSummary.hasOpenFreeze ? ` · ${freezeSummary.activeState === 'scheduled' ? 'Scheduled freeze exists' : 'Active freeze exists'}` : ''}
                   </div>
                 ) : null}
               </div>
@@ -581,22 +541,11 @@ export default function SubscriptionManageRowActions({
               )}
 
               <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end sm:gap-2 pt-2">
-                {hasFreeze ? (
-                  <Button
-                    variant="outline"
-                    onClick={doFreezeClear}
-                    disabled={busy}
-                    className="border-rose-300 text-rose-700 hover:bg-rose-50"
-                  >
-                    Clear freeze
-                  </Button>
-                ) : null}
-
                 <div className="flex justify-end gap-2">
                   <Button variant="outline" onClick={() => setOpenFreeze(false)} disabled={busy}>
                     Cancel
                   </Button>
-                  <SaveButton onClick={doFreezeSave} type="button" loading={busy} disabled={busy || freezeDurationDays === null} idleLabel="Save" pendingLabel="Saving..." />
+                  <SaveButton onClick={doFreezeSave} type="button" loading={busy} disabled={busy || freezeDurationDays === null || !canCreateFreeze} idleLabel="Create freeze" pendingLabel="Saving..." />
                 </div>
               </div>
             </div>

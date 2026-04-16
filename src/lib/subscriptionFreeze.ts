@@ -1,7 +1,8 @@
-import { addDaysDateOnly, isISODateOnly } from '@/lib/cairoTime'
+import { addDaysDateOnly, cairoTodayDateOnly, isISODateOnly } from '@/lib/cairoTime'
 
 export type FreezeEligiblePlan = '3m' | '6m' | '12m'
 export type FreezeSubscriptionType = 'time' | 'sessions' | null | undefined
+export type SubscriptionFreezeActiveState = 'active' | 'scheduled' | null
 
 export type SubscriptionFreezeHistoryRow = {
   id: string
@@ -23,6 +24,7 @@ export type SubscriptionFreezeTokenSummary = {
   used: number
   remaining: number
   active: SubscriptionFreezeHistoryRow | null
+  activeState: SubscriptionFreezeActiveState
   history: SubscriptionFreezeHistoryRow[]
 }
 
@@ -55,14 +57,34 @@ export function toInclusiveFreezeEnd(exclusiveEndDateOnly: string | null | undef
   return addDaysDateOnly(exclusiveEndDateOnly, -1)
 }
 
+export function isSubscriptionFreezeOpen(
+  row: Pick<SubscriptionFreezeHistoryRow, 'freeze_until' | 'cleared_at'> | null | undefined,
+  todayDateOnly = cairoTodayDateOnly(),
+): boolean {
+  if (!row || !!row.cleared_at) return false
+  return !!row.freeze_until && isISODateOnly(row.freeze_until) && row.freeze_until > todayDateOnly
+}
+
+export function getSubscriptionFreezeActiveState(
+  row: Pick<SubscriptionFreezeHistoryRow, 'freeze_from' | 'freeze_until' | 'cleared_at'> | null | undefined,
+  todayDateOnly = cairoTodayDateOnly(),
+): SubscriptionFreezeActiveState {
+  if (!isSubscriptionFreezeOpen(row, todayDateOnly)) return null
+  if (row?.freeze_from && isISODateOnly(row.freeze_from) && row.freeze_from > todayDateOnly) return 'scheduled'
+  return 'active'
+}
+
 export function buildSubscriptionFreezeTokenSummary(args: {
   plan: string | null | undefined
   subscriptionType?: FreezeSubscriptionType
   freezeRows?: SubscriptionFreezeHistoryRow[] | null
+  todayDateOnly?: string
 }): SubscriptionFreezeTokenSummary {
   const allowed = getFreezeTokenAllowance(args.plan, args.subscriptionType)
   const history = Array.isArray(args.freezeRows) ? [...args.freezeRows] : []
-  const active = history.find((row) => row && !row.cleared_at) ?? null
+  const todayDateOnly = args.todayDateOnly ?? cairoTodayDateOnly()
+  const active = history.find((row) => isSubscriptionFreezeOpen(row, todayDateOnly)) ?? null
+  const activeState = getSubscriptionFreezeActiveState(active, todayDateOnly)
   const used = history.length
   const remaining = Math.max(allowed - used, 0)
 
@@ -72,6 +94,7 @@ export function buildSubscriptionFreezeTokenSummary(args: {
     used,
     remaining,
     active,
+    activeState,
     history,
   }
 }
