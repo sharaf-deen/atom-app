@@ -36,6 +36,7 @@ import AthleteProfileSection from '@/components/member-detail/AthleteProfileSect
 import MemberNotifyButton from '@/components/member-detail/MemberNotifyButton'
 import MemberBasicProfileEditButton from '@/components/member-detail/MemberBasicProfileEditButton'
 import { canManageNotifications as canManageMemberNotifications, hasLifetimeGymAccess } from '@/lib/rbac'
+import { buildSubscriptionFreezeTokenSummary, freezePlanSummaryLabel, toInclusiveFreezeEnd, type SubscriptionFreezeHistoryRow } from '@/lib/subscriptionFreeze'
 
 type ProfileRow = {
   user_id: string
@@ -844,6 +845,7 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
   }
 
   const coachSafeView = isCoachViewingOtherMember
+  const canReadFreezeFoundation = !coachSafeView && me.role === 'super_admin' && profile.role === 'member'
 
   const { data: subsData } = await db
     .from('subscriptions')
@@ -854,6 +856,39 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
 
   const subs = (subsData ?? []) as SubscriptionRow[]
   const today = cairoToday()
+
+  const subscriptionIds = subs.map((s) => s.id)
+  let freezeRows: SubscriptionFreezeHistoryRow[] = []
+
+  if (canReadFreezeFoundation && subscriptionIds.length > 0) {
+    const { data } = await adminDb
+      .from('subscription_freezes')
+      .select('id, subscription_id, freeze_from, freeze_until, days, created_at, created_by, updated_at, updated_by, cleared_at, cleared_by')
+      .in('subscription_id', subscriptionIds)
+      .order('created_at', { ascending: false })
+
+    freezeRows = (data ?? []) as SubscriptionFreezeHistoryRow[]
+  }
+
+  const freezeRowsBySubscriptionId = new Map<string, SubscriptionFreezeHistoryRow[]>()
+  for (const row of freezeRows) {
+    const subscriptionId = String(row.subscription_id ?? '')
+    if (!subscriptionId) continue
+    const currentRows = freezeRowsBySubscriptionId.get(subscriptionId) ?? []
+    currentRows.push(row)
+    freezeRowsBySubscriptionId.set(subscriptionId, currentRows)
+  }
+
+  const freezeSummaryBySubscriptionId = new Map(
+    subs.map((s) => [
+      s.id,
+      buildSubscriptionFreezeTokenSummary({
+        plan: s.plan,
+        subscriptionType: s.subscription_type,
+        freezeRows: freezeRowsBySubscriptionId.get(s.id) ?? [],
+      }),
+    ]),
+  )
 
   const hasActiveSubscription = subs.some((s) => {
     const status = String(s.status ?? '').toLowerCase()
@@ -1466,6 +1501,10 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
                   : total > 0
                     ? `Paid ${fmtMoneyEGP(paid)} of ${fmtMoneyEGP(total)}`
                     : 'No billing recorded'
+                const freezeSummary = freezeSummaryBySubscriptionId.get(s.id) ?? null
+                const activeFreeze = freezeSummary?.active ?? null
+                const activeFreezeEnd = toInclusiveFreezeEnd(activeFreeze?.freeze_until)
+                const showFreezeFoundationBlock = canReadFreezeFoundation && (!!freezeSummary && (freezeSummary.eligible || freezeSummary.used > 0))
 
                 return (
                   <div key={s.id} className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4 shadow-soft">
@@ -1535,9 +1574,46 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
                       ) : null}
                     </div>
 
+                    {showFreezeFoundationBlock ? (
+                      <div className="mt-4 rounded-2xl border border-[hsl(var(--border))] bg-white/70 px-4 py-3">
+                        <div className="flex flex-wrap items-start justify-between gap-3">
+                          <div>
+                            <div className="text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Freeze tokens</div>
+                            <div className="mt-1 font-medium">
+                              {freezeSummary?.eligible
+                                ? `${freezeSummary.allowed} total · ${freezeSummary.used} used · ${freezeSummary.remaining} remaining`
+                                : 'Not eligible for freeze'}
+                            </div>
+                            <div className="mt-1 text-xs text-[hsl(var(--muted))]">
+                              {freezePlanSummaryLabel(s.plan, s.subscription_type)}
+                            </div>
+                          </div>
+
+                          {activeFreeze ? <TinyBadge tone="warning">Active freeze</TinyBadge> : null}
+                        </div>
+
+                        {activeFreeze && activeFreeze.freeze_from && activeFreezeEnd ? (
+                          <div className="mt-3 text-sm text-[hsl(var(--muted))]">
+                            Current freeze: {fmtDate(activeFreeze.freeze_from)} → {fmtDate(activeFreezeEnd)}
+                            {typeof activeFreeze.days === 'number' ? ` · ${activeFreeze.days} day(s)` : ''}
+                          </div>
+                        ) : freezeSummary && freezeSummary.used > 0 ? (
+                          <div className="mt-3 text-sm text-[hsl(var(--muted))]">
+                            Freeze history recorded: {freezeSummary.used} freeze(s).
+                          </div>
+                        ) : (
+                          <div className="mt-3 text-sm text-[hsl(var(--muted))]">No freeze used yet.</div>
+                        )}
+                      </div>
+                    ) : null}
+
                     {!coachSafeView && canManageSubscriptions && viewedRole === 'member' ? (
                       <div className="mt-4 border-t border-[hsl(var(--border))] pt-4">
-                        <SubscriptionManageRowActions sub={s} />
+                        <SubscriptionManageRowActions
+                          sub={s}
+                          canManageFreeze={me.role === 'super_admin'}
+                          freezeSummary={freezeSummary && freezeSummary.eligible ? { allowed: freezeSummary.allowed, used: freezeSummary.used, remaining: freezeSummary.remaining } : null}
+                        />
                       </div>
                     ) : null}
                   </div>
