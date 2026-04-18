@@ -1579,11 +1579,6 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
                         <div className="flex flex-wrap items-start justify-between gap-3">
                           <div>
                             <div className="text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Freeze tokens</div>
-                            <div className="mt-1 font-medium">
-                              {freezeSummary?.eligible
-                                ? `${freezeSummary.allowed} total · ${freezeSummary.used} used · ${freezeSummary.remaining} remaining`
-                                : 'Not eligible for freeze'}
-                            </div>
                             <div className="mt-1 text-xs text-[hsl(var(--muted))]">
                               {freezePlanSummaryLabel(s.plan, s.subscription_type)}
                             </div>
@@ -1591,6 +1586,22 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
 
                           {activeFreeze ? <TinyBadge tone="warning">{freezeSummary?.activeState === 'scheduled' ? 'Scheduled freeze' : 'Active freeze'}</TinyBadge> : null}
                         </div>
+
+                        {freezeSummary?.eligible ? (
+                          <div className="mt-3 flex flex-wrap gap-2">
+                            <span className="rounded-full border border-[hsl(var(--border))] bg-[hsl(var(--bg))]/70 px-2.5 py-1 text-xs text-[hsl(var(--muted))]">
+                              Total {freezeSummary.allowed}
+                            </span>
+                            <span className="rounded-full border border-[hsl(var(--border))] bg-[hsl(var(--bg))]/70 px-2.5 py-1 text-xs text-[hsl(var(--muted))]">
+                              Used {freezeSummary.used}
+                            </span>
+                            <span className="rounded-full border border-[hsl(var(--border))] bg-[hsl(var(--bg))]/70 px-2.5 py-1 text-xs text-[hsl(var(--muted))]">
+                              Remaining {freezeSummary.remaining}
+                            </span>
+                          </div>
+                        ) : (
+                          <div className="mt-3 text-sm font-medium">Not eligible for freeze</div>
+                        )}
 
                         {activeFreeze && activeFreeze.freeze_from && activeFreezeEnd ? (
                           <div className="mt-3 text-sm text-[hsl(var(--muted))]">
