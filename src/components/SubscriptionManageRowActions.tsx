@@ -180,6 +180,18 @@ export default function SubscriptionManageRowActions({
   const today = todayDateOnlyCairo()
   const hasOpenFreeze = canFreezePlan && (freezeSummary?.hasOpenFreeze ?? (isISODateOnly(sub.frozen_until) && sub.frozen_until > today))
   const canCreateFreeze = canManageFreeze && canFreezePlan && !hasOpenFreeze && (freezeSummary ? freezeSummary.remaining > 0 : true) && sub.status === 'active' && (!isTime || (isISODateOnly(sub.end_date) && sub.end_date >= today))
+  const activeFreezeStateLabel = freezeSummary?.activeState === 'scheduled' ? 'Scheduled freeze' : 'Active freeze'
+  const canCreateFreezeHint = !canFreezePlan
+    ? 'Freeze is only available for 3, 6, or 12 month subscriptions.'
+    : sub.status !== 'active'
+      ? 'Freeze can only be created on active subscriptions.'
+      : hasOpenFreeze
+        ? `${activeFreezeStateLabel} already exists.`
+        : freezeSummary && freezeSummary.remaining <= 0
+          ? 'No freeze tokens remaining.'
+          : !isISODateOnly(sub.end_date) || sub.end_date < today
+            ? 'Subscription is no longer active today.'
+            : 'Create a new freeze for this subscription.'
 
   const freezeDurationDays = useMemo(() => {
     if (!isISODateOnly(freezeFrom) || !isISODateOnly(freezeTo)) return null
@@ -453,7 +465,7 @@ export default function SubscriptionManageRowActions({
           }}
           disabled={!canEdit}
         >
-          {hasManagedFreezeHistory ? 'Manage freeze' : 'Freeze'}
+          Freeze tokens
         </Button>
       ) : null}
 
@@ -595,39 +607,69 @@ export default function SubscriptionManageRowActions({
             {statusBox}
 
             <div className="mt-4 space-y-4">
-              <div className="text-sm text-[hsl(var(--muted))]">
-                Manage freeze tokens for this subscription. Creating a freeze consumes 1 token. Editing keeps the same token. Deleting a freeze restores its token and recalculates the subscription end date.
-              </div>
-
-              <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))]/50 p-3 text-sm">
-                <div className="font-medium text-[hsl(var(--fg))]">Freeze tokens</div>
-                <div className="mt-1 text-[hsl(var(--muted))]">
-                  {freezePlanSummaryLabel(currentPlanForFreeze, stype)}
+              <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))]/50 p-4">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <div className="text-sm font-semibold text-[hsl(var(--fg))]">Freeze tokens</div>
+                    <div className="mt-1 text-xs text-[hsl(var(--muted))]">{freezePlanSummaryLabel(currentPlanForFreeze, stype)}</div>
+                  </div>
+                  {freezeSummary?.hasOpenFreeze ? (
+                    <div className="rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-[11px] font-medium text-amber-800">
+                      {activeFreezeStateLabel}
+                    </div>
+                  ) : null}
                 </div>
+
                 {freezeSummary ? (
-                  <div className="mt-2 text-xs text-[hsl(var(--muted))]">
-                    Used {freezeSummary.used} / {freezeSummary.allowed} · Remaining {freezeSummary.remaining}
-                    {freezeSummary.hasOpenFreeze ? ` · ${freezeSummary.activeState === 'scheduled' ? 'Scheduled freeze exists' : 'Active freeze exists'}` : ''}
+                  <div className="mt-4 grid grid-cols-3 gap-2">
+                    <div className="rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2">
+                      <div className="text-[11px] uppercase tracking-wide text-[hsl(var(--muted))]">Total</div>
+                      <div className="mt-1 text-sm font-semibold text-[hsl(var(--fg))]">{freezeSummary.allowed}</div>
+                    </div>
+                    <div className="rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2">
+                      <div className="text-[11px] uppercase tracking-wide text-[hsl(var(--muted))]">Used</div>
+                      <div className="mt-1 text-sm font-semibold text-[hsl(var(--fg))]">{freezeSummary.used}</div>
+                    </div>
+                    <div className="rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2">
+                      <div className="text-[11px] uppercase tracking-wide text-[hsl(var(--muted))]">Remaining</div>
+                      <div className="mt-1 text-sm font-semibold text-[hsl(var(--fg))]">{freezeSummary.remaining}</div>
+                    </div>
                   </div>
                 ) : null}
+
+                <div className="mt-3 text-xs text-[hsl(var(--muted))]">
+                  Creating a freeze consumes 1 token. Editing keeps the same token. Deleting a freeze restores its token and recalculates the subscription end date.
+                </div>
               </div>
 
               {manageableFreezeHistory.length > 0 ? (
                 <div className="rounded-2xl border border-[hsl(var(--border))] bg-white/70 p-3">
-                  <div className="text-sm font-medium">Existing freezes</div>
-                  <div className="mt-3 space-y-2">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="text-sm font-medium">Freeze history</div>
+                    <div className="text-xs text-[hsl(var(--muted))]">{manageableFreezeHistory.length} record(s)</div>
+                  </div>
+                  <div className="mt-3 max-h-64 space-y-2 overflow-y-auto pr-1">
                     {manageableFreezeHistory.map((row) => {
                       const rowEnd = toInclusiveFreezeEnd(row.freeze_until)
                       const rowState = row.freeze_until && row.freeze_until > today ? (row.freeze_from && row.freeze_from > today ? 'scheduled' : 'active') : 'ended'
+                      const rowStateLabel = rowState === 'scheduled' ? 'Scheduled' : rowState === 'active' ? 'Active' : 'Ended'
+                      const rowStateClass = rowState === 'scheduled'
+                        ? 'border-sky-200 bg-sky-50 text-sky-800'
+                        : rowState === 'active'
+                          ? 'border-amber-200 bg-amber-50 text-amber-800'
+                          : 'border-[hsl(var(--border))] bg-[hsl(var(--bg))]/70 text-[hsl(var(--muted))]'
                       return (
-                        <div key={row.id} className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))]/40 p-3">
+                        <div key={row.id} className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))]/40 px-3 py-3">
                           <div className="flex flex-wrap items-start justify-between gap-3">
-                            <div>
-                              <div className="text-sm font-medium">
+                            <div className="min-w-0">
+                              <div className="text-sm font-medium text-[hsl(var(--fg))]">
                                 {row.freeze_from || '—'} → {rowEnd || '—'}
                               </div>
-                              <div className="mt-1 text-xs text-[hsl(var(--muted))]">
-                                {typeof row.days === 'number' ? `${row.days} day(s)` : '—'} · {rowState === 'scheduled' ? 'Scheduled' : rowState === 'active' ? 'Active' : 'Ended'}
+                              <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
+                                <span className={`rounded-full border px-2 py-0.5 font-medium ${rowStateClass}`}>{rowStateLabel}</span>
+                                <span className="rounded-full border border-[hsl(var(--border))] bg-white px-2 py-0.5 text-[hsl(var(--muted))]">
+                                  {typeof row.days === 'number' ? `${row.days} day(s)` : '—'}
+                                </span>
                               </div>
                             </div>
                             <div className="flex gap-2">
@@ -646,12 +688,12 @@ export default function SubscriptionManageRowActions({
                 </div>
               ) : null}
 
-              <div className="rounded-2xl border border-[hsl(var(--border))] bg-white/70 p-3">
-                <div className="flex items-start justify-between gap-3">
+              <div className="rounded-2xl border border-[hsl(var(--border))] bg-white/70 p-4">
+                <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
-                    <div className="text-sm font-medium">{editingFreezeId ? 'Edit selected freeze' : 'Create new freeze'}</div>
+                    <div className="text-sm font-medium text-[hsl(var(--fg))]">{editingFreezeId ? 'Edit selected freeze' : 'Create new freeze'}</div>
                     <div className="mt-1 text-xs text-[hsl(var(--muted))]">
-                      {editingFreezeId ? 'Update the selected freeze dates. The subscription end date will be recalculated.' : 'Each new freeze is limited to 30 days maximum.'}
+                      {editingFreezeId ? 'Update the selected freeze dates. The subscription end date will be recalculated.' : canCreateFreezeHint}
                     </div>
                   </div>
                   {editingFreezeId ? (
@@ -663,25 +705,34 @@ export default function SubscriptionManageRowActions({
 
                 <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
                   <div>
-                    <div className="text-sm font-medium mb-1">Freeze start</div>
+                    <div className="mb-1 text-sm font-medium">Freeze start</div>
                     <Input type="date" value={freezeFrom} onChange={(e) => setFreezeFrom(e.target.value)} disabled={busy} />
                   </div>
                   <div>
-                    <div className="text-sm font-medium mb-1">Freeze end</div>
+                    <div className="mb-1 text-sm font-medium">Freeze end</div>
                     <Input type="date" value={freezeTo} onChange={(e) => setFreezeTo(e.target.value)} disabled={busy} />
                   </div>
                 </div>
 
-                <div className="mt-3">
+                <div className="mt-3 flex flex-wrap items-center gap-2">
                   {typeof freezeDurationDays === 'number' ? (
-                    <div className="text-xs text-[hsl(var(--muted))]">Duration: {freezeDurationDays} day(s){freezeDurationDays > 30 ? ' · Max 30 days' : ''}</div>
+                    <>
+                      <span className="rounded-full border border-[hsl(var(--border))] bg-[hsl(var(--bg))]/60 px-2.5 py-1 text-xs text-[hsl(var(--muted))]">
+                        Duration: {freezeDurationDays} day(s){freezeDurationDays > 30 ? ' · Max 30 days' : ''}
+                      </span>
+                      {freezeDurationDays > 0 ? (
+                        <span className="rounded-full border border-[hsl(var(--border))] bg-[hsl(var(--bg))]/60 px-2.5 py-1 text-xs text-[hsl(var(--muted))]">
+                          End date impact: +{freezeDurationDays} day(s)
+                        </span>
+                      ) : null}
+                    </>
                   ) : (
                     <div className="text-xs text-rose-700">Please choose a valid range.</div>
                   )}
                 </div>
               </div>
 
-              <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end sm:gap-2 pt-2">
+              <div className="flex flex-col-reverse gap-2 pt-2 sm:flex-row sm:justify-end sm:gap-2">
                 <div className="flex justify-end gap-2">
                   <Button variant="outline" onClick={() => { resetFreezeEditor(); setOpenFreeze(false) }} disabled={busy}>
                     Cancel
@@ -691,7 +742,7 @@ export default function SubscriptionManageRowActions({
                     type="button"
                     loading={busy}
                     disabled={busy || freezeDurationDays === null || (!editingFreezeId && !canCreateFreeze)}
-                    idleLabel={editingFreezeId ? 'Save freeze changes' : 'Create freeze'}
+                    idleLabel={editingFreezeId ? 'Update freeze' : 'Create freeze'}
                     pendingLabel="Saving..."
                   />
                 </div>
