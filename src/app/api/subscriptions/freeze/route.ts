@@ -4,7 +4,7 @@ export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
 import { NextResponse } from 'next/server'
-import { createClient } from '@supabase/supabase-js'
+import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 import { cairoTodayDateOnly, isISODateOnly } from '@/lib/cairoTime'
 import {
   getConsumptiveSubscriptionFreezeHistory,
@@ -53,12 +53,55 @@ type FreezePayload = {
   clear?: boolean
 }
 
+type SubscriptionRecord = {
+  id: string
+  subscription_type: 'time' | 'sessions' | null
+  plan: string | null
+  status: string | null
+  start_date: string | null
+  end_date: string | null
+  frozen_from: string | null
+  frozen_until: string | null
+}
+
+type RollbackPlan =
+  | { kind: 'none' }
+  | { kind: 'delete-created'; freezeId: string }
+  | { kind: 'restore-row'; row: SubscriptionFreezeHistoryRow }
+
 function resolveAction(payload: FreezePayload | null): FreezeAction {
   if (payload?.clear) return 'delete'
   if (payload?.action === 'update' || payload?.action === 'delete' || payload?.action === 'create') {
     return payload.action
   }
   return payload?.freeze_id ? 'update' : 'create'
+}
+
+async function rollbackFreezeMutation(admin: SupabaseClient, plan: RollbackPlan) {
+  if (plan.kind === 'none') return { ok: true as const }
+
+  if (plan.kind === 'delete-created') {
+    const { error } = await admin.from('subscription_freezes').delete().eq('id', plan.freezeId)
+    if (error) return { ok: false as const, error: error.message }
+    return { ok: true as const }
+  }
+
+  const { row } = plan
+  const { error } = await admin
+    .from('subscription_freezes')
+    .update({
+      freeze_from: row.freeze_from,
+      freeze_until: row.freeze_until,
+      days: row.days,
+      updated_at: row.updated_at ?? null,
+      updated_by: row.updated_by ?? null,
+      cleared_at: row.cleared_at ?? null,
+      cleared_by: row.cleared_by ?? null,
+    })
+    .eq('id', row.id)
+
+  if (error) return { ok: false as const, error: error.message }
+  return { ok: true as const }
 }
 
 export async function POST(req: Request) {
@@ -97,16 +140,7 @@ export async function POST(req: Request) {
     .from('subscriptions')
     .select('id, subscription_type, plan, status, start_date, end_date, frozen_from, frozen_until')
     .eq('id', id)
-    .maybeSingle<{
-      id: string
-      subscription_type: 'time' | 'sessions' | null
-      plan: string | null
-      status: string | null
-      start_date: string | null
-      end_date: string | null
-      frozen_from: string | null
-      frozen_until: string | null
-    }>()
+    .maybeSingle<SubscriptionRecord>()
 
   if (readErr) return json(500, { ok: false, error: readErr.message })
   if (!current) return json(404, { ok: false, error: 'Subscription not found' })
@@ -134,13 +168,24 @@ export async function POST(req: Request) {
   const usedFreezeTokens = freezeHistory.length
   const totalFreezeDays = sumConsumptiveSubscriptionFreezeDays(freezeHistory)
   const baseEndDate = addDays(currentEndDate, -totalFreezeDays)
+
+  if (isISODateOnly(current.start_date) && baseEndDate < current.start_date) {
+    return json(409, {
+      ok: false,
+      error: 'Subscription freeze baseline is inconsistent. Please review the subscription dates before changing freezes.',
+    })
+  }
+
   const openFreezeRows = freezeHistory.filter((row) => isSubscriptionFreezeOpen(row, today))
   const fallbackOpenFreezeRow = openFreezeRows[0] ?? null
 
   const targetFreezeId = String(payload?.freeze_id || '')
-  const targetRow = action === 'create'
-    ? null
-    : (targetFreezeId ? freezeHistory.find((row) => row.id === targetFreezeId) ?? null : fallbackOpenFreezeRow)
+  const targetRow =
+    action === 'create'
+      ? null
+      : targetFreezeId
+        ? freezeHistory.find((row) => row.id === targetFreezeId) ?? null
+        : fallbackOpenFreezeRow
 
   if (action !== 'create' && !targetRow) {
     return json(404, { ok: false, error: 'Freeze not found.' })
@@ -211,8 +256,8 @@ export async function POST(req: Request) {
       days: newDays,
       created_at: targetRow?.created_at ?? null,
       created_by: targetRow?.created_by ?? null,
-      updated_at: null,
-      updated_by: null,
+      updated_at: targetRow?.updated_at ?? null,
+      updated_by: targetRow?.updated_by ?? null,
       cleared_at: null,
       cleared_by: null,
     }
@@ -245,9 +290,11 @@ export async function POST(req: Request) {
   const projectedOpenRow = projectedOpenFreezeRows[0] ?? null
 
   const nowIso = new Date().toISOString()
+  let rollbackPlan: RollbackPlan = { kind: 'none' }
+  let responseFreezeId: string | null = targetRow?.id ?? null
 
   if (action === 'create') {
-    const { error: insertFreezeErr } = await admin
+    const { data: insertedFreeze, error: insertFreezeErr } = await admin
       .from('subscription_freezes')
       .insert({
         subscription_id: id,
@@ -258,8 +305,17 @@ export async function POST(req: Request) {
         updated_at: nowIso,
         updated_by: me.data.user.id,
       })
+      .select('id')
+      .maybeSingle<{ id: string }>()
+
     if (insertFreezeErr) return json(500, { ok: false, error: insertFreezeErr.message })
+    if (!insertedFreeze?.id) return json(500, { ok: false, error: 'Freeze was created but could not be re-read safely.' })
+
+    responseFreezeId = insertedFreeze.id
+    rollbackPlan = { kind: 'delete-created', freezeId: insertedFreeze.id }
   } else if (action === 'update') {
+    rollbackPlan = { kind: 'restore-row', row: targetRow! }
+
     const { error: updateFreezeErr } = await admin
       .from('subscription_freezes')
       .update({
@@ -270,8 +326,11 @@ export async function POST(req: Request) {
         updated_by: me.data.user.id,
       })
       .eq('id', targetRow!.id)
+
     if (updateFreezeErr) return json(500, { ok: false, error: updateFreezeErr.message })
   } else {
+    rollbackPlan = { kind: 'restore-row', row: targetRow! }
+
     const { error: clearFreezeErr } = await admin
       .from('subscription_freezes')
       .update({
@@ -281,10 +340,11 @@ export async function POST(req: Request) {
         updated_by: me.data.user.id,
       })
       .eq('id', targetRow!.id)
+
     if (clearFreezeErr) return json(500, { ok: false, error: clearFreezeErr.message })
   }
 
-  const patch: any = {
+  const patch: Pick<SubscriptionRecord, 'frozen_from' | 'frozen_until' | 'end_date'> = {
     frozen_from: projectedOpenRow?.freeze_from ?? null,
     frozen_until: projectedOpenRow?.freeze_until ?? null,
     end_date: newEndDate,
@@ -295,19 +355,27 @@ export async function POST(req: Request) {
     .update(patch)
     .eq('id', id)
     .select('id, subscription_type, plan, status, end_date, frozen_from, frozen_until')
-    .maybeSingle()
+    .maybeSingle<Pick<SubscriptionRecord, 'id' | 'subscription_type' | 'plan' | 'status' | 'end_date' | 'frozen_from' | 'frozen_until'>>()
 
-  if (updErr) return json(500, { ok: false, error: updErr.message })
+  if (updErr || !updated) {
+    const rollback = await rollbackFreezeMutation(admin, rollbackPlan)
+    return json(500, {
+      ok: false,
+      error: updErr?.message || 'Failed to update the subscription after applying the freeze change.',
+      rollback_ok: rollback.ok,
+      ...(rollback.ok ? {} : { rollback_error: rollback.error }),
+    })
+  }
 
   return json(200, {
     ok: true,
     action,
     id,
-    freeze_id: targetRow?.id ?? null,
-    subscription_type: (updated as any)?.subscription_type ?? current.subscription_type ?? 'time',
-    frozen_from: (updated as any)?.frozen_from ?? projectedOpenRow?.freeze_from ?? null,
-    frozen_until: (updated as any)?.frozen_until ?? projectedOpenRow?.freeze_until ?? null,
-    end_date: (updated as any)?.end_date ?? newEndDate,
+    freeze_id: responseFreezeId,
+    subscription_type: updated.subscription_type ?? current.subscription_type ?? 'time',
+    frozen_from: updated.frozen_from ?? projectedOpenRow?.freeze_from ?? null,
+    frozen_until: updated.frozen_until ?? projectedOpenRow?.freeze_until ?? null,
+    end_date: updated.end_date ?? newEndDate,
     freeze_tokens_used: projectedFreezeHistory.length,
     freeze_tokens_allowed: maxFreezeTokens,
   })
