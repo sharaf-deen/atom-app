@@ -179,18 +179,18 @@ export default function SubscriptionManageRowActions({
 
   const today = todayDateOnlyCairo()
   const hasOpenFreeze = canFreezePlan && (freezeSummary?.hasOpenFreeze ?? (isISODateOnly(sub.frozen_until) && sub.frozen_until > today))
-  const canCreateFreeze = canManageFreeze && canFreezePlan && !hasOpenFreeze && (freezeSummary ? freezeSummary.remaining > 0 : true) && sub.status === 'active' && (!isTime || (isISODateOnly(sub.end_date) && sub.end_date >= today))
+  const canCreateFreeze = canManageFreeze && canFreezePlan && (freezeSummary ? freezeSummary.remaining > 0 : true) && sub.status === 'active' && (!isTime || (isISODateOnly(sub.end_date) && sub.end_date >= today))
   const activeFreezeStateLabel = freezeSummary?.activeState === 'scheduled' ? 'Scheduled freeze' : 'Active freeze'
   const canCreateFreezeHint = !canFreezePlan
     ? 'Freeze is only available for 3, 6, or 12 month subscriptions.'
     : sub.status !== 'active'
       ? 'Freeze can only be created on active subscriptions.'
-      : hasOpenFreeze
-        ? `${activeFreezeStateLabel} already exists.`
-        : freezeSummary && freezeSummary.remaining <= 0
-          ? 'No freeze tokens remaining.'
-          : !isISODateOnly(sub.end_date) || sub.end_date < today
-            ? 'Subscription is no longer active today.'
+      : freezeSummary && freezeSummary.remaining <= 0
+        ? 'No freeze tokens remaining.'
+        : !isISODateOnly(sub.end_date) || sub.end_date < today
+          ? 'Subscription is no longer active today.'
+          : hasOpenFreeze
+            ? `${activeFreezeStateLabel} exists. You can still add another non-overlapping freeze while tokens remain.`
             : 'Create a new freeze for this subscription.'
 
   const freezeDurationDays = useMemo(() => {

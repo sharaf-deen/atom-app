@@ -117,6 +117,28 @@ export function subscriptionFreezeRangesOverlap(
   return left.freeze_from < right.freeze_until && right.freeze_from < left.freeze_until
 }
 
+export function pickSubscriptionSurfaceFreezeRow(
+  freezeRows?: SubscriptionFreezeHistoryRow[] | null,
+  todayDateOnly = cairoTodayDateOnly(),
+): SubscriptionFreezeHistoryRow | null {
+  const history = getConsumptiveSubscriptionFreezeHistory(freezeRows)
+  const active = history.find((row) => getSubscriptionFreezeActiveState(row, todayDateOnly) === 'active') ?? null
+  if (active) return active
+
+  const scheduled = history
+    .filter((row) => getSubscriptionFreezeActiveState(row, todayDateOnly) === 'scheduled')
+    .sort((a, b) => {
+      const aFrom = a.freeze_from ?? ''
+      const bFrom = b.freeze_from ?? ''
+      if (aFrom !== bFrom) return aFrom.localeCompare(bFrom)
+      const aCreated = a.created_at ?? ''
+      const bCreated = b.created_at ?? ''
+      return aCreated.localeCompare(bCreated)
+    })[0] ?? null
+
+  return scheduled
+}
+
 export function buildSubscriptionFreezeTokenSummary(args: {
   plan: string | null | undefined
   subscriptionType?: FreezeSubscriptionType
@@ -126,7 +148,7 @@ export function buildSubscriptionFreezeTokenSummary(args: {
   const allowed = getFreezeTokenAllowance(args.plan, args.subscriptionType)
   const history = getConsumptiveSubscriptionFreezeHistory(args.freezeRows)
   const todayDateOnly = args.todayDateOnly ?? cairoTodayDateOnly()
-  const active = history.find((row) => isSubscriptionFreezeOpen(row, todayDateOnly)) ?? null
+  const active = pickSubscriptionSurfaceFreezeRow(history, todayDateOnly)
   const activeState = getSubscriptionFreezeActiveState(active, todayDateOnly)
   const used = history.length
   const remaining = Math.max(allowed - used, 0)
