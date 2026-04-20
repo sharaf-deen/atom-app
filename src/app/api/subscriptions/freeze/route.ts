@@ -184,9 +184,6 @@ export async function POST(req: Request) {
       return json(400, { ok: false, error: 'Freeze end date must be after start date.' })
     }
 
-    if (action === 'create' && from < today) {
-      return json(400, { ok: false, error: 'Freeze start date cannot be in the past.' })
-    }
 
     if (isISODateOnly(current.start_date) && from < current.start_date) {
       return json(400, { ok: false, error: 'Freeze cannot start before the subscription start date.' })
