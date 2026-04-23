@@ -297,7 +297,7 @@ export default function StoreCategoryManager() {
         <div>
           <div className="text-sm font-semibold">Product categories</div>
           <div className="text-xs text-[hsl(var(--muted))]">
-            Super admin only. Keep product labels clean, ordered and safe before they are used across Store V2.
+            Super admin only. Keep product labels clean, ordered and safe before they are used across the store.
           </div>
         </div>
         <div className="flex flex-wrap gap-2 text-[11px] font-medium">

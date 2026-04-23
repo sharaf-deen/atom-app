@@ -44,11 +44,11 @@ export default async function AdminStoreModelsPage() {
       <Section className="space-y-4">
         <Card>
           <CardHeader>
-            <CardTitle>Store V3 model manager</CardTitle>
+            <CardTitle>Store model manager</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="text-sm text-[hsl(var(--muted))]">
-              Create and manage parent catalog models above existing Store V2 products. Variants, stock, supplier orders, preorders, and sales stay on current Store V2 product rows for now.
+              Create and manage parent catalog models used by the catalog. Variants, stock, supplier orders, preorders, and sales remain managed on product rows.
             </div>
             <StoreModelManager />
           </CardContent>

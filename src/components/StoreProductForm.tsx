@@ -87,7 +87,7 @@ export default function StoreProductForm({
 
   const modelRequirementMessage = useMemo(() => {
     if (selectedModel) return ''
-    return 'Hard enforcement: every Store variant must now be linked to a Store V3 model before it can be saved.'
+    return 'Every store variant must be linked to a catalog model before it can be saved.'
   }, [selectedModel])
 
   useEffect(() => {
@@ -204,7 +204,7 @@ export default function StoreProductForm({
         return
       }
       if (!modelId.trim()) {
-        setStatus({ kind: 'error', msg: 'Linked model is required under Store V3 hard enforcement.' })
+        setStatus({ kind: 'error', msg: 'Linked model is required for every store variant.' })
         toast.error('Linked model is required')
         return
       }
@@ -318,13 +318,13 @@ export default function StoreProductForm({
           {selectedModel ? (
             <div className="space-y-1">
               <div className="font-medium text-[hsl(var(--foreground))]">Linked to: {selectedModel.name}</div>
-              <div>Future Store V3 flow will use this parent model for model → color → size browsing.</div>
+              <div>This parent model is used for model → color → size browsing.</div>
             </div>
           ) : (
             <div className="space-y-1">
               <div>No parent model linked yet.</div>
               <div>
-                Hard enforcement is now active. Create or select the parent model in{' '}
+                A linked model is required. Create or select the parent model in{' '}
                 <Link href="/admin/store/models" className="font-medium underline underline-offset-2">
                   Store Models
                 </Link>

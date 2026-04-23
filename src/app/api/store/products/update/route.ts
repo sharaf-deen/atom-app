@@ -119,7 +119,7 @@ export async function PATCH(req: NextRequest) {
       : currentProductModelId
 
     if (!resolvedModelId) {
-      return noStore(NextResponse.json({ ok: false, error: 'MODEL_REQUIRED', details: 'Linked model is required under Store V3 hard enforcement.' }, { status: 400 }))
+      return noStore(NextResponse.json({ ok: false, error: 'MODEL_REQUIRED', details: 'Linked model is required for every store variant.' }, { status: 400 }))
     }
 
     patch.model_id = resolvedModelId

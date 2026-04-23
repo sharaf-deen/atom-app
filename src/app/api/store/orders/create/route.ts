@@ -16,7 +16,7 @@ export async function POST() {
         ok: false,
         error: 'LEGACY_STORE_ORDER_CREATE_DISABLED',
         details:
-          'Legacy cart/order creation is retired in Store V2. Use /store for preorders or /admin/store/sales for admin sales.',
+          'Legacy cart/order creation is retired. Use /store for preorders or /admin/store/sales for admin sales.',
       },
       { status: 410 }
     )
