@@ -466,13 +466,6 @@ export default async function StorePage({
                 </div>
               </details>
 
-              <div className="text-xs text-[hsl(var(--muted))]">
-                Need the old archive?{' '}
-                <Link prefetch={false} href="/orders" className="underline hover:text-black">
-                  Open legacy orders
-                </Link>
-                .
-              </div>
             </CardContent>
           </Card>
         ) : null}

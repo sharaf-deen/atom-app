@@ -714,7 +714,7 @@ export default function StoreModelManager() {
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <div className="text-sm font-semibold text-black">Variant linking queue</div>
-            <div className="mt-1 text-xs text-[hsl(var(--muted))]">Hard enforcement is enabled. This queue should stay empty; any remaining variant here still needs a valid Store V3 model link.</div>
+            <div className="mt-1 text-xs text-[hsl(var(--muted))]">This queue should stay empty; any remaining variant here still needs a valid catalog model link.</div>
           </div>
           <div className="flex flex-wrap gap-2">
             <Button type="button" variant="outline" size="sm" onClick={() => setShowUnlinkedQueue((current) => !current)}>
@@ -774,7 +774,7 @@ export default function StoreModelManager() {
         {unlinkedActiveCount > 0 ? (
           <div className="mt-3">
             <InlineAlert variant="error">
-              Hard enforcement alert: {unlinkedActiveCount} active variant(s) are still missing a Store V3 model link. Resolve these before applying the final database constraint.
+              Catalog link alert: {unlinkedActiveCount} active variant(s) are still missing a catalog model link. Resolve these to keep the catalog fully linked.
             </InlineAlert>
           </div>
         ) : null}
@@ -1203,7 +1203,7 @@ export default function StoreModelManager() {
       </Modal>
 
       <div className="rounded-2xl border border-dashed p-4 text-sm text-[hsl(var(--muted))]">
-        Featured models: <span className="font-medium text-black">{featuredCount}</span>. Coverage now tracks linked vs unlinked variants, and the queue can suggest quick links to help finish the Store V3 migration before any future enforcement step.
+        Featured models: <span className="font-medium text-black">{featuredCount}</span>. Coverage tracks linked vs unlinked variants, and the queue can suggest quick links to keep the catalog fully linked.
       </div>
     </div>
   )
