@@ -19,6 +19,11 @@ type JsonBody = {
   currency?: string | null
 }
 
+type ParsedPayload = {
+  fields: JsonBody
+  imageFiles: [File | null, File | null, File | null]
+}
+
 const ACCEPTED_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp'])
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024
 const STORE_BUCKET = 'store-product-images'
@@ -63,13 +68,20 @@ function buildUploadPath(userId: string, filename: string) {
   return `products/${userId}/${today}/${uuid}-${sanitizeFilename(filename)}`
 }
 
-async function parsePayload(req: Request): Promise<{ fields: JsonBody; imageFile: File | null }> {
+function readFileSlot(fd: FormData, key: string) {
+  const value = fd.get(key)
+  return value instanceof File && value.size > 0 ? value : null
+}
+
+async function parsePayload(req: Request): Promise<ParsedPayload> {
   const contentType = req.headers.get('content-type') || ''
 
   if (contentType.includes('multipart/form-data') || contentType.includes('application/x-www-form-urlencoded')) {
     const fd = await req.formData()
-    const imageValue = fd.get('image')
-    const imageFile = imageValue instanceof File && imageValue.size > 0 ? imageValue : null
+
+    const image1 = readFileSlot(fd, 'image_1') ?? readFileSlot(fd, 'image')
+    const image2 = readFileSlot(fd, 'image_2')
+    const image3 = readFileSlot(fd, 'image_3')
 
     return {
       fields: {
@@ -83,19 +95,19 @@ async function parsePayload(req: Request): Promise<{ fields: JsonBody; imageFile
         is_active: toBoolean(fd.get('is_active'), true),
         currency: toCleanString(fd.get('currency')) || 'EGP',
       },
-      imageFile,
+      imageFiles: [image1, image2, image3],
     }
   }
 
   const b = (await req.json()) as JsonBody
   return {
     fields: b,
-    imageFile: null,
+    imageFiles: [null, null, null],
   }
 }
 
 export async function POST(req: Request) {
-  let uploadedPath: string | null = null
+  const uploadedPaths: string[] = []
 
   try {
     const supa = createSupabaseServerActionClient()
@@ -109,7 +121,7 @@ export async function POST(req: Request) {
       return noStore(NextResponse.json({ ok: false, error: 'FORBIDDEN' }, { status: 403 }))
     }
 
-    const { fields, imageFile } = await parsePayload(req)
+    const { fields, imageFiles } = await parsePayload(req)
 
     const payload = {
       category: normalizeStoreCategoryKey(fields.category || 'kimono'),
@@ -123,13 +135,15 @@ export async function POST(req: Request) {
       currency: fields.currency ?? 'EGP',
       created_by: auth.user.id,
       image_path: null as string | null,
+      image_path_2: null as string | null,
+      image_path_3: null as string | null,
     }
 
     if (!payload.name) {
       return noStore(NextResponse.json({ ok: false, error: 'INVALID_INPUT', details: 'Name is required.' }, { status: 400 }))
     }
     if (!payload.model_id) {
-      return noStore(NextResponse.json({ ok: false, error: 'MODEL_REQUIRED', details: 'Linked model is required for every store variant.' }, { status: 400 }))
+      return noStore(NextResponse.json({ ok: false, error: 'MODEL_REQUIRED', details: 'Linked model is required.' }, { status: 400 }))
     }
 
     const { data: categoryRow, error: categoryErr } = await admin
@@ -163,16 +177,23 @@ export async function POST(req: Request) {
       }
     }
 
-    if (imageFile) {
+    for (const [index, imageFile] of imageFiles.entries()) {
+      if (!imageFile) continue
+
       const mime = (imageFile.type || '').toLowerCase()
       if (!ACCEPTED_IMAGE_TYPES.has(mime)) {
-        return noStore(NextResponse.json({ ok: false, error: 'INVALID_IMAGE_TYPE', details: 'Photo must be JPG, PNG or WEBP.' }, { status: 400 }))
+        return noStore(NextResponse.json({ ok: false, error: 'INVALID_IMAGE_TYPE', details: `Photo ${index + 1} must be JPG, PNG or WEBP.` }, { status: 400 }))
       }
       if (imageFile.size > MAX_IMAGE_BYTES) {
-        return noStore(NextResponse.json({ ok: false, error: 'IMAGE_TOO_LARGE', details: 'Photo is too large (max 5 MB).' }, { status: 400 }))
+        return noStore(NextResponse.json({ ok: false, error: 'IMAGE_TOO_LARGE', details: `Photo ${index + 1} is too large (max 5 MB).` }, { status: 400 }))
       }
+    }
 
-      uploadedPath = buildUploadPath(auth.user.id, imageFile.name || 'product-image')
+    for (const [index, imageFile] of imageFiles.entries()) {
+      if (!imageFile) continue
+
+      const mime = (imageFile.type || '').toLowerCase()
+      const uploadedPath = buildUploadPath(auth.user.id, imageFile.name || `product-image-${index + 1}`)
       const buffer = await imageFile.arrayBuffer()
       const up = await admin.storage.from(STORE_BUCKET).upload(uploadedPath, buffer, {
         contentType: mime || 'application/octet-stream',
@@ -180,17 +201,23 @@ export async function POST(req: Request) {
       })
 
       if (up.error) {
-        uploadedPath = null
+        if (uploadedPaths.length > 0) {
+          await admin.storage.from(STORE_BUCKET).remove(uploadedPaths)
+        }
         return noStore(NextResponse.json({ ok: false, error: 'UPLOAD_FAILED', details: up.error.message }, { status: 500 }))
       }
 
-      payload.image_path = uploadedPath
+      uploadedPaths.push(uploadedPath)
+
+      if (index === 0) payload.image_path = uploadedPath
+      if (index === 1) payload.image_path_2 = uploadedPath
+      if (index === 2) payload.image_path_3 = uploadedPath
     }
 
     const { data, error } = await admin.from('store_products').insert(payload).select('id').maybeSingle()
     if (error) {
-      if (uploadedPath) {
-        await admin.storage.from(STORE_BUCKET).remove([uploadedPath])
+      if (uploadedPaths.length > 0) {
+        await admin.storage.from(STORE_BUCKET).remove(uploadedPaths)
       }
       return noStore(NextResponse.json({ ok: false, error: error.message }, { status: 500 }))
     }
