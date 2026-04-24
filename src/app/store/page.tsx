@@ -86,8 +86,12 @@ function resolveStoreCatalogImageUrl(path: string | null | undefined) {
 }
 
 
-function firstProductImagePath(item: Pick<ProductRow, 'image_path' | 'image_path_2' | 'image_path_3'>) {
-  return item.image_path || item.image_path_2 || item.image_path_3 || null
+function productImageUrls(item: Pick<ProductRow, 'image_path' | 'image_path_2' | 'image_path_3'>) {
+  const urls = [item.image_path, item.image_path_2, item.image_path_3]
+    .map((path) => resolveStoreCatalogImageUrl(path))
+    .filter((url): url is string => Boolean(url))
+
+  return Array.from(new Set(urls)).slice(0, 3)
 }
 
 function normalizeProductRow(row: ProductQueryRow): ProductRow {
@@ -162,6 +166,7 @@ type StoreModelVariant = {
   is_active: boolean
   allow_preorder: boolean
   image_url: string | null
+  image_urls: string[]
 }
 
 type StoreModelCard = {
@@ -177,6 +182,7 @@ type StoreModelCard = {
     key: string
     label: string
     image_url: string | null
+    image_urls: string[]
     variants: StoreModelVariant[]
   }>
   previewImageUrl: string | null
@@ -259,7 +265,8 @@ function buildStoreModelCards(items: ProductRow[], categoryLabels: Map<string, s
       currency: item.currency ?? 'EGP',
       is_active: Boolean(item.is_active),
       allow_preorder: Boolean(item.allow_preorder),
-      image_url: resolveStoreCatalogImageUrl(firstProductImagePath(item)),
+      image_urls: productImageUrls(item),
+      image_url: productImageUrls(item)[0] ?? null,
     })
 
     if (!current.coverImageUrl) {
@@ -271,7 +278,7 @@ function buildStoreModelCards(items: ProductRow[], categoryLabels: Map<string, s
 
   return Array.from(grouped.entries())
     .map(([key, model]) => {
-      const colorMap = new Map<string, { key: string; label: string; image_url: string | null; variants: StoreModelVariant[] }>()
+      const colorMap = new Map<string, { key: string; label: string; image_url: string | null; image_urls: string[]; variants: StoreModelVariant[] }>()
 
       for (const variant of model.variants) {
         const colorKey = normalizeKeyPart(variant.color, '__default')
@@ -280,10 +287,14 @@ function buildStoreModelCards(items: ProductRow[], categoryLabels: Map<string, s
           key: colorKey,
           label: colorLabel,
           image_url: variant.image_url,
+          image_urls: variant.image_urls,
           variants: [],
         }
         bucket.variants.push(variant)
         if (!bucket.image_url && variant.image_url) bucket.image_url = variant.image_url
+        if (bucket.image_urls.length < 3) {
+          bucket.image_urls = Array.from(new Set([...bucket.image_urls, ...variant.image_urls])).slice(0, 3)
+        }
         colorMap.set(colorKey, bucket)
       }
 
@@ -473,13 +484,6 @@ export default async function StorePage({
                 </div>
               </details>
 
-              <div className="text-xs text-[hsl(var(--muted))]">
-                Need the old archive?{' '}
-                <Link prefetch={false} href="/orders" className="underline hover:text-black">
-                  Open legacy orders
-                </Link>
-                .
-              </div>
             </CardContent>
           </Card>
         ) : null}
