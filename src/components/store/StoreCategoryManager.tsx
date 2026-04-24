@@ -86,6 +86,7 @@ export default function StoreCategoryManager() {
   const [editingKey, setEditingKey] = useState('')
   const [editForm, setEditForm] = useState<CategoryFormState>(EMPTY_FORM)
   const [deleteTarget, setDeleteTarget] = useState<StoreCategoryRow | null>(null)
+  const [showCreateForm, setShowCreateForm] = useState(false)
 
   const isBusy = busyAction !== null
   const createBusy = busyAction?.type === 'create'
@@ -292,19 +293,20 @@ export default function StoreCategoryManager() {
   }
 
   return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap items-start justify-between gap-3">
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <div className="text-sm font-semibold">Product categories</div>
-          <div className="text-xs text-[hsl(var(--muted))]">
-            Super admin only. Keep product labels clean, ordered and safe before they are used across the store.
-          </div>
+          <div className="text-xs text-[hsl(var(--muted))]">Compact admin view. Manage labels, order and visibility.</div>
         </div>
-        <div className="flex flex-wrap gap-2 text-[11px] font-medium">
+        <div className="flex flex-wrap items-center justify-end gap-2 text-[11px] font-medium">
           <span className="rounded-full border px-2.5 py-1 text-[hsl(var(--muted))]">{items.length} total</span>
           <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-emerald-700">{activeCount} active</span>
           <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-slate-700">{inactiveCount} inactive</span>
           <span className="rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-amber-700">{usedCount} in use</span>
+          <Button type="button" size="sm" onClick={() => setShowCreateForm((current) => !current)} disabled={isBusy}>
+            {showCreateForm ? 'Hide form' : 'Add category'}
+          </Button>
         </div>
       </div>
 
@@ -314,48 +316,43 @@ export default function StoreCategoryManager() {
         </InlineAlert>
       ) : null}
 
-      <form onSubmit={createCategory} className="grid gap-3 rounded-2xl border bg-white p-4">
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_120px_auto] xl:items-end">
-          <Input
-            label="Key *"
-            value={form.key}
-            onChange={(e) => setForm((current) => ({ ...current, key: e.target.value }))}
-            placeholder="ex: gi_kids"
-            hint={form.key.trim() ? `Saved as: ${nextNormalizedKey || '—'}` : 'Internal value stored on products.'}
-            disabled={isBusy}
-          />
-          <Input
-            label="Label *"
-            value={form.label}
-            onChange={(e) => setForm((current) => ({ ...current, label: e.target.value }))}
-            placeholder="ex: GI Kids"
-            hint="Customer-facing label shown in filters and product forms."
-            disabled={isBusy}
-          />
-          <Input
-            label="Sort"
-            type="number"
-            value={form.sort_order}
-            onChange={(e) => setForm((current) => ({ ...current, sort_order: Number(e.target.value || 0) }))}
-            hint="Lower values appear first."
-            disabled={isBusy}
-          />
-          <label className="flex items-center gap-2 pb-2 text-sm">
-            <input
-              type="checkbox"
-              checked={form.is_active}
-              onChange={(e) => setForm((current) => ({ ...current, is_active: e.target.checked }))}
+      {showCreateForm ? (
+        <form onSubmit={createCategory} className="grid gap-3 rounded-2xl border bg-white p-3">
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_100px_auto] xl:items-end">
+            <Input
+              label="Key *"
+              value={form.key}
+              onChange={(e) => setForm((current) => ({ ...current, key: e.target.value }))}
+              placeholder="ex: gi_kids"
+              hint={form.key.trim() ? `Saved as: ${nextNormalizedKey || '—'}` : undefined}
               disabled={isBusy}
             />
-            Active now
-          </label>
-        </div>
-
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <div className="text-xs text-[hsl(var(--muted))]">
-            Categories are sorted by <span className="font-semibold text-black">Sort</span>, then by label. Delete stays blocked while products still use a category.
+            <Input
+              label="Label *"
+              value={form.label}
+              onChange={(e) => setForm((current) => ({ ...current, label: e.target.value }))}
+              placeholder="ex: GI Kids"
+              disabled={isBusy}
+            />
+            <Input
+              label="Sort"
+              type="number"
+              value={form.sort_order}
+              onChange={(e) => setForm((current) => ({ ...current, sort_order: Number(e.target.value || 0) }))}
+              disabled={isBusy}
+            />
+            <label className="flex items-center gap-2 pb-2 text-sm">
+              <input
+                type="checkbox"
+                checked={form.is_active}
+                onChange={(e) => setForm((current) => ({ ...current, is_active: e.target.checked }))}
+                disabled={isBusy}
+              />
+              Active
+            </label>
           </div>
-          <div className="flex gap-2">
+
+          <div className="flex flex-wrap items-center justify-end gap-2">
             <Button type="button" variant="outline" onClick={resetCreateForm} disabled={isBusy || createPristine}>
               Reset
             </Button>
@@ -363,107 +360,59 @@ export default function StoreCategoryManager() {
               Add category
             </Button>
           </div>
-        </div>
-      </form>
+        </form>
+      ) : null}
 
-      <div className="grid gap-3">
+      <div className="overflow-hidden rounded-2xl border bg-white">
         {loading ? (
-          <div className="rounded-2xl border border-dashed p-4 text-sm text-[hsl(var(--muted))]">Loading categories…</div>
+          <div className="p-4 text-sm text-[hsl(var(--muted))]">Loading categories…</div>
         ) : items.length === 0 ? (
-          <div className="rounded-2xl border border-dashed p-4 text-sm text-[hsl(var(--muted))]">No categories found yet.</div>
+          <div className="p-4 text-sm text-[hsl(var(--muted))]">No categories found yet.</div>
         ) : (
-          items.map((item, index) => {
-            const editing = editingKey === item.key
-            const row = editing
-              ? editForm
-              : { key: item.key, label: item.label, sort_order: item.sort_order, is_active: item.is_active }
-            const productCount = Number(item.product_count || 0)
-            const deleteBlocked = productCount > 0
-            const saveBusy = busyAction?.type === 'save' && busyAction.key === item.key
-            const deleteBusy = busyAction?.type === 'delete' && busyAction.key === item.key
+          <div className="divide-y">
+            {items.map((item) => {
+              const editing = editingKey === item.key
+              const row = editing
+                ? editForm
+                : { key: item.key, label: item.label, sort_order: item.sort_order, is_active: item.is_active }
+              const productCount = Number(item.product_count || 0)
+              const deleteBlocked = productCount > 0
+              const saveBusy = busyAction?.type === 'save' && busyAction.key === item.key
+              const deleteBusy = busyAction?.type === 'delete' && busyAction.key === item.key
 
-            return (
-              <div
-                key={item.key}
-                className={`rounded-2xl border bg-white p-4 transition ${!item.is_active ? 'border-slate-200 bg-slate-50/40' : ''}`}
-              >
-                <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
-                  <div className="min-w-0">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <div className="text-sm font-semibold text-black">{item.label}</div>
-                      <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] font-medium text-slate-700">
-                        Order {Number(item.sort_order || 0)}
-                      </span>
-                      <span
-                        className={`rounded-full border px-2 py-0.5 text-[11px] font-medium ${
-                          item.is_active
-                            ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
-                            : 'border-slate-200 bg-slate-100 text-slate-700'
-                        }`}
-                      >
-                        {item.is_active ? 'Active' : 'Inactive'}
-                      </span>
-                      <span className={`rounded-full border px-2 py-0.5 text-[11px] font-medium ${usageTone(item)}`}>
-                        {deleteBlocked ? `${productCount} product${productCount > 1 ? 's' : ''} linked` : 'Unused'}
-                      </span>
-                    </div>
-                    <div className="mt-1 break-all text-xs text-[hsl(var(--muted))]">Key: {item.key}</div>
-                  </div>
+              return (
+                <div key={item.key} className={`${!item.is_active ? 'bg-slate-50/60' : 'bg-white'} p-3`}>
                   {!editing ? (
-                    <div className="text-right text-xs text-[hsl(var(--muted))]">
-                      Display order follows the current sort value.
-                    </div>
-                  ) : null}
-                </div>
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <div className="truncate text-sm font-semibold text-black">{item.label}</div>
+                          <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] font-medium text-slate-700">
+                            Order {Number(item.sort_order || 0)}
+                          </span>
+                          <span
+                            className={`rounded-full border px-2 py-0.5 text-[11px] font-medium ${
+                              item.is_active
+                                ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                                : 'border-slate-200 bg-slate-100 text-slate-700'
+                            }`}
+                          >
+                            {item.is_active ? 'Active' : 'Inactive'}
+                          </span>
+                          <span className={`rounded-full border px-2 py-0.5 text-[11px] font-medium ${usageTone(item)}`}>
+                            {deleteBlocked ? `${productCount} linked` : 'Unused'}
+                          </span>
+                        </div>
+                        <div className="mt-1 truncate text-xs text-[hsl(var(--muted))]">Key: {item.key}</div>
+                      </div>
 
-                <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_120px_auto_auto] xl:items-end">
-                  <Input
-                    label="Key"
-                    value={row.key}
-                    onChange={(e) => setEditForm((current) => ({ ...current, key: e.target.value }))}
-                    hint={editing ? `Saved as: ${normalizeStoreCategoryKey(row.key) || '—'}` : undefined}
-                    disabled={!editing || isBusy}
-                  />
-                  <Input
-                    label="Label"
-                    value={row.label}
-                    onChange={(e) => setEditForm((current) => ({ ...current, label: e.target.value }))}
-                    disabled={!editing || isBusy}
-                  />
-                  <Input
-                    label="Sort"
-                    type="number"
-                    value={row.sort_order}
-                    onChange={(e) => setEditForm((current) => ({ ...current, sort_order: Number(e.target.value || 0) }))}
-                    hint={editing ? 'Lower values appear first.' : undefined}
-                    disabled={!editing || isBusy}
-                  />
-                  <label className="flex items-center gap-2 pb-2 text-sm">
-                    <input
-                      type="checkbox"
-                      checked={row.is_active}
-                      onChange={(e) => setEditForm((current) => ({ ...current, is_active: e.target.checked }))}
-                      disabled={!editing || isBusy}
-                    />
-                    Active
-                  </label>
-                  <div className="flex flex-wrap justify-end gap-2">
-                    {editing ? (
-                      <>
-                        <Button type="button" variant="outline" onClick={cancelEdit} disabled={isBusy}>
-                          Cancel
-                        </Button>
-                        <Button type="button" onClick={saveEdit} loading={saveBusy} loadingText="Saving…" disabled={isBusy}>
-                          Save
-                        </Button>
-                      </>
-                    ) : (
-                      <>
-                        <Button type="button" variant="outline" onClick={() => startEdit(item)} disabled={isBusy}>
+                      <div className="flex shrink-0 flex-wrap justify-end gap-2">
+                        <Button type="button" size="sm" variant="outline" onClick={() => startEdit(item)} disabled={isBusy}>
                           Edit
                         </Button>
                         <Button
                           type="button"
+                          size="sm"
                           variant="outline"
                           className="border-rose-200 text-rose-700 hover:bg-rose-50"
                           onClick={() => setDeleteTarget(item)}
@@ -474,21 +423,70 @@ export default function StoreCategoryManager() {
                         >
                           Delete
                         </Button>
-                      </>
-                    )}
-                  </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="grid gap-3">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div className="text-sm font-semibold text-black">Editing {item.label}</div>
+                        {deleteBlocked ? (
+                          <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-800">
+                            {productCount} linked
+                          </span>
+                        ) : null}
+                      </div>
+
+                      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_100px_auto_auto] xl:items-end">
+                        <Input
+                          label="Key"
+                          value={row.key}
+                          onChange={(e) => setEditForm((current) => ({ ...current, key: e.target.value }))}
+                          hint={`Saved as: ${normalizeStoreCategoryKey(row.key) || '—'}`}
+                          disabled={isBusy}
+                        />
+                        <Input
+                          label="Label"
+                          value={row.label}
+                          onChange={(e) => setEditForm((current) => ({ ...current, label: e.target.value }))}
+                          disabled={isBusy}
+                        />
+                        <Input
+                          label="Sort"
+                          type="number"
+                          value={row.sort_order}
+                          onChange={(e) => setEditForm((current) => ({ ...current, sort_order: Number(e.target.value || 0) }))}
+                          disabled={isBusy}
+                        />
+                        <label className="flex items-center gap-2 pb-2 text-sm">
+                          <input
+                            type="checkbox"
+                            checked={row.is_active}
+                            onChange={(e) => setEditForm((current) => ({ ...current, is_active: e.target.checked }))}
+                            disabled={isBusy}
+                          />
+                          Active
+                        </label>
+                        <div className="flex flex-wrap justify-end gap-2">
+                          <Button type="button" size="sm" variant="outline" onClick={cancelEdit} disabled={isBusy}>
+                            Cancel
+                          </Button>
+                          <Button type="button" size="sm" onClick={saveEdit} loading={saveBusy} loadingText="Saving…" disabled={isBusy}>
+                            Save
+                          </Button>
+                        </div>
+                      </div>
+
+                      {deleteBlocked ? (
+                        <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                          Delete is blocked while this category is linked to existing products.
+                        </div>
+                      ) : null}
+                    </div>
+                  )}
                 </div>
-
-                {deleteBlocked ? (
-                  <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
-                    Delete is blocked while this category is linked to existing products.
-                  </div>
-                ) : null}
-
-                {index < items.length - 1 ? <div className="mt-4 border-t border-dashed border-[hsl(var(--border))]" /> : null}
-              </div>
-            )
-          })
+              )
+            })}
+          </div>
         )}
       </div>
 
