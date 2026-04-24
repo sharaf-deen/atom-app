@@ -59,6 +59,8 @@ type ProductRow = {
   is_active: boolean
   allow_preorder: boolean
   image_path: string | null
+  image_path_2: string | null
+  image_path_3: string | null
   created_at?: string | null
 }
 
@@ -83,6 +85,11 @@ function resolveStoreCatalogImageUrl(path: string | null | undefined) {
   return storeProductImageUrl(clean) || null
 }
 
+
+function firstProductImagePath(item: Pick<ProductRow, 'image_path' | 'image_path_2' | 'image_path_3'>) {
+  return item.image_path || item.image_path_2 || item.image_path_3 || null
+}
+
 function normalizeProductRow(row: ProductQueryRow): ProductRow {
   const model = Array.isArray(row.model) ? row.model[0] ?? null : row.model ?? null
   return {
@@ -97,7 +104,7 @@ const listStoreProductsCached = unstable_cache(
 
     let qry = supa
       .from('store_products')
-      .select('id, category, model_id, name, color, size, price_cents, currency, inventory_qty, is_active, allow_preorder, image_path, created_at, model:store_product_models(id,name,slug,description,cover_image_path,sort_order,category_key,is_active)')
+      .select('id, category, model_id, name, color, size, price_cents, currency, inventory_qty, is_active, allow_preorder, image_path, image_path_2, image_path_3, created_at, model:store_product_models(id,name,slug,description,cover_image_path,sort_order,category_key,is_active)')
       .order('created_at', { ascending: false })
 
     if (!isStoreAdmin) qry = qry.eq('is_active', true)
@@ -252,7 +259,7 @@ function buildStoreModelCards(items: ProductRow[], categoryLabels: Map<string, s
       currency: item.currency ?? 'EGP',
       is_active: Boolean(item.is_active),
       allow_preorder: Boolean(item.allow_preorder),
-      image_url: resolveStoreCatalogImageUrl(item.image_path),
+      image_url: resolveStoreCatalogImageUrl(firstProductImagePath(item)),
     })
 
     if (!current.coverImageUrl) {
@@ -466,6 +473,13 @@ export default async function StorePage({
                 </div>
               </details>
 
+              <div className="text-xs text-[hsl(var(--muted))]">
+                Need the old archive?{' '}
+                <Link prefetch={false} href="/orders" className="underline hover:text-black">
+                  Open legacy orders
+                </Link>
+                .
+              </div>
             </CardContent>
           </Card>
         ) : null}
