@@ -32,10 +32,36 @@ type Product = {
   inventory_qty?: number
   is_active?: boolean
   image_path?: string | null
+  image_path_2?: string | null
+  image_path_3?: string | null
 }
 
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024
 const ACCEPTED_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp']
+const STORE_PRODUCT_BUCKET = 'store-product-images'
+const SUPABASE_URL = (process.env.NEXT_PUBLIC_SUPABASE_URL || '').replace(/\/+$/, '')
+
+function storeProductImageUrl(path: string | null | undefined) {
+  const clean = String(path ?? '').trim()
+  if (!SUPABASE_URL || !clean) return ''
+  const encodedPath = clean.split('/').map((segment) => encodeURIComponent(segment)).join('/')
+  return `${SUPABASE_URL}/storage/v1/object/public/${STORE_PRODUCT_BUCKET}/${encodedPath}`
+}
+
+function resolveStoreProductImageUrl(path: string | null | undefined) {
+  const clean = String(path ?? '').trim()
+  if (!clean) return ''
+  if (/^https?:\/\//i.test(clean)) return clean
+  return storeProductImageUrl(clean)
+}
+
+function getExistingImagePaths(product?: Product) {
+  return [
+    product?.image_path ?? null,
+    product?.image_path_2 ?? null,
+    product?.image_path_3 ?? null,
+  ] as const
+}
 
 export default function StoreProductForm({
   product,
@@ -62,7 +88,7 @@ export default function StoreProductForm({
   const [currency, setCurrency] = useState(product?.currency ?? 'EGP')
   const [inventory, setInventory] = useState<number>(Number(product?.inventory_qty ?? 0))
   const [active, setActive] = useState<boolean>(product?.is_active ?? true)
-  const [imageFile, setImageFile] = useState<File | null>(null)
+  const [imageFiles, setImageFiles] = useState<[File | null, File | null, File | null]>([null, null, null])
 
   const [busy, setBusy] = useState(false)
   const [status, setStatus] = useState<{ kind: '' | 'success' | 'error'; msg: string }>({
@@ -70,10 +96,16 @@ export default function StoreProductForm({
     msg: '',
   })
 
-  const imagePreviewUrl = useMemo(() => {
-    if (!imageFile) return ''
-    return URL.createObjectURL(imageFile)
-  }, [imageFile])
+  const existingImagePaths = useMemo(() => getExistingImagePaths(product), [product])
+  const existingImageUrls = useMemo(
+    () => existingImagePaths.map((item) => resolveStoreProductImageUrl(item)),
+    [existingImagePaths]
+  )
+
+  const imagePreviewUrls = useMemo(
+    () => imageFiles.map((file) => (file ? URL.createObjectURL(file) : '')) as [string, string, string],
+    [imageFiles]
+  )
 
   const modelOptions = useMemo(
     () => sortStoreModels(models.filter((item) => item.category_key === category)),
@@ -87,14 +119,16 @@ export default function StoreProductForm({
 
   const modelRequirementMessage = useMemo(() => {
     if (selectedModel) return ''
-    return 'Every store variant must be linked to a catalog model before it can be saved.'
+    return 'Every Store variant must be linked to a Store model before it can be saved.'
   }, [selectedModel])
 
   useEffect(() => {
     return () => {
-      if (imagePreviewUrl) URL.revokeObjectURL(imagePreviewUrl)
+      imagePreviewUrls.forEach((url) => {
+        if (url) URL.revokeObjectURL(url)
+      })
     }
-  }, [imagePreviewUrl])
+  }, [imagePreviewUrls])
 
   useEffect(() => {
     if (!product) return
@@ -107,7 +141,7 @@ export default function StoreProductForm({
     setCurrency(product.currency ?? 'EGP')
     setInventory(Number(product.inventory_qty ?? 0))
     setActive(product.is_active === undefined ? true : !!product.is_active)
-    setImageFile(null)
+    setImageFiles([null, null, null])
   }, [product])
 
   useEffect(() => {
@@ -185,6 +219,14 @@ export default function StoreProductForm({
     return null
   }
 
+  function updateImageFile(index: 0 | 1 | 2, file: File | null) {
+    setImageFiles((current) => {
+      const next = [...current] as [File | null, File | null, File | null]
+      next[index] = file
+      return next
+    })
+  }
+
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault()
     setBusy(true)
@@ -192,63 +234,49 @@ export default function StoreProductForm({
 
     try {
       const price_cents = parsePriceToCents(price)
-      const imageError = !product?.id ? validateImage(imageFile) : null
-      if (imageError) {
-        setStatus({ kind: 'error', msg: imageError })
-        toast.error(imageError)
-        return
+
+      for (const file of imageFiles) {
+        const imageError = validateImage(file)
+        if (imageError) {
+          setStatus({ kind: 'error', msg: imageError })
+          toast.error(imageError)
+          return
+        }
       }
+
       if (!category.trim()) {
         setStatus({ kind: 'error', msg: 'Category is required.' })
         toast.error('Category is required')
         return
       }
       if (!modelId.trim()) {
-        setStatus({ kind: 'error', msg: 'Linked model is required for every store variant.' })
+        setStatus({ kind: 'error', msg: 'Linked model is required.' })
         toast.error('Linked model is required')
         return
       }
 
-      let url = '/api/store/products/create'
-      let method: 'POST' | 'PATCH' = 'POST'
-      let body: BodyInit
-      let headers: HeadersInit | undefined
+      const fd = new FormData()
+      if (product?.id) fd.set('id', product.id)
+      fd.set('category', category.trim())
+      fd.set('model_id', modelId || '')
+      fd.set('name', name.trim())
+      fd.set('color', color.trim())
+      fd.set('size', size.trim())
+      fd.set('price_cents', String(price_cents))
+      fd.set('currency', currency || 'EGP')
+      fd.set('inventory_qty', String(Number(inventory ?? 0)))
+      fd.set('is_active', String(!!active))
 
-      if (product?.id) {
-        method = 'PATCH'
-        url = '/api/store/products/update'
-        body = JSON.stringify({
-          id: product.id,
-          category: category.trim(),
-          model_id: modelId || null,
-          name: name.trim(),
-          color: color.trim() || null,
-          size: size.trim() || null,
-          price_cents,
-          currency: currency || null,
-          inventory_qty: Number(inventory ?? 0),
-          is_active: !!active,
-        })
-        headers = { 'Content-Type': 'application/json' }
-      } else {
-        const fd = new FormData()
-        fd.set('category', category.trim())
-        fd.set('model_id', modelId || '')
-        fd.set('name', name.trim())
-        fd.set('color', color.trim())
-        fd.set('size', size.trim())
-        fd.set('price_cents', String(price_cents))
-        fd.set('currency', currency || 'EGP')
-        fd.set('inventory_qty', String(Number(inventory ?? 0)))
-        fd.set('is_active', String(!!active))
-        if (imageFile) fd.set('image', imageFile)
-        body = fd
-      }
+      imageFiles.forEach((file, index) => {
+        if (file) fd.set(`image_${index + 1}`, file)
+      })
+
+      const method: 'POST' | 'PATCH' = product?.id ? 'PATCH' : 'POST'
+      const url = product?.id ? '/api/store/products/update' : '/api/store/products/create'
 
       const r = await fetch(url, {
         method,
-        headers,
-        body,
+        body: fd,
       })
       const j = await r.json().catch(() => ({}))
       if (!r.ok || !j?.ok) {
@@ -259,7 +287,7 @@ export default function StoreProductForm({
 
       setStatus({ kind: 'success', msg: 'Saved' })
       toast.success('Saved')
-      setImageFile(null)
+      setImageFiles([null, null, null])
       onSaved?.()
     } catch (e: any) {
       setStatus({ kind: 'error', msg: String(e?.message || e) })
@@ -318,13 +346,13 @@ export default function StoreProductForm({
           {selectedModel ? (
             <div className="space-y-1">
               <div className="font-medium text-[hsl(var(--foreground))]">Linked to: {selectedModel.name}</div>
-              <div>This parent model is used for model → color → size browsing.</div>
+              <div>The selected model will group this variant in the Store catalog.</div>
             </div>
           ) : (
             <div className="space-y-1">
               <div>No parent model linked yet.</div>
               <div>
-                A linked model is required. Create or select the parent model in{' '}
+                Create or select the parent model in{' '}
                 <Link href="/admin/store/models" className="font-medium underline underline-offset-2">
                   Store Models
                 </Link>
@@ -388,29 +416,57 @@ export default function StoreProductForm({
         </label>
       </div>
 
-      {!product?.id ? (
-        <div className="grid gap-2">
-          <label className="grid gap-1 text-sm">
-            <span className="font-medium">Photo</span>
-            <input
-              type="file"
-              accept="image/jpeg,image/png,image/webp"
-              disabled={busy}
-              onChange={(e) => {
-                const file = e.target.files?.[0] ?? null
-                setImageFile(file)
-              }}
-            />
-            <span className="text-xs text-[hsl(var(--muted))]">Optional · JPG, PNG or WEBP · max 5 MB</span>
-          </label>
-
-          {imagePreviewUrl ? (
-            <div className="overflow-hidden rounded-2xl border bg-white p-2">
-              <img src={imagePreviewUrl} alt="Selected product" className="h-40 w-full rounded-xl object-cover" />
-            </div>
-          ) : null}
+      <div className="grid gap-3">
+        <div className="rounded-2xl border bg-[hsl(var(--card))] px-3 py-3 text-xs text-[hsl(var(--muted))]">
+          Add up to 3 photos per product. Photo 1 is the main fallback image used across the Store when needed.
         </div>
-      ) : null}
+
+        <div className="grid gap-3 md:grid-cols-3">
+          {[0, 1, 2].map((index) => {
+            const slot = index as 0 | 1 | 2
+            const previewUrl = imagePreviewUrls[slot] || existingImageUrls[slot] || ''
+            const hasExisting = !!existingImageUrls[slot] && !imagePreviewUrls[slot]
+
+            return (
+              <div key={`image-slot-${slot}`} className="rounded-2xl border bg-white p-3">
+                <label className="grid gap-2 text-sm">
+                  <span className="font-medium">Photo {slot + 1}</span>
+                  <input
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp"
+                    disabled={busy}
+                    onChange={(e) => {
+                      const file = e.target.files?.[0] ?? null
+                      updateImageFile(slot, file)
+                    }}
+                  />
+                  <span className="text-xs text-[hsl(var(--muted))]">
+                    JPG, PNG or WEBP · max 5 MB {product?.id ? '· leave empty to keep current photo' : '· optional'}
+                  </span>
+                </label>
+
+                <div className="mt-3 overflow-hidden rounded-2xl border bg-[hsl(var(--card))] p-2">
+                  {previewUrl ? (
+                    <img
+                      src={previewUrl}
+                      alt={`${name || 'Product'} photo ${slot + 1}`}
+                      className="h-36 w-full rounded-xl object-cover"
+                    />
+                  ) : (
+                    <div className="grid h-36 place-items-center rounded-xl border border-dashed text-xs text-[hsl(var(--muted))]">
+                      No photo selected
+                    </div>
+                  )}
+                </div>
+
+                {hasExisting ? (
+                  <div className="mt-2 text-xs text-[hsl(var(--muted))]">Current photo kept unless you upload a replacement.</div>
+                ) : null}
+              </div>
+            )
+          })}
+        </div>
+      </div>
 
       {status.msg ? (
         <InlineAlert variant={status.kind === 'error' ? 'error' : 'success'} compact>

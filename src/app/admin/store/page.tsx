@@ -19,6 +19,7 @@ import {
   canManageStoreSupplierOrders,
 } from '@/lib/rbac'
 import AdminProductQuickEdit from '@/components/store/AdminProductQuickEdit'
+import ProductImageStrip from '@/components/store/ProductImageStrip'
 import StoreAdminNav from '@/components/store/StoreAdminNav'
 import {
   FALLBACK_STORE_PRODUCT_CATEGORIES,
@@ -59,6 +60,23 @@ type PreorderFilter = 'all' | '1' | '0'
 type SupplierStatusFilter = 'all' | 'draft' | 'ordered' | 'partially_received' | 'received' | 'canceled'
 type Tab = 'catalog' | 'supplier-orders'
 
+const STORE_PRODUCT_BUCKET = 'store-product-images'
+const SUPABASE_URL = (process.env.NEXT_PUBLIC_SUPABASE_URL || '').replace(/\/+$/, '')
+
+function storeProductImageUrl(path: string | null | undefined) {
+  const clean = String(path ?? '').trim()
+  if (!SUPABASE_URL || !clean) return ''
+  const encodedPath = clean.split('/').map((segment) => encodeURIComponent(segment)).join('/')
+  return `${SUPABASE_URL}/storage/v1/object/public/${STORE_PRODUCT_BUCKET}/${encodedPath}`
+}
+
+function resolveStoreProductImageUrl(path: string | null | undefined) {
+  const clean = String(path ?? '').trim()
+  if (!clean) return null
+  if (/^https?:\/\//i.test(clean)) return clean
+  return storeProductImageUrl(clean) || null
+}
+
 type ProductRow = {
   id: string
   category: Category
@@ -73,6 +91,9 @@ type ProductRow = {
   is_active: boolean
   allow_preorder: boolean
   low_stock_threshold: number
+  image_path: string | null
+  image_path_2: string | null
+  image_path_3: string | null
   created_at: string | null
 }
 
@@ -392,7 +413,7 @@ export default async function AdminStorePage({
   try {
     let productQuery = supa
 .from('store_products')
-      .select('id, category, model_id, model:store_product_models(id,name,slug,category_key), name, color, size, price_cents, currency, inventory_qty, is_active, allow_preorder, low_stock_threshold, created_at')
+      .select('id, category, model_id, model:store_product_models(id,name,slug,category_key), name, color, size, price_cents, currency, inventory_qty, is_active, allow_preorder, low_stock_threshold, image_path, image_path_2, image_path_3, created_at')
       .order('created_at', { ascending: false })
       .limit(1000)
 
@@ -557,7 +578,7 @@ export default async function AdminStorePage({
             {canManageCatalog ? (
               <Link href="/admin/store/models" className="rounded-2xl border bg-white p-4 transition hover:bg-gray-50">
                 <div className="text-sm font-semibold">Models</div>
-                <div className="mt-1 text-xs text-[hsl(var(--muted))]">Manage parent catalog models used for model → color → size browsing.</div>
+                <div className="mt-1 text-xs text-[hsl(var(--muted))]">Create parent catalog models for the future model → color → size flow.</div>
               </Link>
             ) : null}
             {canManageSupplierOrders ? (
@@ -567,8 +588,8 @@ export default async function AdminStorePage({
               </Link>
             ) : null}
             <div className="rounded-2xl border bg-white p-4">
-              <div className="text-sm font-semibold">Store hub</div>
-              <div className="mt-1 text-xs text-[hsl(var(--muted))]">{canManageCatalog ? 'Full catalog controls stay on super admin. Preorders and sales stay separated for operational safety.' : 'Preorders, supplier orders, sales, and catalog changes stay restricted to super admin.'}</div>
+              <div className="text-sm font-semibold">Store V2 hub</div>
+              <div className="mt-1 text-xs text-[hsl(var(--muted))]">{canManageCatalog ? 'Full catalog controls stay on super admin. Preorders and sales remain separated.' : 'Preorders, supplier orders, sales, and catalog changes stay restricted to super admin.'}</div>
             </div>
           </CardContent>
         </Card>
@@ -681,7 +702,15 @@ export default async function AdminStorePage({
                           <div className="flex flex-wrap items-start justify-between gap-3">
                             <div>
                               <div className="text-sm font-semibold">{product.name}</div>
-                              <div className="mt-1 flex flex-wrap gap-2 text-xs text-[hsl(var(--muted))]">
+                              <ProductImageStrip
+                                name={product.name}
+                                imageUrls={[
+                                  resolveStoreProductImageUrl(product.image_path),
+                                  resolveStoreProductImageUrl(product.image_path_2),
+                                  resolveStoreProductImageUrl(product.image_path_3),
+                                ]}
+                              />
+                              <div className="mt-2 flex flex-wrap gap-2 text-xs text-[hsl(var(--muted))]">
                                 <span className="rounded-full border px-2 py-1">ID: {shortId(product.id)}</span>
                                 <span className="rounded-full border px-2 py-1">{categoryLabels.get(product.category) ?? product.category}</span>
                                 {product.model?.name ? (
@@ -724,6 +753,9 @@ export default async function AdminStorePage({
                                 isActive={product.is_active}
                                 allowPreorder={product.allow_preorder}
                                 lowStockThreshold={product.low_stock_threshold}
+                                imagePath={product.image_path}
+                                imagePath2={product.image_path_2}
+                                imagePath3={product.image_path_3}
                               />
                             ) : (
                               <div className="text-xs text-[hsl(var(--muted))]">Read-only catalog access for your role.</div>

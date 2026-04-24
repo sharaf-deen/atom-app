@@ -21,6 +21,9 @@ type Props = {
   isActive: boolean
   allowPreorder: boolean
   lowStockThreshold: number
+  imagePath?: string | null
+  imagePath2?: string | null
+  imagePath3?: string | null
   onSaved?: () => void
   onDeleted?: () => void
 }
@@ -39,6 +42,9 @@ export default function AdminProductQuickEdit({
   isActive,
   allowPreorder,
   lowStockThreshold,
+  imagePath,
+  imagePath2,
+  imagePath3,
   onSaved,
   onDeleted,
 }: Props) {
@@ -214,6 +220,9 @@ export default function AdminProductQuickEdit({
             currency,
             inventory_qty: inventoryQty,
             is_active: isActive,
+            image_path: imagePath ?? null,
+            image_path_2: imagePath2 ?? null,
+            image_path_3: imagePath3 ?? null,
           }}
           onSaved={() => {
             setEditOpen(false)

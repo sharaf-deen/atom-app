@@ -55,16 +55,16 @@ export async function DELETE(req: NextRequest) {
 
     const { data: product, error: loadErr } = await admin
       .from('store_products')
-      .select('image_path')
+      .select('image_path,image_path_2,image_path_3')
       .eq('id', id)
-      .maybeSingle<{ image_path: string | null }>()
+      .maybeSingle<{ image_path: string | null; image_path_2: string | null; image_path_3: string | null }>()
     if (loadErr) {
       return noStore(
         NextResponse.json({ ok: false, error: 'LOAD_FAILED', details: loadErr.message }, { status: 500 })
       )
     }
 
-    const imagePath = String(product?.image_path ?? '').trim()
+    const imagePaths = [product?.image_path, product?.image_path_2, product?.image_path_3].map((item) => String(item ?? '').trim()).filter(Boolean)
 
     const { error } = await admin.from('store_products').delete().eq('id', id)
     if (error) {
@@ -77,8 +77,8 @@ export async function DELETE(req: NextRequest) {
       )
     }
 
-    if (imagePath) {
-      await admin.storage.from(STORE_BUCKET).remove([imagePath])
+    if (imagePaths.length > 0) {
+      await admin.storage.from(STORE_BUCKET).remove(imagePaths)
     }
 
     return noStore(NextResponse.json({ ok: true }))
