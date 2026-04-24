@@ -134,19 +134,21 @@ export default function StoreCatalogModelCard({
                 <img src={selectedImage ?? ''} alt={model.name} className="h-48 w-full object-cover" loading="lazy" />
               </button>
 
-              <div className="flex gap-2 overflow-x-auto pb-1">
-                {galleryImages.map((image, index) => (
-                  <button
-                    key={`${image}-${index}`}
-                    type="button"
-                    onClick={() => setModalImage(image)}
-                    className="h-14 w-14 shrink-0 overflow-hidden rounded-xl border bg-slate-50 ring-offset-2 transition hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-black"
-                    aria-label={`Open ${model.name} photo ${index + 1}`}
-                  >
-                    <img src={image} alt={`${model.name} ${index + 1}`} className="h-full w-full object-cover" loading="lazy" />
-                  </button>
-                ))}
-              </div>
+              {galleryImages.length > 1 ? (
+                <div className="flex gap-2 overflow-x-auto pb-1">
+                  {galleryImages.slice(1).map((image, index) => (
+                    <button
+                      key={`${image}-${index + 1}`}
+                      type="button"
+                      onClick={() => setModalImage(image)}
+                      className="h-14 w-14 shrink-0 overflow-hidden rounded-xl border bg-slate-50 ring-offset-2 transition hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-black"
+                      aria-label={`Open ${model.name} photo ${index + 2}`}
+                    >
+                      <img src={image} alt={`${model.name} ${index + 2}`} className="h-full w-full object-cover" loading="lazy" />
+                    </button>
+                  ))}
+                </div>
+              ) : null}
             </div>
           ) : null}
 
