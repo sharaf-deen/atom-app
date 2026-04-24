@@ -189,7 +189,7 @@ const baseParams = { status, from, to, page_size: String(pageSize) }
       <PageHeader title="Legacy store orders" subtitle="Read-only archive from the previous store flow" />
 
       <Section className="space-y-6">
-        <InlineAlert variant="info" title="Store V2 is now preorder-first">
+        <InlineAlert variant="info" title="Store archive">
           <div className="space-y-3">
             <p>New requests now go through /store preorders. This page is kept as a read-only archive for older legacy orders only.</p>
             <div className="flex flex-wrap gap-2">
@@ -198,7 +198,7 @@ const baseParams = { status, from, to, page_size: String(pageSize) }
                 href="/store"
                 className="inline-flex items-center rounded-xl border px-3 py-2 text-sm font-medium hover:bg-gray-50"
               >
-                Open Store V2
+                Open Store
               </Link>
             </div>
           </div>

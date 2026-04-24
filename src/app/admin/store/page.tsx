@@ -557,7 +557,7 @@ export default async function AdminStorePage({
             {canManageCatalog ? (
               <Link href="/admin/store/models" className="rounded-2xl border bg-white p-4 transition hover:bg-gray-50">
                 <div className="text-sm font-semibold">Models</div>
-                <div className="mt-1 text-xs text-[hsl(var(--muted))]">Create parent catalog models for the future model → color → size flow.</div>
+                <div className="mt-1 text-xs text-[hsl(var(--muted))]">Manage parent catalog models used for model → color → size browsing.</div>
               </Link>
             ) : null}
             {canManageSupplierOrders ? (
@@ -567,8 +567,8 @@ export default async function AdminStorePage({
               </Link>
             ) : null}
             <div className="rounded-2xl border bg-white p-4">
-              <div className="text-sm font-semibold">Store V2 hub</div>
-              <div className="mt-1 text-xs text-[hsl(var(--muted))]">{canManageCatalog ? 'Full catalog controls stay on super admin. Preorders and sales remain separated.' : 'Preorders, supplier orders, sales, and catalog changes stay restricted to super admin.'}</div>
+              <div className="text-sm font-semibold">Store hub</div>
+              <div className="mt-1 text-xs text-[hsl(var(--muted))]">{canManageCatalog ? 'Full catalog controls stay on super admin. Preorders and sales stay separated for operational safety.' : 'Preorders, supplier orders, sales, and catalog changes stay restricted to super admin.'}</div>
             </div>
           </CardContent>
         </Card>
