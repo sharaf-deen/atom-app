@@ -36,7 +36,7 @@ type Product = {
   image_path_3?: string | null
 }
 
-const MAX_IMAGE_BYTES = 5 * 1024 * 1024
+const MAX_IMAGE_BYTES = 1 * 1024 * 1024
 const ACCEPTED_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp']
 const STORE_PRODUCT_BUCKET = 'store-product-images'
 const SUPABASE_URL = (process.env.NEXT_PUBLIC_SUPABASE_URL || '').replace(/\/+$/, '')
@@ -214,7 +214,7 @@ export default function StoreProductForm({
       return 'Photo must be JPG, PNG or WEBP.'
     }
     if (file.size > MAX_IMAGE_BYTES) {
-      return 'Photo is too large (max 5 MB).'
+      return 'Photo is too large (max 1 MB).'
     }
     return null
   }
@@ -441,7 +441,7 @@ export default function StoreProductForm({
                     }}
                   />
                   <span className="text-xs text-[hsl(var(--muted))]">
-                    JPG, PNG or WEBP · max 5 MB {product?.id ? '· leave empty to keep current photo' : '· optional'}
+                    JPG, PNG or WEBP · max 1 MB {product?.id ? '· leave empty to keep current photo' : '· optional'}
                   </span>
                 </label>
 

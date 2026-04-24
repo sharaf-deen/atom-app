@@ -25,7 +25,7 @@ type ParsedPayload = {
 }
 
 const ACCEPTED_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp'])
-const MAX_IMAGE_BYTES = 5 * 1024 * 1024
+const MAX_IMAGE_BYTES = 1 * 1024 * 1024
 const STORE_BUCKET = 'store-product-images'
 
 function noStore(res: NextResponse) {
@@ -185,7 +185,7 @@ export async function POST(req: Request) {
         return noStore(NextResponse.json({ ok: false, error: 'INVALID_IMAGE_TYPE', details: `Photo ${index + 1} must be JPG, PNG or WEBP.` }, { status: 400 }))
       }
       if (imageFile.size > MAX_IMAGE_BYTES) {
-        return noStore(NextResponse.json({ ok: false, error: 'IMAGE_TOO_LARGE', details: `Photo ${index + 1} is too large (max 5 MB).` }, { status: 400 }))
+        return noStore(NextResponse.json({ ok: false, error: 'IMAGE_TOO_LARGE', details: `Photo ${index + 1} is too large (max 1 MB).` }, { status: 400 }))
       }
     }
 
