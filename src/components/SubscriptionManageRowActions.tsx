@@ -119,13 +119,19 @@ export default function SubscriptionManageRowActions({
   const [emailInvoice, setEmailInvoice] = useState(true)
 
   const initialFreezeFrom = useMemo(() => {
-    return todayDateOnlyCairo()
-  }, [])
+    const t = todayDateOnlyCairo()
+    if (isISODateOnly(sub.end_date) && sub.end_date < t) {
+      const suggestedFrom = addDays(sub.end_date, -6)
+      return isISODateOnly(sub.start_date) && suggestedFrom < sub.start_date ? sub.start_date : suggestedFrom
+    }
+    return t
+  }, [sub.end_date, sub.start_date])
 
   const initialFreezeTo = useMemo(() => {
     const t = todayDateOnlyCairo()
+    if (isISODateOnly(sub.end_date) && sub.end_date < t) return sub.end_date
     return addDays(t, 6)
-  }, [])
+  }, [sub.end_date])
 
   const [freezeFrom, setFreezeFrom] = useState<string>(initialFreezeFrom)
   const [freezeTo, setFreezeTo] = useState<string>(initialFreezeTo)
@@ -178,20 +184,24 @@ export default function SubscriptionManageRowActions({
   }, [isTime, startDate, plan, sub.end_date])
 
   const today = todayDateOnlyCairo()
+  const currentStatus = String(sub.status ?? '').toLowerCase()
+  const isFreezeManageableStatus = currentStatus === 'active' || currentStatus === 'expired'
   const hasOpenFreeze = canFreezePlan && (freezeSummary?.hasOpenFreeze ?? (isISODateOnly(sub.frozen_until) && sub.frozen_until > today))
-  const canCreateFreeze = canManageFreeze && canFreezePlan && (freezeSummary ? freezeSummary.remaining > 0 : true) && sub.status === 'active' && (!isTime || (isISODateOnly(sub.end_date) && sub.end_date >= today))
+  const canCreateFreeze = canManageFreeze && canFreezePlan && (freezeSummary ? freezeSummary.remaining > 0 : true) && isFreezeManageableStatus && isISODateOnly(sub.end_date)
   const activeFreezeStateLabel = freezeSummary?.activeState === 'scheduled' ? 'Scheduled freeze' : 'Active freeze'
   const canCreateFreezeHint = !canFreezePlan
     ? 'Freeze is only available for 3, 6, or 12 month subscriptions.'
-    : sub.status !== 'active'
-      ? 'Freeze can only be created on active subscriptions.'
+    : !isFreezeManageableStatus
+      ? 'Freeze can only be created on active or expired subscriptions.'
       : freezeSummary && freezeSummary.remaining <= 0
         ? 'No freeze tokens remaining.'
-        : !isISODateOnly(sub.end_date) || sub.end_date < today
-          ? 'Subscription is no longer active today.'
-          : hasOpenFreeze
-            ? `${activeFreezeStateLabel} exists. You can still add another non-overlapping freeze while tokens remain.`
-            : 'Create a new freeze for this subscription.'
+        : !isISODateOnly(sub.end_date)
+          ? 'Subscription end date is invalid.'
+          : sub.end_date < today
+            ? 'Backdated freeze is allowed. Choose dates inside the subscription coverage; the end date will be recalculated.'
+            : hasOpenFreeze
+              ? `${activeFreezeStateLabel} exists. You can still add another non-overlapping freeze while tokens remain.`
+              : 'Create a new freeze for this subscription.'
 
   const freezeDurationDays = useMemo(() => {
     if (!isISODateOnly(freezeFrom) || !isISODateOnly(freezeTo)) return null
