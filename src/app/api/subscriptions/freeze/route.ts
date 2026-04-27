@@ -120,6 +120,9 @@ export async function POST(req: Request) {
     return json(400, { ok: false, error: 'Subscription end date is invalid.' })
   }
 
+  const currentStatus = String(current.status ?? '').toLowerCase()
+  const isFreezeManageableStatus = currentStatus === 'active' || currentStatus === 'expired'
+
   const currentEndDate = current.end_date
 
   const { data: freezeRows, error: freezeReadErr } = await admin
@@ -154,11 +157,8 @@ export async function POST(req: Request) {
     if (maxFreezeTokens < 1) {
       return json(400, { ok: false, error: 'Freeze is only available for 3, 6, or 12 month subscriptions.' })
     }
-    if (current.status !== 'active') {
-      return json(400, { ok: false, error: 'Freeze is only available for active subscriptions.' })
-    }
-    if (currentEndDate < today) {
-      return json(400, { ok: false, error: 'Freeze is only available for subscriptions that are still active today.' })
+    if (!isFreezeManageableStatus) {
+      return json(400, { ok: false, error: 'Freeze is only available for active or expired subscriptions.' })
     }
     if (usedFreezeTokens >= maxFreezeTokens) {
       return json(400, {
@@ -190,6 +190,9 @@ export async function POST(req: Request) {
     }
     if (from > currentEndDate) {
       return json(400, { ok: false, error: 'Freeze start date must be within the current subscription coverage.' })
+    }
+    if (to > currentEndDate) {
+      return json(400, { ok: false, error: 'Freeze end date must be within the current subscription coverage.' })
     }
 
     const untilExclusive = addDays(to, 1)
@@ -281,6 +284,10 @@ export async function POST(req: Request) {
     frozen_from: projectedOpenRow?.freeze_from ?? null,
     frozen_until: projectedOpenRow?.freeze_until ?? null,
     end_date: newEndDate,
+  }
+
+  if (stype === 'time' && isFreezeManageableStatus) {
+    patch.status = newEndDate >= today ? 'active' : 'expired'
   }
 
   const { data: updated, error: updErr } = await admin
