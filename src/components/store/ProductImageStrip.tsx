@@ -25,7 +25,7 @@ export default function ProductImageStrip({ name, imageUrls }: ProductImageStrip
 
   return (
     <>
-      <div className="mt-2 flex flex-wrap items-center gap-2">
+      <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
         {photos.map((photo, photoIndex) => (
           <button
             key={photo.id}
@@ -38,7 +38,7 @@ export default function ProductImageStrip({ name, imageUrls }: ProductImageStrip
             <img
               src={photo.url}
               alt={`${name} photo ${photoIndex + 1}`}
-              className="h-14 w-14 object-cover transition group-hover:scale-[1.03]"
+              className="h-12 w-12 object-cover transition group-hover:scale-[1.03]"
               loading="lazy"
             />
           </button>

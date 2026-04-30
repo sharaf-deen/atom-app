@@ -35,6 +35,8 @@ const EMPTY_FORM: CategoryFormState = {
   is_active: true,
 }
 
+const CATEGORY_PAGE_SIZE = 5
+
 function buildFriendlyCategoryError(message: string, action: 'create' | 'update' | 'delete' | 'load') {
   const source = String(message || '').trim()
   const lower = source.toLowerCase()
@@ -87,12 +89,19 @@ export default function StoreCategoryManager() {
   const [editForm, setEditForm] = useState<CategoryFormState>(EMPTY_FORM)
   const [deleteTarget, setDeleteTarget] = useState<StoreCategoryRow | null>(null)
   const [showCreateForm, setShowCreateForm] = useState(false)
+  const [page, setPage] = useState(1)
 
   const isBusy = busyAction !== null
   const createBusy = busyAction?.type === 'create'
   const activeCount = useMemo(() => items.filter((item) => item.is_active).length, [items])
   const inactiveCount = useMemo(() => items.filter((item) => !item.is_active).length, [items])
   const usedCount = useMemo(() => items.filter((item) => Number(item.product_count || 0) > 0).length, [items])
+  const totalPages = useMemo(() => Math.max(1, Math.ceil(items.length / CATEGORY_PAGE_SIZE)), [items.length])
+  const safePage = Math.min(Math.max(1, page), totalPages)
+  const pagedItems = useMemo(() => {
+    const start = (safePage - 1) * CATEGORY_PAGE_SIZE
+    return items.slice(start, start + CATEGORY_PAGE_SIZE)
+  }, [items, safePage])
   const nextNormalizedKey = useMemo(() => normalizeStoreCategoryKey(form.key), [form.key])
   const createPristine =
     !form.key.trim() && !form.label.trim() && Number(form.sort_order || 0) === 0 && form.is_active === EMPTY_FORM.is_active
@@ -127,6 +136,10 @@ export default function StoreCategoryManager() {
   useEffect(() => {
     void load()
   }, [])
+
+  useEffect(() => {
+    setPage((current) => Math.min(Math.max(1, current), totalPages))
+  }, [totalPages])
 
   function resetCreateForm() {
     setForm(EMPTY_FORM)
@@ -192,6 +205,7 @@ export default function StoreCategoryManager() {
         { product_count: 0, ...(json.item as StoreCategoryRow) },
       ])
       setItems(nextItems)
+      setPage(1)
       resetCreateForm()
       setStatus({ kind: 'success', msg: 'Category created successfully.' })
       toast.success('Category created')
@@ -293,17 +307,17 @@ export default function StoreCategoryManager() {
   }
 
   return (
-    <div className="space-y-3">
-      <div className="flex flex-wrap items-center justify-between gap-3">
+    <div className="space-y-2">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
           <div className="text-sm font-semibold">Product categories</div>
-          <div className="text-xs text-[hsl(var(--muted))]">Compact admin view. Manage labels, order and visibility.</div>
+          <div className="text-xs text-[hsl(var(--muted))]">{items.length} total · 5/page · page {safePage}/{totalPages}</div>
         </div>
-        <div className="flex flex-wrap items-center justify-end gap-2 text-[11px] font-medium">
-          <span className="rounded-full border px-2.5 py-1 text-[hsl(var(--muted))]">{items.length} total</span>
-          <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-emerald-700">{activeCount} active</span>
-          <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-slate-700">{inactiveCount} inactive</span>
-          <span className="rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-amber-700">{usedCount} in use</span>
+        <div className="flex flex-wrap items-center justify-end gap-1.5 text-[11px] font-medium">
+          <span className="rounded-full border px-2 py-0.5 text-[hsl(var(--muted))]">{items.length} total</span>
+          <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-emerald-700">{activeCount} active</span>
+          <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-slate-700">{inactiveCount} inactive</span>
+          <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-amber-700">{usedCount} in use</span>
           <Button type="button" size="sm" onClick={() => setShowCreateForm((current) => !current)} disabled={isBusy}>
             {showCreateForm ? 'Hide form' : 'Add category'}
           </Button>
@@ -317,8 +331,8 @@ export default function StoreCategoryManager() {
       ) : null}
 
       {showCreateForm ? (
-        <form onSubmit={createCategory} className="grid gap-3 rounded-2xl border bg-white p-3">
-          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_100px_auto] xl:items-end">
+        <form onSubmit={createCategory} className="grid gap-2 rounded-2xl border bg-white p-2.5">
+          <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_90px_auto] xl:items-end">
             <Input
               label="Key *"
               value={form.key}
@@ -370,7 +384,7 @@ export default function StoreCategoryManager() {
           <div className="p-4 text-sm text-[hsl(var(--muted))]">No categories found yet.</div>
         ) : (
           <div className="divide-y">
-            {items.map((item) => {
+            {pagedItems.map((item) => {
               const editing = editingKey === item.key
               const row = editing
                 ? editForm
@@ -381,11 +395,11 @@ export default function StoreCategoryManager() {
               const deleteBusy = busyAction?.type === 'delete' && busyAction.key === item.key
 
               return (
-                <div key={item.key} className={`${!item.is_active ? 'bg-slate-50/60' : 'bg-white'} p-3`}>
+                <div key={item.key} className={`${!item.is_active ? 'bg-slate-50/60' : 'bg-white'} p-2.5`}>
                   {!editing ? (
-                    <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
                       <div className="min-w-0 flex-1">
-                        <div className="flex flex-wrap items-center gap-2">
+                        <div className="flex flex-wrap items-center gap-1.5">
                           <div className="truncate text-sm font-semibold text-black">{item.label}</div>
                           <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] font-medium text-slate-700">
                             Order {Number(item.sort_order || 0)}
@@ -403,10 +417,10 @@ export default function StoreCategoryManager() {
                             {deleteBlocked ? `${productCount} linked` : 'Unused'}
                           </span>
                         </div>
-                        <div className="mt-1 truncate text-xs text-[hsl(var(--muted))]">Key: {item.key}</div>
+                        <div className="mt-0.5 truncate text-[11px] text-[hsl(var(--muted))]">Key: {item.key}</div>
                       </div>
 
-                      <div className="flex shrink-0 flex-wrap justify-end gap-2">
+                      <div className="flex shrink-0 flex-wrap justify-end gap-1.5">
                         <Button type="button" size="sm" variant="outline" onClick={() => startEdit(item)} disabled={isBusy}>
                           Edit
                         </Button>
@@ -426,7 +440,7 @@ export default function StoreCategoryManager() {
                       </div>
                     </div>
                   ) : (
-                    <div className="grid gap-3">
+                    <div className="grid gap-2">
                       <div className="flex flex-wrap items-center justify-between gap-2">
                         <div className="text-sm font-semibold text-black">Editing {item.label}</div>
                         {deleteBlocked ? (
@@ -436,7 +450,7 @@ export default function StoreCategoryManager() {
                         ) : null}
                       </div>
 
-                      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_100px_auto_auto] xl:items-end">
+                      <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_90px_auto_auto] xl:items-end">
                         <Input
                           label="Key"
                           value={row.key}
@@ -488,6 +502,28 @@ export default function StoreCategoryManager() {
             })}
           </div>
         )}
+      </div>
+
+      <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-[hsl(var(--muted))]">
+        <div>Showing {items.length === 0 ? 0 : (safePage - 1) * CATEGORY_PAGE_SIZE + 1}-{Math.min(items.length, safePage * CATEGORY_PAGE_SIZE)} of {items.length}</div>
+        <div className="flex gap-1.5">
+          <button
+            type="button"
+            className="rounded-xl border px-3 py-1.5 font-medium text-black disabled:pointer-events-none disabled:opacity-50"
+            onClick={() => setPage((current) => Math.max(1, current - 1))}
+            disabled={safePage <= 1 || loading}
+          >
+            Previous
+          </button>
+          <button
+            type="button"
+            className="rounded-xl border px-3 py-1.5 font-medium text-black disabled:pointer-events-none disabled:opacity-50"
+            onClick={() => setPage((current) => Math.min(totalPages, current + 1))}
+            disabled={safePage >= totalPages || loading}
+          >
+            Next
+          </button>
+        </div>
       </div>
 
       <Modal
