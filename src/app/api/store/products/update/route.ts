@@ -13,6 +13,7 @@ type ParsedBody = {
   id: string
   patch: Record<string, any>
   imageFiles: [File | null, File | null, File | null]
+  imageRemovals: [boolean, boolean, boolean]
 }
 
 const ACCEPTED_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp'])
@@ -68,6 +69,19 @@ function readFileSlot(fd: FormData, key: string) {
   return value instanceof File && value.size > 0 ? value : null
 }
 
+function readRemoveSlot(fd: FormData, key: string) {
+  if (!fd.has(key)) return false
+  return toBoolean(fd.get(key), false)
+}
+
+function fieldNameForSlot(index: number) {
+  return index === 0 ? 'image_path' : index === 1 ? 'image_path_2' : 'image_path_3'
+}
+
+function uniqueNonEmpty(values: string[]) {
+  return Array.from(new Set(values.map((value) => value.trim()).filter(Boolean)))
+}
+
 async function parseBody(req: NextRequest): Promise<ParsedBody> {
   const contentType = req.headers.get('content-type') || ''
 
@@ -94,6 +108,11 @@ async function parseBody(req: NextRequest): Promise<ParsedBody> {
       id,
       patch,
       imageFiles: [image1, image2, image3],
+      imageRemovals: [
+        readRemoveSlot(fd, 'remove_image_1'),
+        readRemoveSlot(fd, 'remove_image_2'),
+        readRemoveSlot(fd, 'remove_image_3'),
+      ],
     }
   }
 
@@ -114,10 +133,16 @@ async function parseBody(req: NextRequest): Promise<ParsedBody> {
   if (body?.is_active !== undefined) patch.is_active = Boolean(body.is_active)
   if (body?.allow_preorder !== undefined) patch.allow_preorder = Boolean(body.allow_preorder)
 
+  const removeImages = Array.isArray(body?.remove_images) ? body.remove_images : []
+  const removeImage1 = body?.remove_image_1 === true || removeImages.includes(1) || removeImages.includes('1')
+  const removeImage2 = body?.remove_image_2 === true || removeImages.includes(2) || removeImages.includes('2')
+  const removeImage3 = body?.remove_image_3 === true || removeImages.includes(3) || removeImages.includes('3')
+
   return {
     id,
     patch,
     imageFiles: [null, null, null],
+    imageRemovals: [removeImage1, removeImage2, removeImage3],
   }
 }
 
@@ -153,7 +178,7 @@ export async function PATCH(req: NextRequest) {
       return noStore(NextResponse.json({ ok: false, error: 'FORBIDDEN' }, { status: 403 }))
     }
 
-    const { id, patch, imageFiles } = await parseBody(req)
+    const { id, patch, imageFiles, imageRemovals } = await parseBody(req)
     if (!id) return noStore(NextResponse.json({ ok: false, error: 'MISSING_ID' }, { status: 400 }))
 
     if (patch?.price_cents !== undefined) {
@@ -181,7 +206,8 @@ export async function PATCH(req: NextRequest) {
     }
 
     const hasImageUpdate = imageFiles.some(Boolean)
-    if (Object.keys(patch).length === 0 && !hasImageUpdate) {
+    const hasImageRemoval = imageRemovals.some((shouldRemove, index) => shouldRemove && !imageFiles[index])
+    if (Object.keys(patch).length === 0 && !hasImageUpdate && !hasImageRemoval) {
       return noStore(NextResponse.json({ ok: false, error: 'NO_FIELDS_TO_UPDATE' }, { status: 400 }))
     }
 
@@ -265,6 +291,15 @@ export async function PATCH(req: NextRequest) {
       }
     }
 
+    for (const [index, shouldRemove] of imageRemovals.entries()) {
+      if (!shouldRemove || imageFiles[index]) continue
+
+      const fieldName = fieldNameForSlot(index)
+      const previousPath = String(currentProduct[fieldName as keyof typeof currentProduct] || '').trim()
+      patch[fieldName] = null
+      if (previousPath) oldPathsToDelete.push(previousPath)
+    }
+
     for (const [index, imageFile] of imageFiles.entries()) {
       if (!imageFile) continue
 
@@ -285,7 +320,7 @@ export async function PATCH(req: NextRequest) {
 
       newUploadedPaths.push(uploadedPath)
 
-      const fieldName = index === 0 ? 'image_path' : index === 1 ? 'image_path_2' : 'image_path_3'
+      const fieldName = fieldNameForSlot(index)
       const previousPath = String(currentProduct[fieldName as keyof typeof currentProduct] || '').trim()
       patch[fieldName] = uploadedPath
       if (previousPath) oldPathsToDelete.push(previousPath)
@@ -307,8 +342,9 @@ export async function PATCH(req: NextRequest) {
       )
     }
 
-    if (oldPathsToDelete.length > 0) {
-      await admin.storage.from(STORE_BUCKET).remove(oldPathsToDelete)
+    const pathsToDelete = uniqueNonEmpty(oldPathsToDelete)
+    if (pathsToDelete.length > 0) {
+      await admin.storage.from(STORE_BUCKET).remove(pathsToDelete)
     }
 
     revalidateTag('store-products')

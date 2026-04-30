@@ -186,7 +186,7 @@ export default function AdminProductQuickEdit({
 
       <div className="flex flex-wrap items-center gap-2">
         <Button type="button" variant="outline" onClick={() => setEditOpen(true)}>
-          Edit details
+          Edit details & photos
         </Button>
         <Button
           type="button"
