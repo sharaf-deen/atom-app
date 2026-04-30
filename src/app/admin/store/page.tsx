@@ -62,6 +62,7 @@ type Tab = 'catalog' | 'supplier-orders'
 
 const STORE_PRODUCT_BUCKET = 'store-product-images'
 const SUPABASE_URL = (process.env.NEXT_PUBLIC_SUPABASE_URL || '').replace(/\/+$/, '')
+const CATALOG_PAGE_SIZE = 5
 
 function storeProductImageUrl(path: string | null | undefined) {
   const clean = String(path ?? '').trim()
@@ -261,12 +262,12 @@ function stockPill(product: Pick<ProductRow, 'inventory_qty' | 'low_stock_thresh
   const threshold = Math.max(0, Number(product.low_stock_threshold ?? 0))
 
   if (qty <= 0) {
-    return <span className="rounded-full border border-red-200 bg-red-50 px-2.5 py-1 text-xs font-medium text-red-700">Out of stock</span>
+    return <span className="rounded-full border border-red-200 bg-red-50 px-2 py-0.5 text-[11px] font-medium text-red-700">Out of stock</span>
   }
   if (threshold > 0 && qty <= threshold) {
-    return <span className="rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-700">Low stock</span>
+    return <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700">Low stock</span>
   }
-  return <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-700">Healthy stock</span>
+  return <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-700">Healthy stock</span>
 }
 
 function supplierStatusPill(status: SupplierOrderRow['status']) {
@@ -372,7 +373,7 @@ export default async function AdminStorePage({
   const tab = normalizeTab(requestedTab)
   if (tab === 'supplier-orders' && !canManageStoreSupplierOrders(me.role)) redirect('/admin/store')
   const page = clampInt(searchParams?.page, 1, 1, 9999)
-  const pageSize = clampInt(searchParams?.page_size, 12, 6, 60)
+  const pageSize = CATALOG_PAGE_SIZE
   const q = strParam(searchParams?.q).trim()
   const active = normalizeActive(strParam(searchParams?.active))
   const stock = normalizeStock(strParam(searchParams?.stock))
@@ -488,7 +489,6 @@ export default async function AdminStorePage({
     active: active === 'all' ? '' : active,
     stock: stock === 'all' ? '' : stock,
     preorder: preorder === 'all' ? '' : preorder,
-    page_size: String(pageSize),
   }
 
   const supplierBaseParams = {
@@ -587,7 +587,7 @@ export default async function AdminStorePage({
                 <div className="mt-1 text-xs text-[hsl(var(--muted))]">Create orders and receive stock by delta.</div>
               </Link>
             ) : null}
-            <div className="rounded-2xl border bg-white p-4">
+            <div className="rounded-2xl border bg-white p-3">
               <div className="text-sm font-semibold">Store V2 hub</div>
               <div className="mt-1 text-xs text-[hsl(var(--muted))]">{canManageCatalog ? 'Full catalog controls stay on super admin. Preorders and sales remain separated.' : 'Preorders, supplier orders, sales, and catalog changes stay restricted to super admin.'}</div>
             </div>
@@ -621,13 +621,13 @@ export default async function AdminStorePage({
         </div>
 
         {tab === 'catalog' && (
-          <div className={`grid gap-4 ${canManageCatalog ? 'xl:grid-cols-[minmax(0,420px)_minmax(0,1fr)]' : 'xl:grid-cols-1'}`}>
+          <div className={`grid gap-3 ${canManageCatalog ? 'xl:grid-cols-[minmax(0,380px)_minmax(0,1fr)]' : 'xl:grid-cols-1'}`}>
             {canManageCatalog ? (
-              <Card>
-                <CardHeader><CardTitle>Create catalog product</CardTitle></CardHeader>
-                <CardContent className="space-y-4">
+              <Card className="p-4">
+                <CardHeader className="mb-2"><CardTitle className="text-lg">Create catalog product</CardTitle></CardHeader>
+                <CardContent className="space-y-3">
                   <StoreProductForm />
-                  <div className="rounded-2xl border border-dashed p-4">
+                  <div className="rounded-2xl border border-dashed p-3">
                     <StoreCategoryManager />
                   </div>
                 </CardContent>
@@ -641,9 +641,9 @@ export default async function AdminStorePage({
               </Card>
             )}
 
-            <div className="grid gap-4">
-              <Card>
-                <CardHeader><CardTitle>Catalog filters</CardTitle></CardHeader>
+            <div className="grid gap-3">
+              <Card className="p-4">
+                <CardHeader className="mb-2"><CardTitle className="text-lg">Catalog filters</CardTitle></CardHeader>
                 <CardContent>
                   <form className="grid gap-3 lg:grid-cols-6">
                     <input type="hidden" name="tab" value="catalog" />
@@ -688,20 +688,20 @@ export default async function AdminStorePage({
                   <CardContent className="text-sm text-red-700">Catalog query failed: {productsError}</CardContent>
                 </Card>
               ) : (
-                <Card>
-                  <CardHeader>
-                    <CardTitle>Catalog & stock</CardTitle>
-                    <div className="text-xs text-[hsl(var(--muted))]">{totalFilteredProducts} product(s)</div>
+                <Card className="p-4">
+                  <CardHeader className="mb-2">
+                    <CardTitle className="text-lg">Catalog & stock</CardTitle>
+                    <div className="text-xs text-[hsl(var(--muted))]">{totalFilteredProducts} product(s) · 5/page</div>
                   </CardHeader>
-                  <CardContent className="grid gap-3">
+                  <CardContent className="grid gap-2">
                     {pagedProducts.length === 0 ? (
                       <div className="rounded-2xl border border-dashed p-4 text-sm text-[hsl(var(--muted))]">No products match the current filters.</div>
                     ) : (
                       pagedProducts.map((product) => (
-                        <div key={product.id} className="rounded-2xl border bg-white p-4">
-                          <div className="flex flex-wrap items-start justify-between gap-3">
-                            <div>
-                              <div className="text-sm font-semibold">{product.name}</div>
+                        <div key={product.id} className="rounded-2xl border bg-white p-3">
+                          <div className="flex flex-wrap items-start justify-between gap-2">
+                            <div className="min-w-0 flex-1">
+                              <div className="truncate text-sm font-semibold">{product.name}</div>
                               <ProductImageStrip
                                 name={product.name}
                                 imageUrls={[
@@ -710,34 +710,34 @@ export default async function AdminStorePage({
                                   resolveStoreProductImageUrl(product.image_path_3),
                                 ]}
                               />
-                              <div className="mt-2 flex flex-wrap gap-2 text-xs text-[hsl(var(--muted))]">
-                                <span className="rounded-full border px-2 py-1">ID: {shortId(product.id)}</span>
-                                <span className="rounded-full border px-2 py-1">{categoryLabels.get(product.category) ?? product.category}</span>
+                              <div className="mt-1.5 flex flex-wrap gap-1.5 text-[11px] text-[hsl(var(--muted))]">
+                                <span className="rounded-full border px-2 py-0.5">ID: {shortId(product.id)}</span>
+                                <span className="rounded-full border px-2 py-0.5">{categoryLabels.get(product.category) ?? product.category}</span>
                                 {product.model?.name ? (
-                                  <span className="rounded-full border border-sky-200 bg-sky-50 px-2 py-1 text-sky-700">Model: {product.model.name}</span>
+                                  <span className="rounded-full border border-sky-200 bg-sky-50 px-2 py-0.5 text-sky-700">Model: {product.model.name}</span>
                                 ) : (
-                                  <span className="rounded-full border border-rose-300 bg-rose-100 px-2 py-1 font-medium text-rose-900">Data issue · linked model missing</span>
+                                  <span className="rounded-full border border-rose-300 bg-rose-100 px-2 py-0.5 font-medium text-rose-900">Data issue · linked model missing</span>
                                 )}
-                                {product.size ? <span className="rounded-full border px-2 py-1">Size: {product.size}</span> : null}
-                                {product.color ? <span className="rounded-full border px-2 py-1">Color: {product.color}</span> : null}
+                                {product.size ? <span className="rounded-full border px-2 py-0.5">Size: {product.size}</span> : null}
+                                {product.color ? <span className="rounded-full border px-2 py-0.5">Color: {product.color}</span> : null}
                               </div>
                             </div>
                             <div className="flex flex-wrap items-center gap-2">
                               {stockPill(product)}
-                              <span className={`rounded-full border px-2.5 py-1 text-xs font-medium ${product.allow_preorder ? 'border-violet-200 bg-violet-50 text-violet-700' : 'border-slate-200 bg-slate-50 text-slate-700'}`}>
+                              <span className={`rounded-full border px-2 py-0.5 text-[11px] font-medium ${product.allow_preorder ? 'border-violet-200 bg-violet-50 text-violet-700' : 'border-slate-200 bg-slate-50 text-slate-700'}`}>
                                 {product.allow_preorder ? 'Preorder enabled' : 'Preorder disabled'}
                               </span>
                             </div>
                           </div>
 
-                          <div className="mt-3 grid gap-2 text-sm sm:grid-cols-2 xl:grid-cols-4">
+                          <div className="mt-2 grid gap-1.5 text-xs sm:grid-cols-2 xl:grid-cols-4">
                             <div><span className="text-[hsl(var(--muted))]">Price:</span> <span className="font-medium">{formatCurrency(product.price_cents, 'en-EG', product.currency ?? 'EGP')}</span></div>
                             <div><span className="text-[hsl(var(--muted))]">Stock:</span> <span className="font-medium">{product.inventory_qty}</span></div>
                             <div><span className="text-[hsl(var(--muted))]">Threshold:</span> <span className="font-medium">{product.low_stock_threshold}</span></div>
                             <div><span className="text-[hsl(var(--muted))]">Created:</span> <span className="font-medium">{formatDateTime(product.created_at)}</span></div>
                           </div>
 
-                          <div className="mt-4">
+                          <div className="mt-2">
                             {canManageCatalog ? (
                               <AdminProductQuickEdit
                                 id={product.id}
@@ -768,8 +768,8 @@ export default async function AdminStorePage({
                     <div className="flex flex-wrap items-center justify-between gap-2 pt-2 text-sm">
                       <div>Page {safeProductPage} / {totalProductPages}</div>
                       <div className="flex gap-2">
-                        <Link href={buildUrl('/admin/store', { ...catalogBaseParams, page: String(Math.max(1, safeProductPage - 1)) })} className={`rounded-xl border px-4 py-2 ${safeProductPage <= 1 ? 'pointer-events-none opacity-50' : 'hover:bg-gray-50'}`}>Previous</Link>
-                        <Link href={buildUrl('/admin/store', { ...catalogBaseParams, page: String(safeProductPage + 1) })} className={`rounded-xl border px-4 py-2 ${!hasMoreProducts ? 'pointer-events-none opacity-50' : 'hover:bg-gray-50'}`}>Next</Link>
+                        <Link href={buildUrl('/admin/store', { ...catalogBaseParams, page: String(Math.max(1, safeProductPage - 1)) })} className={`rounded-xl border px-3 py-1.5 ${safeProductPage <= 1 ? 'pointer-events-none opacity-50' : 'hover:bg-gray-50'}`}>Previous</Link>
+                        <Link href={buildUrl('/admin/store', { ...catalogBaseParams, page: String(safeProductPage + 1) })} className={`rounded-xl border px-3 py-1.5 ${!hasMoreProducts ? 'pointer-events-none opacity-50' : 'hover:bg-gray-50'}`}>Next</Link>
                       </div>
                     </div>
                   </CardContent>
