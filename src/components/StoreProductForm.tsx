@@ -89,6 +89,7 @@ export default function StoreProductForm({
   const [inventory, setInventory] = useState<number>(Number(product?.inventory_qty ?? 0))
   const [active, setActive] = useState<boolean>(product?.is_active ?? true)
   const [imageFiles, setImageFiles] = useState<[File | null, File | null, File | null]>([null, null, null])
+  const [removedImageSlots, setRemovedImageSlots] = useState<[boolean, boolean, boolean]>([false, false, false])
 
   const [busy, setBusy] = useState(false)
   const [status, setStatus] = useState<{ kind: '' | 'success' | 'error'; msg: string }>({
@@ -142,6 +143,7 @@ export default function StoreProductForm({
     setInventory(Number(product.inventory_qty ?? 0))
     setActive(product.is_active === undefined ? true : !!product.is_active)
     setImageFiles([null, null, null])
+    setRemovedImageSlots([false, false, false])
   }, [product])
 
   useEffect(() => {
@@ -225,6 +227,32 @@ export default function StoreProductForm({
       next[index] = file
       return next
     })
+    setRemovedImageSlots((current) => {
+      const next = [...current] as [boolean, boolean, boolean]
+      next[index] = false
+      return next
+    })
+  }
+
+  function clearImageSlot(index: 0 | 1 | 2) {
+    setImageFiles((current) => {
+      const next = [...current] as [File | null, File | null, File | null]
+      next[index] = null
+      return next
+    })
+    setRemovedImageSlots((current) => {
+      const next = [...current] as [boolean, boolean, boolean]
+      next[index] = Boolean(product?.id && existingImagePaths[index])
+      return next
+    })
+  }
+
+  function undoRemoveImageSlot(index: 0 | 1 | 2) {
+    setRemovedImageSlots((current) => {
+      const next = [...current] as [boolean, boolean, boolean]
+      next[index] = false
+      return next
+    })
   }
 
   async function onSubmit(e: React.FormEvent) {
@@ -270,6 +298,9 @@ export default function StoreProductForm({
       imageFiles.forEach((file, index) => {
         if (file) fd.set(`image_${index + 1}`, file)
       })
+      removedImageSlots.forEach((isRemoved, index) => {
+        if (isRemoved && !imageFiles[index]) fd.set(`remove_image_${index + 1}`, '1')
+      })
 
       const method: 'POST' | 'PATCH' = product?.id ? 'PATCH' : 'POST'
       const url = product?.id ? '/api/store/products/update' : '/api/store/products/create'
@@ -288,6 +319,7 @@ export default function StoreProductForm({
       setStatus({ kind: 'success', msg: 'Saved' })
       toast.success('Saved')
       setImageFiles([null, null, null])
+      setRemovedImageSlots([false, false, false])
       onSaved?.()
     } catch (e: any) {
       setStatus({ kind: 'error', msg: String(e?.message || e) })
@@ -418,14 +450,19 @@ export default function StoreProductForm({
 
       <div className="grid gap-3">
         <div className="rounded-2xl border bg-[hsl(var(--card))] px-3 py-3 text-xs text-[hsl(var(--muted))]">
-          Add up to 3 photos per product. Photo 1 is the main fallback image used across the Store when needed.
+          Add, replace or remove up to 3 photos per product. Photo 1 is the main fallback image used across the Store when needed.
         </div>
 
         <div className="grid gap-3 md:grid-cols-3">
           {[0, 1, 2].map((index) => {
             const slot = index as 0 | 1 | 2
-            const previewUrl = imagePreviewUrls[slot] || existingImageUrls[slot] || ''
-            const hasExisting = !!existingImageUrls[slot] && !imagePreviewUrls[slot]
+            const newPreviewUrl = imagePreviewUrls[slot]
+            const existingPreviewUrl = removedImageSlots[slot] ? '' : existingImageUrls[slot]
+            const previewUrl = newPreviewUrl || existingPreviewUrl || ''
+            const hasNewFile = !!imageFiles[slot]
+            const hasExisting = !!existingImageUrls[slot] && !hasNewFile && !removedImageSlots[slot]
+            const willRemove = !!removedImageSlots[slot]
+            const canClear = hasNewFile || hasExisting
 
             return (
               <div key={`image-slot-${slot}`} className="rounded-2xl border bg-white p-3">
@@ -438,10 +475,11 @@ export default function StoreProductForm({
                     onChange={(e) => {
                       const file = e.target.files?.[0] ?? null
                       updateImageFile(slot, file)
+                      e.currentTarget.value = ''
                     }}
                   />
                   <span className="text-xs text-[hsl(var(--muted))]">
-                    JPG, PNG or WEBP · max 1 MB {product?.id ? '· leave empty to keep current photo' : '· optional'}
+                    JPG, PNG or WEBP · max 1 MB {product?.id ? '· upload a file to add or replace this photo' : '· optional'}
                   </span>
                 </label>
 
@@ -454,14 +492,35 @@ export default function StoreProductForm({
                     />
                   ) : (
                     <div className="grid h-36 place-items-center rounded-xl border border-dashed text-xs text-[hsl(var(--muted))]">
-                      No photo selected
+                      {willRemove ? 'Photo will be removed' : 'No photo selected'}
                     </div>
                   )}
                 </div>
 
-                {hasExisting ? (
-                  <div className="mt-2 text-xs text-[hsl(var(--muted))]">Current photo kept unless you upload a replacement.</div>
-                ) : null}
+                <div className="mt-2 min-h-5 text-xs text-[hsl(var(--muted))]">
+                  {hasNewFile ? 'New photo selected. It will replace the current slot on save.' : null}
+                  {hasExisting ? 'Current photo kept unless you upload a replacement or remove it.' : null}
+                  {willRemove ? 'This photo will be deleted when you save.' : null}
+                </div>
+
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {willRemove ? (
+                    <Button type="button" variant="outline" size="sm" onClick={() => undoRemoveImageSlot(slot)} disabled={busy}>
+                      Undo remove
+                    </Button>
+                  ) : canClear ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => clearImageSlot(slot)}
+                      disabled={busy}
+                      className="border-rose-200 text-rose-700 hover:bg-rose-50"
+                    >
+                      {hasNewFile ? 'Clear selection' : 'Remove photo'}
+                    </Button>
+                  ) : null}
+                </div>
               </div>
             )
           })}
