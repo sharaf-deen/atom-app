@@ -35,6 +35,7 @@ type SaleRow = {
   payment_method: PaymentMethod | null
   currency: string | null
   total_cents: number
+  discount_cents: number | null
   paid_cents: number
   debt_cents: number
   note: string | null
@@ -256,7 +257,7 @@ export default async function AdminStoreSalesPage({ searchParams }: { searchPara
     let countQ = supa.from('store_sales').select('id', { count: 'exact', head: true })
     let salesQ = supa
       .from('store_sales')
-      .select('id,buyer_user_id,buyer_member_id,buyer_full_name,buyer_email,buyer_phone,status,payment_method,currency,total_cents,paid_cents,debt_cents,note,delivered_at,created_at')
+      .select('id,buyer_user_id,buyer_member_id,buyer_full_name,buyer_email,buyer_phone,status,payment_method,currency,total_cents,discount_cents,paid_cents,debt_cents,note,delivered_at,created_at')
       .order(sort, { ascending: dir === 'asc' })
 
     if (sort !== 'created_at') {
@@ -485,6 +486,7 @@ export default async function AdminStoreSalesPage({ searchParams }: { searchPara
                                 <div className="rounded-2xl border bg-white p-3 text-sm">
                                   <div className="text-[11px] uppercase tracking-[0.12em] text-[hsl(var(--muted))]">Money</div>
                                   <div className="mt-1">Total: <span className="font-medium">{formatCurrency(sale.total_cents, 'en-EG', sale.currency || 'EGP')}</span></div>
+                                  <div>Discount: <span className="font-medium">{formatCurrency(Math.max(0, Number(sale.discount_cents || 0)), 'en-EG', sale.currency || 'EGP')}</span></div>
                                   <div>Paid: <span className="font-medium">{formatCurrency(sale.paid_cents, 'en-EG', sale.currency || 'EGP')}</span></div>
                                   <div>Debt: <span className="font-medium">{formatCurrency(sale.debt_cents, 'en-EG', sale.currency || 'EGP')}</span></div>
                                 </div>
