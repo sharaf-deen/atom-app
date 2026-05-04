@@ -112,7 +112,6 @@ export default function StoreCatalogModelCard({
       model.previewImageUrl,
     ])
   }, [model.previewImageUrl, selectedColor, selectedVariant])
-  const selectedImage = galleryImages[0] ?? null
   const hasMultipleColors = model.colorGroups.length > 1
   const hasMultipleSizes = availableSizes.length > 1
   const priceLabel =
@@ -125,30 +124,18 @@ export default function StoreCatalogModelCard({
       <Card hover>
         <CardContent className="space-y-4 py-4">
           {galleryImages.length > 0 ? (
-            <div className="space-y-2">
-              <button
-                type="button"
-                onClick={() => setModalImage(selectedImage)}
-                className="block w-full overflow-hidden rounded-2xl border bg-slate-50 text-left"
-              >
-                <img src={selectedImage ?? ''} alt={model.name} className="h-48 w-full object-cover" loading="lazy" />
-              </button>
-
-              {galleryImages.length > 1 ? (
-                <div className="flex gap-2 overflow-x-auto pb-1">
-                  {galleryImages.slice(1).map((image, index) => (
-                    <button
-                      key={`${image}-${index + 1}`}
-                      type="button"
-                      onClick={() => setModalImage(image)}
-                      className="h-14 w-14 shrink-0 overflow-hidden rounded-xl border bg-slate-50 ring-offset-2 transition hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-black"
-                      aria-label={`Open ${model.name} photo ${index + 2}`}
-                    >
-                      <img src={image} alt={`${model.name} ${index + 2}`} className="h-full w-full object-cover" loading="lazy" />
-                    </button>
-                  ))}
-                </div>
-              ) : null}
+            <div className="flex gap-2 overflow-x-auto pb-1">
+              {galleryImages.slice(0, 3).map((image, index) => (
+                <button
+                  key={`${image}-${index}`}
+                  type="button"
+                  onClick={() => setModalImage(image)}
+                  className="h-16 w-16 shrink-0 overflow-hidden rounded-xl border bg-slate-50 ring-offset-2 transition hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-black"
+                  aria-label={`Open ${model.name} photo ${index + 1}`}
+                >
+                  <img src={image} alt={`${model.name} ${index + 1}`} className="h-full w-full object-cover" loading="lazy" />
+                </button>
+              ))}
             </div>
           ) : null}
 
