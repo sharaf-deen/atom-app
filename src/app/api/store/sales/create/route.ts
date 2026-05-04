@@ -12,9 +12,11 @@ type PaymentMethod = 'cash' | 'card' | 'bank_transfer' | 'instapay'
 type Body = {
   product_id?: string
   qty?: number
+  buyer_user_id?: string | null
   buyer_full_name?: string
   buyer_email?: string | null
   buyer_phone?: string | null
+  discount_cents?: number
   paid_cents?: number
   payment_method?: PaymentMethod | null
   note?: string | null
@@ -32,9 +34,15 @@ function buildProductLabel(p: { name: string | null; color: string | null; size:
 }
 
 function deriveStatus(totalCents: number, paidCents: number) {
+  if (totalCents <= 0) return 'paid'
   if (paidCents <= 0) return 'draft'
   if (paidCents >= totalCents) return 'paid'
   return 'partial_paid'
+}
+
+function buildBuyerFullName(profile: { first_name: string | null; last_name: string | null; email: string | null; member_id: string | null }) {
+  const name = [profile.first_name, profile.last_name].map((v) => String(v || '').trim()).filter(Boolean).join(' ')
+  return name || profile.email || profile.member_id || 'Buyer'
 }
 
 export async function POST(req: Request) {
@@ -66,9 +74,12 @@ export async function POST(req: Request) {
     const body = (await req.json().catch(() => ({}))) as Body
     const productId = String(body.product_id || '').trim()
     const qty = Math.max(1, Math.floor(Number(body.qty || 0) || 0))
-    const buyerFullName = String(body.buyer_full_name || '').trim()
-    const buyerEmail = String(body.buyer_email || '').trim() || null
-    const buyerPhone = String(body.buyer_phone || '').trim() || null
+    const buyerUserId = String(body.buyer_user_id || '').trim() || null
+    let buyerMemberId: string | null = null
+    let buyerFullName = String(body.buyer_full_name || '').trim()
+    let buyerEmail = String(body.buyer_email || '').trim() || null
+    let buyerPhone = String(body.buyer_phone || '').trim() || null
+    const discountRaw = Math.max(0, Math.floor(Number(body.discount_cents || 0) || 0))
     const paidRaw = Math.max(0, Math.floor(Number(body.paid_cents || 0) || 0))
     const paymentMethod = ALLOWED_PAYMENT.has(body.payment_method as PaymentMethod)
       ? (body.payment_method as PaymentMethod)
@@ -78,8 +89,35 @@ export async function POST(req: Request) {
     if (!productId) {
       return noStore(NextResponse.json({ ok: false, error: 'MISSING_PRODUCT_ID' }, { status: 400 }))
     }
+    if (buyerUserId) {
+      const { data: buyer, error: buyerErr } = await admin
+        .from('profiles')
+        .select('user_id,member_id,email,first_name,last_name,phone')
+        .eq('user_id', buyerUserId)
+        .maybeSingle<{
+          user_id: string
+          member_id: string | null
+          email: string | null
+          first_name: string | null
+          last_name: string | null
+          phone: string | null
+        }>()
+
+      if (buyerErr) {
+        return noStore(NextResponse.json({ ok: false, error: 'BUYER_LOOKUP_FAILED', details: buyerErr.message }, { status: 500 }))
+      }
+      if (!buyer) {
+        return noStore(NextResponse.json({ ok: false, error: 'BUYER_NOT_FOUND' }, { status: 404 }))
+      }
+
+      buyerMemberId = buyer.member_id || null
+      buyerFullName = buildBuyerFullName(buyer)
+      buyerEmail = buyer.email || null
+      buyerPhone = buyer.phone || null
+    }
+
     if (!buyerFullName) {
-      return noStore(NextResponse.json({ ok: false, error: 'MISSING_BUYER_NAME' }, { status: 400 }))
+      return noStore(NextResponse.json({ ok: false, error: 'MISSING_BUYER' }, { status: 400 }))
     }
 
     const { data: product, error: productErr } = await admin
@@ -107,7 +145,9 @@ export async function POST(req: Request) {
       return noStore(NextResponse.json({ ok: false, error: 'PRODUCT_INACTIVE' }, { status: 400 }))
     }
 
-    const totalCents = Math.max(0, Number(product.price_cents || 0)) * qty
+    const subtotalCents = Math.max(0, Number(product.price_cents || 0)) * qty
+    const discountCents = Math.max(0, Math.min(discountRaw, subtotalCents))
+    const totalCents = Math.max(subtotalCents - discountCents, 0)
     const paidCents = Math.max(0, Math.min(paidRaw, totalCents))
     const debtCents = Math.max(totalCents - paidCents, 0)
     const status = deriveStatus(totalCents, paidCents)
@@ -117,8 +157,8 @@ export async function POST(req: Request) {
     const { data: sale, error: saleErr } = await admin
       .from('store_sales')
       .insert({
-        buyer_user_id: null,
-        buyer_member_id: null,
+        buyer_user_id: buyerUserId,
+        buyer_member_id: buyerMemberId,
         buyer_full_name: buyerFullName,
         buyer_email: buyerEmail,
         buyer_phone: buyerPhone,
@@ -126,6 +166,7 @@ export async function POST(req: Request) {
         payment_method: paymentMethod,
         currency,
         total_cents: totalCents,
+        discount_cents: discountCents,
         paid_cents: paidCents,
         debt_cents: debtCents,
         note,
@@ -173,6 +214,7 @@ export async function POST(req: Request) {
         id: sale.id,
         status,
         total_cents: totalCents,
+        discount_cents: discountCents,
         paid_cents: paidCents,
         debt_cents: debtCents,
       })
