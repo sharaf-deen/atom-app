@@ -168,7 +168,6 @@ export async function POST(req: Request) {
         total_cents: totalCents,
         discount_cents: discountCents,
         paid_cents: paidCents,
-        debt_cents: debtCents,
         note,
         created_by: user.id,
       })
