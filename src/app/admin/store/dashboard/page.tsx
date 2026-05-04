@@ -93,6 +93,8 @@ const WINDOWS: Array<{ value: string; label: string; days: number }> = [
   { value: 'all', label: 'All', days: 0 },
 ]
 
+const ACTIVE_STOCK_PAGE_SIZE = 5
+
 function strParam(v: unknown) {
   const s = Array.isArray(v) ? v[0] : v
   return typeof s === 'string' ? s : ''
@@ -131,8 +133,49 @@ function shortId(id: string) {
   return (id || '').slice(0, 8)
 }
 
+function positivePage(v: unknown) {
+  const n = Number(strParam(v))
+  return Number.isFinite(n) && n > 0 ? Math.trunc(n) : 1
+}
+
+function storeDashboardHref(windowValue: string, activeStockPage = 1) {
+  const params = new URLSearchParams()
+  if (windowValue !== '30') params.set('window', windowValue)
+  if (activeStockPage > 1) params.set('stockPage', String(activeStockPage))
+  const qs = params.toString()
+  return qs ? `/admin/store/dashboard?${qs}` : '/admin/store/dashboard'
+}
+
 function productLabel(p: Pick<ProductRow, 'name' | 'color' | 'size'>) {
   return [p.name || 'Product', p.color || '', p.size || ''].filter(Boolean).join(' · ')
+}
+
+function stockStatus(product: Pick<ProductRow, 'inventory_qty' | 'low_stock_threshold'>) {
+  const qty = toInt(product.inventory_qty)
+  const threshold = toInt(product.low_stock_threshold)
+
+  if (qty <= 0) {
+    return {
+      label: 'Out of stock',
+      className: 'border-rose-300 bg-rose-50 text-rose-900',
+    }
+  }
+
+  if (qty <= threshold) {
+    return {
+      label: 'Low stock',
+      className: 'border-amber-300 bg-amber-50 text-amber-900',
+    }
+  }
+
+  return {
+    label: 'Available',
+    className: 'border-emerald-300 bg-emerald-50 text-emerald-900',
+  }
+}
+
+function productStockValueCents(product: Pick<ProductRow, 'inventory_qty' | 'price_cents'>) {
+  return Math.max(0, toInt(product.inventory_qty)) * Math.max(0, toInt(product.price_cents))
 }
 
 function preorderStatusLabel(status?: string | null) {
@@ -251,6 +294,7 @@ export default async function StoreDashboardPage({ searchParams }: { searchParam
   const supa = getSupabaseAdminClientCached()
 
   let summary: DashboardSummaryRow | null = null
+  let activeStockProducts: ProductRow[] = []
   let lowStockProducts: ProductRow[] = []
   let recentSupplierOrders: SupplierOrderRow[] = []
   let recentPreorders: PreorderRow[] = []
@@ -258,14 +302,16 @@ export default async function StoreDashboardPage({ searchParams }: { searchParam
   let pageError: string | null = null
 
   try {
-    const [summaryRes, lowStockRes, supplierRes, preorderRes, salesRes] = await Promise.all([
+    const [summaryRes, activeProductsRes, supplierRes, preorderRes, salesRes] = await Promise.all([
       supa.rpc('admin_store_dashboard_summary', { _days: selectedWindow.days } as any),
       supa
         .from('store_products')
         .select('id,name,color,size,inventory_qty,price_cents,currency,low_stock_threshold,is_active,allow_preorder')
         .eq('is_active', true)
-        .order('inventory_qty', { ascending: true })
-        .limit(100),
+        .order('name', { ascending: true })
+        .order('color', { ascending: true })
+        .order('size', { ascending: true })
+        .limit(500),
       supa
         .from('store_supplier_orders')
         .select('id,reference,supplier_name,status,expected_at,ordered_at,created_at')
@@ -284,17 +330,21 @@ export default async function StoreDashboardPage({ searchParams }: { searchParam
     ])
 
     if (summaryRes.error) throw new Error(summaryRes.error.message)
-    if (lowStockRes.error) throw new Error(lowStockRes.error.message)
+    if (activeProductsRes.error) throw new Error(activeProductsRes.error.message)
     if (supplierRes.error) throw new Error(supplierRes.error.message)
     if (preorderRes.error) throw new Error(preorderRes.error.message)
     if (salesRes.error) throw new Error(salesRes.error.message)
 
     summary = Array.isArray(summaryRes.data) ? ((summaryRes.data[0] as DashboardSummaryRow | undefined) ?? null) : null
 
-    const lowStockRaw = Array.isArray(lowStockRes.data) ? (lowStockRes.data as ProductRow[]) : []
-    lowStockProducts = lowStockRaw
+    const activeProductsRaw = Array.isArray(activeProductsRes.data) ? (activeProductsRes.data as ProductRow[]) : []
+    activeStockProducts = activeProductsRaw
       .filter((row) => Boolean(row.is_active))
+      .sort((a, b) => productLabel(a).localeCompare(productLabel(b), 'en'))
+
+    lowStockProducts = [...activeStockProducts]
       .filter((row) => toInt(row.inventory_qty) <= toInt(row.low_stock_threshold))
+      .sort((a, b) => toInt(a.inventory_qty) - toInt(b.inventory_qty))
       .slice(0, 8)
 
     recentSupplierOrders = Array.isArray(supplierRes.data) ? (supplierRes.data as SupplierOrderRow[]) : []
@@ -326,6 +376,13 @@ export default async function StoreDashboardPage({ searchParams }: { searchParam
     sales_debt_cents: 0,
   }
 
+  const requestedStockPage = positivePage(searchParams?.stockPage)
+  const activeStockTotalPages = Math.max(1, Math.ceil(activeStockProducts.length / ACTIVE_STOCK_PAGE_SIZE))
+  const activeStockPage = Math.min(requestedStockPage, activeStockTotalPages)
+  const activeStockStart = (activeStockPage - 1) * ACTIVE_STOCK_PAGE_SIZE
+  const visibleActiveStockProducts = activeStockProducts.slice(activeStockStart, activeStockStart + ACTIVE_STOCK_PAGE_SIZE)
+  const activeStockTotalUnits = activeStockProducts.reduce((sum, product) => sum + toInt(product.inventory_qty), 0)
+
   return (
     <main>
       <PageHeader
@@ -338,7 +395,7 @@ export default async function StoreDashboardPage({ searchParams }: { searchParam
               return (
                 <Link
                   key={item.value}
-                  href={item.value === '30' ? '/admin/store/dashboard' : `/admin/store/dashboard?window=${item.value}`}
+                  href={storeDashboardHref(item.value, activeStockPage)}
                   prefetch={false}
                   className={`rounded-xl border px-3 py-2 text-sm font-medium ${active ? 'bg-black text-white border-black' : 'hover:bg-gray-50'}`}
                 >
@@ -430,6 +487,83 @@ export default async function StoreDashboardPage({ searchParams }: { searchParam
               hint={`${toInt(metrics.delivered_sales_count)} delivered in ${selectedWindow.label}`}
             />
           </div>
+        </section>
+
+        <section className="space-y-3">
+          <div className="flex flex-wrap items-end justify-between gap-2">
+            <div>
+              <h2 className="text-base font-semibold">Available stock by active product</h2>
+              <p className="text-sm text-[hsl(var(--muted))]">Active products only · 5 products per page · {activeStockTotalUnits} units available.</p>
+            </div>
+            <Button asChild href="/admin/store" variant="outline" size="sm">
+              Manage catalog
+            </Button>
+          </div>
+
+          <Card className="p-4">
+            <CardContent className="space-y-2">
+              {visibleActiveStockProducts.length === 0 ? (
+                <div className="text-sm text-[hsl(var(--muted))]">No active products found.</div>
+              ) : (
+                <>
+                  <div className="space-y-2">
+                    {visibleActiveStockProducts.map((product) => {
+                      const status = stockStatus(product)
+                      const qty = toInt(product.inventory_qty)
+                      const threshold = toInt(product.low_stock_threshold)
+
+                      return (
+                        <div key={product.id} className="rounded-2xl border px-3 py-2">
+                          <div className="flex flex-wrap items-start gap-2">
+                            <div className="min-w-0 flex-1">
+                              <div className="truncate text-sm font-semibold">{productLabel(product)}</div>
+                              <div className="text-xs text-[hsl(var(--muted))]">#{shortId(product.id)}</div>
+                            </div>
+                            <div className="flex flex-wrap items-center justify-end gap-2">
+                              <span className={`rounded-full border px-2 py-1 text-xs font-medium ${status.className}`}>
+                                {status.label}
+                              </span>
+                              <span className="rounded-full border px-2 py-1 text-xs font-semibold">
+                                Stock {qty}
+                              </span>
+                            </div>
+                          </div>
+                          <div className="mt-2 grid gap-1 text-xs text-[hsl(var(--muted))] sm:grid-cols-3">
+                            <div>Threshold {threshold}</div>
+                            <div>Value {formatCurrency(productStockValueCents(product), 'en-EG', product.currency || 'EGP')}</div>
+                            <div>{product.allow_preorder ? 'Preorder enabled' : 'Preorder disabled'}</div>
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+
+                  <div className="flex flex-wrap items-center justify-between gap-2 pt-2 text-xs text-[hsl(var(--muted))]">
+                    <div>
+                      Showing {activeStockStart + 1}-{Math.min(activeStockStart + ACTIVE_STOCK_PAGE_SIZE, activeStockProducts.length)} of {activeStockProducts.length} active products
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {activeStockPage > 1 ? (
+                        <Button asChild href={storeDashboardHref(selectedWindow.value, activeStockPage - 1)} variant="outline" size="sm" className="min-h-9 rounded-xl px-3 py-1.5 text-xs">
+                          Previous
+                        </Button>
+                      ) : (
+                        <span className="inline-flex min-h-9 items-center rounded-xl border px-3 py-1.5 text-xs font-semibold opacity-50">Previous</span>
+                      )}
+                      <span>Page {activeStockPage} / {activeStockTotalPages}</span>
+                      {activeStockPage < activeStockTotalPages ? (
+                        <Button asChild href={storeDashboardHref(selectedWindow.value, activeStockPage + 1)} variant="outline" size="sm" className="min-h-9 rounded-xl px-3 py-1.5 text-xs">
+                          Next
+                        </Button>
+                      ) : (
+                        <span className="inline-flex min-h-9 items-center rounded-xl border px-3 py-1.5 text-xs font-semibold opacity-50">Next</span>
+                      )}
+                    </div>
+                  </div>
+                </>
+              )}
+            </CardContent>
+          </Card>
         </section>
 
         <section className="space-y-3">
