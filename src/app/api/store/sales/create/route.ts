@@ -117,7 +117,7 @@ export async function POST(req: Request) {
     }
 
     if (!buyerFullName) {
-      return noStore(NextResponse.json({ ok: false, error: 'MISSING_BUYER' }, { status: 400 }))
+      buyerFullName = 'Unknown buyer'
     }
 
     const { data: product, error: productErr } = await admin
