@@ -1,7 +1,6 @@
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
-import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import PageHeader from '@/components/layout/PageHeader'
 import Section from '@/components/layout/Section'
@@ -10,7 +9,7 @@ import Button from '@/components/ui/Button'
 import InlineAlert from '@/components/ui/InlineAlert'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card'
 import { formatCurrency } from '@/lib/money'
-import { canAccessStoreDashboard, canManageStorePreorders, canManageStoreSales } from '@/lib/rbac'
+import { canAccessStoreDashboard } from '@/lib/rbac'
 import { getSessionUserCached, getSupabaseAdminClientCached } from '@/lib/requestCache'
 import StoreAdminNav from '@/components/store/StoreAdminNav'
 
@@ -86,13 +85,6 @@ type SaleRow = {
   created_at: string | null
 }
 
-const WINDOWS: Array<{ value: string; label: string; days: number }> = [
-  { value: '7', label: '7d', days: 7 },
-  { value: '30', label: '30d', days: 30 },
-  { value: '90', label: '90d', days: 90 },
-  { value: 'all', label: 'All', days: 0 },
-]
-
 const ACTIVE_STOCK_PAGE_SIZE = 5
 
 function strParam(v: unknown) {
@@ -138,9 +130,8 @@ function positivePage(v: unknown) {
   return Number.isFinite(n) && n > 0 ? Math.trunc(n) : 1
 }
 
-function storeDashboardHref(windowValue: string, activeStockPage = 1) {
+function storeDashboardHref(activeStockPage = 1) {
   const params = new URLSearchParams()
-  if (windowValue !== '30') params.set('window', windowValue)
   if (activeStockPage > 1) params.set('stockPage', String(activeStockPage))
   const qs = params.toString()
   return qs ? `/admin/store/dashboard?${qs}` : '/admin/store/dashboard'
@@ -176,6 +167,11 @@ function stockStatus(product: Pick<ProductRow, 'inventory_qty' | 'low_stock_thre
 
 function productStockValueCents(product: Pick<ProductRow, 'inventory_qty' | 'price_cents'>) {
   return Math.max(0, toInt(product.inventory_qty)) * Math.max(0, toInt(product.price_cents))
+}
+
+function safeAverageCents(totalCents: number, count: number) {
+  if (!Number.isFinite(totalCents) || !Number.isFinite(count) || count <= 0) return 0
+  return Math.round(totalCents / count)
 }
 
 function preorderStatusLabel(status?: string | null) {
@@ -286,11 +282,6 @@ export default async function StoreDashboardPage({ searchParams }: { searchParam
     )
   }
 
-  const canViewPreorders = canManageStorePreorders(me.role)
-  const canViewSales = canManageStoreSales(me.role)
-
-  const windowRaw = strParam(searchParams?.window)
-  const selectedWindow = WINDOWS.find((item) => item.value === windowRaw) ?? WINDOWS[1]
   const supa = getSupabaseAdminClientCached()
 
   let summary: DashboardSummaryRow | null = null
@@ -303,7 +294,7 @@ export default async function StoreDashboardPage({ searchParams }: { searchParam
 
   try {
     const [summaryRes, activeProductsRes, supplierRes, preorderRes, salesRes] = await Promise.all([
-      supa.rpc('admin_store_dashboard_summary', { _days: selectedWindow.days } as any),
+      supa.rpc('admin_store_dashboard_summary', { _days: 30 } as any),
       supa
         .from('store_products')
         .select('id,name,color,size,inventory_qty,price_cents,currency,low_stock_threshold,is_active,allow_preorder')
@@ -382,29 +373,20 @@ export default async function StoreDashboardPage({ searchParams }: { searchParam
   const activeStockStart = (activeStockPage - 1) * ACTIVE_STOCK_PAGE_SIZE
   const visibleActiveStockProducts = activeStockProducts.slice(activeStockStart, activeStockStart + ACTIVE_STOCK_PAGE_SIZE)
   const activeStockTotalUnits = activeStockProducts.reduce((sum, product) => sum + toInt(product.inventory_qty), 0)
+  const activeStockForecastRevenueCents = activeStockProducts.reduce((sum, product) => sum + productStockValueCents(product), 0)
+  const sellableProductsCount = activeStockProducts.filter((product) => toInt(product.inventory_qty) > 0).length
+  const outOfStockProductsCount = activeStockProducts.filter((product) => toInt(product.inventory_qty) <= 0).length
+  const lowStockProductsCount = activeStockProducts.filter((product) => {
+    const qty = toInt(product.inventory_qty)
+    return qty > 0 && qty <= toInt(product.low_stock_threshold)
+  }).length
+  const averageStockUnitPriceCents = safeAverageCents(activeStockForecastRevenueCents, activeStockTotalUnits)
 
   return (
     <main>
       <PageHeader
         title="Store Dashboard"
         subtitle="Current stock, pipeline, supplier flow, preorders, and sales overview."
-        right={
-          <div className="flex flex-wrap items-center gap-2">
-            {WINDOWS.map((item) => {
-              const active = item.value === selectedWindow.value
-              return (
-                <Link
-                  key={item.value}
-                  href={storeDashboardHref(item.value, activeStockPage)}
-                  prefetch={false}
-                  className={`rounded-xl border px-3 py-2 text-sm font-medium ${active ? 'bg-black text-white border-black' : 'hover:bg-gray-50'}`}
-                >
-                  {item.label}
-                </Link>
-              )
-            })}
-          </div>
-        }
         showReload
       />
 
@@ -413,28 +395,6 @@ export default async function StoreDashboardPage({ searchParams }: { searchParam
       </Section>
 
       <Section className="space-y-6">
-        <Card>
-          <CardContent className="flex flex-wrap items-center gap-2">
-            <Button asChild href="/admin/store" variant="outline" size="sm">
-              Store admin
-            </Button>
-            {canViewPreorders ? (
-              <Button asChild href="/admin/store/preorders" variant="outline" size="sm">
-                Preorders
-              </Button>
-            ) : null}
-            {canViewSales ? (
-              <Button asChild href="/admin/store/sales" variant="outline" size="sm">
-                Sales
-              </Button>
-            ) : null}
-            <Button asChild href="/store" variant="ghost" size="sm">
-              Open /store
-            </Button>
-            <div className="ml-auto text-xs text-[hsl(var(--muted))]">Sales window: {selectedWindow.label}</div>
-          </CardContent>
-        </Card>
-
         {pageError ? (
           <InlineAlert variant="error" title="Dashboard failed to load">{pageError}</InlineAlert>
         ) : null}
@@ -482,9 +442,39 @@ export default async function StoreDashboardPage({ searchParams }: { searchParam
               hint="Current unpaid amount across non-canceled sales"
             />
             <StatCard
-              title="Sales in window"
+              title="Sales last 30d"
               value={String(toInt(metrics.sales_count))}
-              hint={`${toInt(metrics.delivered_sales_count)} delivered in ${selectedWindow.label}`}
+              hint={`${toInt(metrics.delivered_sales_count)} delivered in the last 30 days`}
+            />
+          </div>
+        </section>
+
+        <section className="space-y-3">
+          <div>
+            <h2 className="text-base font-semibold">Stock revenue forecast</h2>
+            <p className="text-sm text-[hsl(var(--muted))]">Potential revenue if the current active stock is sold at the recorded product prices.</p>
+          </div>
+
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            <StatCard
+              title="Forecast revenue"
+              value={formatCurrency(activeStockForecastRevenueCents, 'en-EG', 'EGP')}
+              hint="Active stock × product sale price"
+            />
+            <StatCard
+              title="Sellable products"
+              value={`${sellableProductsCount} / ${activeStockProducts.length}`}
+              hint={`${activeStockTotalUnits} units currently available`}
+            />
+            <StatCard
+              title="Average unit price"
+              value={formatCurrency(averageStockUnitPriceCents, 'en-EG', 'EGP')}
+              hint="Weighted by units currently in stock"
+            />
+            <StatCard
+              title="Stock risk"
+              value={`${lowStockProductsCount} low · ${outOfStockProductsCount} out`}
+              hint="Active products needing attention"
             />
           </div>
         </section>
@@ -544,7 +534,7 @@ export default async function StoreDashboardPage({ searchParams }: { searchParam
                     </div>
                     <div className="flex items-center gap-2">
                       {activeStockPage > 1 ? (
-                        <Button asChild href={storeDashboardHref(selectedWindow.value, activeStockPage - 1)} variant="outline" size="sm" className="min-h-9 rounded-xl px-3 py-1.5 text-xs">
+                        <Button asChild href={storeDashboardHref(activeStockPage - 1)} variant="outline" size="sm" className="min-h-9 rounded-xl px-3 py-1.5 text-xs">
                           Previous
                         </Button>
                       ) : (
@@ -552,7 +542,7 @@ export default async function StoreDashboardPage({ searchParams }: { searchParam
                       )}
                       <span>Page {activeStockPage} / {activeStockTotalPages}</span>
                       {activeStockPage < activeStockTotalPages ? (
-                        <Button asChild href={storeDashboardHref(selectedWindow.value, activeStockPage + 1)} variant="outline" size="sm" className="min-h-9 rounded-xl px-3 py-1.5 text-xs">
+                        <Button asChild href={storeDashboardHref(activeStockPage + 1)} variant="outline" size="sm" className="min-h-9 rounded-xl px-3 py-1.5 text-xs">
                           Next
                         </Button>
                       ) : (
@@ -569,24 +559,24 @@ export default async function StoreDashboardPage({ searchParams }: { searchParam
         <section className="space-y-3">
           <div>
             <h2 className="text-base font-semibold">Sales activity</h2>
-            <p className="text-sm text-[hsl(var(--muted))]">This block follows the selected sales window.</p>
+            <p className="text-sm text-[hsl(var(--muted))]">Last 30 days. The period selector was removed to keep the dashboard simple and stable.</p>
           </div>
 
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
             <StatCard
               title="Sales total"
               value={formatCurrency(toInt(metrics.sales_total_cents), 'en-EG', 'EGP')}
-              hint="Total sale value created in the selected window"
+              hint="Total sale value created in the last 30 days"
             />
             <StatCard
               title="Collected"
               value={formatCurrency(toInt(metrics.sales_paid_cents), 'en-EG', 'EGP')}
-              hint="Paid amount recorded in the selected window"
+              hint="Paid amount recorded in the last 30 days"
             />
             <StatCard
-              title="Debt in window"
+              title="Debt in last 30 days"
               value={formatCurrency(toInt(metrics.sales_debt_cents), 'en-EG', 'EGP')}
-              hint="Remaining debt from sales created in the selected window"
+              hint="Remaining debt from sales created in the last 30 days"
             />
           </div>
         </section>
