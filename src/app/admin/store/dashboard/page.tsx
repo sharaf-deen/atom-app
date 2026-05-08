@@ -12,6 +12,12 @@ import { formatCurrency } from '@/lib/money'
 import { canAccessStoreDashboard } from '@/lib/rbac'
 import { getSessionUserCached, getSupabaseAdminClientCached } from '@/lib/requestCache'
 import StoreAdminNav from '@/components/store/StoreAdminNav'
+import {
+  FALLBACK_STORE_PRODUCT_CATEGORIES,
+  buildStoreCategoryOptions,
+  storeCategoryLabelMap,
+  type StoreProductCategoryRow,
+} from '@/lib/storeCategories'
 
 type SearchParams = Record<string, string | string[] | undefined>
 
@@ -39,6 +45,7 @@ type DashboardSummaryRow = {
 
 type ProductRow = {
   id: string
+  category: string | null
   name: string | null
   color: string | null
   size: string | null
@@ -130,8 +137,15 @@ function positivePage(v: unknown) {
   return Number.isFinite(n) && n > 0 ? Math.trunc(n) : 1
 }
 
-function storeDashboardHref(activeStockPage = 1) {
+function normalizeCategory(value: unknown, allowedKeys: Set<string>) {
+  const clean = strParam(value).trim()
+  if (clean && clean !== 'all' && allowedKeys.has(clean)) return clean
+  return 'all'
+}
+
+function storeDashboardHref(activeStockPage = 1, stockCategory = 'all') {
   const params = new URLSearchParams()
+  if (stockCategory && stockCategory !== 'all') params.set('stockCategory', stockCategory)
   if (activeStockPage > 1) params.set('stockPage', String(activeStockPage))
   const qs = params.toString()
   return qs ? `/admin/store/dashboard?${qs}` : '/admin/store/dashboard'
@@ -292,12 +306,32 @@ export default async function StoreDashboardPage({ searchParams }: { searchParam
   let recentSales: SaleRow[] = []
   let pageError: string | null = null
 
+  let categoryRows: StoreProductCategoryRow[] = []
+  try {
+    const { data, error } = await supa
+      .from('store_product_categories')
+      .select('key,label,is_active,sort_order')
+      .order('sort_order', { ascending: true })
+      .order('label', { ascending: true })
+    if (error) throw error
+    categoryRows = ((data ?? []) as StoreProductCategoryRow[]).filter((row) => row.key && row.label)
+  } catch {
+    categoryRows = FALLBACK_STORE_PRODUCT_CATEGORIES
+  }
+
+  if (categoryRows.length === 0) categoryRows = FALLBACK_STORE_PRODUCT_CATEGORIES
+  const activeCategoryRows = categoryRows.filter((row) => row.is_active)
+  const categoryKeys = new Set(activeCategoryRows.map((row) => row.key))
+  const activeStockCategory = normalizeCategory(searchParams?.stockCategory, categoryKeys)
+  const categoryOptions = buildStoreCategoryOptions(activeCategoryRows, { includeAll: true })
+  const categoryLabels = storeCategoryLabelMap(categoryRows)
+
   try {
     const [summaryRes, activeProductsRes, supplierRes, preorderRes, salesRes] = await Promise.all([
       supa.rpc('admin_store_dashboard_summary', { _days: 30 } as any),
       supa
         .from('store_products')
-        .select('id,name,color,size,inventory_qty,price_cents,currency,low_stock_threshold,is_active,allow_preorder')
+        .select('id,category,name,color,size,inventory_qty,price_cents,currency,low_stock_threshold,is_active,allow_preorder')
         .eq('is_active', true)
         .order('name', { ascending: true })
         .order('color', { ascending: true })
@@ -367,11 +401,19 @@ export default async function StoreDashboardPage({ searchParams }: { searchParam
     sales_debt_cents: 0,
   }
 
+  const filteredActiveStockProducts = activeStockCategory === 'all'
+    ? activeStockProducts
+    : activeStockProducts.filter((product) => product.category === activeStockCategory)
+  const filteredActiveStockTotalUnits = filteredActiveStockProducts.reduce((sum, product) => sum + toInt(product.inventory_qty), 0)
+  const activeStockCategoryLabel = activeStockCategory === 'all'
+    ? 'All categories'
+    : (categoryLabels.get(activeStockCategory) ?? activeStockCategory)
+
   const requestedStockPage = positivePage(searchParams?.stockPage)
-  const activeStockTotalPages = Math.max(1, Math.ceil(activeStockProducts.length / ACTIVE_STOCK_PAGE_SIZE))
+  const activeStockTotalPages = Math.max(1, Math.ceil(filteredActiveStockProducts.length / ACTIVE_STOCK_PAGE_SIZE))
   const activeStockPage = Math.min(requestedStockPage, activeStockTotalPages)
   const activeStockStart = (activeStockPage - 1) * ACTIVE_STOCK_PAGE_SIZE
-  const visibleActiveStockProducts = activeStockProducts.slice(activeStockStart, activeStockStart + ACTIVE_STOCK_PAGE_SIZE)
+  const visibleActiveStockProducts = filteredActiveStockProducts.slice(activeStockStart, activeStockStart + ACTIVE_STOCK_PAGE_SIZE)
   const activeStockTotalUnits = activeStockProducts.reduce((sum, product) => sum + toInt(product.inventory_qty), 0)
   const activeStockForecastRevenueCents = activeStockProducts.reduce((sum, product) => sum + productStockValueCents(product), 0)
   const sellableProductsCount = activeStockProducts.filter((product) => toInt(product.inventory_qty) > 0).length
@@ -480,20 +522,47 @@ export default async function StoreDashboardPage({ searchParams }: { searchParam
         </section>
 
         <section className="space-y-3">
-          <div className="flex flex-wrap items-end justify-between gap-2">
+          <div className="flex flex-wrap items-end justify-between gap-3">
             <div>
               <h2 className="text-base font-semibold">Available stock by active product</h2>
-              <p className="text-sm text-[hsl(var(--muted))]">Active products only · 5 products per page · {activeStockTotalUnits} units available.</p>
+              <p className="text-sm text-[hsl(var(--muted))]">
+                Active products only · 5 products per page · {filteredActiveStockTotalUnits} units available · {activeStockCategoryLabel}.
+              </p>
             </div>
-            <Button asChild href="/admin/store" variant="outline" size="sm">
-              Manage catalog
-            </Button>
+            <div className="flex flex-wrap items-end gap-2">
+              <form method="get" action="/admin/store/dashboard" className="flex flex-wrap items-end gap-2">
+                <input type="hidden" name="stockPage" value="1" />
+                <label className="grid gap-1 text-xs font-medium text-[hsl(var(--muted))]">
+                  Category
+                  <select
+                    name="stockCategory"
+                    defaultValue={activeStockCategory}
+                    className="min-h-9 rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-1.5 text-sm text-[hsl(var(--fg))]"
+                  >
+                    {categoryOptions.map((option) => (
+                      <option key={option.value} value={option.value}>{option.label}</option>
+                    ))}
+                  </select>
+                </label>
+                <button type="submit" className="min-h-9 rounded-xl border px-3 py-1.5 text-sm font-semibold shadow-sm">
+                  Apply
+                </button>
+                {activeStockCategory !== 'all' ? (
+                  <Button asChild href={storeDashboardHref(1, 'all')} variant="outline" size="sm" className="min-h-9 rounded-xl px-3 py-1.5 text-sm">
+                    Clear
+                  </Button>
+                ) : null}
+              </form>
+              <Button asChild href="/admin/store" variant="outline" size="sm">
+                Manage catalog
+              </Button>
+            </div>
           </div>
 
           <Card className="p-4">
             <CardContent className="space-y-2">
               {visibleActiveStockProducts.length === 0 ? (
-                <div className="text-sm text-[hsl(var(--muted))]">No active products found.</div>
+                <div className="text-sm text-[hsl(var(--muted))]">No active products found for this category.</div>
               ) : (
                 <>
                   <div className="space-y-2">
@@ -507,7 +576,9 @@ export default async function StoreDashboardPage({ searchParams }: { searchParam
                           <div className="flex flex-wrap items-start gap-2">
                             <div className="min-w-0 flex-1">
                               <div className="truncate text-sm font-semibold">{productLabel(product)}</div>
-                              <div className="text-xs text-[hsl(var(--muted))]">#{shortId(product.id)}</div>
+                              <div className="text-xs text-[hsl(var(--muted))]">
+                                #{shortId(product.id)} · {categoryLabels.get(product.category || '') ?? product.category ?? 'Uncategorized'}
+                              </div>
                             </div>
                             <div className="flex flex-wrap items-center justify-end gap-2">
                               <span className={`rounded-full border px-2 py-1 text-xs font-medium ${status.className}`}>
@@ -530,11 +601,11 @@ export default async function StoreDashboardPage({ searchParams }: { searchParam
 
                   <div className="flex flex-wrap items-center justify-between gap-2 pt-2 text-xs text-[hsl(var(--muted))]">
                     <div>
-                      Showing {activeStockStart + 1}-{Math.min(activeStockStart + ACTIVE_STOCK_PAGE_SIZE, activeStockProducts.length)} of {activeStockProducts.length} active products
+                      Showing {activeStockStart + 1}-{Math.min(activeStockStart + ACTIVE_STOCK_PAGE_SIZE, filteredActiveStockProducts.length)} of {filteredActiveStockProducts.length} active products
                     </div>
                     <div className="flex items-center gap-2">
                       {activeStockPage > 1 ? (
-                        <Button asChild href={storeDashboardHref(activeStockPage - 1)} variant="outline" size="sm" className="min-h-9 rounded-xl px-3 py-1.5 text-xs">
+                        <Button asChild href={storeDashboardHref(activeStockPage - 1, activeStockCategory)} variant="outline" size="sm" className="min-h-9 rounded-xl px-3 py-1.5 text-xs">
                           Previous
                         </Button>
                       ) : (
@@ -542,7 +613,7 @@ export default async function StoreDashboardPage({ searchParams }: { searchParam
                       )}
                       <span>Page {activeStockPage} / {activeStockTotalPages}</span>
                       {activeStockPage < activeStockTotalPages ? (
-                        <Button asChild href={storeDashboardHref(activeStockPage + 1)} variant="outline" size="sm" className="min-h-9 rounded-xl px-3 py-1.5 text-xs">
+                        <Button asChild href={storeDashboardHref(activeStockPage + 1, activeStockCategory)} variant="outline" size="sm" className="min-h-9 rounded-xl px-3 py-1.5 text-xs">
                           Next
                         </Button>
                       ) : (
