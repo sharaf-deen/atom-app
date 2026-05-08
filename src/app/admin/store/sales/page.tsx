@@ -19,7 +19,7 @@ import StoreAdminNav from '@/components/store/StoreAdminNav'
 type SearchParams = Record<string, string | string[] | undefined>
 
 type SortDir = 'asc' | 'desc'
-type SaleSortKey = 'created_at' | 'buyer_full_name' | 'status' | 'total_cents' | 'paid_cents' | 'debt_cents'
+type SaleSortKey = 'created_at' | 'purchase_date' | 'buyer_full_name' | 'status' | 'total_cents' | 'paid_cents' | 'debt_cents'
 
 type SaleStatus = 'draft' | 'partial_paid' | 'paid' | 'delivered' | 'canceled'
 type PaymentMethod = 'cash' | 'card' | 'bank_transfer' | 'instapay'
@@ -40,6 +40,7 @@ type SaleRow = {
   debt_cents: number
   note: string | null
   delivered_at: string | null
+  purchase_date: string | null
   created_at: string
 }
 
@@ -88,7 +89,7 @@ function normalizeSortDir(v: string): SortDir {
 }
 
 function normalizeSaleSort(v: string): SaleSortKey {
-  return v === 'buyer_full_name' || v === 'status' || v === 'total_cents' || v === 'paid_cents' || v === 'debt_cents' ? v : 'created_at'
+  return v === 'purchase_date' || v === 'buyer_full_name' || v === 'status' || v === 'total_cents' || v === 'paid_cents' || v === 'debt_cents' ? v : 'purchase_date'
 }
 
 function renderSortLink(basePath: string, params: Record<string, string>, column: SaleSortKey, currentSort: SaleSortKey, currentDir: SortDir, label: string, defaultDir: SortDir = 'asc') {
@@ -137,6 +138,17 @@ function fmtDateTime(iso?: string | null) {
     day: '2-digit',
     hour: '2-digit',
     minute: '2-digit',
+  })
+}
+
+function fmtDate(value?: string | null) {
+  if (!value) return '—'
+  const d = new Date(`${value}T00:00:00`)
+  if (Number.isNaN(d.getTime())) return value
+  return d.toLocaleDateString('en-GB', {
+    year: 'numeric',
+    month: 'short',
+    day: '2-digit',
   })
 }
 
@@ -257,7 +269,7 @@ export default async function AdminStoreSalesPage({ searchParams }: { searchPara
     let countQ = supa.from('store_sales').select('id', { count: 'exact', head: true })
     let salesQ = supa
       .from('store_sales')
-      .select('id,buyer_user_id,buyer_member_id,buyer_full_name,buyer_email,buyer_phone,status,payment_method,currency,total_cents,discount_cents,paid_cents,debt_cents,note,delivered_at,created_at')
+      .select('id,buyer_user_id,buyer_member_id,buyer_full_name,buyer_email,buyer_phone,status,payment_method,currency,total_cents,discount_cents,paid_cents,debt_cents,note,delivered_at,purchase_date,created_at')
       .order(sort, { ascending: dir === 'asc' })
 
     if (sort !== 'created_at') {
@@ -321,7 +333,7 @@ export default async function AdminStoreSalesPage({ searchParams }: { searchPara
     <main>
       <PageHeader
         title="Store Admin — Sales & Debt"
-        subtitle="Dense admin row list for sales with expandable detail panels."
+        subtitle="Create sales, track purchase dates, and edit sale details safely."
       />
 
       <Section className="space-y-4">
@@ -400,7 +412,7 @@ export default async function AdminStoreSalesPage({ searchParams }: { searchPara
           {sales.length > 0 ? (
             <Card>
               <CardContent className="space-y-4">
-                <div className="text-xs text-[hsl(var(--muted))]">Ultra-dense desktop row list. Open only the sales you need to inspect or edit. Click desktop headers to sort.</div>
+                <div className="text-xs text-[hsl(var(--muted))]">Dense desktop row list. Open only the sales you need to inspect, edit, or delete. Click desktop headers to sort.</div>
 
                 <div className="hidden lg:grid sticky top-16 z-20 grid-cols-[minmax(0,1.8fr)_minmax(0,1.8fr)_140px_120px_120px_120px_150px_96px] gap-3 rounded-2xl border bg-[hsl(var(--card))]/95 px-4 py-3 text-[11px] font-semibold uppercase tracking-[0.14em] text-[hsl(var(--muted))] shadow-sm backdrop-blur supports-[backdrop-filter]:bg-[hsl(var(--card))]/90">
                   {renderSortLink('/admin/store/sales', baseParams, 'buyer_full_name', sort, dir, 'Buyer')}
@@ -409,7 +421,7 @@ export default async function AdminStoreSalesPage({ searchParams }: { searchPara
                   {renderSortLink('/admin/store/sales', baseParams, 'total_cents', sort, dir, 'Total', 'desc')}
                   {renderSortLink('/admin/store/sales', baseParams, 'paid_cents', sort, dir, 'Paid', 'desc')}
                   {renderSortLink('/admin/store/sales', baseParams, 'debt_cents', sort, dir, 'Debt', 'desc')}
-                  {renderSortLink('/admin/store/sales', baseParams, 'created_at', sort, dir, 'Created', 'desc')}
+                  {renderSortLink('/admin/store/sales', baseParams, 'purchase_date', sort, dir, 'Purchase', 'desc')}
                   <div className="text-right">Open</div>
                 </div>
 
@@ -418,14 +430,10 @@ export default async function AdminStoreSalesPage({ searchParams }: { searchPara
                     {sales.map((sale) => {
                     const items = itemsBySale.get(sale.id) ?? []
                     const hasAppliedStock = items.some((item) => !!item.delivered_stock_applied)
-                    const canDeleteSale = (sale.status === 'draft' || sale.status === 'canceled') && !hasAppliedStock
+                    const canDeleteSale = !hasAppliedStock
                     const deleteBlockedReason = canDeleteSale
                       ? null
-                      : hasAppliedStock
-                        ? 'Delete is blocked because stock was already applied on this sale.'
-                        : sale.status === 'draft' || sale.status === 'canceled'
-                          ? null
-                          : 'Only draft or canceled sales can be deleted.'
+                      : 'Delete is blocked because stock was already applied on this sale.'
 
                     return (
                       <details key={sale.id} className="group overflow-hidden rounded-2xl border bg-white shadow-sm">
@@ -444,7 +452,7 @@ export default async function AdminStoreSalesPage({ searchParams }: { searchPara
                               <div><span className="text-[hsl(var(--muted))]">Total:</span> <span className="font-medium">{formatCurrency(sale.total_cents, 'en-EG', sale.currency || 'EGP')}</span></div>
                               <div><span className="text-[hsl(var(--muted))]">Paid:</span> <span className="font-medium">{formatCurrency(sale.paid_cents, 'en-EG', sale.currency || 'EGP')}</span></div>
                               <div><span className="text-[hsl(var(--muted))]">Debt:</span> <span className="font-medium">{formatCurrency(sale.debt_cents, 'en-EG', sale.currency || 'EGP')}</span></div>
-                              <div><span className="text-[hsl(var(--muted))]">Created:</span> <span className="font-medium">{fmtDateTime(sale.created_at)}</span></div>
+                              <div><span className="text-[hsl(var(--muted))]">Purchase:</span> <span className="font-medium">{fmtDate(sale.purchase_date)}</span></div>
                             </div>
                             <div className="mt-3 text-right text-xs font-medium text-[hsl(var(--muted))] group-open:hidden">Tap to open</div>
                             <div className="mt-3 hidden text-right text-xs font-medium text-[hsl(var(--muted))] group-open:block">Tap to close</div>
@@ -467,7 +475,7 @@ export default async function AdminStoreSalesPage({ searchParams }: { searchPara
                             <div className="text-sm font-medium">{formatCurrency(sale.total_cents, 'en-EG', sale.currency || 'EGP')}</div>
                             <div className="text-sm font-medium">{formatCurrency(sale.paid_cents, 'en-EG', sale.currency || 'EGP')}</div>
                             <div className="text-sm font-medium">{formatCurrency(sale.debt_cents, 'en-EG', sale.currency || 'EGP')}</div>
-                            <div className="text-sm text-[hsl(var(--muted))]">{fmtDateTime(sale.created_at)}</div>
+                            <div className="text-sm text-[hsl(var(--muted))]">{fmtDate(sale.purchase_date)}</div>
                             <div className="text-right text-xs font-medium text-[hsl(var(--muted))] group-open:hidden">Details</div>
                             <div className="hidden text-right text-xs font-medium text-[hsl(var(--muted))] group-open:block">Close</div>
                           </div>
@@ -492,7 +500,7 @@ export default async function AdminStoreSalesPage({ searchParams }: { searchPara
                                 </div>
                                 <div className="rounded-2xl border bg-white p-3 text-sm">
                                   <div className="text-[11px] uppercase tracking-[0.12em] text-[hsl(var(--muted))]">Timeline</div>
-                                  <div className="mt-1">Created: <span className="font-medium">{fmtDateTime(sale.created_at)}</span></div>
+                                  <div className="mt-1">Purchase: <span className="font-medium">{fmtDate(sale.purchase_date)}</span></div>
                                   <div>Delivered: <span className="font-medium">{fmtDateTime(sale.delivered_at)}</span></div>
                                   <div>Payment: <span className="font-medium">{sale.payment_method || '—'}</span></div>
                                 </div>
@@ -533,12 +541,26 @@ export default async function AdminStoreSalesPage({ searchParams }: { searchPara
 
                             <AdminSaleQuickEdit
                               id={sale.id}
+                              purchaseDate={sale.purchase_date}
+                              buyerFullName={sale.buyer_full_name}
+                              buyerEmail={sale.buyer_email}
+                              buyerPhone={sale.buyer_phone}
                               totalCents={sale.total_cents}
+                              discountCents={sale.discount_cents}
                               paidCents={sale.paid_cents}
                               debtCents={sale.debt_cents}
                               paymentMethod={sale.payment_method}
                               status={sale.status}
                               note={sale.note}
+                              currency={sale.currency}
+                              item={items[0] ? {
+                                productId: items[0].product_id,
+                                productName: items[0].product_name,
+                                qty: items[0].qty,
+                                unitPriceCents: items[0].unit_price_cents,
+                                deliveredStockApplied: !!items[0].delivered_stock_applied,
+                              } : null}
+                              hasAppliedStock={hasAppliedStock}
                               canDelete={canDeleteSale}
                               deleteBlockedReason={deleteBlockedReason}
                             />

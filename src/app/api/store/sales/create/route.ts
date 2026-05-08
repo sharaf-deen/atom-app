@@ -11,6 +11,7 @@ type PaymentMethod = 'cash' | 'card' | 'bank_transfer' | 'instapay'
 
 type Body = {
   product_id?: string
+  purchase_date?: string | null
   qty?: number
   buyer_user_id?: string | null
   buyer_full_name?: string
@@ -45,6 +46,11 @@ function buildBuyerFullName(profile: { first_name: string | null; last_name: str
   return name || profile.email || profile.member_id || 'Buyer'
 }
 
+function normalizeDateInput(value: unknown) {
+  const s = String(value || '').trim()
+  return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : new Date().toISOString().slice(0, 10)
+}
+
 export async function POST(req: Request) {
   try {
     const authClient = createSupabaseServerActionClient()
@@ -73,6 +79,7 @@ export async function POST(req: Request) {
 
     const body = (await req.json().catch(() => ({}))) as Body
     const productId = String(body.product_id || '').trim()
+    const purchaseDate = normalizeDateInput(body.purchase_date)
     const qty = Math.max(1, Math.floor(Number(body.qty || 0) || 0))
     const buyerUserId = String(body.buyer_user_id || '').trim() || null
     let buyerMemberId: string | null = null
@@ -158,6 +165,7 @@ export async function POST(req: Request) {
       .from('store_sales')
       .insert({
         buyer_user_id: buyerUserId,
+        purchase_date: purchaseDate,
         buyer_member_id: buyerMemberId,
         buyer_full_name: buyerFullName,
         buyer_email: buyerEmail,
