@@ -40,6 +40,10 @@ const PAYMENT_METHODS: Array<{ value: PaymentMethod; label: string }> = [
   { value: 'card', label: 'Card' },
 ]
 
+function todayInputDate() {
+  return new Date().toISOString().slice(0, 10)
+}
+
 function productLabel(p: ProductOption) {
   const bits = [p.name, p.color || null, p.size || null].filter(Boolean)
   return bits.join(' · ')
@@ -59,6 +63,7 @@ function buyerMeta(buyer: BuyerOption) {
 export default function AdminSaleForm({ products }: { products: ProductOption[] }) {
   const router = useRouter()
   const [productId, setProductId] = useState<string>(products[0]?.id ?? '')
+  const [purchaseDate, setPurchaseDate] = useState<string>(todayInputDate())
   const [buyerQuery, setBuyerQuery] = useState('')
   const [buyerResults, setBuyerResults] = useState<BuyerOption[]>([])
   const [selectedBuyer, setSelectedBuyer] = useState<BuyerOption | null>(null)
@@ -153,6 +158,7 @@ export default function AdminSaleForm({ products }: { products: ProductOption[] 
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           product_id: selectedProduct.id,
+          purchase_date: purchaseDate,
           qty: Math.max(1, Math.floor(qty || 0)),
           buyer_user_id: selectedBuyer?.user_id ?? null,
           buyer_full_name: selectedBuyer ? null : buyerQuery.trim() || null,
@@ -174,6 +180,7 @@ export default function AdminSaleForm({ products }: { products: ProductOption[] 
       setStatus({ kind: 'success', msg: 'Sale created' })
       toast.success('Sale created')
       clearBuyer()
+      setPurchaseDate(todayInputDate())
       setQty(1)
       setDiscount('0.00')
       setPaid('0.00')
@@ -193,10 +200,10 @@ export default function AdminSaleForm({ products }: { products: ProductOption[] 
   return (
     <form onSubmit={onSubmit} className="grid gap-4">
       <InlineAlert compact variant="info">
-        Buyer is optional. Select a member, type a walk-in name, or leave empty for an unknown buyer. Stock is reduced only when the sale is marked as delivered.
+        Buyer is optional. Select a member, type a walk-in name, or leave empty for an unknown buyer. Purchase date is the real sale date. Stock is reduced only when the sale is marked as delivered.
       </InlineAlert>
 
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+      <div className="grid grid-cols-1 gap-3 lg:grid-cols-[minmax(0,1.2fr)_180px_minmax(0,1.2fr)]">
         <Select
           label="Product *"
           value={productId}
@@ -210,6 +217,15 @@ export default function AdminSaleForm({ products }: { products: ProductOption[] 
             </option>
           ))}
         </Select>
+
+        <Input
+          label="Purchase date *"
+          type="date"
+          value={purchaseDate}
+          onChange={(e) => setPurchaseDate(e.target.value)}
+          disabled={busy}
+          required
+        />
 
         <div className="relative">
           <Input
