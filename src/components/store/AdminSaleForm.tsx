@@ -145,11 +145,6 @@ export default function AdminSaleForm({ products }: { products: ProductOption[] 
       toast.error('Select a product')
       return
     }
-    if (!selectedBuyer) {
-      toast.error('Select a buyer')
-      return
-    }
-
     setBusy(true)
     setStatus({ kind: '', msg: '' })
     try {
@@ -159,7 +154,8 @@ export default function AdminSaleForm({ products }: { products: ProductOption[] 
         body: JSON.stringify({
           product_id: selectedProduct.id,
           qty: Math.max(1, Math.floor(qty || 0)),
-          buyer_user_id: selectedBuyer.user_id,
+          buyer_user_id: selectedBuyer?.user_id ?? null,
+          buyer_full_name: selectedBuyer ? null : buyerQuery.trim() || null,
           discount_cents: discountCents,
           paid_cents: parsePriceToCents(paid),
           payment_method: paymentMethod,
@@ -197,7 +193,7 @@ export default function AdminSaleForm({ products }: { products: ProductOption[] 
   return (
     <form onSubmit={onSubmit} className="grid gap-4">
       <InlineAlert compact variant="info">
-        Select a member as buyer. Stock is reduced only when the sale is marked as delivered.
+        Buyer is optional. Select a member, type a walk-in name, or leave empty for an unknown buyer. Stock is reduced only when the sale is marked as delivered.
       </InlineAlert>
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -217,15 +213,14 @@ export default function AdminSaleForm({ products }: { products: ProductOption[] 
 
         <div className="relative">
           <Input
-            label="Buyer *"
+            label="Buyer (optional)"
             value={buyerQuery}
             onChange={(e) => {
               setBuyerQuery(e.target.value)
               setSelectedBuyer(null)
             }}
             disabled={busy}
-            required
-            placeholder="Search by name, email, or member ID"
+            placeholder="Search member, type buyer name, or leave empty"
             autoComplete="off"
           />
           {buyerQuery.trim().length >= 2 && !selectedBuyer ? (
@@ -259,7 +254,7 @@ export default function AdminSaleForm({ products }: { products: ProductOption[] 
             <div className="truncate text-xs text-emerald-800">{buyerMeta(selectedBuyer) || 'No contact details'}</div>
           </div>
           <Button type="button" variant="outline" size="sm" onClick={clearBuyer} disabled={busy}>
-            Change
+            Clear buyer
           </Button>
         </div>
       ) : null}
@@ -338,7 +333,7 @@ export default function AdminSaleForm({ products }: { products: ProductOption[] 
       ) : null}
 
       <div className="flex flex-wrap items-center gap-2">
-        <Button type="submit" disabled={busy || !selectedProduct || !selectedBuyer} loading={busy} loadingText="Saving…">
+        <Button type="submit" disabled={busy || !selectedProduct} loading={busy} loadingText="Saving…">
           Create sale
         </Button>
       </div>
