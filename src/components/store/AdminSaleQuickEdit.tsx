@@ -13,6 +13,34 @@ import { parsePriceToCents, toPriceString } from '@/lib/money'
 type PaymentMethod = 'cash' | 'card' | 'bank_transfer' | 'instapay'
 type SaleStatus = 'draft' | 'partial_paid' | 'paid' | 'delivered' | 'canceled'
 
+type SaleItemEdit = {
+  productId: string
+  productName: string | null
+  qty: number
+  unitPriceCents: number
+  deliveredStockApplied: boolean
+} | null
+
+type Props = {
+  id: string
+  purchaseDate: string | null
+  buyerFullName: string | null
+  buyerEmail: string | null
+  buyerPhone: string | null
+  totalCents: number
+  discountCents: number | null
+  paidCents: number
+  debtCents: number
+  paymentMethod: PaymentMethod | null
+  status: SaleStatus
+  note: string | null
+  currency: string | null
+  item: SaleItemEdit
+  hasAppliedStock: boolean
+  canDelete: boolean
+  deleteBlockedReason: string | null
+}
+
 const PAYMENT_METHODS: Array<{ value: PaymentMethod; label: string }> = [
   { value: 'cash', label: 'Cash' },
   { value: 'instapay', label: 'Instapay' },
@@ -20,7 +48,7 @@ const PAYMENT_METHODS: Array<{ value: PaymentMethod; label: string }> = [
   { value: 'card', label: 'Card' },
 ]
 
-const SALE_STATUSES: Array<{ value: SaleStatus; label: string }> = [
+const STATUSES: Array<{ value: SaleStatus; label: string }> = [
   { value: 'draft', label: 'Draft' },
   { value: 'partial_paid', label: 'Partial paid' },
   { value: 'paid', label: 'Paid' },
@@ -28,195 +56,294 @@ const SALE_STATUSES: Array<{ value: SaleStatus; label: string }> = [
   { value: 'canceled', label: 'Canceled' },
 ]
 
+function centsToInput(cents: number | null | undefined) {
+  return (Math.max(0, Math.floor(Number(cents || 0))) / 100).toFixed(2)
+}
+
 export default function AdminSaleQuickEdit({
   id,
+  purchaseDate,
+  buyerFullName,
+  buyerEmail,
+  buyerPhone,
   totalCents,
+  discountCents,
   paidCents,
   debtCents,
   paymentMethod,
   status,
   note,
+  currency,
+  item,
+  hasAppliedStock,
   canDelete,
   deleteBlockedReason,
-}: {
-  id: string
-  totalCents: number
-  paidCents: number
-  debtCents: number
-  paymentMethod: PaymentMethod | null
-  status: SaleStatus
-  note: string | null
-  canDelete?: boolean
-  deleteBlockedReason?: string | null
-}) {
+}: Props) {
   const router = useRouter()
-  const [paid, setPaid] = useState<string>(toPriceString(paidCents))
-  const [method, setMethod] = useState<PaymentMethod>(paymentMethod ?? 'cash')
-  const [saleStatus, setSaleStatus] = useState<SaleStatus>(status)
-  const [internalNote, setInternalNote] = useState(note ?? '')
+  const [purchaseDateValue, setPurchaseDateValue] = useState(purchaseDate || new Date().toISOString().slice(0, 10))
+  const [buyerNameValue, setBuyerNameValue] = useState(buyerFullName || 'Unknown buyer')
+  const [buyerEmailValue, setBuyerEmailValue] = useState(buyerEmail || '')
+  const [buyerPhoneValue, setBuyerPhoneValue] = useState(buyerPhone || '')
+  const [statusValue, setStatusValue] = useState<SaleStatus>(status)
+  const [paymentValue, setPaymentValue] = useState<PaymentMethod>(paymentMethod || 'cash')
+  const [qtyValue, setQtyValue] = useState<number>(Math.max(1, Number(item?.qty || 1)))
+  const [unitPriceValue, setUnitPriceValue] = useState<string>(centsToInput(item?.unitPriceCents || totalCents))
+  const [discountValue, setDiscountValue] = useState<string>(centsToInput(discountCents))
+  const [paidValue, setPaidValue] = useState<string>(centsToInput(paidCents))
+  const [noteValue, setNoteValue] = useState(note || '')
   const [busy, setBusy] = useState(false)
-  const [deleting, setDeleting] = useState(false)
-  const [err, setErr] = useState('')
+  const [deleteBusy, setDeleteBusy] = useState(false)
+  const [message, setMessage] = useState<{ kind: '' | 'success' | 'error'; text: string }>({ kind: '', text: '' })
 
-  const nextPaidCents = useMemo(() => {
-    const cents = parsePriceToCents(paid)
-    return Math.max(0, Math.min(cents, totalCents))
-  }, [paid, totalCents])
+  const preview = useMemo(() => {
+    const qty = Math.max(1, Math.floor(Number(qtyValue || 1)))
+    const unitPriceCents = parsePriceToCents(unitPriceValue)
+    const subtotalCents = Math.max(0, qty * unitPriceCents)
+    const discount = Math.max(0, Math.min(parsePriceToCents(discountValue), subtotalCents))
+    const total = Math.max(0, subtotalCents - discount)
+    const paid = Math.max(0, Math.min(parsePriceToCents(paidValue), total))
+    const debt = Math.max(0, total - paid)
+    return { qty, unitPriceCents, subtotalCents, discount, total, paid, debt }
+  }, [discountValue, paidValue, qtyValue, unitPriceValue])
 
-  const nextDebtCents = useMemo(() => Math.max(totalCents - nextPaidCents, 0), [totalCents, nextPaidCents])
-
-  const dirty = useMemo(() => {
-    return (
-      nextPaidCents !== paidCents ||
-      method !== (paymentMethod ?? 'cash') ||
-      saleStatus !== status ||
-      (internalNote || '') !== (note || '')
-    )
-  }, [nextPaidCents, paidCents, method, paymentMethod, saleStatus, status, internalNote, note])
-
-  const statusLocked = status === 'delivered' || status === 'canceled'
-
-  async function save() {
-    if (!dirty || busy) return
+  async function saveChanges() {
     setBusy(true)
-    setErr('')
+    setMessage({ kind: '', text: '' })
     try {
-      const r = await fetch('/api/store/sales/admin-update', {
-        method: 'PATCH',
+      const res = await fetch('/api/store/sales/update', {
+        method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          id,
-          paid_cents: nextPaidCents,
-          payment_method: method,
-          status: saleStatus,
-          note: internalNote.trim() || null,
+          sale_id: id,
+          purchase_date: purchaseDateValue,
+          buyer_full_name: buyerNameValue.trim() || null,
+          buyer_email: buyerEmailValue.trim() || null,
+          buyer_phone: buyerPhoneValue.trim() || null,
+          status: statusValue,
+          payment_method: paymentValue,
+          qty: preview.qty,
+          unit_price_cents: preview.unitPriceCents,
+          discount_cents: preview.discount,
+          paid_cents: preview.paid,
+          note: noteValue.trim() || null,
         }),
         cache: 'no-store',
       })
-      const j = await r.json().catch(() => ({}))
-      if (!r.ok || !j?.ok) {
-        const msg = j?.details || j?.error || 'Update failed'
-        setErr(msg)
-        toast.error(msg)
+      const json = await res.json().catch(() => ({}))
+      if (!res.ok || !json?.ok) {
+        const err = json?.details || json?.error || 'Sale update failed'
+        setMessage({ kind: 'error', text: err })
+        toast.error(err)
         return
       }
+      setMessage({ kind: 'success', text: 'Sale updated' })
       toast.success('Sale updated')
       router.refresh()
       setTimeout(() => router.refresh(), 250)
     } catch (e: any) {
-      const msg = e?.message || 'Network error'
-      setErr(msg)
-      toast.error(msg)
+      const err = e?.message || 'Network error'
+      setMessage({ kind: 'error', text: err })
+      toast.error(err)
     } finally {
       setBusy(false)
     }
   }
 
   async function deleteSale() {
-    if (!canDelete || deleting) return
-    const confirmed = window.confirm('Delete this sale? This action cannot be undone.')
-    if (!confirmed) return
+    if (!canDelete) return
+    const ok = window.confirm('Delete this sale permanently? This cannot be undone.')
+    if (!ok) return
 
-    setDeleting(true)
-    setErr('')
+    setDeleteBusy(true)
+    setMessage({ kind: '', text: '' })
     try {
-      const r = await fetch(`/api/store/sales/delete?id=${encodeURIComponent(id)}`, {
-        method: 'DELETE',
+      const res = await fetch('/api/store/sales/delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sale_id: id }),
         cache: 'no-store',
       })
-      const j = await r.json().catch(() => ({}))
-      if (!r.ok || !j?.ok) {
-        const msg = j?.details || j?.error || 'Delete failed'
-        setErr(msg)
-        toast.error(msg)
+      const json = await res.json().catch(() => ({}))
+      if (!res.ok || !json?.ok) {
+        const err = json?.details || json?.error || 'Sale delete failed'
+        setMessage({ kind: 'error', text: err })
+        toast.error(err)
         return
       }
       toast.success('Sale deleted')
       router.refresh()
       setTimeout(() => router.refresh(), 250)
     } catch (e: any) {
-      const msg = e?.message || 'Network error'
-      setErr(msg)
-      toast.error(msg)
+      const err = e?.message || 'Network error'
+      setMessage({ kind: 'error', text: err })
+      toast.error(err)
     } finally {
-      setDeleting(false)
+      setDeleteBusy(false)
     }
   }
 
   return (
-    <div className="grid gap-3 rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4">
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+    <div className="rounded-2xl border bg-white p-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <div className="text-sm font-semibold">Edit sale</div>
+          <div className="text-xs text-[hsl(var(--muted))]">Edit purchase, buyer, money, status, item quantity, and note.</div>
+        </div>
+        <div className="rounded-full border px-2.5 py-1 text-xs text-[hsl(var(--muted))]">
+          Current debt: {toPriceString(debtCents)} {currency || 'EGP'}
+        </div>
+      </div>
+
+      <div className="mt-4 grid gap-3">
         <Input
-          label="Paid"
-          type="number"
-          inputMode="decimal"
-          min="0"
-          step="0.01"
-          value={paid}
-          onChange={(e) => setPaid(e.target.value)}
-          disabled={busy || deleting}
+          label="Purchase date"
+          type="date"
+          value={purchaseDateValue}
+          onChange={(e) => setPurchaseDateValue(e.target.value)}
+          disabled={busy || deleteBusy}
         />
 
-        <Select label="Payment method" value={method} onChange={(e) => setMethod(e.target.value as PaymentMethod)} disabled={busy || deleting}>
-          {PAYMENT_METHODS.map((m) => (
-            <option key={m.value} value={m.value}>
-              {m.label}
-            </option>
-          ))}
-        </Select>
+        <div className="grid gap-3 sm:grid-cols-3">
+          <Input
+            label="Buyer name"
+            value={buyerNameValue}
+            onChange={(e) => setBuyerNameValue(e.target.value)}
+            disabled={busy || deleteBusy}
+            placeholder="Unknown buyer"
+          />
+          <Input
+            label="Buyer email"
+            type="email"
+            value={buyerEmailValue}
+            onChange={(e) => setBuyerEmailValue(e.target.value)}
+            disabled={busy || deleteBusy}
+            placeholder="Optional"
+          />
+          <Input
+            label="Buyer phone"
+            value={buyerPhoneValue}
+            onChange={(e) => setBuyerPhoneValue(e.target.value)}
+            disabled={busy || deleteBusy}
+            placeholder="Optional"
+          />
+        </div>
 
-        <Select
-          label="Status"
-          value={saleStatus}
-          onChange={(e) => setSaleStatus(e.target.value as SaleStatus)}
-          disabled={busy || deleting || statusLocked}
-        >
-          {SALE_STATUSES.map((s) => (
-            <option key={s.value} value={s.value}>
-              {s.label}
-            </option>
-          ))}
-        </Select>
-      </div>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Select
+            label="Status"
+            value={statusValue}
+            onChange={(e) => setStatusValue(e.target.value as SaleStatus)}
+            disabled={busy || deleteBusy || hasAppliedStock}
+          >
+            {STATUSES.map((s) => (
+              <option key={s.value} value={s.value}>{s.label}</option>
+            ))}
+          </Select>
+          <Select
+            label="Payment method"
+            value={paymentValue}
+            onChange={(e) => setPaymentValue(e.target.value as PaymentMethod)}
+            disabled={busy || deleteBusy}
+          >
+            {PAYMENT_METHODS.map((p) => (
+              <option key={p.value} value={p.value}>{p.label}</option>
+            ))}
+          </Select>
+        </div>
 
-      <Textarea
-        label="Internal note"
-        rows={2}
-        value={internalNote}
-        onChange={(e) => setInternalNote(e.target.value)}
-        disabled={busy || deleting}
-      />
+        {item ? (
+          <div className="rounded-2xl border p-3">
+            <div className="text-xs font-medium text-[hsl(var(--muted))]">Item</div>
+            <div className="mt-1 truncate text-sm font-semibold">{item.productName || 'Product'}</div>
+            {hasAppliedStock ? (
+              <div className="mt-2 text-xs text-amber-700">Quantity and price are locked because stock was already applied.</div>
+            ) : null}
+            <div className="mt-3 grid gap-3 sm:grid-cols-2">
+              <Input
+                label="Quantity"
+                type="number"
+                min={1}
+                value={qtyValue}
+                onChange={(e) => setQtyValue(Number(e.target.value || 1))}
+                disabled={busy || deleteBusy || hasAppliedStock}
+              />
+              <Input
+                label="Unit price (EGP)"
+                type="number"
+                inputMode="decimal"
+                min="0"
+                step="0.01"
+                value={unitPriceValue}
+                onChange={(e) => setUnitPriceValue(e.target.value)}
+                disabled={busy || deleteBusy || hasAppliedStock}
+              />
+            </div>
+          </div>
+        ) : null}
 
-      <div className="rounded-2xl border border-[hsl(var(--border))] bg-white p-3 text-sm">
-        <div>Total: {toPriceString(totalCents)} EGP</div>
-        <div>Current debt: {toPriceString(debtCents)} EGP</div>
-        <div>Next debt after save: {toPriceString(nextDebtCents)} EGP</div>
-      </div>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Input
+            label="Discount (EGP)"
+            type="number"
+            inputMode="decimal"
+            min="0"
+            step="0.01"
+            value={discountValue}
+            onChange={(e) => setDiscountValue(e.target.value)}
+            disabled={busy || deleteBusy}
+          />
+          <Input
+            label="Paid (EGP)"
+            type="number"
+            inputMode="decimal"
+            min="0"
+            step="0.01"
+            value={paidValue}
+            onChange={(e) => setPaidValue(e.target.value)}
+            disabled={busy || deleteBusy}
+          />
+        </div>
 
-      {statusLocked ? (
-        <InlineAlert compact variant="info">
-          {status === 'delivered'
-            ? 'Delivered sales stay delivered. You can still adjust paid amount, payment method, and note.'
-            : 'Canceled sales stay canceled. You can still update note and payment details if needed.'}
-        </InlineAlert>
-      ) : null}
+        <div className="rounded-2xl border bg-[hsl(var(--bg))] p-3 text-sm">
+          <div className="text-[11px] font-medium text-[hsl(var(--muted))]">Preview</div>
+          <div className="mt-1 grid gap-1 sm:grid-cols-2">
+            <div>Total: <span className="font-medium">{toPriceString(preview.total)} {currency || 'EGP'}</span></div>
+            <div>Debt: <span className="font-medium">{toPriceString(preview.debt)} {currency || 'EGP'}</span></div>
+          </div>
+        </div>
 
-      {deleteBlockedReason ? <InlineAlert compact variant="info">{deleteBlockedReason}</InlineAlert> : null}
-      {err ? <InlineAlert variant="error">{err}</InlineAlert> : null}
+        <Textarea
+          label="Note"
+          value={noteValue}
+          onChange={(e) => setNoteValue(e.target.value)}
+          rows={3}
+          disabled={busy || deleteBusy}
+          placeholder="Optional internal note"
+        />
 
-      <div className="flex flex-wrap items-center gap-2">
-        <Button onClick={save} disabled={!dirty || busy || deleting} loading={busy} loadingText="Saving…">
-          Save
-        </Button>
-        <Button
-          variant="outline"
-          onClick={deleteSale}
-          disabled={!canDelete || busy || deleting}
-          loading={deleting}
-          loadingText="Deleting…"
-        >
-          Delete sale
-        </Button>
+        {message.text ? (
+          <InlineAlert compact variant={message.kind === 'error' ? 'error' : 'success'}>{message.text}</InlineAlert>
+        ) : null}
+
+        {deleteBlockedReason ? (
+          <InlineAlert compact variant="info">{deleteBlockedReason}</InlineAlert>
+        ) : null}
+
+        <div className="flex flex-wrap items-center gap-2">
+          <Button type="button" onClick={saveChanges} disabled={busy || deleteBusy} loading={busy} loadingText="Saving…">
+            Save changes
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={deleteSale}
+            disabled={!canDelete || busy || deleteBusy}
+            loading={deleteBusy}
+            loadingText="Deleting…"
+          >
+            Delete sale
+          </Button>
+        </div>
       </div>
     </div>
   )
