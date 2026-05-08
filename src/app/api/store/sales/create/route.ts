@@ -189,7 +189,6 @@ export async function POST(req: Request) {
       product_name: productName,
       qty,
       unit_price_cents: Number(product.price_cents || 0),
-      line_total_cents: totalCents,
       currency,
       delivered_stock_applied: false,
     })
