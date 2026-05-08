@@ -112,6 +112,11 @@ function strParam(v: unknown) {
   return typeof s === 'string' ? s : ''
 }
 
+function normalizeDateParam(v: unknown) {
+  const s = strParam(v).trim()
+  return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : ''
+}
+
 function clampInt(v: unknown, def: number, min: number, max: number) {
   const raw = Array.isArray(v) ? v[0] : v
   const n = Number(raw)
@@ -215,7 +220,9 @@ export default async function AdminStoreSalesPage({ searchParams }: { searchPara
   const statusRaw = strParam(searchParams?.status)
   const paymentRaw = strParam(searchParams?.payment)
   const page = clampInt(searchParams?.page, 1, 1, 9999)
-  const pageSize = clampInt(searchParams?.page_size, 12, 6, 50)
+  const pageSize = 5
+  const purchaseFrom = normalizeDateParam(searchParams?.purchase_from)
+  const purchaseTo = normalizeDateParam(searchParams?.purchase_to)
   const sort = normalizeSaleSort(strParam(searchParams?.sort))
   const dir = normalizeSortDir(strParam(searchParams?.dir))
 
@@ -286,6 +293,14 @@ export default async function AdminStoreSalesPage({ searchParams }: { searchPara
       countQ = countQ.eq('payment_method', payment)
       salesQ = salesQ.eq('payment_method', payment)
     }
+    if (purchaseFrom) {
+      countQ = countQ.gte('purchase_date', purchaseFrom)
+      salesQ = salesQ.gte('purchase_date', purchaseFrom)
+    }
+    if (purchaseTo) {
+      countQ = countQ.lte('purchase_date', purchaseTo)
+      salesQ = salesQ.lte('purchase_date', purchaseTo)
+    }
     if (q) {
       const like = `%${q.replace(/,/g, ' ')}%`
       const orExpr = `buyer_full_name.ilike.${like},buyer_email.ilike.${like},buyer_phone.ilike.${like}`
@@ -324,7 +339,8 @@ export default async function AdminStoreSalesPage({ searchParams }: { searchPara
     q,
     status,
     payment,
-    page_size: String(pageSize),
+    purchase_from: purchaseFrom,
+    purchase_to: purchaseTo,
     sort,
     dir,
   }
@@ -333,7 +349,7 @@ export default async function AdminStoreSalesPage({ searchParams }: { searchPara
     <main>
       <PageHeader
         title="Store Admin — Sales & Debt"
-        subtitle="Create sales, track purchase dates, and edit sale details safely."
+        subtitle="Create sales, filter purchase dates, and edit sale details safely."
       />
 
       <Section className="space-y-4">
@@ -358,7 +374,7 @@ export default async function AdminStoreSalesPage({ searchParams }: { searchPara
 
         <Card>
           <CardContent className="space-y-4">
-            <form className="grid grid-cols-1 gap-3 md:grid-cols-4" action="/admin/store/sales" method="get">
+            <form className="grid grid-cols-1 gap-3 md:grid-cols-6" action="/admin/store/sales" method="get">
               <label className="block md:col-span-2">
                 <span className="mb-1 block text-sm font-medium">Search buyer</span>
                 <input
@@ -384,10 +400,27 @@ export default async function AdminStoreSalesPage({ searchParams }: { searchPara
                   ))}
                 </select>
               </label>
-              <input type="hidden" name="page_size" value={String(pageSize)} />
+              <label className="block">
+                <span className="mb-1 block text-sm font-medium">From date</span>
+                <input
+                  type="date"
+                  name="purchase_from"
+                  defaultValue={purchaseFrom}
+                  className="min-h-[42px] w-full rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm"
+                />
+              </label>
+              <label className="block">
+                <span className="mb-1 block text-sm font-medium">To date</span>
+                <input
+                  type="date"
+                  name="purchase_to"
+                  defaultValue={purchaseTo}
+                  className="min-h-[42px] w-full rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm"
+                />
+              </label>
               <input type="hidden" name="sort" value={sort} />
               <input type="hidden" name="dir" value={dir} />
-              <div className="flex flex-wrap items-center gap-2 md:col-span-4">
+              <div className="flex flex-wrap items-center gap-2 md:col-span-6">
                 <Button type="submit">Apply filters</Button>
                 <Button asChild variant="outline" href="/admin/store/sales">
                   Reset
@@ -412,7 +445,7 @@ export default async function AdminStoreSalesPage({ searchParams }: { searchPara
           {sales.length > 0 ? (
             <Card>
               <CardContent className="space-y-4">
-                <div className="text-xs text-[hsl(var(--muted))]">Dense desktop row list. Open only the sales you need to inspect, edit, or delete. Click desktop headers to sort.</div>
+                <div className="text-xs text-[hsl(var(--muted))]">Dense desktop row list. 5 sales per page. Open only the sales you need to inspect, edit, or delete. Click desktop headers to sort.</div>
 
                 <div className="hidden lg:grid sticky top-16 z-20 grid-cols-[minmax(0,1.8fr)_minmax(0,1.8fr)_140px_120px_120px_120px_150px_96px] gap-3 rounded-2xl border bg-[hsl(var(--card))]/95 px-4 py-3 text-[11px] font-semibold uppercase tracking-[0.14em] text-[hsl(var(--muted))] shadow-sm backdrop-blur supports-[backdrop-filter]:bg-[hsl(var(--card))]/90">
                   {renderSortLink('/admin/store/sales', baseParams, 'buyer_full_name', sort, dir, 'Buyer')}
