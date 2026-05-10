@@ -142,7 +142,7 @@ function parseProgram(partA: string): { tops: string[]; blocks: ProgramBlock[] }
     // Titles like "Baby 3–5 years" / "Kids 6–9 years" / "Teens 10–14 years" contain digits
     // and must be treated as section titles (not time lines, not items).
     const isDigitTitle =
-      /^Baby\s+\d{1,2}\s*[–-]\s*\d{1,2}\s+years$/i.test(t) ||
+      /^Baby\s+\d{1,2}\s*[–-]\s*\d{1,2}\s+years(?:\s+Group\s+[A-Z])?$/i.test(t) ||
       /^Kids\s+\d{1,2}\s*[–-]\s*\d{1,2}\s+years$/i.test(t) ||
       /^Teens\s+\d{1,2}\s*[–-]\s*\d{1,2}\s+years$/i.test(t)
 
@@ -694,7 +694,16 @@ export default function ScheduleEditor({ initialContent, canEdit, updatedAt }: P
   }, [adultsStructured])
 
   const kidsStructured = useMemo(() => {
-    const baby = findFirstBlock(kidsBlocksAll, /^Baby\s+3\s*[-–]\s*5\s+years$/i)
+    const babyBlocks = findBlocks(kidsBlocksAll, /^Baby\s+3\s*[-–]\s*5\s+years(?:\s+Group\s+[A-Z])?$/i)
+    const babySorted = [...babyBlocks].sort((a, b) => {
+      const getGroupOrder = (title: string) => {
+        const m = title.match(/Group\s+([A-Z])/i)
+        if (!m?.[1]) return 0
+        return m[1].toUpperCase().charCodeAt(0) - 64
+      }
+      return getGroupOrder(a.title) - getGroupOrder(b.title) || a.title.localeCompare(b.title)
+    })
+    const baby = babySorted[0] || null
 
     const kids69 = findBlocks(kidsBlocksAll, /^Kids\s+6\s*[-–]\s*9\s+years$/i)
     const kids69Beg = kids69.find((b) => (b.subtitle || '').toLowerCase().includes('beginners')) || null
@@ -719,6 +728,7 @@ export default function ScheduleEditor({ initialContent, canEdit, updatedAt }: P
 
     return {
       baby,
+      babySorted,
       kids69Beg,
       kids69Int,
       teensBeg,
@@ -801,6 +811,12 @@ async function onSave() {
     kidsStructured.compSorted.find((b) => (b.subtitle || '').toUpperCase().trim() === 'GROUP A') || null
   const kidsCompB =
     kidsStructured.compSorted.find((b) => (b.subtitle || '').toUpperCase().trim() === 'GROUP B') || null
+
+  const babyBlocksForView = kidsStructured.babySorted.length
+    ? kidsStructured.babySorted
+    : kidsStructured.baby
+      ? [kidsStructured.baby]
+      : []
 
 return (
     <div className="space-y-4">
@@ -1003,20 +1019,37 @@ return (
                   </div>
 
                   <div className="grid gap-6 md:grid-cols-2">
-                    <BlockCard title="Baby 3-5 years">
-                      <div>
-                        <div className="text-sm font-semibold text-neutral-700">Beginners · Gi</div>
-                        <div className="mt-2 space-y-1.5">
-                          {itemsOrFallback(kidsStructured.baby, [
-                            'Monday – 5:15 PM',
-                            'Wednesday – 5:15 PM',
-                            'Saturday – 11:15 AM',
-                          ]).map((it, i) => (
-                            <ItemLine key={i} it={it} />
-                          ))}
+                    {babyBlocksForView.length ? (
+                      babyBlocksForView.map((babyBlock) => (
+                        <BlockCard key={babyBlock.id} title={babyBlock.title}>
+                          <div>
+                            <div className="text-sm font-semibold text-neutral-700">
+                              {babyBlock.subtitle || 'Beginners · Gi'}
+                            </div>
+                            <div className="mt-2 space-y-1.5">
+                              {itemsOrFallback(babyBlock, []).map((it, i) => (
+                                <ItemLine key={i} it={it} />
+                              ))}
+                            </div>
+                          </div>
+                        </BlockCard>
+                      ))
+                    ) : (
+                      <BlockCard title="Baby 3-5 years">
+                        <div>
+                          <div className="text-sm font-semibold text-neutral-700">Beginners · Gi</div>
+                          <div className="mt-2 space-y-1.5">
+                            {[
+                              'Monday – 5:15 PM',
+                              'Wednesday – 5:15 PM',
+                              'Saturday – 11:15 AM',
+                            ].map(makeProgramItem).map((it, i) => (
+                              <ItemLine key={i} it={it} />
+                            ))}
+                          </div>
                         </div>
-                      </div>
-                    </BlockCard>
+                      </BlockCard>
+                    )}
 
                     <BlockCard title="Kids 6–9 years">
                       <div>
