@@ -43,11 +43,11 @@ export default async function NotificationsPage() {
   return (
     <main>
       <PageHeader
-        title="Notifications"
+        title={canManage ? 'Notifications' : 'Discussions'}
         subtitle={
           canManage
-            ? 'Send clearly. Read quickly. Keep only what matters visible.'
-            : 'Unread first. Open fast. Keep only what matters.'
+            ? 'Send messages, review member replies, and keep the history clean.'
+            : 'Messages and updates from ATOM, displayed like simple conversations.'
         }
       />
 
@@ -92,25 +92,25 @@ export default async function NotificationsPage() {
             <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
               <div className="max-w-2xl">
                 <div className="flex flex-wrap items-center gap-2">
-                  <h2 className="text-xl font-semibold tracking-tight">Simple inbox, faster reading</h2>
-                  <Badge>Inbox</Badge>
+                  <h2 className="text-xl font-semibold tracking-tight">ATOM discussions</h2>
+                  <Badge>Discussions</Badge>
                 </div>
                 <p className="mt-2 text-base leading-7 text-[hsl(var(--muted))]">
-                  Open the latest update, mark it read, or keep it for later. The page stays focused on what matters now.
+                  Read important updates in a familiar discussion style: clear sender, short preview, and fast opening.
                 </p>
               </div>
 
               <div className="grid gap-3 sm:grid-cols-2 lg:min-w-[320px]">
                 <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] px-4 py-3">
-                  <div className="text-xs font-semibold uppercase tracking-[0.2em] text-[hsl(var(--muted))]">Focus</div>
-                  <div className="mt-1 text-base font-semibold">Unread first</div>
-                  <p className="mt-1 text-sm leading-6 text-[hsl(var(--muted))]">Start with the messages you have not opened yet.</p>
+                  <div className="text-xs font-semibold uppercase tracking-[0.2em] text-[hsl(var(--muted))]">Style</div>
+                  <div className="mt-1 text-base font-semibold">Discussion view</div>
+                  <p className="mt-1 text-sm leading-6 text-[hsl(var(--muted))]">Each update feels like a simple ATOM conversation.</p>
                 </div>
 
                 <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] px-4 py-3">
                   <div className="text-xs font-semibold uppercase tracking-[0.2em] text-[hsl(var(--muted))]">Actions</div>
                   <div className="mt-1 text-base font-semibold">Open, read, keep clean</div>
-                  <p className="mt-1 text-sm leading-6 text-[hsl(var(--muted))]">Only the essential actions stay visible.</p>
+                  <p className="mt-1 text-sm leading-6 text-[hsl(var(--muted))]">No email-style clutter, only what members need.</p>
                 </div>
               </div>
             </div>
@@ -130,11 +130,11 @@ export default async function NotificationsPage() {
         {hasInbox ? (
           <div className="space-y-3">
             <div>
-              <h2 className="text-lg font-semibold tracking-tight">{canManage ? 'Inbox' : 'My inbox'}</h2>
+              <h2 className="text-lg font-semibold tracking-tight">{canManage ? 'Inbox' : 'My discussions'}</h2>
               <p className="text-sm text-[hsl(var(--muted))]">
                 {canManage
                   ? 'Unread and important items stay easy to spot.'
-                  : 'Unread items stay first so you can read what matters quickly.'}
+                  : 'Open ATOM updates like short, simple discussions.'}
               </p>
             </div>
             <NotificationsList />
