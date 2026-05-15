@@ -6,6 +6,7 @@ import Input from '@/components/ui/Input'
 import Select from '@/components/ui/Select'
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card'
 import Badge from '@/components/ui/Badge'
+import ContactForm from '@/components/ContactForm'
 
 type Box = 'inbox' | 'sent'
 type SortMode = 'recent' | 'unread_first' | 'important_first'
@@ -31,6 +32,7 @@ const PER_PAGE = 5
 type Props = {
   isAdmin?: boolean
   sentOnly?: boolean
+  initialThread?: string | null
 }
 
 async function safeJson(r: Response) {
@@ -160,7 +162,7 @@ function sortItems(items: Item[], mode: SortMode, isSentView: boolean) {
   return copy
 }
 
-export default function NotificationsList({ isAdmin = false, sentOnly = false }: Props) {
+export default function NotificationsList({ isAdmin = false, sentOnly = false, initialThread = null }: Props) {
   const [box, setBox] = useState<Box>(sentOnly ? 'sent' : 'inbox')
   const [tab, setTab] = useState<'all' | 'unread'>('all')
   const [kind, setKind] = useState<KindFilter>('all')
@@ -175,6 +177,7 @@ export default function NotificationsList({ isAdmin = false, sentOnly = false }:
   const [err, setErr] = useState('')
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [openId, setOpenId] = useState<string | null>(null)
+  const [openAdminContact, setOpenAdminContact] = useState(false)
   const [actionMsg, setActionMsg] = useState('')
   const [audCounts, setAudCounts] = useState<{
     members: number
@@ -183,13 +186,21 @@ export default function NotificationsList({ isAdmin = false, sentOnly = false }:
     head_coaches: number
   } | null>(null)
 
+  const isSentView = sentOnly || box === 'sent'
+  const compactUserView = !isAdmin && !sentOnly
+
   useEffect(() => {
     if (sentOnly) setBox('sent')
   }, [sentOnly])
 
+  useEffect(() => {
+    if (!compactUserView) return
+    if (String(initialThread || '').toLowerCase() !== 'admin') return
+    setOpenAdminContact(true)
+    setOpenId(null)
+  }, [compactUserView, initialThread])
+
   const totalPages = useMemo(() => Math.max(1, Math.ceil(total / PER_PAGE)), [total])
-  const isSentView = sentOnly || box === 'sent'
-  const compactUserView = !isAdmin && !sentOnly
   const visibleItems = useMemo(() => sortItems(items, sortMode, isSentView), [items, sortMode, isSentView])
   const openItem = useMemo(() => visibleItems.find((item) => item.id === openId) ?? null, [visibleItems, openId])
   const unreadOnPage = useMemo(() => visibleItems.filter((item) => !item.read_at).length, [visibleItems])
@@ -431,6 +442,7 @@ export default function NotificationsList({ isAdmin = false, sentOnly = false }:
   }
 
   async function openItemAndRead(item: Item) {
+    setOpenAdminContact(false)
     setOpenId(item.id)
     if (!isSentView && !item.read_at) {
       const ok = await markIds([item.id], 'read')
@@ -546,6 +558,45 @@ export default function NotificationsList({ isAdmin = false, sentOnly = false }:
     }
   }
 
+  function openAdminContactThread() {
+    setOpenAdminContact(true)
+    setOpenId(null)
+    if (typeof window !== 'undefined') {
+      const url = new URL(window.location.href)
+      url.searchParams.set('thread', 'admin')
+      window.history.replaceState(null, '', `${url.pathname}?${url.searchParams.toString()}`)
+    }
+  }
+
+  function renderAdminContactConversation() {
+    return (
+      <div className="mt-4 overflow-hidden rounded-3xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] shadow-soft">
+        <div className="flex items-center gap-3 border-b border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4">
+          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full border border-zinc-200 bg-zinc-50 text-base font-bold text-zinc-800">
+            A
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="truncate text-base font-semibold leading-6">Admin</div>
+            <div className="truncate text-sm text-[hsl(var(--muted))]">Questions, support and important updates</div>
+          </div>
+        </div>
+
+        <div className="space-y-3 bg-[hsl(var(--bg))] p-4">
+          <div className="max-w-[92%] rounded-3xl rounded-tl-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] px-4 py-3 shadow-soft">
+            <div className="text-sm font-semibold leading-6">Contact admin</div>
+            <div className="mt-2 text-base leading-7 text-[hsl(var(--muted))]">
+              Need help with your membership, payments, store order, or training access? Send a short message to the ATOM admin team here.
+            </div>
+          </div>
+
+          <div className="ml-auto max-w-[96%]">
+            <ContactForm variant="composer" />
+          </div>
+        </div>
+      </div>
+    )
+  }
+
   function renderOpenConversation(item: Item) {
     const meta = channelMeta(item.kind)
     const signals = rowSignals(item)
@@ -606,16 +657,50 @@ export default function NotificationsList({ isAdmin = false, sentOnly = false }:
   }
 
   function renderCompactCards() {
-    if (visibleItems.length === 0) {
+    if (visibleItems.length === 0 && !compactUserView) {
       return (
         <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4 text-[hsl(var(--muted))]">
-          {compactUserView ? 'No discussions yet.' : isSentView ? 'No sent notifications.' : 'No inbox notifications.'}
+          {isSentView ? 'No sent notifications.' : 'No inbox notifications.'}
         </div>
       )
     }
 
     if (compactUserView) {
-      return visibleItems.map((n) => {
+      const adminCard = (
+        <button
+          key="admin-contact"
+          type="button"
+          onClick={openAdminContactThread}
+          className={
+            'w-full rounded-3xl border p-4 text-left shadow-soft transition hover:-translate-y-0.5 hover:shadow-md ' +
+            (openAdminContact ? 'border-black/20 bg-[hsl(var(--card))]' : 'border-[hsl(var(--border))] bg-[hsl(var(--card))]')
+          }
+        >
+          <div className="flex items-center gap-3">
+            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full border border-zinc-200 bg-zinc-50 text-base font-bold text-zinc-800">
+              A
+            </div>
+
+            <div className="min-w-0 flex-1">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2">
+                    <div className="truncate text-base font-semibold leading-6">Admin</div>
+                    {openAdminContact ? <span className="h-2 w-2 shrink-0 rounded-full bg-black" aria-label="Open discussion" /> : null}
+                  </div>
+                  <div className="mt-0.5 truncate text-sm text-[hsl(var(--muted))]">Need help? Message the ATOM team.</div>
+                </div>
+
+                <div className="flex shrink-0 flex-col items-end gap-1">
+                  <div className="text-xs font-medium text-[hsl(var(--muted))]">Support</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </button>
+      )
+
+      const notificationCards = visibleItems.map((n) => {
         const signals = rowSignals(n)
         const meta = channelMeta(n.kind)
         const messagePreview = n.title ? `${n.title} · ${preview(n.body, 90)}` : preview(n.body, 100)
@@ -661,8 +746,9 @@ export default function NotificationsList({ isAdmin = false, sentOnly = false }:
           </button>
         )
       })
-    }
 
+      return [adminCard, ...notificationCards]
+    }
     return visibleItems.map((n) => {
       const signals = rowSignals(n)
       return (
@@ -943,7 +1029,9 @@ export default function NotificationsList({ isAdmin = false, sentOnly = false }:
           </div>
         ) : null}
 
-        {openItem ? (
+        {compactUserView && openAdminContact ? (
+          renderAdminContactConversation()
+        ) : openItem ? (
           compactUserView ? (
             renderOpenConversation(openItem)
           ) : (

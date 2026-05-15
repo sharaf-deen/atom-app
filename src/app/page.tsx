@@ -1116,7 +1116,7 @@ function memberActions(): QuickAction[] {
   return [
     { href: '/profile', label: 'My profile', desc: 'Identity, subscription details and QR code.', icon: IdCard },
     { href: '/store', label: 'Store', desc: 'Browse available products and equipment.', icon: ShoppingBag },
-    { href: '/contact', label: 'Contact admin', desc: 'Send a message when you need help.', icon: UserCog },
+    { href: '/notifications?thread=admin', label: 'Contact admin', desc: 'Message the ATOM team.', icon: UserCog },
   ]
 }
 
