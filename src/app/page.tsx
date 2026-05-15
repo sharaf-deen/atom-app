@@ -1115,9 +1115,7 @@ function HomeLogoutShortcut() {
 function memberActions(): QuickAction[] {
   return [
     { href: '/profile', label: 'My profile', desc: 'Identity, subscription details and QR code.', icon: IdCard },
-    { href: '/schedule', label: 'Schedule', desc: 'See the current class schedule.', icon: CalendarDays },
-    { href: '/notifications', label: 'Notifications', desc: 'Read your latest updates.', icon: Bell },
-    { href: '/packages-and-promos', label: 'Packages & promos', desc: 'See current offers and packages.', icon: Gift },
+    { href: '/store', label: 'Store', desc: 'Browse available products and equipment.', icon: ShoppingBag },
     { href: '/contact', label: 'Contact admin', desc: 'Send a message when you need help.', icon: UserCog },
   ]
 }
@@ -1266,7 +1264,7 @@ export default async function HomePage() {
             <QuickActions
               title="Quick actions"
               subtitle="Keep the next step simple."
-              items={memberActions().slice(0, 3)}
+              items={memberActions()}
             />
           </>
         ) : null}
