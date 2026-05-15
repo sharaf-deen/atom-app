@@ -12,7 +12,18 @@ import NotificationsMemberInbox from '@/components/NotificationsMemberInbox'
 import Badge from '@/components/ui/Badge'
 import { canManageNotifications, hasVisibleNotificationInbox } from '@/lib/rbac'
 
-export default async function NotificationsPage() {
+type NotificationsPageProps = {
+  searchParams?: {
+    thread?: string | string[]
+    discussion?: string | string[]
+  }
+}
+
+function firstSearchParam(value: string | string[] | undefined) {
+  return Array.isArray(value) ? value[0] : value
+}
+
+export default async function NotificationsPage({ searchParams }: NotificationsPageProps) {
   const me = await getSessionUser()
 
   if (!me) {
@@ -39,6 +50,7 @@ export default async function NotificationsPage() {
   const canManage = canManageNotifications(role)
   const hasInbox = hasVisibleNotificationInbox(role)
   const isUserInboxView = hasInbox && !canManage
+  const initialThread = firstSearchParam(searchParams?.thread) || firstSearchParam(searchParams?.discussion) || null
 
   return (
     <main>
@@ -137,7 +149,7 @@ export default async function NotificationsPage() {
                   : 'Open ATOM updates like short, simple discussions.'}
               </p>
             </div>
-            <NotificationsList />
+            <NotificationsList initialThread={isUserInboxView ? initialThread : null} />
           </div>
         ) : null}
 
