@@ -33,7 +33,8 @@ export async function POST(req: Request) {
     if (meErr) {
       return noStore(NextResponse.json({ ok: false, error: 'PROFILE_ERROR', details: meErr.message }, { status: 500 }))
     }
-    if ((me?.role ?? 'member') !== 'member') {
+    const allowedContactRoles: Role[] = ['member', 'champion', 'vip']
+    if (!allowedContactRoles.includes((me?.role ?? 'member') as Role)) {
       return noStore(NextResponse.json({ ok: false, error: 'FORBIDDEN' }, { status: 403 }))
     }
 
