@@ -60,6 +60,63 @@ function kindLabel(kind: string | null | undefined) {
   }
 }
 
+function channelMeta(kind: string | null | undefined) {
+  switch (kind) {
+    case 'billing':
+      return {
+        title: 'Payments',
+        description: 'Payment confirmations and pending balances',
+        avatar: 'P',
+      }
+    case 'order_update':
+      return {
+        title: 'Store',
+        description: 'Orders, preorders and product updates',
+        avatar: 'S',
+      }
+    case 'promo':
+      return {
+        title: 'Offers',
+        description: 'Packages, promos and special announcements',
+        avatar: '%',
+      }
+    case 'info':
+    default:
+      return {
+        title: 'Admin',
+        description: 'Questions, support and important updates',
+        avatar: 'A',
+      }
+  }
+}
+
+function channelAvatarClass(kind: string | null | undefined) {
+  switch (kind) {
+    case 'billing':
+      return 'border-amber-200 bg-amber-50 text-amber-700'
+    case 'order_update':
+      return 'border-blue-200 bg-blue-50 text-blue-700'
+    case 'promo':
+      return 'border-emerald-200 bg-emerald-50 text-emerald-700'
+    case 'info':
+    default:
+      return 'border-zinc-200 bg-zinc-50 text-zinc-800'
+  }
+}
+
+function conversationTime(iso: string) {
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return iso
+
+  const now = new Date()
+  const sameDay = d.toDateString() === now.toDateString()
+  if (sameDay) {
+    return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+  }
+
+  return d.toLocaleDateString([], { month: 'short', day: 'numeric' })
+}
+
 function preview(text: string, max = 120) {
   const s = String(text || '').replace(/\s+/g, ' ').trim()
   if (!s) return '—'
@@ -377,7 +434,10 @@ export default function NotificationsList({ isAdmin = false, sentOnly = false }:
     setOpenId(item.id)
     if (!isSentView && !item.read_at) {
       const ok = await markIds([item.id], 'read')
-      if (ok) await load(page)
+      if (ok) {
+        await load(page)
+        setOpenId(item.id)
+      }
     }
   }
 
@@ -486,13 +546,121 @@ export default function NotificationsList({ isAdmin = false, sentOnly = false }:
     }
   }
 
+  function renderOpenConversation(item: Item) {
+    const meta = channelMeta(item.kind)
+    const signals = rowSignals(item)
+
+    return (
+      <div className="mt-4 overflow-hidden rounded-3xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] shadow-soft">
+        <div className="flex items-center gap-3 border-b border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4">
+          <div className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-full border text-base font-bold ${channelAvatarClass(item.kind)}`}>
+            {meta.avatar}
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2">
+              <div className="truncate text-base font-semibold leading-6">{meta.title}</div>
+              {signals.unread ? <span className="h-2 w-2 shrink-0 rounded-full bg-black" aria-label="Unread" /> : null}
+            </div>
+            <div className="truncate text-sm text-[hsl(var(--muted))]">{meta.description}</div>
+          </div>
+        </div>
+
+        <div className="space-y-3 bg-[hsl(var(--bg))] p-4">
+          <div className="max-w-[92%] rounded-3xl rounded-tl-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] px-4 py-3 shadow-soft">
+            <div className="text-sm font-semibold leading-6">{item.title || meta.title}</div>
+            <div className="mt-2 whitespace-pre-wrap text-base leading-7">{item.body}</div>
+            <div className="mt-2 text-right text-[11px] font-medium text-[hsl(var(--muted))]">{fmtDate(item.created_at)}</div>
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2 border-t border-[hsl(var(--border))] bg-[hsl(var(--card))] p-3">
+          {item.read_at ? (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={async () => {
+                const ok = await markIds([item.id], 'unread')
+                if (ok) await load(page)
+              }}
+            >
+              Mark unread
+            </Button>
+          ) : (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={async () => {
+                const ok = await markIds([item.id], 'read')
+                if (ok) await load(page)
+              }}
+            >
+              Mark read
+            </Button>
+          )}
+          <Button variant="outline" size="sm" onClick={() => deleteOne(item.id)}>
+            Delete
+          </Button>
+        </div>
+      </div>
+    )
+  }
+
   function renderCompactCards() {
     if (visibleItems.length === 0) {
       return (
         <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4 text-[hsl(var(--muted))]">
-          {isSentView ? 'No sent notifications.' : 'No inbox notifications.'}
+          {compactUserView ? 'No discussions yet.' : isSentView ? 'No sent notifications.' : 'No inbox notifications.'}
         </div>
       )
+    }
+
+    if (compactUserView) {
+      return visibleItems.map((n) => {
+        const signals = rowSignals(n)
+        const meta = channelMeta(n.kind)
+        const messagePreview = n.title ? `${n.title} · ${preview(n.body, 90)}` : preview(n.body, 100)
+
+        return (
+          <button
+            key={n.id}
+            type="button"
+            onClick={() => openItemAndRead(n)}
+            className={
+              'w-full rounded-3xl border p-4 text-left shadow-soft transition hover:-translate-y-0.5 hover:shadow-md ' +
+              (signals.unread
+                ? 'border-black/20 bg-[hsl(var(--card))]'
+                : 'border-[hsl(var(--border))] bg-[hsl(var(--card))]')
+            }
+          >
+            <div className="flex items-center gap-3">
+              <div className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-full border text-base font-bold ${channelAvatarClass(n.kind)}`}>
+                {meta.avatar}
+              </div>
+
+              <div className="min-w-0 flex-1">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2">
+                      <div className="truncate text-base font-semibold leading-6">{meta.title}</div>
+                      {signals.unread ? <span className="h-2 w-2 shrink-0 rounded-full bg-black" aria-label="Unread" /> : null}
+                    </div>
+                    <div className="mt-0.5 truncate text-sm text-[hsl(var(--muted))]">{messagePreview}</div>
+                  </div>
+
+                  <div className="flex shrink-0 flex-col items-end gap-1">
+                    <div className="text-xs font-medium text-[hsl(var(--muted))]">{conversationTime(n.created_at)}</div>
+                    {signals.unread ? (
+                      <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-black px-1.5 text-[11px] font-bold text-white">
+                        1
+                      </span>
+                    ) : null}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </button>
+        )
+      })
     }
 
     return visibleItems.map((n) => {
@@ -574,10 +742,10 @@ export default function NotificationsList({ isAdmin = false, sentOnly = false }:
     <Card hover>
       <CardHeader className="items-start gap-3">
         <div>
-          <CardTitle className="text-xl">{compactUserView ? 'Inbox' : isSentView ? 'Sent notifications' : 'My inbox'}</CardTitle>
+          <CardTitle className="text-xl">{compactUserView ? 'Discussions' : isSentView ? 'Sent notifications' : 'My inbox'}</CardTitle>
           <p className="mt-1 text-sm leading-6 text-[hsl(var(--muted))]">
             {compactUserView
-              ? 'Unread first, quick opening, and only the actions you really need.'
+              ? 'A simple WhatsApp-style view for ATOM updates.'
               : isSentView
                 ? 'Review what was sent and keep the history clean.'
                 : 'Unread items and key actions stay visible first.'}
@@ -617,7 +785,7 @@ export default function NotificationsList({ isAdmin = false, sentOnly = false }:
               <Input
                 value={q}
                 onChange={(e) => setQ(e.target.value)}
-                placeholder="Search your notifications…"
+                placeholder="Search discussions…"
                 aria-label="Search notifications"
               />
             </div>
@@ -733,7 +901,7 @@ export default function NotificationsList({ isAdmin = false, sentOnly = false }:
 
         {compactUserView ? (
           <div className="mt-4 flex flex-wrap gap-2">
-            <Badge className="px-3 py-1">{tab === 'unread' ? 'Unread only' : 'All messages'}</Badge>
+            <Badge className="px-3 py-1">{tab === 'unread' ? 'Unread only' : 'All discussions'}</Badge>
             <Badge className="px-3 py-1">{visibleItems.length} visible</Badge>
             <Badge className="px-3 py-1">{unreadOnPage} unread</Badge>
             {recentOnPage > 0 ? <Badge className="px-3 py-1">{recentOnPage} recent</Badge> : null}
@@ -776,74 +944,78 @@ export default function NotificationsList({ isAdmin = false, sentOnly = false }:
         ) : null}
 
         {openItem ? (
-          <div className="mt-4 rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4 shadow-soft">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-              <div className="space-y-2">
-                <div className="flex flex-wrap items-center gap-2">
-                  <h4 className="text-lg font-semibold leading-7">{openItem.title || 'Untitled notification'}</h4>
-                  <Badge>{kindLabel(openItem.kind)}</Badge>
-                  {rowSignals(openItem).important ? <Badge>Important</Badge> : null}
-                  {rowSignals(openItem).recent ? <Badge>Recent</Badge> : null}
-                  {!isSentView ? (
-                    openItem.read_at ? <Badge className="bg-black text-white border-black">Read</Badge> : <Badge>Unread</Badge>
-                  ) : null}
+          compactUserView ? (
+            renderOpenConversation(openItem)
+          ) : (
+            <div className="mt-4 rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4 shadow-soft">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div className="space-y-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h4 className="text-lg font-semibold leading-7">{openItem.title || 'Untitled notification'}</h4>
+                    <Badge>{kindLabel(openItem.kind)}</Badge>
+                    {rowSignals(openItem).important ? <Badge>Important</Badge> : null}
+                    {rowSignals(openItem).recent ? <Badge>Recent</Badge> : null}
+                    {!isSentView ? (
+                      openItem.read_at ? <Badge className="bg-black text-white border-black">Read</Badge> : <Badge>Unread</Badge>
+                    ) : null}
+                  </div>
+                  <div className="text-sm text-[hsl(var(--muted))]">{fmtDate(openItem.created_at)}</div>
+                  {isSentView ? (
+                    <div className="text-base text-[hsl(var(--muted))]">
+                      Recipient: <span className="font-medium text-black">{openItem.recipient_name || '—'}</span>
+                      {openItem.recipient_email ? ` · ${openItem.recipient_email}` : ''}
+                      {typeof openItem.recipient_count === 'number'
+                        ? ` · ${openItem.recipient_count} recipient${openItem.recipient_count === 1 ? '' : 's'}`
+                        : ''}
+                    </div>
+                  ) : (
+                    <div className="text-base text-[hsl(var(--muted))]">
+                      Triage: {rowSignals(openItem).unread ? 'Unread first' : 'Already read'}
+                      {rowSignals(openItem).recent ? ' · Recent' : ''}
+                      {rowSignals(openItem).important ? ' · Important' : ''}
+                    </div>
+                  )}
                 </div>
-                <div className="text-sm text-[hsl(var(--muted))]">{fmtDate(openItem.created_at)}</div>
-                {isSentView ? (
-                  <div className="text-base text-[hsl(var(--muted))]">
-                    Recipient: <span className="font-medium text-black">{openItem.recipient_name || '—'}</span>
-                    {openItem.recipient_email ? ` · ${openItem.recipient_email}` : ''}
-                    {typeof openItem.recipient_count === 'number'
-                      ? ` · ${openItem.recipient_count} recipient${openItem.recipient_count === 1 ? '' : 's'}`
-                      : ''}
+
+                {!isSentView ? (
+                  <div className="flex flex-wrap items-center gap-2">
+                    {openItem.read_at ? (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={async () => {
+                          const ok = await markIds([openItem.id], 'unread')
+                          if (ok) await load(page)
+                        }}
+                      >
+                        Mark unread
+                      </Button>
+                    ) : (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={async () => {
+                          const ok = await markIds([openItem.id], 'read')
+                          if (ok) await load(page)
+                        }}
+                      >
+                        Mark read
+                      </Button>
+                    )}
+                    <Button variant="outline" size="sm" onClick={() => deleteOne(openItem.id)}>
+                      Delete
+                    </Button>
                   </div>
-                ) : (
-                  <div className="text-base text-[hsl(var(--muted))]">
-                    Triage: {rowSignals(openItem).unread ? 'Unread first' : 'Already read'}
-                    {rowSignals(openItem).recent ? ' · Recent' : ''}
-                    {rowSignals(openItem).important ? ' · Important' : ''}
-                  </div>
-                )}
+                ) : isAdmin ? (
+                  <Button variant="outline" size="sm" onClick={() => deleteSentOne(openItem)}>
+                    Delete sent row
+                  </Button>
+                ) : null}
               </div>
 
-              {!isSentView ? (
-                <div className="flex flex-wrap items-center gap-2">
-                  {openItem.read_at ? (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={async () => {
-                        const ok = await markIds([openItem.id], 'unread')
-                        if (ok) await load(page)
-                      }}
-                    >
-                      Mark unread
-                    </Button>
-                  ) : (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={async () => {
-                        const ok = await markIds([openItem.id], 'read')
-                        if (ok) await load(page)
-                      }}
-                    >
-                      Mark read
-                    </Button>
-                  )}
-                  <Button variant="outline" size="sm" onClick={() => deleteOne(openItem.id)}>
-                    Delete
-                  </Button>
-                </div>
-              ) : isAdmin ? (
-                <Button variant="outline" size="sm" onClick={() => deleteSentOne(openItem)}>
-                  Delete sent row
-                </Button>
-              ) : null}
+              <div className="mt-4 whitespace-pre-wrap text-base leading-7">{openItem.body}</div>
             </div>
-
-            <div className="mt-4 whitespace-pre-wrap text-base leading-7">{openItem.body}</div>
-          </div>
+          )
         ) : null}
 
         <div className="mt-4">
