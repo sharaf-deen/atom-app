@@ -11,12 +11,26 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card'
 import { formatCurrency } from '@/lib/money'
 import { canAccessStoreAdmin } from '@/lib/rbac'
 import AdminPreorderQuickEdit from '@/components/store/AdminPreorderQuickEdit'
+import AdminPreorderForm from '@/components/store/AdminPreorderForm'
 import StoreAdminNav from '@/components/store/StoreAdminNav'
 
 type PreorderStatus = 'pending' | 'confirmed' | 'ordered_from_supplier' | 'ready' | 'completed' | 'canceled'
 type PreorderStatusFilter = 'all' | PreorderStatus
 type SortDir = 'asc' | 'desc'
 type PreorderSortKey = 'updated_at' | 'product_name' | 'buyer' | 'status' | 'qty' | 'total_cents' | 'deposit_cents'
+
+
+type ProductOption = {
+  id: string
+  name: string
+  color: string | null
+  size: string | null
+  price_cents: number
+  currency: string | null
+  inventory_qty: number
+  is_active: boolean
+  allow_preorder: boolean
+}
 
 type PreorderRow = {
   id: string
@@ -275,10 +289,22 @@ export default async function AdminStorePreordersPage({
   const dir = normalizeDir(strParam(searchParams?.dir))
 
   const supa = getSupabaseAdminClientCached()
+  let productOptions: ProductOption[] = []
   let rows: PreorderRow[] = []
   let errorMsg: string | null = null
 
   try {
+    const { data: productsData, error: productsError } = await supa
+      .from('store_products')
+      .select('id,name,color,size,price_cents,currency,inventory_qty,is_active,allow_preorder')
+      .eq('is_active', true)
+      .eq('allow_preorder', true)
+      .order('created_at', { ascending: false })
+      .limit(200)
+
+    if (productsError) throw new Error(productsError.message)
+    productOptions = (Array.isArray(productsData) ? productsData : []) as ProductOption[]
+
     let query = supa
       .from('store_preorders')
       .select('id, buyer_user_id, buyer_full_name, buyer_email, buyer_phone, product_id, product_name, product_category, product_color, product_size, qty, unit_price_cents, total_cents, deposit_cents, balance_due_cents, deposit_payment_method, status, note, created_at, updated_at')
@@ -375,10 +401,20 @@ export default async function AdminStorePreordersPage({
           <Card>
             <CardHeader><CardTitle>Admin flow</CardTitle></CardHeader>
             <CardContent className="space-y-2 text-sm">
-              <div className="text-[hsl(var(--muted))]">Use filters first, then open only the rows you need to edit or delete.</div>
+              <div className="text-[hsl(var(--muted))]">Create member preorders from here, then use filters to review, edit, or delete rows.</div>
             </CardContent>
           </Card>
         </div>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Create preorder</CardTitle>
+            <div className="text-xs text-[hsl(var(--muted))]">Super admin only. This creates a reservation for an existing member and does not reduce stock.</div>
+          </CardHeader>
+          <CardContent>
+            <AdminPreorderForm products={productOptions} />
+          </CardContent>
+        </Card>
 
         <Card>
           <CardHeader><CardTitle>Filters</CardTitle></CardHeader>
