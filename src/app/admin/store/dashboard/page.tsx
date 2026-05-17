@@ -92,6 +92,17 @@ type SaleRow = {
   created_at: string | null
 }
 
+type StoreExpenseRow = {
+  id: string
+  expense_date: string | null
+  category: string | null
+  title: string | null
+  amount_cents: number | null
+  payment_method: string | null
+  vendor_name: string | null
+  created_at: string | null
+}
+
 const ACTIVE_STOCK_PAGE_SIZE = 5
 
 function strParam(v: unknown) {
@@ -241,6 +252,40 @@ function supplierStatusLabel(status?: string | null) {
   }
 }
 
+function storeExpenseCategoryLabel(category?: string | null) {
+  switch (category) {
+    case 'supplier_order':
+      return 'Supplier order'
+    case 'transport':
+      return 'Transport'
+    case 'customs_taxes':
+      return 'Customs / taxes'
+    case 'packaging':
+      return 'Packaging'
+    case 'refund':
+      return 'Refund'
+    case 'other':
+      return 'Other'
+    default:
+      return category || '—'
+  }
+}
+
+function paymentMethodLabel(method?: string | null) {
+  switch (method) {
+    case 'cash':
+      return 'Cash'
+    case 'card':
+      return 'Card'
+    case 'instapay':
+      return 'Instapay'
+    case 'bank_transfer':
+      return 'Bank transfer'
+    default:
+      return method || '—'
+  }
+}
+
 function chipClass(status?: string | null) {
   switch (status) {
     case 'ready':
@@ -304,6 +349,8 @@ export default async function StoreDashboardPage({ searchParams }: { searchParam
   let recentSupplierOrders: SupplierOrderRow[] = []
   let recentPreorders: PreorderRow[] = []
   let recentSales: SaleRow[] = []
+  let recentStoreExpenses: StoreExpenseRow[] = []
+  let storeExpensesLast30dCents = 0
   let pageError: string | null = null
 
   let categoryRows: StoreProductCategoryRow[] = []
@@ -325,9 +372,12 @@ export default async function StoreDashboardPage({ searchParams }: { searchParam
   const activeStockCategory = normalizeCategory(searchParams?.stockCategory, categoryKeys)
   const categoryOptions = buildStoreCategoryOptions(activeCategoryRows, { includeAll: true })
   const categoryLabels = storeCategoryLabelMap(categoryRows)
+  const last30Date = new Date()
+  last30Date.setDate(last30Date.getDate() - 29)
+  const last30DateString = last30Date.toISOString().slice(0, 10)
 
   try {
-    const [summaryRes, activeProductsRes, supplierRes, preorderRes, salesRes] = await Promise.all([
+    const [summaryRes, activeProductsRes, supplierRes, preorderRes, salesRes, expensesRes, recentExpensesRes] = await Promise.all([
       supa.rpc('admin_store_dashboard_summary', { _days: 30 } as any),
       supa
         .from('store_products')
@@ -350,6 +400,19 @@ export default async function StoreDashboardPage({ searchParams }: { searchParam
       supa
         .from('store_sales')
         .select('id,buyer_full_name,buyer_email,status,total_cents,paid_cents,debt_cents,delivered_at,created_at')
+        .order('created_at', { ascending: false })
+        .limit(6),
+      supa
+        .from('store_expenses')
+        .select('amount_cents')
+        .is('deleted_at', null)
+        .gte('expense_date', last30DateString)
+        .limit(100000),
+      supa
+        .from('store_expenses')
+        .select('id,expense_date,category,title,amount_cents,payment_method,vendor_name,created_at')
+        .is('deleted_at', null)
+        .order('expense_date', { ascending: false })
         .order('created_at', { ascending: false })
         .limit(6),
     ])
@@ -375,6 +438,10 @@ export default async function StoreDashboardPage({ searchParams }: { searchParam
     recentSupplierOrders = Array.isArray(supplierRes.data) ? (supplierRes.data as SupplierOrderRow[]) : []
     recentPreorders = Array.isArray(preorderRes.data) ? (preorderRes.data as PreorderRow[]) : []
     recentSales = Array.isArray(salesRes.data) ? (salesRes.data as SaleRow[]) : []
+    storeExpensesLast30dCents = !expensesRes.error && Array.isArray(expensesRes.data)
+      ? expensesRes.data.reduce((sum: number, row: any) => sum + Math.max(0, Number(row?.amount_cents ?? 0)), 0)
+      : 0
+    recentStoreExpenses = !recentExpensesRes.error && Array.isArray(recentExpensesRes.data) ? (recentExpensesRes.data as StoreExpenseRow[]) : []
   } catch (e: any) {
     pageError = e?.message || String(e)
   }
@@ -423,6 +490,7 @@ export default async function StoreDashboardPage({ searchParams }: { searchParam
     return qty > 0 && qty <= toInt(product.low_stock_threshold)
   }).length
   const averageStockUnitPriceCents = safeAverageCents(activeStockForecastRevenueCents, activeStockTotalUnits)
+  const storeNetCashLast30dCents = toInt(metrics.sales_paid_cents) - storeExpensesLast30dCents
 
   return (
     <main>
@@ -633,7 +701,7 @@ export default async function StoreDashboardPage({ searchParams }: { searchParam
             <p className="text-sm text-[hsl(var(--muted))]">Last 30 days. The period selector was removed to keep the dashboard simple and stable.</p>
           </div>
 
-          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
             <StatCard
               title="Sales total"
               value={formatCurrency(toInt(metrics.sales_total_cents), 'en-EG', 'EGP')}
@@ -643,6 +711,16 @@ export default async function StoreDashboardPage({ searchParams }: { searchParam
               title="Collected"
               value={formatCurrency(toInt(metrics.sales_paid_cents), 'en-EG', 'EGP')}
               hint="Paid amount recorded in the last 30 days"
+            />
+            <StatCard
+              title="Store expenses"
+              value={formatCurrency(storeExpensesLast30dCents, 'en-EG', 'EGP')}
+              hint="Active store expenses in the last 30 days"
+            />
+            <StatCard
+              title="Net store cash"
+              value={formatCurrency(storeNetCashLast30dCents, 'en-EG', 'EGP')}
+              hint="Collected sales minus store expenses"
             />
             <StatCard
               title="Debt in last 30 days"
@@ -759,6 +837,32 @@ export default async function StoreDashboardPage({ searchParams }: { searchParam
                     </div>
                     <div className="mt-1 text-xs text-[hsl(var(--muted))]">
                       Created: {fmtDateTime(sale.created_at)}{sale.delivered_at ? ` · Delivered: ${fmtDateTime(sale.delivered_at)}` : ''}
+                    </div>
+                  </div>
+                ))
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Latest store expenses</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {recentStoreExpenses.length === 0 ? (
+                <div className="text-sm text-[hsl(var(--muted))]">No store expenses yet.</div>
+              ) : (
+                recentStoreExpenses.map((expense) => (
+                  <div key={expense.id} className="rounded-2xl border p-3">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <div className="font-medium">{expense.title || `Expense #${shortId(expense.id)}`}</div>
+                      <span className="rounded-full border px-2 py-1 text-xs font-medium">
+                        {storeExpenseCategoryLabel(expense.category)}
+                      </span>
+                    </div>
+                    <div className="mt-1 text-sm text-[hsl(var(--muted))]">{expense.vendor_name || 'No vendor'}</div>
+                    <div className="mt-2 text-xs text-[hsl(var(--muted))]">
+                      {formatCurrency(toInt(expense.amount_cents), 'en-EG', 'EGP')} · {paymentMethodLabel(expense.payment_method)} · Date {fmtDate(expense.expense_date)}
                     </div>
                   </div>
                 ))
