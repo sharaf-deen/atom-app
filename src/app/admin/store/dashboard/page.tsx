@@ -8,6 +8,7 @@ import AccessDeniedPage from '@/components/AccessDeniedPage'
 import Button from '@/components/ui/Button'
 import InlineAlert from '@/components/ui/InlineAlert'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card'
+import { addDays, cairoToday } from '@/lib/cairoDate'
 import { formatCurrency } from '@/lib/money'
 import { canAccessStoreDashboard } from '@/lib/rbac'
 import { getSessionUserCached, getSupabaseAdminClientCached } from '@/lib/requestCache'
@@ -103,7 +104,34 @@ type StoreExpenseRow = {
   created_at: string | null
 }
 
+type StoreAccountingSaleRow = {
+  total_cents: number | null
+  discount_cents: number | null
+  paid_cents: number | null
+  debt_cents: number | null
+  status: string | null
+  purchase_date: string | null
+}
+
+type StoreAccountingExpenseRow = {
+  amount_cents: number | null
+  category: string | null
+  payment_method: string | null
+  expense_date: string | null
+}
+
+type AccountingPeriod = '7d' | '30d' | 'month' | 'all'
+
 const ACTIVE_STOCK_PAGE_SIZE = 5
+const DEFAULT_ACCOUNTING_PERIOD: AccountingPeriod = '30d'
+const ACCOUNTING_PERIOD_OPTIONS: Array<{ value: AccountingPeriod; label: string }> = [
+  { value: '7d', label: '7d' },
+  { value: '30d', label: '30d' },
+  { value: 'month', label: 'This month' },
+  { value: 'all', label: 'All' },
+]
+const STORE_EXPENSE_CATEGORY_KEYS = ['supplier_order', 'transport', 'customs_taxes', 'packaging', 'refund', 'other'] as const
+
 
 function strParam(v: unknown) {
   const s = Array.isArray(v) ? v[0] : v
@@ -154,12 +182,46 @@ function normalizeCategory(value: unknown, allowedKeys: Set<string>) {
   return 'all'
 }
 
-function storeDashboardHref(activeStockPage = 1, stockCategory = 'all') {
+function storeDashboardHref(
+  activeStockPage = 1,
+  stockCategory = 'all',
+  accountingPeriod: AccountingPeriod = DEFAULT_ACCOUNTING_PERIOD
+) {
   const params = new URLSearchParams()
   if (stockCategory && stockCategory !== 'all') params.set('stockCategory', stockCategory)
   if (activeStockPage > 1) params.set('stockPage', String(activeStockPage))
+  if (accountingPeriod !== DEFAULT_ACCOUNTING_PERIOD) params.set('accountingPeriod', accountingPeriod)
   const qs = params.toString()
   return qs ? `/admin/store/dashboard?${qs}` : '/admin/store/dashboard'
+}
+
+function normalizeAccountingPeriod(value: unknown): AccountingPeriod {
+  const clean = strParam(value).trim()
+  return clean === '7d' || clean === '30d' || clean === 'month' || clean === 'all' ? clean : DEFAULT_ACCOUNTING_PERIOD
+}
+
+function accountingPeriodRange(period: AccountingPeriod, today: string) {
+  if (period === 'all') return { from: null as string | null, to: today }
+  if (period === 'month') return { from: `${today.slice(0, 8)}01`, to: today }
+  if (period === '7d') return { from: addDays(today, -6), to: today }
+  return { from: addDays(today, -29), to: today }
+}
+
+function accountingPeriodLabel(period: AccountingPeriod, from: string | null, to: string) {
+  if (period === 'all') return 'All time'
+  if (period === 'month') return `This month · ${from} → ${to}`
+  if (period === '7d') return `Last 7 days · ${from} → ${to}`
+  return `Last 30 days · ${from} → ${to}`
+}
+
+function expensesHrefForRange(from: string | null, to: string) {
+  if (!from) return '/admin/store/expenses?page_size=10'
+  const params = new URLSearchParams()
+  params.set('preset', 'custom')
+  params.set('from', from)
+  params.set('to', to)
+  params.set('page_size', '10')
+  return `/admin/store/expenses?${params.toString()}`
 }
 
 function productLabel(p: Pick<ProductRow, 'name' | 'color' | 'size'>) {
@@ -350,7 +412,13 @@ export default async function StoreDashboardPage({ searchParams }: { searchParam
   let recentPreorders: PreorderRow[] = []
   let recentSales: SaleRow[] = []
   let recentStoreExpenses: StoreExpenseRow[] = []
-  let storeExpensesLast30dCents = 0
+  let accountingSalesGrossCents = 0
+  let accountingSalesDiscountCents = 0
+  let accountingSalesCollectedCents = 0
+  let accountingSalesDebtCents = 0
+  let accountingSalesCount = 0
+  let storeExpensesPeriodCents = 0
+  let accountingExpenseRows: StoreAccountingExpenseRow[] = []
   let pageError: string | null = null
 
   let categoryRows: StoreProductCategoryRow[] = []
@@ -372,12 +440,32 @@ export default async function StoreDashboardPage({ searchParams }: { searchParam
   const activeStockCategory = normalizeCategory(searchParams?.stockCategory, categoryKeys)
   const categoryOptions = buildStoreCategoryOptions(activeCategoryRows, { includeAll: true })
   const categoryLabels = storeCategoryLabelMap(categoryRows)
-  const last30Date = new Date()
-  last30Date.setDate(last30Date.getDate() - 29)
-  const last30DateString = last30Date.toISOString().slice(0, 10)
+  const accountingPeriod = normalizeAccountingPeriod(searchParams?.accountingPeriod)
+  const todayCairo = cairoToday()
+  const accountingRange = accountingPeriodRange(accountingPeriod, todayCairo)
+  const accountingFrom = accountingRange.from
+  const accountingTo = accountingRange.to
 
   try {
-    const [summaryRes, activeProductsRes, supplierRes, preorderRes, salesRes, expensesRes, recentExpensesRes] = await Promise.all([
+    let salesAccountingQuery: any = supa
+      .from('store_sales')
+      .select('total_cents,discount_cents,paid_cents,debt_cents,status,purchase_date')
+      .neq('status', 'canceled')
+      .limit(100000)
+
+    if (accountingFrom) salesAccountingQuery = salesAccountingQuery.gte('purchase_date', accountingFrom)
+    if (accountingTo) salesAccountingQuery = salesAccountingQuery.lte('purchase_date', accountingTo)
+
+    let expensesAccountingQuery: any = supa
+      .from('store_expenses')
+      .select('amount_cents,category,payment_method,expense_date')
+      .is('deleted_at', null)
+      .limit(100000)
+
+    if (accountingFrom) expensesAccountingQuery = expensesAccountingQuery.gte('expense_date', accountingFrom)
+    if (accountingTo) expensesAccountingQuery = expensesAccountingQuery.lte('expense_date', accountingTo)
+
+    const [summaryRes, activeProductsRes, supplierRes, preorderRes, salesRes, accountingSalesRes, accountingExpensesRes, recentExpensesRes] = await Promise.all([
       supa.rpc('admin_store_dashboard_summary', { _days: 30 } as any),
       supa
         .from('store_products')
@@ -402,12 +490,8 @@ export default async function StoreDashboardPage({ searchParams }: { searchParam
         .select('id,buyer_full_name,buyer_email,status,total_cents,paid_cents,debt_cents,delivered_at,created_at')
         .order('created_at', { ascending: false })
         .limit(6),
-      supa
-        .from('store_expenses')
-        .select('amount_cents')
-        .is('deleted_at', null)
-        .gte('expense_date', last30DateString)
-        .limit(100000),
+      salesAccountingQuery,
+      expensesAccountingQuery,
       supa
         .from('store_expenses')
         .select('id,expense_date,category,title,amount_cents,payment_method,vendor_name,created_at')
@@ -438,9 +522,24 @@ export default async function StoreDashboardPage({ searchParams }: { searchParam
     recentSupplierOrders = Array.isArray(supplierRes.data) ? (supplierRes.data as SupplierOrderRow[]) : []
     recentPreorders = Array.isArray(preorderRes.data) ? (preorderRes.data as PreorderRow[]) : []
     recentSales = Array.isArray(salesRes.data) ? (salesRes.data as SaleRow[]) : []
-    storeExpensesLast30dCents = !expensesRes.error && Array.isArray(expensesRes.data)
-      ? expensesRes.data.reduce((sum: number, row: any) => sum + Math.max(0, Number(row?.amount_cents ?? 0)), 0)
-      : 0
+
+    const accountingSalesRows = !accountingSalesRes.error && Array.isArray(accountingSalesRes.data)
+      ? (accountingSalesRes.data as StoreAccountingSaleRow[])
+      : []
+    accountingSalesCount = accountingSalesRows.length
+    accountingSalesDiscountCents = accountingSalesRows.reduce((sum, row) => sum + Math.max(0, toInt(row.discount_cents)), 0)
+    accountingSalesCollectedCents = accountingSalesRows.reduce((sum, row) => sum + Math.max(0, toInt(row.paid_cents)), 0)
+    accountingSalesDebtCents = accountingSalesRows.reduce((sum, row) => sum + Math.max(0, toInt(row.debt_cents)), 0)
+    accountingSalesGrossCents = accountingSalesRows.reduce((sum, row) => {
+      const total = Math.max(0, toInt(row.total_cents))
+      const discount = Math.max(0, toInt(row.discount_cents))
+      return sum + total + discount
+    }, 0)
+
+    accountingExpenseRows = !accountingExpensesRes.error && Array.isArray(accountingExpensesRes.data)
+      ? (accountingExpensesRes.data as StoreAccountingExpenseRow[])
+      : []
+    storeExpensesPeriodCents = accountingExpenseRows.reduce((sum, row) => sum + Math.max(0, toInt(row.amount_cents)), 0)
     recentStoreExpenses = !recentExpensesRes.error && Array.isArray(recentExpensesRes.data) ? (recentExpensesRes.data as StoreExpenseRow[]) : []
   } catch (e: any) {
     pageError = e?.message || String(e)
@@ -490,8 +589,23 @@ export default async function StoreDashboardPage({ searchParams }: { searchParam
     return qty > 0 && qty <= toInt(product.low_stock_threshold)
   }).length
   const averageStockUnitPriceCents = safeAverageCents(activeStockForecastRevenueCents, activeStockTotalUnits)
-  const storeNetCashLast30dCents = toInt(metrics.sales_paid_cents) - storeExpensesLast30dCents
-  const expensesLast30Href = `/admin/store/expenses?preset=custom&from=${last30DateString}&to=${new Date().toISOString().slice(0, 10)}&page_size=10`
+  const storeNetCashPeriodCents = accountingSalesCollectedCents - storeExpensesPeriodCents
+  const accountingPeriodText = accountingPeriodLabel(accountingPeriod, accountingFrom, accountingTo)
+  const expensesPeriodHref = expensesHrefForRange(accountingFrom, accountingTo)
+  const accountingNetHint = storeNetCashPeriodCents >= 0 ? 'Positive cash position for this period' : 'Expenses are higher than collected sales for this period'
+  const expenseCategoryTotals = STORE_EXPENSE_CATEGORY_KEYS.map((category) => ({
+    category,
+    label: storeExpenseCategoryLabel(category),
+    cents: accountingExpenseRows
+      .filter((row) => (row.category || 'other') === category)
+      .reduce((sum, row) => sum + Math.max(0, toInt(row.amount_cents)), 0),
+  }))
+  const visibleExpenseCategoryTotals = expenseCategoryTotals.filter((row) => row.cents > 0)
+  const maxExpenseCategoryCents = Math.max(1, ...expenseCategoryTotals.map((row) => row.cents))
+  const supplierOrderExpenseCents = expenseCategoryTotals.find((row) => row.category === 'supplier_order')?.cents ?? 0
+  const transportExpenseCents = expenseCategoryTotals.find((row) => row.category === 'transport')?.cents ?? 0
+  const customsExpenseCents = expenseCategoryTotals.find((row) => row.category === 'customs_taxes')?.cents ?? 0
+  const supplierTransportExpenseCents = supplierOrderExpenseCents + transportExpenseCents
 
   return (
     <main>
@@ -601,6 +715,7 @@ export default async function StoreDashboardPage({ searchParams }: { searchParam
             <div className="flex flex-wrap items-end gap-2">
               <form method="get" action="/admin/store/dashboard" className="flex flex-wrap items-end gap-2">
                 <input type="hidden" name="stockPage" value="1" />
+                <input type="hidden" name="accountingPeriod" value={accountingPeriod} />
                 <label className="grid gap-1 text-xs font-medium text-[hsl(var(--muted))]">
                   Category
                   <select
@@ -617,7 +732,7 @@ export default async function StoreDashboardPage({ searchParams }: { searchParam
                   Apply
                 </button>
                 {activeStockCategory !== 'all' ? (
-                  <Button asChild href={storeDashboardHref(1, 'all')} variant="outline" size="sm" className="min-h-9 rounded-xl px-3 py-1.5 text-sm">
+                  <Button asChild href={storeDashboardHref(1, 'all', accountingPeriod)} variant="outline" size="sm" className="min-h-9 rounded-xl px-3 py-1.5 text-sm">
                     Clear
                   </Button>
                 ) : null}
@@ -674,7 +789,7 @@ export default async function StoreDashboardPage({ searchParams }: { searchParam
                     </div>
                     <div className="flex items-center gap-2">
                       {activeStockPage > 1 ? (
-                        <Button asChild href={storeDashboardHref(activeStockPage - 1, activeStockCategory)} variant="outline" size="sm" className="min-h-9 rounded-xl px-3 py-1.5 text-xs">
+                        <Button asChild href={storeDashboardHref(activeStockPage - 1, activeStockCategory, accountingPeriod)} variant="outline" size="sm" className="min-h-9 rounded-xl px-3 py-1.5 text-xs">
                           Previous
                         </Button>
                       ) : (
@@ -682,7 +797,7 @@ export default async function StoreDashboardPage({ searchParams }: { searchParam
                       )}
                       <span>Page {activeStockPage} / {activeStockTotalPages}</span>
                       {activeStockPage < activeStockTotalPages ? (
-                        <Button asChild href={storeDashboardHref(activeStockPage + 1, activeStockCategory)} variant="outline" size="sm" className="min-h-9 rounded-xl px-3 py-1.5 text-xs">
+                        <Button asChild href={storeDashboardHref(activeStockPage + 1, activeStockCategory, accountingPeriod)} variant="outline" size="sm" className="min-h-9 rounded-xl px-3 py-1.5 text-xs">
                           Next
                         </Button>
                       ) : (
@@ -699,40 +814,126 @@ export default async function StoreDashboardPage({ searchParams }: { searchParam
         <section className="space-y-3">
           <div className="flex flex-wrap items-end justify-between gap-3">
             <div>
-              <h2 className="text-base font-semibold">Sales activity</h2>
-              <p className="text-sm text-[hsl(var(--muted))]">Last 30 days. The period selector was removed to keep the dashboard simple and stable.</p>
+              <h2 className="text-base font-semibold">Store cash overview</h2>
+              <p className="text-sm text-[hsl(var(--muted))]">{accountingPeriodText}. Cash view only: collected sales minus store expenses.</p>
             </div>
-            <Button asChild href={expensesLast30Href} variant="outline" size="sm">
-              View expenses
-            </Button>
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="flex flex-wrap items-center gap-1 rounded-2xl border bg-[hsl(var(--card))] p-1">
+                {ACCOUNTING_PERIOD_OPTIONS.map((option) => {
+                  const active = option.value === accountingPeriod
+                  return (
+                    <Button
+                      key={option.value}
+                      asChild
+                      href={storeDashboardHref(activeStockPage, activeStockCategory, option.value)}
+                      variant={active ? 'solid' : 'ghost'}
+                      size="sm"
+                      className="min-h-8 rounded-xl px-3 py-1 text-xs"
+                    >
+                      {option.label}
+                    </Button>
+                  )
+                })}
+              </div>
+              <Button asChild href={expensesPeriodHref} variant="outline" size="sm">
+                View expenses
+              </Button>
+            </div>
           </div>
 
-          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+          <InlineAlert variant="info" compact>
+            This is not a profit or margin report. Supplier orders may include stock that is not sold yet, so this block shows cash visibility only.
+          </InlineAlert>
+
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
             <StatCard
-              title="Sales total"
-              value={formatCurrency(toInt(metrics.sales_total_cents), 'en-EG', 'EGP')}
-              hint="Total sale value created in the last 30 days"
+              title="Gross sales"
+              value={formatCurrency(accountingSalesGrossCents, 'en-EG', 'EGP')}
+              hint={`${accountingSalesCount} non-canceled sales before discounts`}
             />
             <StatCard
-              title="Collected"
-              value={formatCurrency(toInt(metrics.sales_paid_cents), 'en-EG', 'EGP')}
-              hint="Paid amount recorded in the last 30 days"
+              title="Discounts"
+              value={formatCurrency(accountingSalesDiscountCents, 'en-EG', 'EGP')}
+              hint="Discounts recorded on store sales"
+            />
+            <StatCard
+              title="Collected sales"
+              value={formatCurrency(accountingSalesCollectedCents, 'en-EG', 'EGP')}
+              hint="Paid amount recorded for this period"
             />
             <StatCard
               title="Store expenses"
-              value={formatCurrency(storeExpensesLast30dCents, 'en-EG', 'EGP')}
-              hint="Active store expenses in the last 30 days"
+              value={formatCurrency(storeExpensesPeriodCents, 'en-EG', 'EGP')}
+              hint="Active store expenses for this period"
             />
             <StatCard
               title="Net store cash"
-              value={formatCurrency(storeNetCashLast30dCents, 'en-EG', 'EGP')}
-              hint="Collected sales minus store expenses"
+              value={formatCurrency(storeNetCashPeriodCents, 'en-EG', 'EGP')}
+              hint={accountingNetHint}
             />
             <StatCard
-              title="Debt in last 30 days"
-              value={formatCurrency(toInt(metrics.sales_debt_cents), 'en-EG', 'EGP')}
-              hint="Remaining debt from sales created in the last 30 days"
+              title="Open debt"
+              value={formatCurrency(accountingSalesDebtCents, 'en-EG', 'EGP')}
+              hint="Remaining unpaid sales amount"
             />
+          </div>
+        </section>
+
+        <section className="space-y-3">
+          <div className="flex flex-wrap items-end justify-between gap-3">
+            <div>
+              <h2 className="text-base font-semibold">Store expense breakdown</h2>
+              <p className="text-sm text-[hsl(var(--muted))]">Expenses by category for the selected cash period.</p>
+            </div>
+            <Button asChild href={expensesPeriodHref} variant="outline" size="sm">
+              Open filtered expenses
+            </Button>
+          </div>
+
+          <div className="grid gap-3 lg:grid-cols-[minmax(0,1.4fr)_minmax(280px,0.8fr)]">
+            <Card>
+              <CardHeader>
+                <CardTitle>Expenses by category</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                {visibleExpenseCategoryTotals.length === 0 ? (
+                  <div className="text-sm text-[hsl(var(--muted))]">No expenses found for this period.</div>
+                ) : (
+                  visibleExpenseCategoryTotals.map((row) => {
+                    const pct = Math.max(4, Math.round((row.cents / maxExpenseCategoryCents) * 100))
+                    return (
+                      <div key={row.category} className="space-y-1">
+                        <div className="flex items-center justify-between gap-3 text-sm">
+                          <span className="font-medium">{row.label}</span>
+                          <span className="text-[hsl(var(--muted))]">{formatCurrency(row.cents, 'en-EG', 'EGP')}</span>
+                        </div>
+                        <div className="h-2 overflow-hidden rounded-full bg-[hsl(var(--border))]">
+                          <div className="h-full rounded-full bg-[hsl(var(--fg))]" style={{ width: `${pct}%` }} />
+                        </div>
+                      </div>
+                    )
+                  })
+                )}
+              </CardContent>
+            </Card>
+
+            <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-1">
+              <StatCard
+                title="Supplier orders"
+                value={formatCurrency(supplierOrderExpenseCents, 'en-EG', 'EGP')}
+                hint="Expenses linked or categorized as supplier order"
+              />
+              <StatCard
+                title="Transport"
+                value={formatCurrency(transportExpenseCents, 'en-EG', 'EGP')}
+                hint="Delivery, shipping, and transport costs"
+              />
+              <StatCard
+                title="Supplier + transport"
+                value={formatCurrency(supplierTransportExpenseCents, 'en-EG', 'EGP')}
+                hint={`${formatCurrency(customsExpenseCents, 'en-EG', 'EGP')} customs / taxes`}
+              />
+            </div>
           </div>
         </section>
 
@@ -854,7 +1055,7 @@ export default async function StoreDashboardPage({ searchParams }: { searchParam
             <CardHeader>
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <CardTitle>Latest store expenses</CardTitle>
-                <Button asChild href={expensesLast30Href} variant="outline" size="sm">
+                <Button asChild href={expensesPeriodHref} variant="outline" size="sm">
                   Open expenses
                 </Button>
               </div>
