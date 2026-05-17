@@ -16,7 +16,8 @@ import { formatCurrency, parsePriceToCents } from '@/lib/money'
 import { getSessionUserCached, getSupabaseAdminClientCached } from '@/lib/requestCache'
 
 const STORE_EXPENSE_BUCKET = 'store-expense-attachments'
-const PER_PAGE = 25
+const DEFAULT_PAGE_SIZE = 10
+const PAGE_SIZE_OPTIONS = [5, 10, 25] as const
 
 const STORE_EXPENSE_CATEGORIES = [
   { value: 'supplier_order', label: 'Supplier order' },
@@ -49,6 +50,11 @@ function strParam(value: unknown) {
 function parsePositiveInt(value: unknown, fallback: number) {
   const n = Number.parseInt(strParam(value), 10)
   return Number.isFinite(n) && n > 0 ? n : fallback
+}
+
+function parsePageSize(value: unknown) {
+  const n = parsePositiveInt(value, DEFAULT_PAGE_SIZE)
+  return (PAGE_SIZE_OPTIONS as readonly number[]).includes(n) ? n : DEFAULT_PAGE_SIZE
 }
 
 function parsePreset(value: unknown): RangePreset {
@@ -280,8 +286,9 @@ export default async function StoreExpensesPage({ searchParams }: { searchParams
     : 'all'
   const qRaw = strParam(searchParams?.q)
   const q = sanitizeSearch(qRaw)
+  const pageSize = parsePageSize(searchParams?.page_size)
   const page = parsePositiveInt(searchParams?.page, 1)
-  const offset = (page - 1) * PER_PAGE
+  const offset = (page - 1) * pageSize
 
   const saved = strParam(searchParams?.saved)
   const updated = strParam(searchParams?.updated)
@@ -307,7 +314,7 @@ export default async function StoreExpensesPage({ searchParams }: { searchParams
     listQuery = listQuery.or(`title.ilike.${like},vendor_name.ilike.${like},note.ilike.${like}`)
   }
 
-  const { data: rows, error: rowsError, count } = await listQuery.range(offset, offset + PER_PAGE - 1)
+  const { data: rows, error: rowsError, count } = await listQuery.range(offset, offset + pageSize - 1)
 
   let summaryQuery = admin
     .from('store_expenses')
@@ -339,21 +346,29 @@ export default async function StoreExpensesPage({ searchParams }: { searchParams
   }, 0)
 
   const totalCount = typeof count === 'number' ? count : undefined
-  const totalPages = totalCount ? Math.max(1, Math.ceil(totalCount / PER_PAGE)) : undefined
+  const totalPages = totalCount ? Math.max(1, Math.ceil(totalCount / pageSize)) : undefined
   const hasPrev = page > 1
-  const hasNext = totalPages ? page < totalPages : expenses.length === PER_PAGE
+  const hasNext = totalPages ? page < totalPages : expenses.length === pageSize
   const showPagination = totalPages ? totalPages > 1 : hasPrev || hasNext
 
-  const baseQS = { preset, from, to, category, payment_method: paymentMethod, q: qRaw }
+  const baseQS = { preset, from, to, category, payment_method: paymentMethod, q: qRaw, page_size: String(pageSize) }
   const filterReturnQS = buildQS(baseQS)
+  const exportHref = `/api/admin/store/expenses/export?${filterReturnQS}`
+  const activeFilterChips = [
+    `Period: ${from} → ${to}`,
+    category !== 'all' ? `Category: ${categoryLabel(category)}` : 'Category: All',
+    paymentMethod !== 'all' ? `Payment: ${paymentLabel(paymentMethod)}` : 'Payment: All',
+    q ? `Search: ${q}` : '',
+    `Page size: ${pageSize}`,
+  ].filter(Boolean)
   const prevHref = hasPrev ? `/admin/store/expenses?${buildQS({ ...baseQS, page: String(page - 1) })}` : ''
   const nextHref = hasNext ? `/admin/store/expenses?${buildQS({ ...baseQS, page: String(page + 1) })}` : ''
 
   const quickLinks = {
-    today: `/admin/store/expenses?${buildQS({ preset: 'today', from: today, to: today, category, payment_method: paymentMethod, q: qRaw })}`,
-    seven: `/admin/store/expenses?${buildQS({ preset: '7d', from: toISODate(addDays(now, -6)), to: today, category, payment_method: paymentMethod, q: qRaw })}`,
-    month: `/admin/store/expenses?${buildQS({ preset: 'month', from: thisMonthFrom, to: thisMonthTo, category, payment_method: paymentMethod, q: qRaw })}`,
-    custom: `/admin/store/expenses?${buildQS({ preset: 'custom', from, to, category, payment_method: paymentMethod, q: qRaw })}`,
+    today: `/admin/store/expenses?${buildQS({ preset: 'today', from: today, to: today, category, payment_method: paymentMethod, q: qRaw, page_size: String(pageSize) })}`,
+    seven: `/admin/store/expenses?${buildQS({ preset: '7d', from: toISODate(addDays(now, -6)), to: today, category, payment_method: paymentMethod, q: qRaw, page_size: String(pageSize) })}`,
+    month: `/admin/store/expenses?${buildQS({ preset: 'month', from: thisMonthFrom, to: thisMonthTo, category, payment_method: paymentMethod, q: qRaw, page_size: String(pageSize) })}`,
+    custom: `/admin/store/expenses?${buildQS({ preset: 'custom', from, to, category, payment_method: paymentMethod, q: qRaw, page_size: String(pageSize) })}`,
   }
 
   return (
@@ -396,7 +411,7 @@ export default async function StoreExpensesPage({ searchParams }: { searchParams
               <a href="/admin/store/expenses" className="inline-flex items-center justify-center rounded-2xl border border-[hsl(var(--border))] bg-white px-4 py-2 text-sm font-medium shadow-soft hover:bg-[hsl(var(--bg))]/80">Reset</a>
             </div>
 
-            <form method="get" className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
+            <form method="get" className="grid gap-3 sm:grid-cols-2 xl:grid-cols-7">
               <label className="block">
                 <span className="mb-1 block text-sm font-medium">Preset</span>
                 <select name="preset" defaultValue={preset} className="w-full rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring">
@@ -438,16 +453,34 @@ export default async function StoreExpensesPage({ searchParams }: { searchParams
                 <input name="q" defaultValue={qRaw} placeholder="title / vendor / note" className="w-full rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none placeholder:text-[hsl(var(--muted))] focus-visible:ring-2 focus-visible:ring-ring" />
               </label>
 
-              <div className="sm:col-span-2 xl:col-span-6">
+              <label className="block">
+                <span className="mb-1 block text-sm font-medium">Rows</span>
+                <select name="page_size" defaultValue={String(pageSize)} className="w-full rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                  {PAGE_SIZE_OPTIONS.map((size) => <option key={size} value={String(size)}>{size}</option>)}
+                </select>
+              </label>
+
+              <div className="flex flex-wrap items-center gap-2 sm:col-span-2 xl:col-span-7">
                 <button type="submit" className="inline-flex items-center justify-center rounded-2xl bg-black px-4 py-2 text-sm font-medium text-white shadow-soft hover:opacity-95">
                   Apply filters
                 </button>
+                <a href={exportHref} className="inline-flex items-center justify-center rounded-2xl border border-[hsl(var(--border))] bg-white px-4 py-2 text-sm font-medium shadow-soft hover:bg-[hsl(var(--bg))]/80">
+                  Export CSV
+                </a>
               </div>
             </form>
+
+            <div className="flex flex-wrap gap-2 border-t border-[hsl(var(--border))] pt-3">
+              {activeFilterChips.map((chip) => (
+                <span key={chip} className="rounded-full border border-[hsl(var(--border))] bg-[hsl(var(--bg))]/50 px-3 py-1 text-xs font-medium text-[hsl(var(--muted))]">
+                  {chip}
+                </span>
+              ))}
+            </div>
           </CardContent>
         </Card>
 
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
           <Card>
             <CardContent className="py-4">
               <div className="text-xs text-[hsl(var(--muted))]">Filtered total</div>
@@ -458,6 +491,12 @@ export default async function StoreExpensesPage({ searchParams }: { searchParams
             <CardContent className="py-4">
               <div className="text-xs text-[hsl(var(--muted))]">Filtered expenses</div>
               <div className="mt-1 text-xl font-semibold">{filteredCount}</div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="py-4">
+              <div className="text-xs text-[hsl(var(--muted))]">Current page total</div>
+              <div className="mt-1 text-xl font-semibold">{formatCurrency(currentPageTotalCents, 'en-EG', 'EGP')}</div>
             </CardContent>
           </Card>
           <Card>
@@ -476,9 +515,16 @@ export default async function StoreExpensesPage({ searchParams }: { searchParams
 
         <Card>
           <CardHeader>
-            <CardTitle>Store expenses</CardTitle>
-            <div className="text-xs text-[hsl(var(--muted))]">
-              Showing {totalCount ? `${Math.min(offset + 1, totalCount)}–${Math.min(offset + expenses.length, totalCount)} of ${totalCount}` : `${expenses.length}`} active item{expenses.length === 1 ? '' : 's'}.
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <CardTitle>Store expenses</CardTitle>
+                <div className="text-xs text-[hsl(var(--muted))]">
+                  Showing {totalCount ? `${Math.min(offset + 1, totalCount)}–${Math.min(offset + expenses.length, totalCount)} of ${totalCount}` : `${expenses.length}`} active item{expenses.length === 1 ? '' : 's'}.
+                </div>
+              </div>
+              <a href={exportHref} className="inline-flex items-center justify-center rounded-2xl border border-[hsl(var(--border))] bg-white px-4 py-2 text-sm font-medium shadow-soft hover:bg-[hsl(var(--bg))]/80">
+                Export CSV
+              </a>
             </div>
           </CardHeader>
           <CardContent>

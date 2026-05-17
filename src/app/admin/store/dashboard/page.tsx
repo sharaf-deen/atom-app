@@ -491,6 +491,7 @@ export default async function StoreDashboardPage({ searchParams }: { searchParam
   }).length
   const averageStockUnitPriceCents = safeAverageCents(activeStockForecastRevenueCents, activeStockTotalUnits)
   const storeNetCashLast30dCents = toInt(metrics.sales_paid_cents) - storeExpensesLast30dCents
+  const expensesLast30Href = `/admin/store/expenses?preset=custom&from=${last30DateString}&to=${new Date().toISOString().slice(0, 10)}&page_size=10`
 
   return (
     <main>
@@ -696,9 +697,14 @@ export default async function StoreDashboardPage({ searchParams }: { searchParam
         </section>
 
         <section className="space-y-3">
-          <div>
-            <h2 className="text-base font-semibold">Sales activity</h2>
-            <p className="text-sm text-[hsl(var(--muted))]">Last 30 days. The period selector was removed to keep the dashboard simple and stable.</p>
+          <div className="flex flex-wrap items-end justify-between gap-3">
+            <div>
+              <h2 className="text-base font-semibold">Sales activity</h2>
+              <p className="text-sm text-[hsl(var(--muted))]">Last 30 days. The period selector was removed to keep the dashboard simple and stable.</p>
+            </div>
+            <Button asChild href={expensesLast30Href} variant="outline" size="sm">
+              View expenses
+            </Button>
           </div>
 
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
@@ -846,7 +852,12 @@ export default async function StoreDashboardPage({ searchParams }: { searchParam
 
           <Card>
             <CardHeader>
-              <CardTitle>Latest store expenses</CardTitle>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <CardTitle>Latest store expenses</CardTitle>
+                <Button asChild href={expensesLast30Href} variant="outline" size="sm">
+                  Open expenses
+                </Button>
+              </div>
             </CardHeader>
             <CardContent className="space-y-3">
               {recentStoreExpenses.length === 0 ? (
