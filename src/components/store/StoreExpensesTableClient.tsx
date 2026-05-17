@@ -16,6 +16,10 @@ export type StoreExpenseRow = {
   amount_cents: number | null
   currency: string | null
   payment_method: string | null
+  supplier_order_id: string | null
+  supplier_order_reference?: string | null
+  supplier_order_supplier_name?: string | null
+  supplier_order_status?: string | null
   vendor_name: string | null
   note: string | null
   attachment_path: string | null
@@ -31,6 +35,7 @@ type Props = {
   expenses: StoreExpenseRow[]
   categories: Option[]
   paymentMethods: Option[]
+  supplierOrders: Array<Option & { supplierName?: string | null; totalCents?: number | null }>
   canManage: boolean
   returnQueryString?: string
   focusExpenseId?: string
@@ -43,6 +48,7 @@ type EditableExpense = {
   title: string
   amount: string
   payment_method: string
+  supplier_order_id: string
   vendor_name: string
   note: string
 }
@@ -53,6 +59,17 @@ function categoryLabel(categories: Option[], value?: string | null) {
 
 function paymentLabel(paymentMethods: Option[], value?: string | null) {
   return paymentMethods.find((item) => item.value === value)?.label ?? value?.replaceAll('_', ' ') ?? '—'
+}
+
+function supplierOrderDisplay(expense: StoreExpenseRow) {
+  if (!expense.supplier_order_id) return ''
+  const ref = expense.supplier_order_reference?.trim() || `Order ${expense.supplier_order_id.slice(0, 8)}`
+  const supplier = expense.supplier_order_supplier_name?.trim() || 'Supplier'
+  return `${ref} · ${supplier}`
+}
+
+function supplierStatusLabel(status?: string | null) {
+  return status?.replaceAll('_', ' ') || 'linked'
 }
 
 function paymentBadgeClass(value?: string | null) {
@@ -95,6 +112,7 @@ export default function StoreExpensesTableClient({
   expenses,
   categories,
   paymentMethods,
+  supplierOrders,
   canManage,
   returnQueryString = '',
   focusExpenseId = '',
@@ -125,6 +143,7 @@ export default function StoreExpensesTableClient({
       form.set('title', editing.title)
       form.set('amount', editing.amount)
       form.set('payment_method', editing.payment_method)
+      form.set('supplier_order_id', editing.supplier_order_id)
       form.set('vendor_name', editing.vendor_name)
       form.set('note', editing.note)
       if (editingFile) form.set('attachment', editingFile)
@@ -200,6 +219,7 @@ export default function StoreExpensesTableClient({
       title: expense.title || '',
       amount: toPriceString(expense.amount_cents),
       payment_method: expense.payment_method || 'cash',
+      supplier_order_id: expense.supplier_order_id || '',
       vendor_name: expense.vendor_name || '',
       note: expense.note || '',
     })
@@ -245,6 +265,7 @@ export default function StoreExpensesTableClient({
       <div className="space-y-3 md:hidden">
         {expenses.map((expense) => {
           const hasAttachment = Boolean(expense.attachment_path)
+          const linkedSupplierOrder = supplierOrderDisplay(expense)
           return (
             <div
               id={`store-expense-${expense.id}`}
@@ -256,6 +277,11 @@ export default function StoreExpensesTableClient({
                   <div className="text-xs text-[hsl(var(--muted))]">{expense.expense_date}</div>
                   <div className="mt-1 truncate font-semibold">{expense.title || 'Store expense'}</div>
                   <div className="mt-1 text-xs text-[hsl(var(--muted))]">{categoryLabel(categories, expense.category)}</div>
+                  {linkedSupplierOrder ? (
+                    <div className="mt-1 inline-flex rounded-full border border-sky-200 bg-sky-50 px-2 py-0.5 text-[11px] font-medium text-sky-700">
+                      {linkedSupplierOrder}
+                    </div>
+                  ) : null}
                 </div>
                 <div className="text-right">
                   <div className="text-lg font-semibold">{formatCurrency(expense.amount_cents, 'en-EG', expense.currency || 'EGP')}</div>
@@ -306,6 +332,7 @@ export default function StoreExpensesTableClient({
               <th className="py-3 pr-3 font-medium">Date</th>
               <th className="py-3 pr-3 font-medium">Expense</th>
               <th className="py-3 pr-3 font-medium">Category</th>
+              <th className="py-3 pr-3 font-medium">Supplier order</th>
               <th className="py-3 pr-3 font-medium">Payment</th>
               <th className="py-3 pr-3 text-right font-medium">Amount</th>
               <th className="py-3 pr-3 font-medium">Attachment</th>
@@ -315,6 +342,7 @@ export default function StoreExpensesTableClient({
           <tbody>
             {expenses.map((expense) => {
               const hasAttachment = Boolean(expense.attachment_path)
+              const linkedSupplierOrder = supplierOrderDisplay(expense)
               return (
                 <tr id={`store-expense-${expense.id}`} key={expense.id} className={`border-b border-[hsl(var(--border))] align-top ${focusExpenseId === expense.id ? 'bg-emerald-50/50' : ''}`}>
                   <td className="py-3 pr-3 whitespace-nowrap">{expense.expense_date}</td>
@@ -325,6 +353,14 @@ export default function StoreExpensesTableClient({
                     </div>
                   </td>
                   <td className="py-3 pr-3 whitespace-nowrap">{categoryLabel(categories, expense.category)}</td>
+                  <td className="py-3 pr-3">
+                    {linkedSupplierOrder ? (
+                      <div>
+                        <div className="text-xs font-medium">{linkedSupplierOrder}</div>
+                        <div className="mt-0.5 text-[11px] text-[hsl(var(--muted))]">{supplierStatusLabel(expense.supplier_order_status)}</div>
+                      </div>
+                    ) : <span className="text-xs text-[hsl(var(--muted))]">—</span>}
+                  </td>
                   <td className="py-3 pr-3 whitespace-nowrap">
                     <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-medium ${paymentBadgeClass(expense.payment_method)}`}>
                       {paymentLabel(paymentMethods, expense.payment_method)}
@@ -411,6 +447,14 @@ export default function StoreExpensesTableClient({
                 </select>
               </label>
             </div>
+            <label className="block">
+              <span className="mb-1 block text-sm font-medium">Related supplier order</span>
+              <select value={editing.supplier_order_id} onChange={(event) => setEditing({ ...editing, supplier_order_id: event.target.value })} className="w-full rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                <option value="">No supplier order link</option>
+                {supplierOrders.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
+              </select>
+              <span className="mt-1 block text-xs text-[hsl(var(--muted))]">Optional accounting link only. It does not update stock or supplier order status.</span>
+            </label>
             <label className="block">
               <span className="mb-1 block text-sm font-medium">Vendor / supplier</span>
               <input value={editing.vendor_name} onChange={(event) => setEditing({ ...editing, vendor_name: event.target.value })} className="w-full rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring" />

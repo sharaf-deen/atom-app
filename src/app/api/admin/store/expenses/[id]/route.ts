@@ -93,6 +93,7 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
     const title = safeStr(form.get('title'))
     const amountRaw = safeStr(form.get('amount'))
     const paymentMethod = safeStr(form.get('payment_method'))
+    const supplierOrderIdRaw = safeStr(form.get('supplier_order_id'))
     const vendorName = safeStr(form.get('vendor_name'))
     const note = safeStr(form.get('note'))
 
@@ -101,12 +102,26 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
     if (!title) return json(400, { ok: false, error: 'TITLE_REQUIRED' })
     if (!PAYMENT_METHODS.has(paymentMethod)) return json(400, { ok: false, error: 'INVALID_PAYMENT_METHOD' })
 
+    const supplierOrderId = supplierOrderIdRaw && isUuid(supplierOrderIdRaw) ? supplierOrderIdRaw : null
+    if (supplierOrderIdRaw && !supplierOrderId) return json(400, { ok: false, error: 'INVALID_SUPPLIER_ORDER_ID' })
+
     const amountCents = parsePriceToCents(amountRaw)
     if (!Number.isFinite(amountCents) || amountCents <= 0) {
       return json(400, { ok: false, error: 'INVALID_AMOUNT', details: 'Amount must be greater than 0.' })
     }
 
     const admin = guard.admin
+
+    if (supplierOrderId) {
+      const { data: supplierOrder, error: supplierOrderErr } = await admin
+        .from('store_supplier_orders')
+        .select('id')
+        .eq('id', supplierOrderId)
+        .maybeSingle<{ id: string }>()
+
+      if (supplierOrderErr) return json(500, { ok: false, error: 'SUPPLIER_ORDER_LOOKUP_FAILED', details: supplierOrderErr.message })
+      if (!supplierOrder?.id) return json(400, { ok: false, error: 'SUPPLIER_ORDER_NOT_FOUND' })
+    }
 
     const { data: before, error: beforeErr } = await admin
       .from('store_expenses')
@@ -125,6 +140,7 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
       amount_cents: amountCents,
       currency: 'EGP',
       payment_method: paymentMethod,
+      supplier_order_id: supplierOrderId,
       vendor_name: vendorName || null,
       note: note || null,
       updated_by: guard.userId,

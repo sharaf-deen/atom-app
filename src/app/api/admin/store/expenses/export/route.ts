@@ -12,6 +12,13 @@ const PAYMENT_METHODS = new Set(['cash', 'card', 'bank_transfer', 'instapay'])
 
 type RangePreset = 'today' | '7d' | 'month' | 'custom'
 
+type SupplierOrderExportRow = {
+  id: string
+  reference: string | null
+  supplier_name: string | null
+  status: string | null
+}
+
 type ExpenseExportRow = {
   id: string
   expense_date: string | null
@@ -20,6 +27,7 @@ type ExpenseExportRow = {
   amount_cents: number | null
   currency: string | null
   payment_method: string | null
+  supplier_order_id: string | null
   vendor_name: string | null
   note: string | null
   attachment_filename: string | null
@@ -35,6 +43,10 @@ function json(status: number, body: any) {
 
 function isDateOnly(value: string) {
   return /^\d{4}-\d{2}-\d{2}$/.test(value)
+}
+
+function isUuid(value: string) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)
 }
 
 function toISODate(date: Date) {
@@ -98,6 +110,14 @@ function paymentLabel(value?: string | null) {
     default:
       return value || ''
   }
+}
+
+function supplierOrderLabel(row?: SupplierOrderExportRow | null, fallbackId?: string | null) {
+  if (!row && !fallbackId) return ''
+  const ref = row?.reference?.trim() || (fallbackId ? `Order ${fallbackId.slice(0, 8)}` : '')
+  const supplier = row?.supplier_name?.trim() || ''
+  const status = row?.status?.replaceAll('_', ' ') || ''
+  return [ref, supplier, status].filter(Boolean).join(' · ')
 }
 
 function amountEgP(cents?: number | null) {
@@ -169,12 +189,14 @@ export async function GET(req: Request) {
   const paymentRaw = url.searchParams.get('payment_method') || 'all'
   const category = CATEGORIES.has(categoryRaw) ? categoryRaw : 'all'
   const paymentMethod = PAYMENT_METHODS.has(paymentRaw) ? paymentRaw : 'all'
+  const supplierOrderRaw = url.searchParams.get('supplier_order_id') || 'all'
+  const supplierOrderId = supplierOrderRaw !== 'all' && isUuid(supplierOrderRaw) ? supplierOrderRaw : 'all'
   const q = sanitizeSearch(url.searchParams.get('q') || '')
 
   const admin = createSupabaseAdminClient()
   let query = admin
     .from('store_expenses')
-    .select('id,expense_date,category,title,amount_cents,currency,payment_method,vendor_name,note,attachment_filename,created_at,updated_at')
+    .select('id,expense_date,category,title,amount_cents,currency,payment_method,supplier_order_id,vendor_name,note,attachment_filename,created_at,updated_at')
     .is('deleted_at', null)
     .gte('expense_date', from)
     .lte('expense_date', to)
@@ -184,6 +206,7 @@ export async function GET(req: Request) {
 
   if (category !== 'all') query = query.eq('category', category)
   if (paymentMethod !== 'all') query = query.eq('payment_method', paymentMethod)
+  if (supplierOrderId !== 'all') query = query.eq('supplier_order_id', supplierOrderId)
   if (q) {
     const like = `%${q}%`
     query = query.or(`title.ilike.${like},vendor_name.ilike.${like},note.ilike.${like}`)
@@ -193,10 +216,26 @@ export async function GET(req: Request) {
   if (error) return json(500, { ok: false, error: 'EXPORT_FAILED', details: error.message })
 
   const rows = (data ?? []) as ExpenseExportRow[]
+  const supplierOrderIds = Array.from(new Set(rows.map((row) => row.supplier_order_id).filter(Boolean))) as string[]
+  const supplierOrderMap = new Map<string, SupplierOrderExportRow>()
+
+  if (supplierOrderIds.length > 0) {
+    const { data: supplierRows } = await admin
+      .from('store_supplier_orders')
+      .select('id,reference,supplier_name,status')
+      .in('id', supplierOrderIds)
+
+    for (const row of (supplierRows ?? []) as SupplierOrderExportRow[]) {
+      supplierOrderMap.set(row.id, row)
+    }
+  }
+
   const header = csvLine([
     'Expense date',
     'Category',
     'Title',
+    'Related supplier order',
+    'Related supplier order ID',
     'Vendor / supplier',
     'Payment method',
     'Amount EGP',
@@ -212,6 +251,8 @@ export async function GET(req: Request) {
     row.expense_date || '',
     categoryLabel(row.category),
     row.title || '',
+    supplierOrderLabel(row.supplier_order_id ? supplierOrderMap.get(row.supplier_order_id) : null, row.supplier_order_id),
+    row.supplier_order_id || '',
     row.vendor_name || '',
     paymentLabel(row.payment_method),
     amountEgP(row.amount_cents),
