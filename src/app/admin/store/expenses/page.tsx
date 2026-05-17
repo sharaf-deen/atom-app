@@ -35,6 +35,30 @@ const PAYMENT_METHODS = [
   { value: 'bank_transfer', label: 'Bank transfer' },
 ] as const
 
+type SupplierOrderOption = {
+  id: string
+  reference: string | null
+  supplier_name: string | null
+  status: string | null
+  ordered_at: string | null
+  received_at: string | null
+  created_at: string | null
+  total_cents: number
+}
+
+function supplierOrderLabel(order: Pick<SupplierOrderOption, 'id' | 'reference' | 'supplier_name' | 'status'>) {
+  const ref = order.reference?.trim() || `Order ${order.id.slice(0, 8)}`
+  const supplier = order.supplier_name?.trim() || 'Supplier'
+  const status = order.status?.replaceAll('_', ' ') || 'status unknown'
+  return `${ref} · ${supplier} · ${status}`
+}
+
+function toAmountInput(cents: number | null | undefined) {
+  const n = Number(cents ?? 0)
+  if (!Number.isFinite(n) || n <= 0) return ''
+  return (n / 100).toFixed(2)
+}
+
 type SearchParams = Record<string, string | string[] | undefined>
 type RangePreset = 'today' | '7d' | 'month' | 'custom'
 
@@ -87,6 +111,10 @@ function isDateOnly(value: string) {
   return /^\d{4}-\d{2}-\d{2}$/.test(value)
 }
 
+function isUuid(value: string) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)
+}
+
 function sanitizeSearch(value: string) {
   return value.replace(/[%,_]/g, ' ').replace(/\s+/g, ' ').trim()
 }
@@ -119,6 +147,29 @@ function redirectWithMessage(baseQuery: string, key: 'saved' | 'error', message:
     search.set('error', message)
   }
   redirect(`/admin/store/expenses?${search.toString()}`)
+}
+
+async function readSupplierOrderOptions(admin: ReturnType<typeof getSupabaseAdminClientCached>) {
+  const { data, error } = await admin
+    .from('store_supplier_orders')
+    .select('id,reference,supplier_name,status,ordered_at,received_at,created_at,items:store_supplier_order_items(line_total_cents)')
+    .order('created_at', { ascending: false })
+    .limit(200)
+
+  if (error) return { options: [] as SupplierOrderOption[], error: error.message }
+
+  const options = (data ?? []).map((row: any) => ({
+    id: String(row.id),
+    reference: row.reference ?? null,
+    supplier_name: row.supplier_name ?? null,
+    status: row.status ?? null,
+    ordered_at: row.ordered_at ?? null,
+    received_at: row.received_at ?? null,
+    created_at: row.created_at ?? null,
+    total_cents: (row.items ?? []).reduce((sum: number, item: any) => sum + Math.max(0, Number(item.line_total_cents ?? 0)), 0),
+  })) as SupplierOrderOption[]
+
+  return { options, error: null as string | null }
 }
 
 async function uploadAttachment(admin: ReturnType<typeof getSupabaseAdminClientCached>, file: File, expenseDate: string) {
@@ -171,6 +222,7 @@ async function addStoreExpenseAction(formData: FormData) {
   const paymentMethod = safeStr(formData.get('payment_method')).trim()
   const vendorName = safeStr(formData.get('vendor_name')).trim()
   const note = safeStr(formData.get('note')).trim()
+  const supplierOrderIdRaw = safeStr(formData.get('supplier_order_id')).trim()
 
   if (!isDateOnly(expenseDate)) redirectWithMessage(returnQueryString, 'error', 'Invalid expense date.')
   if (!STORE_EXPENSE_CATEGORIES.some((item) => item.value === category)) redirectWithMessage(returnQueryString, 'error', 'Please choose a valid category.')
@@ -180,7 +232,23 @@ async function addStoreExpenseAction(formData: FormData) {
   const amountCents = parsePriceToCents(amountRaw)
   if (!Number.isFinite(amountCents) || amountCents <= 0) redirectWithMessage(returnQueryString, 'error', 'Amount must be greater than 0.')
 
+  const supplierOrderId = supplierOrderIdRaw && isUuid(supplierOrderIdRaw) ? supplierOrderIdRaw : null
+  if (supplierOrderIdRaw && !supplierOrderId) redirectWithMessage(returnQueryString, 'error', 'Invalid supplier order link.')
+
   const admin = getSupabaseAdminClientCached()
+
+  if (supplierOrderId) {
+    const { data: supplierOrder, error: supplierOrderError } = await admin
+      .from('store_supplier_orders')
+      .select('id')
+      .eq('id', supplierOrderId)
+      .maybeSingle<{ id: string }>()
+
+    if (supplierOrderError || !supplierOrder?.id) {
+      redirectWithMessage(returnQueryString, 'error', supplierOrderError?.message || 'Related supplier order was not found.')
+    }
+  }
+
   const attachment = formData.get('attachment')
   let attachmentPayload: Record<string, string | null> = {}
   let insertedId = ''
@@ -202,6 +270,7 @@ async function addStoreExpenseAction(formData: FormData) {
         amount_cents: amountCents,
         currency: 'EGP',
         payment_method: paymentMethod,
+        supplier_order_id: supplierOrderId,
         vendor_name: vendorName || null,
         note: note || null,
         created_by: me.id,
@@ -284,6 +353,8 @@ export default async function StoreExpensesPage({ searchParams }: { searchParams
   const paymentMethod = PAYMENT_METHODS.some((item) => item.value === strParam(searchParams?.payment_method))
     ? strParam(searchParams?.payment_method)
     : 'all'
+  const supplierOrderParam = strParam(searchParams?.supplier_order_id).trim()
+  const supplierOrderFilter = supplierOrderParam && isUuid(supplierOrderParam) ? supplierOrderParam : 'all'
   const qRaw = strParam(searchParams?.q)
   const q = sanitizeSearch(qRaw)
   const pageSize = parsePageSize(searchParams?.page_size)
@@ -297,10 +368,13 @@ export default async function StoreExpensesPage({ searchParams }: { searchParams
   const focusId = strParam(searchParams?.focus_id)
 
   const admin = getSupabaseAdminClientCached()
+  const { options: supplierOrderOptions, error: supplierOrdersError } = await readSupplierOrderOptions(admin)
+  const supplierOrderById = new Map(supplierOrderOptions.map((order) => [order.id, order]))
+  const selectedSupplierOrder = supplierOrderFilter !== 'all' ? supplierOrderById.get(supplierOrderFilter) ?? null : null
 
   let listQuery = admin
     .from('store_expenses')
-    .select('id,expense_date,category,title,amount_cents,currency,payment_method,vendor_name,note,attachment_path,attachment_mime,attachment_filename,created_at,updated_at', { count: 'exact' })
+    .select('id,expense_date,category,title,amount_cents,currency,payment_method,supplier_order_id,vendor_name,note,attachment_path,attachment_mime,attachment_filename,created_at,updated_at', { count: 'exact' })
     .is('deleted_at', null)
     .gte('expense_date', from)
     .lte('expense_date', to)
@@ -309,6 +383,7 @@ export default async function StoreExpensesPage({ searchParams }: { searchParams
 
   if (category !== 'all') listQuery = listQuery.eq('category', category)
   if (paymentMethod !== 'all') listQuery = listQuery.eq('payment_method', paymentMethod)
+  if (supplierOrderFilter !== 'all') listQuery = listQuery.eq('supplier_order_id', supplierOrderFilter)
   if (q) {
     const like = `%${q}%`
     listQuery = listQuery.or(`title.ilike.${like},vendor_name.ilike.${like},note.ilike.${like}`)
@@ -318,7 +393,7 @@ export default async function StoreExpensesPage({ searchParams }: { searchParams
 
   let summaryQuery = admin
     .from('store_expenses')
-    .select('id,amount_cents,payment_method,category')
+    .select('id,amount_cents,payment_method,category,supplier_order_id')
     .is('deleted_at', null)
     .gte('expense_date', from)
     .lte('expense_date', to)
@@ -326,6 +401,7 @@ export default async function StoreExpensesPage({ searchParams }: { searchParams
 
   if (category !== 'all') summaryQuery = summaryQuery.eq('category', category)
   if (paymentMethod !== 'all') summaryQuery = summaryQuery.eq('payment_method', paymentMethod)
+  if (supplierOrderFilter !== 'all') summaryQuery = summaryQuery.eq('supplier_order_id', supplierOrderFilter)
   if (q) {
     const like = `%${q}%`
     summaryQuery = summaryQuery.or(`title.ilike.${like},vendor_name.ilike.${like},note.ilike.${like}`)
@@ -333,8 +409,16 @@ export default async function StoreExpensesPage({ searchParams }: { searchParams
 
   const { data: summaryRows, error: summaryError } = await summaryQuery
 
-  const expenses = (rows ?? []) as StoreExpenseRow[]
-  const summary = (summaryRows ?? []) as Array<{ id: string; amount_cents: number | null; payment_method: string | null; category: string | null }>
+  const expenses = ((rows ?? []) as StoreExpenseRow[]).map((row) => {
+    const supplierOrder = row.supplier_order_id ? supplierOrderById.get(row.supplier_order_id) : null
+    return {
+      ...row,
+      supplier_order_reference: supplierOrder?.reference ?? null,
+      supplier_order_supplier_name: supplierOrder?.supplier_name ?? null,
+      supplier_order_status: supplierOrder?.status ?? null,
+    }
+  })
+  const summary = (summaryRows ?? []) as Array<{ id: string; amount_cents: number | null; payment_method: string | null; category: string | null; supplier_order_id: string | null }>
   const filteredTotalCents = summary.reduce((sum, row) => sum + Math.max(0, Number(row.amount_cents ?? 0)), 0)
   const currentPageTotalCents = expenses.reduce((sum, row) => sum + Math.max(0, Number(row.amount_cents ?? 0)), 0)
   const filteredCount = summary.length
@@ -351,25 +435,37 @@ export default async function StoreExpensesPage({ searchParams }: { searchParams
   const hasNext = totalPages ? page < totalPages : expenses.length === pageSize
   const showPagination = totalPages ? totalPages > 1 : hasPrev || hasNext
 
-  const baseQS = { preset, from, to, category, payment_method: paymentMethod, q: qRaw, page_size: String(pageSize) }
+  const baseQS = { preset, from, to, category, payment_method: paymentMethod, supplier_order_id: supplierOrderFilter === 'all' ? '' : supplierOrderFilter, q: qRaw, page_size: String(pageSize) }
   const filterReturnQS = buildQS(baseQS)
   const exportHref = `/api/admin/store/expenses/export?${filterReturnQS}`
   const activeFilterChips = [
     `Period: ${from} → ${to}`,
     category !== 'all' ? `Category: ${categoryLabel(category)}` : 'Category: All',
     paymentMethod !== 'all' ? `Payment: ${paymentLabel(paymentMethod)}` : 'Payment: All',
+    supplierOrderFilter !== 'all' ? `Supplier order: ${selectedSupplierOrder ? supplierOrderLabel(selectedSupplierOrder) : supplierOrderFilter.slice(0, 8)}` : 'Supplier order: All',
     q ? `Search: ${q}` : '',
     `Page size: ${pageSize}`,
   ].filter(Boolean)
   const prevHref = hasPrev ? `/admin/store/expenses?${buildQS({ ...baseQS, page: String(page - 1) })}` : ''
   const nextHref = hasNext ? `/admin/store/expenses?${buildQS({ ...baseQS, page: String(page + 1) })}` : ''
 
+  const supplierOrderQSValue = supplierOrderFilter === 'all' ? '' : supplierOrderFilter
   const quickLinks = {
-    today: `/admin/store/expenses?${buildQS({ preset: 'today', from: today, to: today, category, payment_method: paymentMethod, q: qRaw, page_size: String(pageSize) })}`,
-    seven: `/admin/store/expenses?${buildQS({ preset: '7d', from: toISODate(addDays(now, -6)), to: today, category, payment_method: paymentMethod, q: qRaw, page_size: String(pageSize) })}`,
-    month: `/admin/store/expenses?${buildQS({ preset: 'month', from: thisMonthFrom, to: thisMonthTo, category, payment_method: paymentMethod, q: qRaw, page_size: String(pageSize) })}`,
-    custom: `/admin/store/expenses?${buildQS({ preset: 'custom', from, to, category, payment_method: paymentMethod, q: qRaw, page_size: String(pageSize) })}`,
+    today: `/admin/store/expenses?${buildQS({ preset: 'today', from: today, to: today, category, payment_method: paymentMethod, supplier_order_id: supplierOrderQSValue, q: qRaw, page_size: String(pageSize) })}`,
+    seven: `/admin/store/expenses?${buildQS({ preset: '7d', from: toISODate(addDays(now, -6)), to: today, category, payment_method: paymentMethod, supplier_order_id: supplierOrderQSValue, q: qRaw, page_size: String(pageSize) })}`,
+    month: `/admin/store/expenses?${buildQS({ preset: 'month', from: thisMonthFrom, to: thisMonthTo, category, payment_method: paymentMethod, supplier_order_id: supplierOrderQSValue, q: qRaw, page_size: String(pageSize) })}`,
+    custom: `/admin/store/expenses?${buildQS({ preset: 'custom', from, to, category, payment_method: paymentMethod, supplier_order_id: supplierOrderQSValue, q: qRaw, page_size: String(pageSize) })}`,
   }
+
+  const defaultLinkedSupplierOrder = supplierOrderFilter !== 'all' ? supplierOrderById.get(supplierOrderFilter) ?? null : null
+  const defaultExpenseTitle = defaultLinkedSupplierOrder
+    ? `Supplier order ${defaultLinkedSupplierOrder.reference?.trim() || defaultLinkedSupplierOrder.id.slice(0, 8)}`
+    : ''
+  const defaultExpenseVendor = defaultLinkedSupplierOrder?.supplier_name ?? ''
+  const defaultExpenseAmount = toAmountInput(defaultLinkedSupplierOrder?.total_cents)
+  const defaultExpenseNote = defaultLinkedSupplierOrder
+    ? `Linked supplier order: ${supplierOrderLabel(defaultLinkedSupplierOrder)}`
+    : ''
 
   return (
     <main>
@@ -387,6 +483,7 @@ export default async function StoreExpensesPage({ searchParams }: { searchParams
         {errorMsg ? <InlineAlert variant="error" title="Error">{errorMsg}</InlineAlert> : null}
         {rowsError ? <InlineAlert variant="warning" title="Expenses">{rowsError.message || 'Failed to load store expenses.'}</InlineAlert> : null}
         {summaryError ? <InlineAlert variant="warning" title="Summary">{summaryError.message || 'Failed to load store expense summary.'}</InlineAlert> : null}
+        {supplierOrdersError ? <InlineAlert variant="warning" title="Supplier orders">{supplierOrdersError || 'Failed to load supplier order links.'}</InlineAlert> : null}
         {saved ? <InlineAlert variant="success" title="Saved">Store expense added.</InlineAlert> : null}
         {updated ? <InlineAlert variant="success" title="Updated">Store expense updated.</InlineAlert> : null}
         {deleted ? <InlineAlert variant="success" title="Deleted">Store expense deleted from the active view. The audit record is kept.</InlineAlert> : null}
@@ -411,7 +508,7 @@ export default async function StoreExpensesPage({ searchParams }: { searchParams
               <a href="/admin/store/expenses" className="inline-flex items-center justify-center rounded-2xl border border-[hsl(var(--border))] bg-white px-4 py-2 text-sm font-medium shadow-soft hover:bg-[hsl(var(--bg))]/80">Reset</a>
             </div>
 
-            <form method="get" className="grid gap-3 sm:grid-cols-2 xl:grid-cols-7">
+            <form method="get" className="grid gap-3 sm:grid-cols-2 xl:grid-cols-8">
               <label className="block">
                 <span className="mb-1 block text-sm font-medium">Preset</span>
                 <select name="preset" defaultValue={preset} className="w-full rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring">
@@ -448,6 +545,14 @@ export default async function StoreExpensesPage({ searchParams }: { searchParams
                 </select>
               </label>
 
+              <label className="block">
+                <span className="mb-1 block text-sm font-medium">Supplier order</span>
+                <select name="supplier_order_id" defaultValue={supplierOrderFilter} className="w-full rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                  <option value="all">All</option>
+                  {supplierOrderOptions.map((order) => <option key={order.id} value={order.id}>{supplierOrderLabel(order)}</option>)}
+                </select>
+              </label>
+
               <label className="block sm:col-span-2 xl:col-span-1">
                 <span className="mb-1 block text-sm font-medium">Search</span>
                 <input name="q" defaultValue={qRaw} placeholder="title / vendor / note" className="w-full rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none placeholder:text-[hsl(var(--muted))] focus-visible:ring-2 focus-visible:ring-ring" />
@@ -460,7 +565,7 @@ export default async function StoreExpensesPage({ searchParams }: { searchParams
                 </select>
               </label>
 
-              <div className="flex flex-wrap items-center gap-2 sm:col-span-2 xl:col-span-7">
+              <div className="flex flex-wrap items-center gap-2 sm:col-span-2 xl:col-span-8">
                 <button type="submit" className="inline-flex items-center justify-center rounded-2xl bg-black px-4 py-2 text-sm font-medium text-white shadow-soft hover:opacity-95">
                   Apply filters
                 </button>
@@ -533,6 +638,7 @@ export default async function StoreExpensesPage({ searchParams }: { searchParams
                 expenses={expenses}
                 categories={STORE_EXPENSE_CATEGORIES.map((item) => ({ value: item.value, label: item.label }))}
                 paymentMethods={PAYMENT_METHODS.map((item) => ({ value: item.value, label: item.label }))}
+                supplierOrders={supplierOrderOptions.map((order) => ({ value: order.id, label: supplierOrderLabel(order), supplierName: order.supplier_name, totalCents: order.total_cents }))}
                 canManage={canManage}
                 returnQueryString={filterReturnQS}
                 focusExpenseId={focusId}
@@ -555,7 +661,8 @@ export default async function StoreExpensesPage({ searchParams }: { searchParams
         </Card>
 
         {canManage ? (
-          <Card>
+          <div id="add-store-expense">
+            <Card>
             <CardHeader>
               <CardTitle>Add store expense</CardTitle>
               <div className="text-xs text-[hsl(var(--muted))]">Super admin only · EGP only · attachment optional.</div>
@@ -567,6 +674,14 @@ export default async function StoreExpensesPage({ searchParams }: { searchParams
                   <span className="mb-1 block text-sm font-medium">Date</span>
                   <input type="date" name="expense_date" defaultValue={today} className="w-full rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring" />
                 </label>
+                <label className="block sm:col-span-3">
+                  <span className="mb-1 block text-sm font-medium">Related supplier order</span>
+                  <select name="supplier_order_id" defaultValue={defaultLinkedSupplierOrder?.id || ''} className="w-full rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                    <option value="">No supplier order link</option>
+                    {supplierOrderOptions.map((order) => <option key={order.id} value={order.id}>{supplierOrderLabel(order)}</option>)}
+                  </select>
+                  <span className="mt-1 block text-xs text-[hsl(var(--muted))]">Optional accounting link only. It does not update stock or supplier order status.</span>
+                </label>
                 <label className="block sm:col-span-2">
                   <span className="mb-1 block text-sm font-medium">Category</span>
                   <select name="category" defaultValue="supplier_order" required className="w-full rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring">
@@ -575,11 +690,11 @@ export default async function StoreExpensesPage({ searchParams }: { searchParams
                 </label>
                 <label className="block">
                   <span className="mb-1 block text-sm font-medium">Amount (EGP)</span>
-                  <input type="number" name="amount" min="0" step="0.01" required className="w-full rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring" />
+                  <input type="number" name="amount" min="0" step="0.01" defaultValue={defaultExpenseAmount} required className="w-full rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring" />
                 </label>
                 <label className="block sm:col-span-2">
                   <span className="mb-1 block text-sm font-medium">Title</span>
-                  <input name="title" placeholder="Example: Pakistan factory order" required className="w-full rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none placeholder:text-[hsl(var(--muted))] focus-visible:ring-2 focus-visible:ring-ring" />
+                  <input name="title" defaultValue={defaultExpenseTitle} placeholder="Example: Pakistan factory order" required className="w-full rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none placeholder:text-[hsl(var(--muted))] focus-visible:ring-2 focus-visible:ring-ring" />
                 </label>
                 <label className="block">
                   <span className="mb-1 block text-sm font-medium">Payment method</span>
@@ -589,11 +704,11 @@ export default async function StoreExpensesPage({ searchParams }: { searchParams
                 </label>
                 <label className="block">
                   <span className="mb-1 block text-sm font-medium">Vendor / supplier</span>
-                  <input name="vendor_name" placeholder="Optional" className="w-full rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none placeholder:text-[hsl(var(--muted))] focus-visible:ring-2 focus-visible:ring-ring" />
+                  <input name="vendor_name" defaultValue={defaultExpenseVendor} placeholder="Optional" className="w-full rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none placeholder:text-[hsl(var(--muted))] focus-visible:ring-2 focus-visible:ring-ring" />
                 </label>
                 <label className="block sm:col-span-2">
                   <span className="mb-1 block text-sm font-medium">Note</span>
-                  <input name="note" placeholder="Optional note…" className="w-full rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none placeholder:text-[hsl(var(--muted))] focus-visible:ring-2 focus-visible:ring-ring" />
+                  <input name="note" defaultValue={defaultExpenseNote} placeholder="Optional note…" className="w-full rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none placeholder:text-[hsl(var(--muted))] focus-visible:ring-2 focus-visible:ring-ring" />
                 </label>
                 <label className="block sm:col-span-2">
                   <span className="mb-1 block text-sm font-medium">Attachment</span>
@@ -605,7 +720,8 @@ export default async function StoreExpensesPage({ searchParams }: { searchParams
                 </div>
               </form>
             </CardContent>
-          </Card>
+            </Card>
+          </div>
         ) : null}
       </Section>
     </main>
