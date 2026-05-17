@@ -13,6 +13,7 @@ import { formatCurrency } from '@/lib/money'
 import {
   canAccessStoreCatalogAdmin,
   canAccessStoreDashboard,
+  canAccessStoreExpenses,
   canManageStoreCatalog,
   canManageStorePreorders,
   canManageStoreSales,
@@ -248,6 +249,10 @@ function formatDateTime(value?: string | null) {
     hour: '2-digit',
     minute: '2-digit',
   })
+}
+
+function todayDateOnly() {
+  return new Date().toISOString().slice(0, 10)
 }
 
 function isLowStock(product: Pick<ProductRow, 'inventory_qty' | 'low_stock_threshold'>) {
@@ -499,6 +504,8 @@ export default async function AdminStorePage({
   }
 
   const canSeeDashboard = canAccessStoreDashboard(me.role)
+  const canSeeExpenses = canAccessStoreExpenses(me.role)
+  const storeExpenseLinkTo = todayDateOnly()
   const canManageCatalog = canManageStoreCatalog(me.role)
   const canManageSupplierOrders = canManageStoreSupplierOrders(me.role)
   const canManagePreorders = canManageStorePreorders(me.role)
@@ -585,6 +592,12 @@ export default async function AdminStorePage({
               <Link href="/admin/store?tab=supplier-orders" className="rounded-2xl border bg-white p-4 transition hover:bg-gray-50">
                 <div className="text-sm font-semibold">Supplier Orders</div>
                 <div className="mt-1 text-xs text-[hsl(var(--muted))]">Create orders and receive stock by delta.</div>
+              </Link>
+            ) : null}
+            {canSeeExpenses ? (
+              <Link href="/admin/store/expenses" className="rounded-2xl border bg-white p-4 transition hover:bg-gray-50">
+                <div className="text-sm font-semibold">Expenses</div>
+                <div className="mt-1 text-xs text-[hsl(var(--muted))]">Track supplier, transport, and store costs.</div>
               </Link>
             ) : null}
             <div className="rounded-2xl border bg-white p-3">
@@ -856,6 +869,23 @@ export default async function AdminStorePage({
                               </div>
                               <div className="flex flex-wrap items-center gap-2">{supplierStatusPill(order.status)}</div>
                             </div>
+
+                            {canSeeExpenses ? (
+                              <div className="mb-3 flex flex-wrap gap-2">
+                                <Link
+                                  href={`${buildUrl('/admin/store/expenses', { supplier_order_id: order.id, preset: 'custom', from: '2020-01-01', to: storeExpenseLinkTo })}#add-store-expense`}
+                                  className="inline-flex items-center rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-xs font-medium hover:bg-gray-50"
+                                >
+                                  Create linked expense
+                                </Link>
+                                <Link
+                                  href={buildUrl('/admin/store/expenses', { supplier_order_id: order.id, preset: 'custom', from: '2020-01-01', to: storeExpenseLinkTo })}
+                                  className="inline-flex items-center rounded-xl border border-[hsl(var(--border))] px-3 py-2 text-xs font-medium hover:bg-gray-50"
+                                >
+                                  View linked expenses
+                                </Link>
+                              </div>
+                            ) : null}
 
                             <div className="grid gap-2 text-sm sm:grid-cols-2 xl:grid-cols-4">
                               <div><span className="text-[hsl(var(--muted))]">Expected:</span> <span className="font-medium">{order.expected_at || '—'}</span></div>
