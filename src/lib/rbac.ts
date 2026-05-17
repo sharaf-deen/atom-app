@@ -15,6 +15,7 @@ export const NOTIFICATION_RECIPIENT_ROLES = ['member', 'champion', 'vip', 'assis
 export const STORE_CUSTOMER_ROLES = ['member', 'champion', 'vip', 'assistant_coach', 'coach', 'head_coach'] as const satisfies readonly Role[]
 export const STORE_CATALOG_ADMIN_ROLES = ['reception', 'admin', 'super_admin'] as const satisfies readonly Role[]
 export const STORE_DASHBOARD_ROLES = ['admin', 'super_admin'] as const satisfies readonly Role[]
+export const STORE_EXPENSE_ROLES = ['admin', 'super_admin'] as const satisfies readonly Role[]
 
 export type NavIconKey =
   | 'home'
@@ -366,6 +367,14 @@ export function canManageStoreSales(role: Role | null | undefined) {
   return hasAnyRole(role, SUPER_ADMIN_ROLES)
 }
 
+export function canAccessStoreExpenses(role: Role | null | undefined) {
+  return hasAnyRole(role, STORE_EXPENSE_ROLES)
+}
+
+export function canManageStoreExpenses(role: Role | null | undefined) {
+  return hasAnyRole(role, SUPER_ADMIN_ROLES)
+}
+
 export function canAccessStoreAdmin(role: Role | null | undefined) {
   return hasAnyRole(role, SUPER_ADMIN_ROLES)
 }
@@ -670,6 +679,14 @@ const CAPABILITY_BLUEPRINTS: CapabilityBlueprint[] = [
     description: 'Record store sales, payment methods, and outstanding debts in store admin.',
     href: '/admin/store/sales',
     check: (role) => canManageStoreSales(role),
+  },
+  {
+    key: 'store_expenses',
+    category: 'Store',
+    label: 'Store expenses',
+    description: 'Review store expenses and cash visibility. Admin is read-only; super admin can manage entries.',
+    href: '/admin/store/expenses',
+    check: (role) => canAccessStoreExpenses(role),
   },
   {
     key: 'store_admin',
