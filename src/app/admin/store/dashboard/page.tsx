@@ -120,6 +120,24 @@ type StoreAccountingExpenseRow = {
   expense_date: string | null
 }
 
+type StoreAccountingFundingRow = {
+  amount_cents: number | null
+  type: string | null
+  payment_method: string | null
+  funding_date: string | null
+}
+
+type StoreRecentFundingRow = {
+  id: string
+  funding_date: string | null
+  type: string | null
+  title: string | null
+  amount_cents: number | null
+  payment_method: string | null
+  source_name: string | null
+  created_at: string | null
+}
+
 type AccountingPeriod = '7d' | '30d' | 'month' | 'all'
 
 const ACTIVE_STOCK_PAGE_SIZE = 5
@@ -222,6 +240,16 @@ function expensesHrefForRange(from: string | null, to: string) {
   params.set('to', to)
   params.set('page_size', '10')
   return `/admin/store/expenses?${params.toString()}`
+}
+
+function fundingHrefForRange(from: string | null, to: string) {
+  if (!from) return '/admin/store/funding?page_size=10'
+  const params = new URLSearchParams()
+  params.set('preset', 'custom')
+  params.set('from', from)
+  params.set('to', to)
+  params.set('page_size', '10')
+  return `/admin/store/funding?${params.toString()}`
 }
 
 function productLabel(p: Pick<ProductRow, 'name' | 'color' | 'size'>) {
@@ -333,6 +361,17 @@ function storeExpenseCategoryLabel(category?: string | null) {
   }
 }
 
+function storeFundingTypeLabel(type?: string | null) {
+  switch (type) {
+    case 'loan_received':
+      return 'Loan received'
+    case 'loan_repayment':
+      return 'Loan repayment'
+    default:
+      return type?.replaceAll('_', ' ') || '—'
+  }
+}
+
 function paymentMethodLabel(method?: string | null) {
   switch (method) {
     case 'cash':
@@ -412,6 +451,7 @@ export default async function StoreDashboardPage({ searchParams }: { searchParam
   let recentPreorders: PreorderRow[] = []
   let recentSales: SaleRow[] = []
   let recentStoreExpenses: StoreExpenseRow[] = []
+  let recentStoreFunding: StoreRecentFundingRow[] = []
   let accountingSalesGrossCents = 0
   let accountingSalesDiscountCents = 0
   let accountingSalesCollectedCents = 0
@@ -419,6 +459,7 @@ export default async function StoreDashboardPage({ searchParams }: { searchParam
   let accountingSalesCount = 0
   let storeExpensesPeriodCents = 0
   let accountingExpenseRows: StoreAccountingExpenseRow[] = []
+  let accountingFundingRows: StoreAccountingFundingRow[] = []
   let pageError: string | null = null
 
   let categoryRows: StoreProductCategoryRow[] = []
@@ -465,7 +506,16 @@ export default async function StoreDashboardPage({ searchParams }: { searchParam
     if (accountingFrom) expensesAccountingQuery = expensesAccountingQuery.gte('expense_date', accountingFrom)
     if (accountingTo) expensesAccountingQuery = expensesAccountingQuery.lte('expense_date', accountingTo)
 
-    const [summaryRes, activeProductsRes, supplierRes, preorderRes, salesRes, accountingSalesRes, accountingExpensesRes, recentExpensesRes] = await Promise.all([
+    let fundingAccountingQuery: any = supa
+      .from('store_external_funding')
+      .select('amount_cents,type,payment_method,funding_date')
+      .is('deleted_at', null)
+      .limit(100000)
+
+    if (accountingFrom) fundingAccountingQuery = fundingAccountingQuery.gte('funding_date', accountingFrom)
+    if (accountingTo) fundingAccountingQuery = fundingAccountingQuery.lte('funding_date', accountingTo)
+
+    const [summaryRes, activeProductsRes, supplierRes, preorderRes, salesRes, accountingSalesRes, accountingExpensesRes, accountingFundingRes, recentExpensesRes, recentFundingRes] = await Promise.all([
       supa.rpc('admin_store_dashboard_summary', { _days: 30 } as any),
       supa
         .from('store_products')
@@ -492,11 +542,19 @@ export default async function StoreDashboardPage({ searchParams }: { searchParam
         .limit(6),
       salesAccountingQuery,
       expensesAccountingQuery,
+      fundingAccountingQuery,
       supa
         .from('store_expenses')
         .select('id,expense_date,category,title,amount_cents,payment_method,vendor_name,created_at')
         .is('deleted_at', null)
         .order('expense_date', { ascending: false })
+        .order('created_at', { ascending: false })
+        .limit(6),
+      supa
+        .from('store_external_funding')
+        .select('id,funding_date,type,title,amount_cents,payment_method,source_name,created_at')
+        .is('deleted_at', null)
+        .order('funding_date', { ascending: false })
         .order('created_at', { ascending: false })
         .limit(6),
     ])
@@ -540,7 +598,11 @@ export default async function StoreDashboardPage({ searchParams }: { searchParam
       ? (accountingExpensesRes.data as StoreAccountingExpenseRow[])
       : []
     storeExpensesPeriodCents = accountingExpenseRows.reduce((sum, row) => sum + Math.max(0, toInt(row.amount_cents)), 0)
+    accountingFundingRows = !accountingFundingRes.error && Array.isArray(accountingFundingRes.data)
+      ? (accountingFundingRes.data as StoreAccountingFundingRow[])
+      : []
     recentStoreExpenses = !recentExpensesRes.error && Array.isArray(recentExpensesRes.data) ? (recentExpensesRes.data as StoreExpenseRow[]) : []
+    recentStoreFunding = !recentFundingRes.error && Array.isArray(recentFundingRes.data) ? (recentFundingRes.data as StoreRecentFundingRow[]) : []
   } catch (e: any) {
     pageError = e?.message || String(e)
   }
@@ -592,6 +654,16 @@ export default async function StoreDashboardPage({ searchParams }: { searchParam
   const storeNetCashPeriodCents = accountingSalesCollectedCents - storeExpensesPeriodCents
   const accountingPeriodText = accountingPeriodLabel(accountingPeriod, accountingFrom, accountingTo)
   const expensesPeriodHref = expensesHrefForRange(accountingFrom, accountingTo)
+  const fundingPeriodHref = fundingHrefForRange(accountingFrom, accountingTo)
+  const externalFundingReceivedCents = accountingFundingRows
+    .filter((row) => row.type === 'loan_received')
+    .reduce((sum, row) => sum + Math.max(0, toInt(row.amount_cents)), 0)
+  const externalFundingRepaymentCents = accountingFundingRows
+    .filter((row) => row.type === 'loan_repayment')
+    .reduce((sum, row) => sum + Math.max(0, toInt(row.amount_cents)), 0)
+  const netExternalFundingCents = externalFundingReceivedCents - externalFundingRepaymentCents
+  const availableStoreCashWithFundingCents = storeNetCashPeriodCents + netExternalFundingCents
+  const outstandingFundingDebtCents = Math.max(0, netExternalFundingCents)
   const accountingNetHint = storeNetCashPeriodCents >= 0 ? 'Positive cash position for this period' : 'Expenses are higher than collected sales for this period'
   const expenseCategoryTotals = STORE_EXPENSE_CATEGORY_KEYS.map((category) => ({
     category,
@@ -815,7 +887,7 @@ export default async function StoreDashboardPage({ searchParams }: { searchParam
           <div className="flex flex-wrap items-end justify-between gap-3">
             <div>
               <h2 className="text-base font-semibold">Store cash overview</h2>
-              <p className="text-sm text-[hsl(var(--muted))]">{accountingPeriodText}. Cash view only: collected sales minus store expenses.</p>
+              <p className="text-sm text-[hsl(var(--muted))]">{accountingPeriodText}. Operating cash excludes external funding; available cash includes loans and repayments.</p>
             </div>
             <div className="flex flex-wrap items-center gap-2">
               <div className="flex flex-wrap items-center gap-1 rounded-2xl border bg-[hsl(var(--card))] p-1">
@@ -838,11 +910,14 @@ export default async function StoreDashboardPage({ searchParams }: { searchParam
               <Button asChild href={expensesPeriodHref} variant="outline" size="sm">
                 View expenses
               </Button>
+              <Button asChild href={fundingPeriodHref} variant="outline" size="sm">
+                View funding
+              </Button>
             </div>
           </div>
 
           <InlineAlert variant="info" compact>
-            This is not a profit or margin report. Supplier orders may include stock that is not sold yet, so this block shows cash visibility only.
+            This is not a profit or margin report. Supplier orders may include stock that is not sold yet. External funding is not revenue; it is shown separately as loans and repayments.
           </InlineAlert>
 
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
@@ -875,6 +950,34 @@ export default async function StoreDashboardPage({ searchParams }: { searchParam
               title="Open debt"
               value={formatCurrency(accountingSalesDebtCents, 'en-EG', 'EGP')}
               hint="Remaining unpaid sales amount"
+            />
+          </div>
+
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+            <StatCard
+              title="External funding received"
+              value={formatCurrency(externalFundingReceivedCents, 'en-EG', 'EGP')}
+              hint="Loans received for the Store"
+            />
+            <StatCard
+              title="Funding repayments"
+              value={formatCurrency(externalFundingRepaymentCents, 'en-EG', 'EGP')}
+              hint="Loan repayments made by the Store"
+            />
+            <StatCard
+              title="Net external funding"
+              value={formatCurrency(netExternalFundingCents, 'en-EG', 'EGP')}
+              hint="Received funding minus repayments"
+            />
+            <StatCard
+              title="Available store cash"
+              value={formatCurrency(availableStoreCashWithFundingCents, 'en-EG', 'EGP')}
+              hint="Net store cash + net external funding"
+            />
+            <StatCard
+              title="Funding debt"
+              value={formatCurrency(outstandingFundingDebtCents, 'en-EG', 'EGP')}
+              hint="Outstanding external funding to repay"
             />
           </div>
         </section>
@@ -1075,6 +1178,37 @@ export default async function StoreDashboardPage({ searchParams }: { searchParam
                     <div className="mt-1 text-sm text-[hsl(var(--muted))]">{expense.vendor_name || 'No vendor'}</div>
                     <div className="mt-2 text-xs text-[hsl(var(--muted))]">
                       {formatCurrency(toInt(expense.amount_cents), 'en-EG', 'EGP')} · {paymentMethodLabel(expense.payment_method)} · Date {fmtDate(expense.expense_date)}
+                    </div>
+                  </div>
+                ))
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <CardTitle>Latest external funding</CardTitle>
+                <Button asChild href={fundingPeriodHref} variant="outline" size="sm">
+                  Open funding
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {recentStoreFunding.length === 0 ? (
+                <div className="text-sm text-[hsl(var(--muted))]">No external funding yet.</div>
+              ) : (
+                recentStoreFunding.map((funding) => (
+                  <div key={funding.id} className="rounded-2xl border p-3">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <div className="font-medium">{funding.title || `Funding #${shortId(funding.id)}`}</div>
+                      <span className="rounded-full border px-2 py-1 text-xs font-medium">
+                        {storeFundingTypeLabel(funding.type)}
+                      </span>
+                    </div>
+                    <div className="mt-1 text-sm text-[hsl(var(--muted))]">{funding.source_name || 'No source / lender'}</div>
+                    <div className="mt-2 text-xs text-[hsl(var(--muted))]">
+                      {formatCurrency(toInt(funding.amount_cents), 'en-EG', 'EGP')} · {paymentMethodLabel(funding.payment_method)} · Date {fmtDate(funding.funding_date)}
                     </div>
                   </div>
                 ))
