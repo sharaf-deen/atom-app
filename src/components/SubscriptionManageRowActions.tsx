@@ -16,6 +16,7 @@ import { cairoTodayDateOnly } from '@/lib/cairoTime'
 
 type Plan = '1m' | '3m' | '6m' | '12m' | 'sessions'
 type SubscriptionType = 'time' | 'sessions'
+type PaymentMethod = 'cash' | 'instapay' | 'card' | 'bank_transfer'
 
 type IsoDateOnly = string
 
@@ -26,6 +27,13 @@ function isISODateOnly(s?: string | null): s is IsoDateOnly {
 function todayDateOnlyCairo() {
   return cairoTodayDateOnly()
 }
+
+function normalizePaymentMethod(v?: string | null): PaymentMethod {
+  const s = String(v ?? '').trim().toLowerCase()
+  if (s === 'instapay' || s === 'card' || s === 'bank_transfer') return s
+  return 'cash'
+}
+
 
 function addDays(dateOnly: string, days: number) {
   const [y, m, d] = dateOnly.split('-').map(Number)
@@ -105,6 +113,7 @@ export default function SubscriptionManageRowActions({
   const [busy, setBusy] = useState(false)
 
   const [amount, setAmount] = useState<string>(String(sub.amount ?? 0))
+  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>(() => normalizePaymentMethod(sub.payment_method))
   const [startDate, setStartDate] = useState<string>(sub.start_date ?? '')
   const [plan, setPlan] = useState<Plan>(() => {
     const p = String(sub.plan ?? '') as Plan
@@ -227,7 +236,7 @@ export default function SubscriptionManageRowActions({
         return
       }
 
-      const patch: any = { amount: amountNum }
+      const patch: any = { amount: amountNum, payment_method: paymentMethod }
 
       if (isTime) {
         if (!isISODateOnly(startDate)) {
@@ -437,6 +446,13 @@ export default function SubscriptionManageRowActions({
     }
   }
 
+  const paymentMethodOptions: { label: string; value: PaymentMethod }[] = [
+    { label: 'Cash', value: 'cash' },
+    { label: 'Instapay', value: 'instapay' },
+    { label: 'Card', value: 'card' },
+    { label: 'Bank transfer', value: 'bank_transfer' },
+  ]
+
   const planOptions = [
     { label: '1 month', value: '1m' },
     { label: '3 months', value: '3m' },
@@ -520,6 +536,21 @@ export default function SubscriptionManageRowActions({
                 <div>
                   <div className="text-sm font-medium mb-1">Amount</div>
                   <Input value={amount} onChange={(e) => setAmount(e.target.value)} disabled={busy} />
+                </div>
+
+                <div>
+                  <div className="text-sm font-medium mb-1">Payment method</div>
+                  <Select
+                    value={paymentMethod}
+                    onChange={(e) => setPaymentMethod(e.target.value as PaymentMethod)}
+                    disabled={busy}
+                  >
+                    {paymentMethodOptions.map((o) => (
+                      <option key={o.value} value={o.value}>
+                        {o.label}
+                      </option>
+                    ))}
+                  </Select>
                 </div>
               </div>
 
