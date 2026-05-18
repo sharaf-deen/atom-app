@@ -42,7 +42,7 @@ create table if not exists public.private_coaching_passes (
   updated_at timestamptz not null default timezone('utc', now()),
   created_by uuid null references public.profiles(user_id) on delete set null,
   updated_by uuid null references public.profiles(user_id) on delete set null,
-  constraint private_coaching_passes_used_sessions_check check (used_sessions <= total_sessions)
+  constraint private_coaching_passes_used_sessions_lte_total_check check (used_sessions <= total_sessions)
 );
 
 create index if not exists idx_private_coaching_requests_member_created_at
