@@ -1,7 +1,6 @@
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
-import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import PageHeader from '@/components/layout/PageHeader'
 import Section from '@/components/layout/Section'
@@ -9,6 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card'
 import Button from '@/components/ui/Button'
 import AccessDeniedPage from '@/components/AccessDeniedPage'
 import PrivateCoachingRequestForm from '@/components/private-coaching/PrivateCoachingRequestForm'
+import PrivateCoachingBookingClient from '@/components/private-coaching/PrivateCoachingBookingClient'
 import { getSessionUserCached, getSupabaseAdminClientCached } from '@/lib/requestCache'
 import {
   PRIVATE_COACHING_ALLOWED_MEMBER_ROLES,
@@ -16,7 +16,6 @@ import {
   privateCoachingMemberName,
   privateCoachingPaymentMethodLabel,
   privateCoachingStatusLabel,
-  formatPrivateCoachingSlotTime,
 } from '@/lib/privateCoaching'
 
 type CoachRow = {
@@ -57,6 +56,18 @@ type SlotRow = {
   note: string | null
 }
 
+type BookingRow = {
+  id: string
+  coach_id: string
+  slot_date: string
+  start_time: string
+  end_time: string
+  status: string
+  note: string | null
+  booked_at: string
+  cancelled_at: string | null
+}
+
 function formatDate(value?: string | null) {
   if (!value) return '—'
   const date = new Date(value)
@@ -67,13 +78,6 @@ function formatDate(value?: string | null) {
 function coachName(coach: CoachRow | undefined | null) {
   if (!coach) return 'Head Coach'
   return privateCoachingMemberName(coach)
-}
-
-function formatSlotDate(value?: string | null) {
-  if (!value) return '—'
-  const date = new Date(`${value}T00:00:00`)
-  if (Number.isNaN(date.getTime())) return value
-  return date.toLocaleDateString('en-GB', { weekday: 'short', year: 'numeric', month: 'short', day: '2-digit' })
 }
 
 export default async function PrivateCoachingPage() {
@@ -98,7 +102,7 @@ export default async function PrivateCoachingPage() {
 
   const admin = getSupabaseAdminClientCached()
 
-  const [coachesRes, requestsRes, passesRes] = await Promise.all([
+  const [coachesRes, requestsRes, passesRes, bookingsRes] = await Promise.all([
     admin
       .from('profiles')
       .select('user_id, first_name, last_name, email')
@@ -115,9 +119,16 @@ export default async function PrivateCoachingPage() {
       .from('private_coaching_passes')
       .select('id, coach_id, total_sessions, used_sessions, remaining_sessions, status, activated_at')
       .eq('member_id', me.id)
-      .eq('status', 'active')
+      .in('status', ['active', 'depleted'])
       .order('created_at', { ascending: false })
       .limit(10),
+    admin
+      .from('private_coaching_bookings')
+      .select('id, coach_id, slot_date, start_time, end_time, status, note, booked_at, cancelled_at')
+      .eq('member_id', me.id)
+      .order('slot_date', { ascending: false })
+      .order('start_time', { ascending: false })
+      .limit(20),
   ])
 
   const coaches = ((coachesRes.data ?? []) as CoachRow[])
@@ -130,7 +141,9 @@ export default async function PrivateCoachingPage() {
 
   const coachMap = new Map(((coachesRes.data ?? []) as CoachRow[]).map((coach) => [coach.user_id, coach]))
   const requests = (requestsRes.data ?? []) as RequestRow[]
-  const activePasses = (passesRes.data ?? []) as PassRow[]
+  const passes = (passesRes.data ?? []) as PassRow[]
+  const activePasses = passes.filter((pass) => pass.status === 'active')
+  const bookings = (bookingsRes.data ?? []) as BookingRow[]
   const pendingRequest = requests.find((request) => request.status === 'payment_pending') ?? null
   const latestRequest = requests[0] ?? null
   const totalRemaining = activePasses.reduce((sum, pass) => sum + Math.max(0, Number(pass.remaining_sessions ?? 0)), 0)
@@ -153,6 +166,29 @@ export default async function PrivateCoachingPage() {
       availableSlots = (slots ?? []) as SlotRow[]
     }
   }
+
+  const availableSlotRows = availableSlots.map((slot) => ({
+    id: slot.id,
+    coachId: slot.coach_id,
+    coachName: coachName(coachMap.get(slot.coach_id)),
+    slotDate: slot.slot_date,
+    startTime: slot.start_time,
+    endTime: slot.end_time,
+    note: slot.note,
+  }))
+
+  const bookingRows = bookings.map((booking) => ({
+    id: booking.id,
+    coachId: booking.coach_id,
+    coachName: coachName(coachMap.get(booking.coach_id)),
+    slotDate: booking.slot_date,
+    startTime: booking.start_time,
+    endTime: booking.end_time,
+    status: booking.status,
+    note: booking.note,
+    bookedAt: booking.booked_at,
+    cancelledAt: booking.cancelled_at,
+  }))
 
   return (
     <main>
@@ -189,21 +225,21 @@ export default async function PrivateCoachingPage() {
                 <div className="text-sm text-[hsl(var(--muted))]">Available tokens</div>
                 <div className="mt-1 text-3xl font-semibold tracking-tight">{totalRemaining}</div>
                 <p className="mt-2 text-sm text-[hsl(var(--muted))]">
-                  Coach availability is visible below. Booking with tokens will be added in the next lot.
+                  One booking uses one token. If the coach cancels a booking, the token is returned automatically.
                 </p>
               </div>
 
-              {activePasses.length ? (
+              {passes.length ? (
                 <div className="mt-4 space-y-2">
-                  {activePasses.map((pass) => (
+                  {passes.map((pass) => (
                     <div key={pass.id} className="rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm">
                       <div className="flex items-center justify-between gap-3">
                         <div>
                           <div className="font-semibold">{pass.remaining_sessions}/{pass.total_sessions} session(s) left</div>
                           <div className="text-xs text-[hsl(var(--muted))]">Activated {formatDate(pass.activated_at)} · {coachName(coachMap.get(pass.coach_id))}</div>
                         </div>
-                        <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700">
-                          Active
+                        <span className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${pass.status === 'active' ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-slate-200 bg-slate-50 text-slate-700'}`}>
+                          {pass.status === 'active' ? 'Active' : 'Depleted'}
                         </span>
                       </div>
                     </div>
@@ -246,49 +282,18 @@ export default async function PrivateCoachingPage() {
           </Card>
         </div>
 
-
         <Card>
           <CardHeader>
-            <CardTitle>Available coach slots</CardTitle>
+            <CardTitle>Book a coach slot</CardTitle>
           </CardHeader>
           <CardContent>
-            {totalRemaining > 0 ? (
-              availableSlots.length ? (
-                <div className="grid gap-3">
-                  {availableSlots.map((slot) => (
-                    <div key={slot.id} className="rounded-3xl border border-[hsl(var(--border))] bg-white p-4 shadow-soft">
-                      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                        <div>
-                          <div className="font-semibold tracking-tight">
-                            {formatSlotDate(slot.slot_date)} · {formatPrivateCoachingSlotTime(slot.start_time)} - {formatPrivateCoachingSlotTime(slot.end_time)}
-                          </div>
-                          <div className="mt-1 text-sm text-[hsl(var(--muted))]">
-                            {coachName(coachMap.get(slot.coach_id))}{slot.note ? ` · ${slot.note}` : ''}
-                          </div>
-                        </div>
-                        <span className="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700">
-                          Available
-                        </span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="rounded-3xl border border-dashed border-[hsl(var(--border))] bg-white p-4 text-sm text-[hsl(var(--muted))]">
-                  No available slot yet. The head coach will add private coaching availability soon.
-                </div>
-              )
-            ) : (
-              <div className="rounded-3xl border border-dashed border-[hsl(var(--border))] bg-white p-4 text-sm text-[hsl(var(--muted))]">
-                Available coach slots will appear here after your private coaching payment is confirmed and your tokens are active.
-              </div>
-            )}
+            <PrivateCoachingBookingClient
+              totalRemaining={totalRemaining}
+              availableSlots={availableSlotRows}
+              bookings={bookingRows}
+            />
           </CardContent>
         </Card>
-
-        <p className="text-xs text-[hsl(var(--muted))]">
-          This lot only displays coach availability. Booking a slot with tokens will come in the next lot.
-        </p>
       </Section>
     </main>
   )

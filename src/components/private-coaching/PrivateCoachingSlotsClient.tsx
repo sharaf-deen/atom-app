@@ -51,6 +51,7 @@ function formatSlotDate(value?: string | null) {
 
 function statusClass(status: string) {
   if (status === 'available') return 'border-emerald-200 bg-emerald-50 text-emerald-700'
+  if (status === 'booked') return 'border-blue-200 bg-blue-50 text-blue-700'
   return 'border-slate-200 bg-slate-50 text-slate-700'
 }
 
@@ -128,10 +129,10 @@ export default function PrivateCoachingSlotsClient({ rows, coaches, canChooseCoa
         <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
           <div>
             <h4 className="text-lg font-semibold tracking-tight">Add availability</h4>
-            <p className="text-sm text-[hsl(var(--muted))]">Create simple available slots. Members can view them only after their private coaching tokens are active.</p>
+            <p className="text-sm text-[hsl(var(--muted))]">Create simple available slots. Members with active tokens can book them from their private coaching page.</p>
           </div>
           <span className="rounded-full border border-[hsl(var(--border))] bg-[hsl(var(--bg))] px-3 py-1 text-xs font-semibold text-[hsl(var(--muted))]">
-            No booking yet
+            Booking enabled
           </span>
         </div>
 
@@ -246,7 +247,7 @@ export default function PrivateCoachingSlotsClient({ rows, coaches, canChooseCoa
                 </Button>
               ) : (
                 <span className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold text-slate-700">
-                  Cancelled
+                  {privateCoachingSlotStatusLabel(row.status)}
                 </span>
               )}
             </div>

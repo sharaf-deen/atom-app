@@ -9,6 +9,7 @@ import Button from '@/components/ui/Button'
 import AccessDeniedPage from '@/components/AccessDeniedPage'
 import PrivateCoachingAdminClient from '@/components/private-coaching/PrivateCoachingAdminClient'
 import PrivateCoachingSlotsClient from '@/components/private-coaching/PrivateCoachingSlotsClient'
+import PrivateCoachingBookingsClient from '@/components/private-coaching/PrivateCoachingBookingsClient'
 import { getSessionUserCached, getSupabaseAdminClientCached } from '@/lib/requestCache'
 import { formatPrivateCoachingMoney, privateCoachingMemberName } from '@/lib/privateCoaching'
 
@@ -61,6 +62,19 @@ type SlotRow = {
   created_at: string
 }
 
+type BookingRow = {
+  id: string
+  member_id: string
+  coach_id: string
+  slot_date: string
+  start_time: string
+  end_time: string
+  status: string
+  note: string | null
+  booked_at: string
+  cancelled_at: string | null
+}
+
 function profileMeta(profile: ProfileRow | undefined | null) {
   if (!profile) return 'No profile details'
   return [profile.member_id ? `ID ${profile.member_id}` : '', profile.email ?? '', profile.phone ?? '']
@@ -90,13 +104,13 @@ export default async function HeadCoachPrivateCoachingPage() {
 
   const admin = getSupabaseAdminClientCached()
 
-  let query = admin
+  let requestsQuery = admin
     .from('private_coaching_requests')
     .select('id, member_id, coach_id, package_sessions, amount_cents, payment_method, status, created_at, confirmed_at')
     .order('created_at', { ascending: false })
     .limit(100)
 
-  if (me.role === 'head_coach') query = query.eq('coach_id', me.id)
+  if (me.role === 'head_coach') requestsQuery = requestsQuery.eq('coach_id', me.id)
 
   let slotsQuery = admin
     .from('private_coaching_slots')
@@ -108,12 +122,21 @@ export default async function HeadCoachPrivateCoachingPage() {
 
   if (me.role === 'head_coach') slotsQuery = slotsQuery.eq('coach_id', me.id)
 
-  const [requestsRes, passesRes, coachesRes, slotsRes] = await Promise.all([
-    query,
+  let bookingsQuery = admin
+    .from('private_coaching_bookings')
+    .select('id, member_id, coach_id, slot_date, start_time, end_time, status, note, booked_at, cancelled_at')
+    .order('slot_date', { ascending: false })
+    .order('start_time', { ascending: false })
+    .limit(100)
+
+  if (me.role === 'head_coach') bookingsQuery = bookingsQuery.eq('coach_id', me.id)
+
+  const [requestsRes, passesRes, coachesRes, slotsRes, bookingsRes] = await Promise.all([
+    requestsQuery,
     admin
       .from('private_coaching_passes')
       .select('id, member_id, coach_id, total_sessions, used_sessions, remaining_sessions, status')
-      .eq('status', 'active')
+      .in('status', ['active', 'depleted'])
       .limit(1000),
     admin
       .from('profiles')
@@ -122,13 +145,18 @@ export default async function HeadCoachPrivateCoachingPage() {
       .not('user_id', 'is', null)
       .order('first_name', { ascending: true }),
     slotsQuery,
+    bookingsQuery,
   ])
 
   const requests = (requestsRes.data ?? []) as RequestRow[]
   const passes = (passesRes.data ?? []) as PassRow[]
   const coaches = ((coachesRes.data ?? []) as CoachRow[]).filter((coach) => coach.user_id)
   const slots = (slotsRes.data ?? []) as SlotRow[]
-  const profileIds = Array.from(new Set(requests.flatMap((row) => [row.member_id, row.coach_id]).filter(Boolean)))
+  const bookings = (bookingsRes.data ?? []) as BookingRow[]
+  const profileIds = Array.from(new Set([
+    ...requests.flatMap((row) => [row.member_id, row.coach_id]),
+    ...bookings.flatMap((row) => [row.member_id, row.coach_id]),
+  ].filter(Boolean)))
   const profilesById = new Map<string, ProfileRow>()
 
   if (profileIds.length > 0) {
@@ -148,8 +176,11 @@ export default async function HeadCoachPrivateCoachingPage() {
   const pendingValueCents = requests
     .filter((row) => row.status === 'payment_pending')
     .reduce((sum, row) => sum + Number(row.amount_cents ?? 0), 0)
-  const activeTokens = passes.reduce((sum, row) => sum + Math.max(0, Number(row.remaining_sessions ?? 0)), 0)
+  const activeTokens = passes
+    .filter((row) => row.status === 'active')
+    .reduce((sum, row) => sum + Math.max(0, Number(row.remaining_sessions ?? 0)), 0)
   const availableSlotsCount = slots.filter((row) => row.status === 'available').length
+  const bookedCount = bookings.filter((row) => row.status === 'booked').length
 
   const coachMap = new Map(coaches.map((coach) => [coach.user_id, coach]))
   const coachOptions = coaches.map((coach) => ({
@@ -169,6 +200,24 @@ export default async function HeadCoachPrivateCoachingPage() {
     note: row.note,
     createdAt: row.created_at,
   }))
+
+  const bookingRows = bookings.map((row) => {
+    const member = profilesById.get(row.member_id)
+    const coach = profilesById.get(row.coach_id)
+    return {
+      id: row.id,
+      memberName: privateCoachingMemberName(member ?? {}),
+      memberMeta: profileMeta(member),
+      coachName: privateCoachingMemberName(coach ?? coachMap.get(row.coach_id) ?? {}),
+      slotDate: row.slot_date,
+      startTime: row.start_time,
+      endTime: row.end_time,
+      status: row.status,
+      note: row.note,
+      bookedAt: row.booked_at,
+      cancelledAt: row.cancelled_at,
+    }
+  })
 
   const clientRows = requests.map((row) => {
     const member = profilesById.get(row.member_id)
@@ -191,7 +240,7 @@ export default async function HeadCoachPrivateCoachingPage() {
     <main>
       <PageHeader
         title="Private coaching"
-        subtitle="Confirm payments and unlock member session tokens."
+        subtitle="Confirm payments, manage availability and follow bookings."
         right={
           <Button asChild variant="outline" href="/private-coaching">
             Member view
@@ -200,7 +249,7 @@ export default async function HeadCoachPrivateCoachingPage() {
       />
 
       <Section className="space-y-5">
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-6">
           <Card>
             <CardContent>
               <div className="text-sm text-[hsl(var(--muted))]">Pending requests</div>
@@ -231,8 +280,22 @@ export default async function HeadCoachPrivateCoachingPage() {
               <div className="mt-1 text-2xl font-semibold">{availableSlotsCount}</div>
             </CardContent>
           </Card>
+          <Card>
+            <CardContent>
+              <div className="text-sm text-[hsl(var(--muted))]">Booked slots</div>
+              <div className="mt-1 text-2xl font-semibold">{bookedCount}</div>
+            </CardContent>
+          </Card>
         </div>
 
+        <Card>
+          <CardHeader>
+            <CardTitle>Private coaching bookings</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <PrivateCoachingBookingsClient rows={bookingRows} />
+          </CardContent>
+        </Card>
 
         <Card>
           <CardHeader>

@@ -59,6 +59,13 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
       return json(403, { ok: false, error: 'FORBIDDEN' })
     }
     if (slot.status === 'cancelled') return json(200, { ok: true })
+    if (slot.status === 'booked') {
+      return json(409, {
+        ok: false,
+        error: 'SLOT_ALREADY_BOOKED',
+        details: 'This slot is already booked. Cancel the booking from the bookings list so the member token is returned.',
+      })
+    }
 
     const { error: updateError } = await admin
       .from('private_coaching_slots')
