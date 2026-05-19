@@ -8,6 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card'
 import Button from '@/components/ui/Button'
 import AccessDeniedPage from '@/components/AccessDeniedPage'
 import PrivateCoachingAdminClient from '@/components/private-coaching/PrivateCoachingAdminClient'
+import PrivateCoachingSlotsClient from '@/components/private-coaching/PrivateCoachingSlotsClient'
 import { getSessionUserCached, getSupabaseAdminClientCached } from '@/lib/requestCache'
 import { formatPrivateCoachingMoney, privateCoachingMemberName } from '@/lib/privateCoaching'
 
@@ -40,6 +41,24 @@ type PassRow = {
   used_sessions: number
   remaining_sessions: number
   status: string
+}
+
+type CoachRow = {
+  user_id: string
+  first_name: string | null
+  last_name: string | null
+  email: string | null
+}
+
+type SlotRow = {
+  id: string
+  coach_id: string
+  slot_date: string
+  start_time: string
+  end_time: string
+  status: string
+  note: string | null
+  created_at: string
 }
 
 function profileMeta(profile: ProfileRow | undefined | null) {
@@ -79,17 +98,36 @@ export default async function HeadCoachPrivateCoachingPage() {
 
   if (me.role === 'head_coach') query = query.eq('coach_id', me.id)
 
-  const [requestsRes, passesRes] = await Promise.all([
+  let slotsQuery = admin
+    .from('private_coaching_slots')
+    .select('id, coach_id, slot_date, start_time, end_time, status, note, created_at')
+    .gte('slot_date', new Date().toISOString().slice(0, 10))
+    .order('slot_date', { ascending: true })
+    .order('start_time', { ascending: true })
+    .limit(100)
+
+  if (me.role === 'head_coach') slotsQuery = slotsQuery.eq('coach_id', me.id)
+
+  const [requestsRes, passesRes, coachesRes, slotsRes] = await Promise.all([
     query,
     admin
       .from('private_coaching_passes')
       .select('id, member_id, coach_id, total_sessions, used_sessions, remaining_sessions, status')
       .eq('status', 'active')
       .limit(1000),
+    admin
+      .from('profiles')
+      .select('user_id, first_name, last_name, email')
+      .eq('role', 'head_coach')
+      .not('user_id', 'is', null)
+      .order('first_name', { ascending: true }),
+    slotsQuery,
   ])
 
   const requests = (requestsRes.data ?? []) as RequestRow[]
   const passes = (passesRes.data ?? []) as PassRow[]
+  const coaches = ((coachesRes.data ?? []) as CoachRow[]).filter((coach) => coach.user_id)
+  const slots = (slotsRes.data ?? []) as SlotRow[]
   const profileIds = Array.from(new Set(requests.flatMap((row) => [row.member_id, row.coach_id]).filter(Boolean)))
   const profilesById = new Map<string, ProfileRow>()
 
@@ -111,6 +149,26 @@ export default async function HeadCoachPrivateCoachingPage() {
     .filter((row) => row.status === 'payment_pending')
     .reduce((sum, row) => sum + Number(row.amount_cents ?? 0), 0)
   const activeTokens = passes.reduce((sum, row) => sum + Math.max(0, Number(row.remaining_sessions ?? 0)), 0)
+  const availableSlotsCount = slots.filter((row) => row.status === 'available').length
+
+  const coachMap = new Map(coaches.map((coach) => [coach.user_id, coach]))
+  const coachOptions = coaches.map((coach) => ({
+    user_id: coach.user_id,
+    full_name: privateCoachingMemberName(coach),
+    email: coach.email,
+  }))
+
+  const slotRows = slots.map((row) => ({
+    id: row.id,
+    coachId: row.coach_id,
+    coachName: privateCoachingMemberName(coachMap.get(row.coach_id) ?? {}),
+    slotDate: row.slot_date,
+    startTime: row.start_time,
+    endTime: row.end_time,
+    status: row.status,
+    note: row.note,
+    createdAt: row.created_at,
+  }))
 
   const clientRows = requests.map((row) => {
     const member = profilesById.get(row.member_id)
@@ -142,7 +200,7 @@ export default async function HeadCoachPrivateCoachingPage() {
       />
 
       <Section className="space-y-5">
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
           <Card>
             <CardContent>
               <div className="text-sm text-[hsl(var(--muted))]">Pending requests</div>
@@ -167,7 +225,28 @@ export default async function HeadCoachPrivateCoachingPage() {
               <div className="mt-1 text-2xl font-semibold">{activeTokens}</div>
             </CardContent>
           </Card>
+          <Card>
+            <CardContent>
+              <div className="text-sm text-[hsl(var(--muted))]">Available slots</div>
+              <div className="mt-1 text-2xl font-semibold">{availableSlotsCount}</div>
+            </CardContent>
+          </Card>
         </div>
+
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Coach availability slots</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <PrivateCoachingSlotsClient
+              rows={slotRows}
+              coaches={coachOptions}
+              canChooseCoach={me.role === 'super_admin'}
+              defaultCoachId={me.role === 'head_coach' ? me.id : coachOptions[0]?.user_id ?? ''}
+            />
+          </CardContent>
+        </Card>
 
         <Card>
           <CardHeader>
