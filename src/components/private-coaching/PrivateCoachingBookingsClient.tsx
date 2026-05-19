@@ -20,12 +20,20 @@ type BookingRow = {
   status: string
   note: string | null
   bookedAt: string
+  completedAt: string | null
   cancelledAt: string | null
 }
 
 type Props = {
   rows: BookingRow[]
 }
+
+const STATUS_FILTERS = [
+  { value: 'all', label: 'All' },
+  { value: 'booked', label: 'Booked' },
+  { value: 'completed', label: 'Completed' },
+  { value: 'cancelled', label: 'Cancelled' },
+] as const
 
 function formatSlotDate(value?: string | null) {
   if (!value) return '—'
@@ -53,16 +61,56 @@ function statusClass(status: string) {
   return 'border-slate-200 bg-slate-50 text-slate-700'
 }
 
+function statusCount(rows: BookingRow[], status: string) {
+  return rows.filter((row) => row.status === status).length
+}
+
 export default function PrivateCoachingBookingsClient({ rows }: Props) {
   const router = useRouter()
   const [busyId, setBusyId] = React.useState('')
+  const [busyAction, setBusyAction] = React.useState<'complete' | 'cancel' | ''>('')
+  const [filter, setFilter] = React.useState<(typeof STATUS_FILTERS)[number]['value']>('all')
   const [status, setStatus] = React.useState<{ kind: 'success' | 'error' | ''; message: string }>({ kind: '', message: '' })
+
+  const filteredRows = React.useMemo(() => {
+    if (filter === 'all') return rows
+    return rows.filter((row) => row.status === filter)
+  }, [filter, rows])
+
+  async function completeBooking(id: string) {
+    const ok = window.confirm('Mark this private coaching session as completed?')
+    if (!ok) return
+
+    setBusyId(id)
+    setBusyAction('complete')
+    setStatus({ kind: '', message: '' })
+
+    try {
+      const res = await fetch(`/api/private-coaching/bookings/${encodeURIComponent(id)}/complete`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      })
+      const json = await res.json().catch(() => ({}))
+      if (!res.ok || !json?.ok) {
+        setStatus({ kind: 'error', message: json?.details || json?.error || 'Could not mark booking as completed.' })
+        return
+      }
+      setStatus({ kind: 'success', message: 'Session marked as completed.' })
+      router.refresh()
+    } catch (error: any) {
+      setStatus({ kind: 'error', message: error?.message || 'Could not mark booking as completed.' })
+    } finally {
+      setBusyId('')
+      setBusyAction('')
+    }
+  }
 
   async function cancelBooking(id: string) {
     const ok = window.confirm('Cancel this private coaching booking? The member token will be returned.')
     if (!ok) return
 
     setBusyId(id)
+    setBusyAction('cancel')
     setStatus({ kind: '', message: '' })
 
     try {
@@ -81,6 +129,7 @@ export default function PrivateCoachingBookingsClient({ rows }: Props) {
       setStatus({ kind: 'error', message: error?.message || 'Could not cancel booking.' })
     } finally {
       setBusyId('')
+      setBusyAction('')
     }
   }
 
@@ -88,14 +137,52 @@ export default function PrivateCoachingBookingsClient({ rows }: Props) {
     <div className="space-y-4">
       {status.message ? <InlineAlert variant={status.kind === 'error' ? 'error' : 'success'}>{status.message}</InlineAlert> : null}
 
+      <div className="grid gap-3 sm:grid-cols-3">
+        <div className="rounded-3xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] p-4">
+          <div className="text-sm text-[hsl(var(--muted))]">Booked</div>
+          <div className="mt-1 text-2xl font-semibold">{statusCount(rows, 'booked')}</div>
+        </div>
+        <div className="rounded-3xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] p-4">
+          <div className="text-sm text-[hsl(var(--muted))]">Completed</div>
+          <div className="mt-1 text-2xl font-semibold">{statusCount(rows, 'completed')}</div>
+        </div>
+        <div className="rounded-3xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] p-4">
+          <div className="text-sm text-[hsl(var(--muted))]">Cancelled</div>
+          <div className="mt-1 text-2xl font-semibold">{statusCount(rows, 'cancelled')}</div>
+        </div>
+      </div>
+
+      <div className="flex flex-wrap gap-2">
+        {STATUS_FILTERS.map((item) => (
+          <button
+            key={item.value}
+            type="button"
+            onClick={() => setFilter(item.value)}
+            className={`rounded-full border px-3 py-1.5 text-sm font-semibold transition ${
+              filter === item.value
+                ? 'border-black bg-black text-white'
+                : 'border-[hsl(var(--border))] bg-white text-[hsl(var(--muted))] hover:text-[hsl(var(--fg))]'
+            }`}
+          >
+            {item.label}
+          </button>
+        ))}
+      </div>
+
       {rows.length === 0 ? (
         <div className="rounded-3xl border border-dashed border-[hsl(var(--border))] bg-white p-5 text-sm text-[hsl(var(--muted))] shadow-soft">
           No private coaching booking yet.
         </div>
       ) : null}
 
+      {rows.length > 0 && filteredRows.length === 0 ? (
+        <div className="rounded-3xl border border-dashed border-[hsl(var(--border))] bg-white p-5 text-sm text-[hsl(var(--muted))] shadow-soft">
+          No booking matches this filter.
+        </div>
+      ) : null}
+
       <div className="grid gap-3">
-        {rows.map((row) => (
+        {filteredRows.map((row) => (
           <div key={row.id} className="rounded-3xl border border-[hsl(var(--border))] bg-white p-4 shadow-soft">
             <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
               <div className="min-w-0">
@@ -111,7 +198,7 @@ export default function PrivateCoachingBookingsClient({ rows }: Props) {
                 <div className="mt-3 text-base font-semibold tracking-tight">{row.memberName}</div>
                 <div className="mt-1 text-sm text-[hsl(var(--muted))]">{row.memberMeta}</div>
 
-                <div className="mt-3 grid gap-2 text-sm sm:grid-cols-2 lg:grid-cols-3">
+                <div className="mt-3 grid gap-2 text-sm sm:grid-cols-2 lg:grid-cols-4">
                   <div>
                     <div className="text-[11px] font-semibold uppercase tracking-wide text-[hsl(var(--muted))]">Slot</div>
                     <div className="font-semibold">
@@ -123,6 +210,10 @@ export default function PrivateCoachingBookingsClient({ rows }: Props) {
                     <div className="font-semibold">{formatDateTime(row.bookedAt)}</div>
                   </div>
                   <div>
+                    <div className="text-[11px] font-semibold uppercase tracking-wide text-[hsl(var(--muted))]">Completed</div>
+                    <div className="font-semibold">{row.completedAt ? formatDateTime(row.completedAt) : '—'}</div>
+                  </div>
+                  <div>
                     <div className="text-[11px] font-semibold uppercase tracking-wide text-[hsl(var(--muted))]">Note</div>
                     <div className="font-semibold">{row.note || '—'}</div>
                   </div>
@@ -130,20 +221,32 @@ export default function PrivateCoachingBookingsClient({ rows }: Props) {
               </div>
 
               {row.status === 'booked' ? (
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => cancelBooking(row.id)}
-                  disabled={Boolean(busyId)}
-                  loading={busyId === row.id}
-                  loadingText="Cancelling…"
-                  className="w-full lg:w-auto"
-                >
-                  Cancel booking
-                </Button>
+                <div className="flex w-full flex-col gap-2 lg:w-auto">
+                  <Button
+                    type="button"
+                    onClick={() => completeBooking(row.id)}
+                    disabled={Boolean(busyId)}
+                    loading={busyId === row.id && busyAction === 'complete'}
+                    loadingText="Saving…"
+                    className="w-full lg:w-auto"
+                  >
+                    Mark completed
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => cancelBooking(row.id)}
+                    disabled={Boolean(busyId)}
+                    loading={busyId === row.id && busyAction === 'cancel'}
+                    loadingText="Cancelling…"
+                    className="w-full lg:w-auto"
+                  >
+                    Cancel booking
+                  </Button>
+                </div>
               ) : (
                 <div className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold text-slate-700">
-                  {row.cancelledAt ? `Cancelled ${formatDateTime(row.cancelledAt)}` : privateCoachingBookingStatusLabel(row.status)}
+                  {row.completedAt ? `Completed ${formatDateTime(row.completedAt)}` : row.cancelledAt ? `Cancelled ${formatDateTime(row.cancelledAt)}` : privateCoachingBookingStatusLabel(row.status)}
                 </div>
               )}
             </div>

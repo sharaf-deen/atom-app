@@ -65,6 +65,7 @@ type BookingRow = {
   status: string
   note: string | null
   booked_at: string
+  completed_at: string | null
   cancelled_at: string | null
 }
 
@@ -124,7 +125,7 @@ export default async function PrivateCoachingPage() {
       .limit(10),
     admin
       .from('private_coaching_bookings')
-      .select('id, coach_id, slot_date, start_time, end_time, status, note, booked_at, cancelled_at')
+      .select('id, coach_id, slot_date, start_time, end_time, status, note, booked_at, completed_at, cancelled_at')
       .eq('member_id', me.id)
       .order('slot_date', { ascending: false })
       .order('start_time', { ascending: false })
@@ -187,6 +188,7 @@ export default async function PrivateCoachingPage() {
     status: booking.status,
     note: booking.note,
     bookedAt: booking.booked_at,
+    completedAt: booking.completed_at,
     cancelledAt: booking.cancelled_at,
   }))
 

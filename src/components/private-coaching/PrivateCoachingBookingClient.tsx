@@ -29,6 +29,7 @@ type BookingRow = {
   status: string
   note: string | null
   bookedAt: string
+  completedAt: string | null
   cancelledAt: string | null
 }
 
@@ -37,6 +38,13 @@ type Props = {
   availableSlots: AvailableSlotRow[]
   bookings: BookingRow[]
 }
+
+const BOOKING_FILTERS = [
+  { value: 'all', label: 'All' },
+  { value: 'booked', label: 'Upcoming' },
+  { value: 'completed', label: 'Completed' },
+  { value: 'cancelled', label: 'Cancelled' },
+] as const
 
 function formatSlotDate(value?: string | null) {
   if (!value) return '—'
@@ -68,6 +76,12 @@ export default function PrivateCoachingBookingClient({ totalRemaining, available
   const router = useRouter()
   const [busySlotId, setBusySlotId] = React.useState('')
   const [status, setStatus] = React.useState<{ kind: 'success' | 'error' | ''; message: string }>({ kind: '', message: '' })
+  const [bookingFilter, setBookingFilter] = React.useState<(typeof BOOKING_FILTERS)[number]['value']>('all')
+
+  const filteredBookings = React.useMemo(() => {
+    if (bookingFilter === 'all') return bookings
+    return bookings.filter((booking) => booking.status === bookingFilter)
+  }, [bookingFilter, bookings])
 
   async function bookSlot(slotId: string) {
     setBusySlotId(slotId)
@@ -151,16 +165,42 @@ export default function PrivateCoachingBookingClient({ totalRemaining, available
       </div>
 
       <div>
-        <div className="mb-3 flex items-center justify-between gap-3">
-          <h4 className="text-base font-semibold tracking-tight">Your bookings</h4>
+        <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h4 className="text-base font-semibold tracking-tight">Your bookings</h4>
+            <p className="text-sm text-[hsl(var(--muted))]">Upcoming sessions and private coaching history.</p>
+          </div>
           <span className="rounded-full border border-[hsl(var(--border))] bg-white px-3 py-1 text-xs font-semibold text-[hsl(var(--muted))]">
             {bookings.length} booking(s)
           </span>
         </div>
 
         {bookings.length ? (
+          <div className="mb-3 flex flex-wrap gap-2">
+            {BOOKING_FILTERS.map((item) => (
+              <button
+                key={item.value}
+                type="button"
+                onClick={() => setBookingFilter(item.value)}
+                className={`rounded-full border px-3 py-1.5 text-sm font-semibold transition ${
+                  bookingFilter === item.value
+                    ? 'border-black bg-black text-white'
+                    : 'border-[hsl(var(--border))] bg-white text-[hsl(var(--muted))] hover:text-[hsl(var(--fg))]'
+                }`}
+              >
+                {item.label}
+              </button>
+            ))}
+          </div>
+        ) : null}
+
+        {bookings.length > 0 && filteredBookings.length === 0 ? (
+          <div className="rounded-3xl border border-dashed border-[hsl(var(--border))] bg-white p-4 text-sm text-[hsl(var(--muted))]">
+            No booking matches this filter.
+          </div>
+        ) : bookings.length ? (
           <div className="grid gap-3">
-            {bookings.map((booking) => (
+            {filteredBookings.map((booking) => (
               <div key={booking.id} className="rounded-3xl border border-[hsl(var(--border))] bg-white p-4 shadow-soft">
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                   <div>
@@ -176,6 +216,7 @@ export default function PrivateCoachingBookingClient({ totalRemaining, available
                   </div>
                   <div className="text-left text-xs text-[hsl(var(--muted))] sm:text-right">
                     Booked {formatDateTime(booking.bookedAt)}
+                    {booking.completedAt ? <><br />Completed {formatDateTime(booking.completedAt)}</> : null}
                     {booking.cancelledAt ? <><br />Cancelled {formatDateTime(booking.cancelledAt)}</> : null}
                   </div>
                 </div>
