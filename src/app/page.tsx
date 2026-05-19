@@ -1115,18 +1115,33 @@ function HomeLogoutShortcut() {
 function memberActions(): QuickAction[] {
   return [
     { href: '/profile', label: 'My profile', desc: 'Identity, subscription details and QR code.', icon: IdCard },
+    { href: '/private-coaching', label: 'Private coaching', desc: 'Request and book private coaching sessions.', icon: UserCog },
     { href: '/store', label: 'Store', desc: 'Browse available products and equipment.', icon: ShoppingBag },
     { href: '/notifications?thread=admin', label: 'Contact admin', desc: 'Message the ATOM team.', icon: UserCog },
   ]
 }
 
-function coachActions(): QuickAction[] {
-  return [
+function coachActions(role: Role): QuickAction[] {
+  const actions: QuickAction[] = [
     { href: '/profile', label: 'My profile', desc: 'Identity, QR code and personal info.', icon: IdCard },
+  ]
+
+  if (role === 'head_coach') {
+    actions.push({
+      href: '/head-coach/private-coaching',
+      label: 'Private coaching',
+      desc: 'Manage requests, slots and bookings.',
+      icon: UserCog,
+    })
+  }
+
+  actions.push(
     { href: '/schedule', label: 'Schedule', desc: 'Open the latest class schedule.', icon: CalendarDays },
     { href: '/notifications', label: 'Notifications', desc: 'Read the latest staff updates.', icon: Bell },
     { href: '/packages-and-promos', label: 'Packages & promos', desc: 'Quick access to current offers.', icon: Gift },
-  ]
+  )
+
+  return actions
 }
 
 function receptionActions(): QuickAction[] {
@@ -1158,7 +1173,8 @@ function adminActions(role: 'admin' | 'super_admin'): QuickAction[] {
   ]
 
   if (role === 'super_admin') {
-    base.splice(8, 0, { href: '/admin/store/dashboard', label: 'Store admin', desc: 'Open the store dashboard and operations hub.', icon: LayoutDashboard })
+    base.splice(4, 0, { href: '/admin/private-coaching', label: 'Private coaching', desc: 'Manage private coaching requests, slots and bookings.', icon: UserCog })
+    base.splice(9, 0, { href: '/admin/store/dashboard', label: 'Store admin', desc: 'Open the store dashboard and operations hub.', icon: LayoutDashboard })
     base.push({ href: '/admin/permissions-audit', label: 'Permissions audit', desc: 'Review who can access what.', icon: UserCog })
   }
 
@@ -1284,7 +1300,7 @@ export default async function HomePage() {
               <QuickActions
                 title="Coach shortcuts"
                 subtitle="The most useful staff actions first."
-                items={coachActions().slice(0, 3)}
+                items={coachActions(user.role).slice(0, 3)}
               />
             </div>
 

@@ -61,6 +61,9 @@ function pickQuick(items: MenuItem[]) {
   const priority = [
     '/admin',
     '/members',
+    '/admin/private-coaching',
+    '/head-coach/private-coaching',
+    '/private-coaching',
     '/scan',
     '/admin/expiring-soon',
     '/admin/attendance',
