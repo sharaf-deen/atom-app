@@ -69,12 +69,28 @@ export function privateCoachingMemberName(profile: {
   return [profile.first_name ?? '', profile.last_name ?? ''].join(' ').trim() || profile.email || 'Member'
 }
 
-export type PrivateCoachingSlotStatus = 'available' | 'cancelled'
+export type PrivateCoachingSlotStatus = 'available' | 'booked' | 'cancelled'
+export type PrivateCoachingBookingStatus = 'booked' | 'completed' | 'cancelled'
 
 export function privateCoachingSlotStatusLabel(status: PrivateCoachingSlotStatus | string | null | undefined) {
   switch (status) {
     case 'available':
       return 'Available'
+    case 'booked':
+      return 'Booked'
+    case 'cancelled':
+      return 'Cancelled'
+    default:
+      return 'Unknown'
+  }
+}
+
+export function privateCoachingBookingStatusLabel(status: PrivateCoachingBookingStatus | string | null | undefined) {
+  switch (status) {
+    case 'booked':
+      return 'Booked'
+    case 'completed':
+      return 'Completed'
     case 'cancelled':
       return 'Cancelled'
     default:
