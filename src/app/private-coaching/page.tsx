@@ -16,6 +16,7 @@ import {
   privateCoachingMemberName,
   privateCoachingPaymentMethodLabel,
   privateCoachingStatusLabel,
+  formatPrivateCoachingSlotTime,
 } from '@/lib/privateCoaching'
 
 type CoachRow = {
@@ -46,6 +47,16 @@ type PassRow = {
   activated_at: string
 }
 
+type SlotRow = {
+  id: string
+  coach_id: string
+  slot_date: string
+  start_time: string
+  end_time: string
+  status: string
+  note: string | null
+}
+
 function formatDate(value?: string | null) {
   if (!value) return '—'
   const date = new Date(value)
@@ -56,6 +67,13 @@ function formatDate(value?: string | null) {
 function coachName(coach: CoachRow | undefined | null) {
   if (!coach) return 'Head Coach'
   return privateCoachingMemberName(coach)
+}
+
+function formatSlotDate(value?: string | null) {
+  if (!value) return '—'
+  const date = new Date(`${value}T00:00:00`)
+  if (Number.isNaN(date.getTime())) return value
+  return date.toLocaleDateString('en-GB', { weekday: 'short', year: 'numeric', month: 'short', day: '2-digit' })
 }
 
 export default async function PrivateCoachingPage() {
@@ -117,6 +135,25 @@ export default async function PrivateCoachingPage() {
   const latestRequest = requests[0] ?? null
   const totalRemaining = activePasses.reduce((sum, pass) => sum + Math.max(0, Number(pass.remaining_sessions ?? 0)), 0)
 
+  let availableSlots: SlotRow[] = []
+  if (totalRemaining > 0) {
+    const coachIds = Array.from(new Set(activePasses.map((pass) => pass.coach_id).filter(Boolean)))
+    if (coachIds.length > 0) {
+      const today = new Date().toISOString().slice(0, 10)
+      const { data: slots } = await admin
+        .from('private_coaching_slots')
+        .select('id, coach_id, slot_date, start_time, end_time, status, note')
+        .in('coach_id', coachIds)
+        .eq('status', 'available')
+        .gte('slot_date', today)
+        .order('slot_date', { ascending: true })
+        .order('start_time', { ascending: true })
+        .limit(20)
+
+      availableSlots = (slots ?? []) as SlotRow[]
+    }
+  }
+
   return (
     <main>
       <PageHeader
@@ -152,7 +189,7 @@ export default async function PrivateCoachingPage() {
                 <div className="text-sm text-[hsl(var(--muted))]">Available tokens</div>
                 <div className="mt-1 text-3xl font-semibold tracking-tight">{totalRemaining}</div>
                 <p className="mt-2 text-sm text-[hsl(var(--muted))]">
-                  Scheduling opens in the next lot after coach availability is added.
+                  Coach availability is visible below. Booking with tokens will be added in the next lot.
                 </p>
               </div>
 
@@ -209,8 +246,48 @@ export default async function PrivateCoachingPage() {
           </Card>
         </div>
 
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Available coach slots</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {totalRemaining > 0 ? (
+              availableSlots.length ? (
+                <div className="grid gap-3">
+                  {availableSlots.map((slot) => (
+                    <div key={slot.id} className="rounded-3xl border border-[hsl(var(--border))] bg-white p-4 shadow-soft">
+                      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                        <div>
+                          <div className="font-semibold tracking-tight">
+                            {formatSlotDate(slot.slot_date)} · {formatPrivateCoachingSlotTime(slot.start_time)} - {formatPrivateCoachingSlotTime(slot.end_time)}
+                          </div>
+                          <div className="mt-1 text-sm text-[hsl(var(--muted))]">
+                            {coachName(coachMap.get(slot.coach_id))}{slot.note ? ` · ${slot.note}` : ''}
+                          </div>
+                        </div>
+                        <span className="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700">
+                          Available
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="rounded-3xl border border-dashed border-[hsl(var(--border))] bg-white p-4 text-sm text-[hsl(var(--muted))]">
+                  No available slot yet. The head coach will add private coaching availability soon.
+                </div>
+              )
+            ) : (
+              <div className="rounded-3xl border border-dashed border-[hsl(var(--border))] bg-white p-4 text-sm text-[hsl(var(--muted))]">
+                Available coach slots will appear here after your private coaching payment is confirmed and your tokens are active.
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
         <p className="text-xs text-[hsl(var(--muted))]">
-          This first lot only handles package requests, payment confirmation and token activation. Slot booking will come in the availability and booking lots.
+          This lot only displays coach availability. Booking a slot with tokens will come in the next lot.
         </p>
       </Section>
     </main>
