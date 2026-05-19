@@ -68,3 +68,33 @@ export function privateCoachingMemberName(profile: {
 }) {
   return [profile.first_name ?? '', profile.last_name ?? ''].join(' ').trim() || profile.email || 'Member'
 }
+
+export type PrivateCoachingSlotStatus = 'available' | 'cancelled'
+
+export function privateCoachingSlotStatusLabel(status: PrivateCoachingSlotStatus | string | null | undefined) {
+  switch (status) {
+    case 'available':
+      return 'Available'
+    case 'cancelled':
+      return 'Cancelled'
+    default:
+      return 'Unknown'
+  }
+}
+
+export function isValidPrivateCoachingSlotDate(value: unknown): value is string {
+  if (typeof value !== 'string') return false
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false
+  const date = new Date(`${value}T00:00:00Z`)
+  return !Number.isNaN(date.getTime())
+}
+
+export function isValidPrivateCoachingSlotTime(value: unknown): value is string {
+  return typeof value === 'string' && /^\d{2}:\d{2}$/.test(value)
+}
+
+export function formatPrivateCoachingSlotTime(value?: string | null) {
+  if (!value) return '—'
+  const [hour = '', minute = ''] = String(value).split(':')
+  return `${hour.padStart(2, '0')}:${minute.padStart(2, '0')}`
+}
