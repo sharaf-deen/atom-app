@@ -30,6 +30,27 @@ function safeStr(value: unknown) {
   return typeof value === 'string' ? value.trim() : ''
 }
 
+function normalizePriceInput(value: string) {
+  const raw = String(value || '').trim()
+  if (!raw) return raw
+
+  let cleaned = raw.replace(/\s+/g, '').replace(/[^0-9.,-]/g, '')
+  const lastComma = cleaned.lastIndexOf(',')
+  const lastDot = cleaned.lastIndexOf('.')
+
+  if (lastComma >= 0 && lastDot >= 0) {
+    if (lastComma > lastDot) {
+      cleaned = cleaned.replace(/\./g, '').replace(',', '.')
+    } else {
+      cleaned = cleaned.replace(/,/g, '')
+    }
+  } else if (lastComma >= 0) {
+    cleaned = cleaned.replace(',', '.')
+  }
+
+  return cleaned
+}
+
 async function requireSuperAdmin() {
   const authClient = createSupabaseServerActionClient()
   const admin = createSupabaseAdminClient()
@@ -101,9 +122,9 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
     if (!title) return json(400, { ok: false, error: 'TITLE_REQUIRED' })
     if (!PAYMENT_METHODS.has(paymentMethod)) return json(400, { ok: false, error: 'INVALID_PAYMENT_METHOD' })
 
-    const amountCents = parsePriceToCents(amountRaw)
+    const amountCents = parsePriceToCents(normalizePriceInput(amountRaw))
     if (!Number.isFinite(amountCents) || amountCents <= 0) {
-      return json(400, { ok: false, error: 'INVALID_AMOUNT', details: 'Amount must be greater than 0.' })
+      return json(400, { ok: false, error: 'INVALID_AMOUNT', details: 'Amount must be greater than 0. Use 17264 or 17264.00.' })
     }
 
     const admin = guard.admin
