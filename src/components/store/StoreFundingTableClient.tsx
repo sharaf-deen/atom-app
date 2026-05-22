@@ -97,6 +97,27 @@ function parseErrorMessage(data: any, fallback: string) {
   return data?.details || data?.error || fallback
 }
 
+function normalizeDecimalInput(value: string) {
+  const raw = String(value || '').trim()
+  if (!raw) return raw
+
+  let cleaned = raw.replace(/\s+/g, '').replace(/[^0-9.,-]/g, '')
+  const lastComma = cleaned.lastIndexOf(',')
+  const lastDot = cleaned.lastIndexOf('.')
+
+  if (lastComma >= 0 && lastDot >= 0) {
+    if (lastComma > lastDot) {
+      cleaned = cleaned.replace(/\./g, '').replace(',', '.')
+    } else {
+      cleaned = cleaned.replace(/,/g, '')
+    }
+  } else if (lastComma >= 0) {
+    cleaned = cleaned.replace(',', '.')
+  }
+
+  return cleaned
+}
+
 export default function StoreFundingTableClient({
   fundingRows,
   fundingTypes,
@@ -129,7 +150,7 @@ export default function StoreFundingTableClient({
       form.set('funding_date', editing.funding_date)
       form.set('type', editing.type)
       form.set('title', editing.title)
-      form.set('amount', editing.amount)
+      form.set('amount', normalizeDecimalInput(editing.amount))
       form.set('payment_method', editing.payment_method)
       form.set('source_name', editing.source_name)
       form.set('note', editing.note)
@@ -391,7 +412,7 @@ export default function StoreFundingTableClient({
             <div className="grid gap-3 sm:grid-cols-2">
               <label className="block">
                 <span className="mb-1 block text-sm font-medium">Amount (EGP)</span>
-                <input type="number" min="0" step="0.01" value={editing.amount} onChange={(event) => setEditing({ ...editing, amount: event.target.value })} className="w-full rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring" />
+                <input type="text" inputMode="decimal" value={editing.amount} onChange={(event) => setEditing({ ...editing, amount: event.target.value })} placeholder="17264.00" className="w-full rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring" />
               </label>
               <label className="block">
                 <span className="mb-1 block text-sm font-medium">Payment</span>
