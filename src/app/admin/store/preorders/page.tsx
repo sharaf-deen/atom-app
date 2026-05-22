@@ -12,6 +12,7 @@ import { formatCurrency } from '@/lib/money'
 import { canAccessStoreAdmin } from '@/lib/rbac'
 import AdminPreorderQuickEdit from '@/components/store/AdminPreorderQuickEdit'
 import AdminPreorderForm from '@/components/store/AdminPreorderForm'
+import CompletePreorderAsSaleButton from '@/components/store/CompletePreorderAsSaleButton'
 import StoreAdminNav from '@/components/store/StoreAdminNav'
 
 type PreorderStatus = 'pending' | 'confirmed' | 'ordered_from_supplier' | 'ready' | 'completed' | 'canceled'
@@ -51,6 +52,7 @@ type PreorderRow = {
   deposit_payment_method: 'cash' | 'instapay' | 'bank_transfer' | 'card' | null
   status: PreorderStatus
   note: string | null
+  converted_sale_id: string | null
   created_at: string
   updated_at: string
 }
@@ -307,7 +309,7 @@ export default async function AdminStorePreordersPage({
 
     let query = supa
       .from('store_preorders')
-      .select('id, buyer_user_id, buyer_full_name, buyer_email, buyer_phone, product_id, product_name, product_category, product_color, product_size, qty, unit_price_cents, total_cents, deposit_cents, balance_due_cents, deposit_payment_method, status, note, created_at, updated_at')
+      .select('id, buyer_user_id, buyer_full_name, buyer_email, buyer_phone, product_id, product_name, product_category, product_color, product_size, qty, unit_price_cents, total_cents, deposit_cents, balance_due_cents, deposit_payment_method, status, note, converted_sale_id, created_at, updated_at')
       .order('created_at', { ascending: false })
       .limit(1000)
 
@@ -558,14 +560,24 @@ export default async function AdminStorePreordersPage({
                               ) : null}
                             </div>
 
-                            <AdminPreorderQuickEdit
-                              id={row.id}
-                              totalCents={row.total_cents}
-                              depositCents={row.deposit_cents}
-                              depositPaymentMethod={row.deposit_payment_method}
-                              status={row.status}
-                              note={row.note}
-                            />
+                            <div className="space-y-4">
+                              <AdminPreorderQuickEdit
+                                id={row.id}
+                                totalCents={row.total_cents}
+                                depositCents={row.deposit_cents}
+                                depositPaymentMethod={row.deposit_payment_method}
+                                status={row.status}
+                                note={row.note}
+                              />
+                              <CompletePreorderAsSaleButton
+                                id={row.id}
+                                status={row.status}
+                                totalCents={row.total_cents}
+                                balanceDueCents={row.balance_due_cents}
+                                depositPaymentMethod={row.deposit_payment_method}
+                                convertedSaleId={row.converted_sale_id}
+                              />
+                            </div>
                           </div>
                         </div>
                       </details>
