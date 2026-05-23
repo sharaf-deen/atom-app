@@ -145,8 +145,10 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
       amount_cents: amountCents,
       currency: 'EGP',
       payment_method: paymentMethod,
-      source_name: sourceName || null,
-      note: note || null,
+      // Keep empty strings instead of null for maximum compatibility with older production schemas.
+      // The fields remain optional in the UI, but this avoids 400s if a deployed DB has NOT NULL text columns.
+      source_name: sourceName || '',
+      note: note || '',
       updated_by: guard.userId,
     }
 
