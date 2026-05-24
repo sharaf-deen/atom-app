@@ -12,6 +12,13 @@ const STORE_FUNDING_BUCKET = 'store-funding-attachments'
 const FUNDING_TYPES = new Set(['loan_received', 'loan_repayment'])
 const PAYMENT_METHODS = new Set(['cash', 'card', 'bank_transfer', 'instapay'])
 
+type RouteContext = { params: { id?: string } | Promise<{ id?: string }> }
+
+async function resolveRouteId(context: RouteContext) {
+  const params = await Promise.resolve(context.params)
+  return String(params?.id || '').trim()
+}
+
 function json(status: number, body: any) {
   const res = NextResponse.json(body, { status })
   res.headers.set('Cache-Control', 'no-store')
@@ -98,16 +105,22 @@ async function uploadAttachment(admin: ReturnType<typeof createSupabaseAdminClie
   }
 }
 
-export async function PATCH(req: Request, { params }: { params: { id: string } }) {
+export async function PATCH(req: Request, context: RouteContext) {
   try {
     const guard = await requireSuperAdmin()
     if (!guard.ok) return guard.response
 
-    const id = String(params?.id || '').trim()
-    if (!isUuid(id)) return json(400, { ok: false, error: 'INVALID_ID' })
-
     const form = await req.formData().catch(() => null)
     if (!form) return json(400, { ok: false, error: 'INVALID_FORM_DATA' })
+
+    const routeId = await resolveRouteId(context)
+    const formId = safeStr(form.get('id'))
+    const id = isUuid(routeId) ? routeId : formId
+
+    if (!isUuid(id)) return json(400, { ok: false, error: 'INVALID_ID' })
+    if (formId && isUuid(formId) && routeId && isUuid(routeId) && formId !== routeId) {
+      return json(400, { ok: false, error: 'ID_MISMATCH' })
+    }
 
     const fundingDate = safeStr(form.get('funding_date'))
     const type = safeStr(form.get('type'))
@@ -190,12 +203,12 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
   }
 }
 
-export async function DELETE(_req: Request, { params }: { params: { id: string } }) {
+export async function DELETE(_req: Request, context: RouteContext) {
   try {
     const guard = await requireSuperAdmin()
     if (!guard.ok) return guard.response
 
-    const id = String(params?.id || '').trim()
+    const id = await resolveRouteId(context)
     if (!isUuid(id)) return json(400, { ok: false, error: 'INVALID_ID' })
 
     const { data: before, error: beforeErr } = await guard.admin
