@@ -30,6 +30,14 @@ function safeStr(value: unknown) {
   return typeof value === 'string' ? value.trim() : ''
 }
 
+function firstValidUuid(values: string[]) {
+  for (const value of values) {
+    const cleaned = safeStr(value)
+    if (isUuid(cleaned)) return cleaned
+  }
+  return ''
+}
+
 function normalizePriceInput(value: string) {
   const raw = String(value || '').trim()
   if (!raw) return raw
@@ -106,8 +114,21 @@ export async function PATCH(req: Request) {
     const form = await req.formData().catch(() => null)
     if (!form) return json(400, { ok: false, error: 'INVALID_FORM_DATA' })
 
-    const id = safeStr(form.get('id'))
-    if (!isUuid(id)) return json(400, { ok: false, error: 'INVALID_ID', details: 'Missing or invalid funding id in form data.' })
+    const url = new URL(req.url)
+    const id = firstValidUuid([
+      safeStr(form.get('id')),
+      safeStr(form.get('funding_id')),
+      safeStr(form.get('entry_id')),
+      safeStr(url.searchParams.get('id')),
+    ])
+
+    if (!id) {
+      return json(400, {
+        ok: false,
+        error: 'INVALID_ID',
+        details: 'Missing or invalid funding id. Please refresh the Store funding page and try again.',
+      })
+    }
 
     const fundingDate = safeStr(form.get('funding_date'))
     const type = safeStr(form.get('type'))
