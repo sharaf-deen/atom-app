@@ -147,6 +147,7 @@ export default function StoreFundingTableClient({
       if (!editing) return { ok: false as const, message: 'No funding entry selected.' }
 
       const form = new FormData()
+      form.set('id', editing.id)
       form.set('funding_date', editing.funding_date)
       form.set('type', editing.type)
       form.set('title', editing.title)
@@ -156,7 +157,7 @@ export default function StoreFundingTableClient({
       form.set('note', editing.note)
       if (editingFile) form.set('attachment', editingFile)
 
-      const res = await fetch(`/api/admin/store/funding/${editing.id}`, {
+      const res = await fetch(`/api/admin/store/funding/${encodeURIComponent(editing.id)}`, {
         method: 'PATCH',
         body: form,
       })
@@ -226,7 +227,7 @@ export default function StoreFundingTableClient({
 
     try {
       setDeleting(true)
-      const res = await fetch(`/api/admin/store/funding/${deletingFunding.id}`, {
+      const res = await fetch(`/api/admin/store/funding/${encodeURIComponent(deletingFunding.id)}`, {
         method: 'DELETE',
       })
       const data = await res.json().catch(() => ({}))
