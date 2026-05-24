@@ -147,7 +147,11 @@ export default function StoreFundingTableClient({
       if (!editing) return { ok: false as const, message: 'No funding entry selected.' }
 
       const form = new FormData()
-      form.set('id', editing.id)
+      const fundingId = String(editing.id || '').trim()
+      if (!fundingId) return { ok: false as const, message: 'Missing funding id. Please refresh the page and try again.' }
+
+      form.set('id', fundingId)
+      form.set('funding_id', fundingId)
       form.set('funding_date', editing.funding_date)
       form.set('type', editing.type)
       form.set('title', editing.title)
@@ -157,7 +161,7 @@ export default function StoreFundingTableClient({
       form.set('note', editing.note)
       if (editingFile) form.set('attachment', editingFile)
 
-      const res = await fetch('/api/admin/store/funding/update', {
+      const res = await fetch(`/api/admin/store/funding/update?id=${encodeURIComponent(fundingId)}`, {
         method: 'PATCH',
         body: form,
       })
