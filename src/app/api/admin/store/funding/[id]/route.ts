@@ -12,11 +12,8 @@ const STORE_FUNDING_BUCKET = 'store-funding-attachments'
 const FUNDING_TYPES = new Set(['loan_received', 'loan_repayment'])
 const PAYMENT_METHODS = new Set(['cash', 'card', 'bank_transfer', 'instapay'])
 
-type RouteContext = { params: { id?: string } | Promise<{ id?: string }> }
-
-async function resolveRouteId(context: RouteContext) {
-  const params = await Promise.resolve(context.params)
-  return String(params?.id || '').trim()
+type RouteContext = {
+  params?: { id?: string } | Promise<{ id?: string }>
 }
 
 function json(status: number, body: any) {
@@ -35,6 +32,14 @@ function isDateOnly(value: string) {
 
 function safeStr(value: unknown) {
   return typeof value === 'string' ? value.trim() : ''
+}
+
+function firstValidUuid(values: unknown[]) {
+  for (const value of values) {
+    const cleaned = safeStr(value)
+    if (isUuid(cleaned)) return cleaned
+  }
+  return ''
 }
 
 function normalizePriceInput(value: string) {
@@ -56,6 +61,27 @@ function normalizePriceInput(value: string) {
   }
 
   return cleaned
+}
+
+async function readParams(context?: RouteContext) {
+  const params = context?.params
+  if (!params) return {}
+  return typeof (params as any)?.then === 'function' ? await params : params
+}
+
+async function readFundingId(req: Request, context?: RouteContext, form?: FormData | null) {
+  const params = await readParams(context)
+  const url = new URL(req.url)
+  const lastPathSegment = decodeURIComponent(url.pathname.split('/').filter(Boolean).pop() || '')
+
+  return firstValidUuid([
+    params?.id,
+    url.searchParams.get('id'),
+    form?.get('id'),
+    form?.get('funding_id'),
+    form?.get('entry_id'),
+    lastPathSegment,
+  ])
 }
 
 async function requireSuperAdmin() {
@@ -113,13 +139,13 @@ export async function PATCH(req: Request, context: RouteContext) {
     const form = await req.formData().catch(() => null)
     if (!form) return json(400, { ok: false, error: 'INVALID_FORM_DATA' })
 
-    const routeId = await resolveRouteId(context)
-    const formId = safeStr(form.get('id'))
-    const id = isUuid(routeId) ? routeId : formId
-
-    if (!isUuid(id)) return json(400, { ok: false, error: 'INVALID_ID' })
-    if (formId && isUuid(formId) && routeId && isUuid(routeId) && formId !== routeId) {
-      return json(400, { ok: false, error: 'ID_MISMATCH' })
+    const id = await readFundingId(req, context, form)
+    if (!id) {
+      return json(400, {
+        ok: false,
+        error: 'INVALID_ID',
+        details: 'Missing or invalid funding id. Please refresh the Store funding page and try again.',
+      })
     }
 
     const fundingDate = safeStr(form.get('funding_date'))
@@ -158,8 +184,6 @@ export async function PATCH(req: Request, context: RouteContext) {
       amount_cents: amountCents,
       currency: 'EGP',
       payment_method: paymentMethod,
-      // Keep empty strings instead of null for maximum compatibility with older production schemas.
-      // The fields remain optional in the UI, but this avoids 400s if a deployed DB has NOT NULL text columns.
       source_name: sourceName || '',
       note: note || '',
       updated_by: guard.userId,
@@ -203,13 +227,13 @@ export async function PATCH(req: Request, context: RouteContext) {
   }
 }
 
-export async function DELETE(_req: Request, context: RouteContext) {
+export async function DELETE(req: Request, context: RouteContext) {
   try {
     const guard = await requireSuperAdmin()
     if (!guard.ok) return guard.response
 
-    const id = await resolveRouteId(context)
-    if (!isUuid(id)) return json(400, { ok: false, error: 'INVALID_ID' })
+    const id = await readFundingId(req, context, null)
+    if (!id) return json(400, { ok: false, error: 'INVALID_ID' })
 
     const { data: before, error: beforeErr } = await guard.admin
       .from('store_external_funding')

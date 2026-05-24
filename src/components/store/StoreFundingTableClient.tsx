@@ -161,7 +161,8 @@ export default function StoreFundingTableClient({
       form.set('note', editing.note)
       if (editingFile) form.set('attachment', editingFile)
 
-      const res = await fetch(`/api/admin/store/funding/update?id=${encodeURIComponent(fundingId)}`, {
+      const encodedFundingId = encodeURIComponent(fundingId)
+      const res = await fetch(`/api/admin/store/funding/${encodedFundingId}?id=${encodedFundingId}`, {
         method: 'PATCH',
         body: form,
       })
