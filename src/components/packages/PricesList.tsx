@@ -7,8 +7,10 @@ import Input from '@/components/ui/Input'
 import Select from '@/components/ui/Select'
 import Badge from '@/components/ui/Badge'
 
+export type PackageId = string | number
+
 export type PackageItem = {
-  id: string
+  id: PackageId
   name: string
   type: 'membership' | 'private'
   unit: 'month' | 'session'
@@ -122,19 +124,20 @@ export default function PricesList({ items, canEdit }: Props) {
 
   const byId = useMemo(() => {
     const m = new Map<string, PackageItem>()
-    for (const it of items) m.set(it.id, it)
+    for (const it of items) m.set(String(it.id), it)
     return m
   }, [items])
 
   const [draft, setDraft] = useState<Partial<PackageItem>>({})
 
-  function startEdit(id: string) {
-    const it = byId.get(id)
+  function startEdit(id: PackageId) {
+    const normalizedId = String(id)
+    const it = byId.get(normalizedId)
     if (!it) return
     setErr('')
     setAdding(false)
-    setEditingId(id)
-    setDraft({ ...it, benefits: normalizeBenefits(it.benefits) })
+    setEditingId(normalizedId)
+    setDraft({ ...it, id: normalizedId, benefits: normalizeBenefits(it.benefits) })
   }
 
   function cancelEdit() {
@@ -161,7 +164,7 @@ export default function PricesList({ items, canEdit }: Props) {
       const r = await fetch('/api/packages-pricing/update', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: editingId, patch }),
+        body: JSON.stringify({ id: String(editingId), patch }),
       })
       const j: any = await safeJson(r)
       if (!r.ok || !j?.ok) {
@@ -228,7 +231,7 @@ export default function PricesList({ items, canEdit }: Props) {
     }
   }
 
-  async function deleteOne(id: string, name: string) {
+  async function deleteOne(id: PackageId, name: string) {
     if (!canEdit) return
     const confirmed = window.confirm(`Delete package "${name}"? This will remove it from the price list.`)
     if (!confirmed) return
@@ -239,7 +242,7 @@ export default function PricesList({ items, canEdit }: Props) {
       const r = await fetch('/api/packages-pricing/delete', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id }),
+        body: JSON.stringify({ id: String(id) }),
       })
       const j: any = await safeJson(r)
       if (!r.ok || !j?.ok) {
@@ -247,7 +250,7 @@ export default function PricesList({ items, canEdit }: Props) {
         return
       }
 
-      if (editingId === id) {
+      if (editingId === String(id)) {
         setEditingId(null)
         setDraft({})
       }
@@ -376,7 +379,7 @@ export default function PricesList({ items, canEdit }: Props) {
 
             <tbody>
               {items.map((it) => {
-                const isEditing = editingId === it.id
+                const isEditing = editingId === String(it.id)
                 const row = isEditing ? (draft as PackageItem) : it
 
                 return (
