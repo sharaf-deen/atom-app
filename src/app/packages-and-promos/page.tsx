@@ -49,7 +49,7 @@ export default async function PackagesAndPromosPage() {
   try {
     const { data, error } = await admin
       .from('packages_pricing')
-      .select('id,name,type,unit,qty,price_egp,is_active')
+      .select('id,name,type,unit,qty,price_egp,is_active,benefits')
       .order('type', { ascending: true })
       .order('unit', { ascending: true })
       .order('qty', { ascending: true })

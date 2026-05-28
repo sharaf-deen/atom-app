@@ -16,6 +16,25 @@ function toInt(v: any, def: number) {
   return Math.floor(n)
 }
 
+function sanitizeBenefits(v: any) {
+  const arr = Array.isArray(v) ? v : []
+
+  const out: string[] = []
+  for (const raw of arr) {
+    const text = String(raw ?? '')
+      .replace(/^[-•*]\s*/, '')
+      .trim()
+      .slice(0, 120)
+
+    if (!text) continue
+    if (out.includes(text)) continue
+    out.push(text)
+    if (out.length >= 8) break
+  }
+
+  return out
+}
+
 export async function POST(req: Request) {
   const supa = createSupabaseServerActionClient()
   const me = await supa.auth.getUser()
@@ -46,6 +65,7 @@ export async function POST(req: Request) {
   const qty = toInt(item.qty, 1)
   const price_egp = toInt(item.price_egp, 0)
   const is_active = item.is_active === false ? false : true
+  const benefits = sanitizeBenefits(item.benefits)
 
   if (!name) return json(400, { ok: false, error: 'Name is required' })
   if (!['membership', 'private'].includes(type)) return json(400, { ok: false, error: 'Invalid type' })
@@ -57,8 +77,8 @@ export async function POST(req: Request) {
 
   const { data, error } = await admin
     .from('packages_pricing')
-    .insert({ name, type, unit, qty, price_egp, is_active })
-    .select('id,name,type,unit,qty,price_egp,is_active')
+    .insert({ name, type, unit, qty, price_egp, is_active, benefits, updated_by: me.data.user.id })
+    .select('id,name,type,unit,qty,price_egp,is_active,benefits')
     .maybeSingle()
 
   if (error) return json(500, { ok: false, error: error.message })
