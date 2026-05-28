@@ -19,6 +19,20 @@ function isUuid(v: string) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{12}$/i.test(v)
 }
 
+function isPositiveIntegerId(v: string) {
+  return /^[1-9][0-9]*$/.test(v)
+}
+
+function normalizePackageId(v: any) {
+  const id = String(v ?? '').trim()
+  if (!id) return ''
+  return id
+}
+
+function isValidPackageId(v: string) {
+  return isUuid(v) || isPositiveIntegerId(v)
+}
+
 export async function POST(req: Request) {
   try {
     const supa = createSupabaseServerActionClient()
@@ -42,8 +56,15 @@ export async function POST(req: Request) {
       body = null
     }
 
-    const id = String(body?.id || '')
-    if (!id || !isUuid(id)) return json(400, { ok: false, error: 'INVALID_ID' })
+    const id = normalizePackageId(body?.id ?? body?.package_id ?? body?.entry_id)
+
+    if (!id || !isValidPackageId(id)) {
+      return json(400, {
+        ok: false,
+        error: 'INVALID_ID',
+        details: 'Missing or invalid package id. This route accepts the current UUID ids and the older numeric package ids.',
+      })
+    }
 
     const admin = createSupabaseAdminClient()
     const { data, error } = await admin

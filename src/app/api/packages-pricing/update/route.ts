@@ -19,6 +19,20 @@ function isUuid(v: string) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{12}$/i.test(v)
 }
 
+function isPositiveIntegerId(v: string) {
+  return /^[1-9][0-9]*$/.test(v)
+}
+
+function normalizePackageId(v: any) {
+  const id = String(v ?? '').trim()
+  if (!id) return ''
+  return id
+}
+
+function isValidPackageId(v: string) {
+  return isUuid(v) || isPositiveIntegerId(v)
+}
+
 function toInt(v: any, def: number) {
   const n = Number(v)
   if (!Number.isFinite(n)) return def
@@ -67,9 +81,17 @@ export async function POST(req: Request) {
       body = null
     }
 
-    const id = String(body?.id || '')
+    const id = normalizePackageId(body?.id ?? body?.package_id ?? body?.entry_id)
     const patch = body?.patch ?? null
-    if (!id || !isUuid(id)) return json(400, { ok: false, error: 'INVALID_ID' })
+
+    if (!id || !isValidPackageId(id)) {
+      return json(400, {
+        ok: false,
+        error: 'INVALID_ID',
+        details: 'Missing or invalid package id. This route accepts the current UUID ids and the older numeric package ids.',
+      })
+    }
+
     if (!patch || typeof patch !== 'object') return json(400, { ok: false, error: 'INVALID_PATCH' })
 
     const update: any = {
