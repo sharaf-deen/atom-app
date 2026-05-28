@@ -15,6 +15,7 @@ export type PackageItem = {
   qty: number
   price_egp: number
   is_active: boolean
+  benefits?: string[] | null
 }
 
 type Props = {
@@ -36,6 +37,71 @@ function toInt(v: any, def: number) {
   return Math.floor(n)
 }
 
+function normalizeBenefits(v: any): string[] {
+  if (!Array.isArray(v)) return []
+
+  const out: string[] = []
+  for (const raw of v) {
+    const text = String(raw ?? '')
+      .replace(/^[-•*]\s*/, '')
+      .trim()
+      .slice(0, 120)
+
+    if (!text) continue
+    if (out.includes(text)) continue
+    out.push(text)
+    if (out.length >= 8) break
+  }
+
+  return out
+}
+
+function benefitsToText(v: any) {
+  return normalizeBenefits(v).join('\n')
+}
+
+function parseBenefitsText(v: string) {
+  return normalizeBenefits(v.split('\n'))
+}
+
+function BenefitsEditor({
+  value,
+  onChange,
+}: {
+  value: string[] | null | undefined
+  onChange: (next: string[]) => void
+}) {
+  return (
+    <label className="block">
+      <span className="mb-1 block text-xs text-[hsl(var(--muted))]">Benefits / advantages</span>
+      <textarea
+        value={benefitsToText(value)}
+        onChange={(e) => onChange(parseBenefitsText(e.target.value))}
+        rows={3}
+        placeholder="One benefit per line"
+        className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3.5 py-2.5 text-sm text-black placeholder:text-[hsl(var(--muted))] shadow-soft outline-none transition focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-[hsl(var(--bg))]"
+      />
+      <span className="mt-1 block text-xs text-[hsl(var(--muted))]">Max 8 lines. Keep each benefit short.</span>
+    </label>
+  )
+}
+
+function BenefitsDisplay({ benefits }: { benefits: string[] | null | undefined }) {
+  const list = normalizeBenefits(benefits)
+  if (list.length === 0) return null
+
+  return (
+    <ul className="mt-2 space-y-1 text-xs text-[hsl(var(--muted))]">
+      {list.map((benefit) => (
+        <li key={benefit} className="flex gap-1.5">
+          <span aria-hidden="true">•</span>
+          <span>{benefit}</span>
+        </li>
+      ))}
+    </ul>
+  )
+}
+
 export default function PricesList({ items, canEdit }: Props) {
   const router = useRouter()
 
@@ -51,6 +117,7 @@ export default function PricesList({ items, canEdit }: Props) {
     qty: 1,
     price_egp: 0,
     is_active: true,
+    benefits: [],
   })
 
   const byId = useMemo(() => {
@@ -65,8 +132,9 @@ export default function PricesList({ items, canEdit }: Props) {
     const it = byId.get(id)
     if (!it) return
     setErr('')
+    setAdding(false)
     setEditingId(id)
-    setDraft({ ...it })
+    setDraft({ ...it, benefits: normalizeBenefits(it.benefits) })
   }
 
   function cancelEdit() {
@@ -87,6 +155,7 @@ export default function PricesList({ items, canEdit }: Props) {
         qty: toInt(draft.qty, 1),
         price_egp: toInt(draft.price_egp, 0),
         is_active: !!draft.is_active,
+        benefits: normalizeBenefits(draft.benefits),
       }
 
       const r = await fetch('/api/packages-pricing/update', {
@@ -122,6 +191,7 @@ export default function PricesList({ items, canEdit }: Props) {
         qty: toInt(newItem.qty, 1),
         price_egp: toInt(newItem.price_egp, 0),
         is_active: !!newItem.is_active,
+        benefits: normalizeBenefits(newItem.benefits),
       }
 
       if (!payload.name) {
@@ -148,6 +218,7 @@ export default function PricesList({ items, canEdit }: Props) {
         qty: 1,
         price_egp: 0,
         is_active: true,
+        benefits: [],
       })
       router.refresh()
     } catch (e: any) {
@@ -156,6 +227,113 @@ export default function PricesList({ items, canEdit }: Props) {
       setSaving(false)
     }
   }
+
+  async function deleteOne(id: string, name: string) {
+    if (!canEdit) return
+    const confirmed = window.confirm(`Delete package "${name}"? This will remove it from the price list.`)
+    if (!confirmed) return
+
+    setSaving(true)
+    setErr('')
+    try {
+      const r = await fetch('/api/packages-pricing/delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id }),
+      })
+      const j: any = await safeJson(r)
+      if (!r.ok || !j?.ok) {
+        setErr(j?.details || j?.error || 'Failed to delete')
+        return
+      }
+
+      if (editingId === id) {
+        setEditingId(null)
+        setDraft({})
+      }
+      router.refresh()
+    } catch (e: any) {
+      setErr(e?.message ?? String(e))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const addForm = (
+    <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] p-4">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <div>
+          <div className="text-xs text-[hsl(var(--muted))]">Name</div>
+          <Input value={newItem.name} onChange={(e) => setNewItem((p) => ({ ...p, name: e.target.value }))} />
+        </div>
+
+        <div>
+          <div className="text-xs text-[hsl(var(--muted))]">Type</div>
+          <Select value={newItem.type} onChange={(e) => setNewItem((p) => ({ ...p, type: e.target.value as any }))}>
+            <option value="membership">membership</option>
+            <option value="private">private</option>
+          </Select>
+        </div>
+
+        <div>
+          <div className="text-xs text-[hsl(var(--muted))]">Unit</div>
+          <Select value={newItem.unit} onChange={(e) => setNewItem((p) => ({ ...p, unit: e.target.value as any }))}>
+            <option value="month">month</option>
+            <option value="session">session</option>
+          </Select>
+        </div>
+
+        <div>
+          <div className="text-xs text-[hsl(var(--muted))]">Qty</div>
+          <Input
+            type="number"
+            value={String(newItem.qty)}
+            onChange={(e) => setNewItem((p) => ({ ...p, qty: toInt(e.target.value, 1) }))}
+          />
+        </div>
+
+        <div>
+          <div className="text-xs text-[hsl(var(--muted))]">Price (EGP)</div>
+          <Input
+            type="number"
+            value={String(newItem.price_egp)}
+            onChange={(e) => setNewItem((p) => ({ ...p, price_egp: toInt(e.target.value, 0) }))}
+          />
+        </div>
+
+        <div className="flex items-end">
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={!!newItem.is_active}
+              onChange={(e) => setNewItem((p) => ({ ...p, is_active: e.target.checked }))}
+            />
+            Active
+          </label>
+        </div>
+
+        <div className="sm:col-span-2">
+          <BenefitsEditor value={newItem.benefits} onChange={(benefits) => setNewItem((p) => ({ ...p, benefits }))} />
+        </div>
+      </div>
+
+      <div className="mt-4 flex flex-wrap items-center gap-2">
+        <Button onClick={createOne} loading={saving} loadingText="Saving…">
+          Save
+        </Button>
+        <Button
+          variant="outline"
+          onClick={() => {
+            setAdding(false)
+            setErr('')
+          }}
+          disabled={saving}
+        >
+          Cancel
+        </Button>
+      </div>
+    </div>
+  )
 
   return (
     <div>
@@ -176,81 +354,7 @@ export default function PricesList({ items, canEdit }: Props) {
                   Add a package
                 </Button>
               ) : (
-                <div className="mt-2 rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4 shadow-soft">
-                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                    <div>
-                      <div className="text-xs text-[hsl(var(--muted))]">Name</div>
-                      <Input value={newItem.name} onChange={(e) => setNewItem((p) => ({ ...p, name: e.target.value }))} />
-                    </div>
-
-                    <div>
-                      <div className="text-xs text-[hsl(var(--muted))]">Type</div>
-                      <Select
-                        value={newItem.type}
-                        onChange={(e) => setNewItem((p) => ({ ...p, type: e.target.value as any }))}
-                      >
-                        <option value="membership">membership</option>
-                        <option value="private">private</option>
-                      </Select>
-                    </div>
-
-                    <div>
-                      <div className="text-xs text-[hsl(var(--muted))]">Unit</div>
-                      <Select
-                        value={newItem.unit}
-                        onChange={(e) => setNewItem((p) => ({ ...p, unit: e.target.value as any }))}
-                      >
-                        <option value="month">month</option>
-                        <option value="session">session</option>
-                      </Select>
-                    </div>
-
-                    <div>
-                      <div className="text-xs text-[hsl(var(--muted))]">Qty</div>
-                      <Input
-                        type="number"
-                        value={String(newItem.qty)}
-                        onChange={(e) => setNewItem((p) => ({ ...p, qty: toInt(e.target.value, 1) }))}
-                      />
-                    </div>
-
-                    <div>
-                      <div className="text-xs text-[hsl(var(--muted))]">Price (EGP)</div>
-                      <Input
-                        type="number"
-                        value={String(newItem.price_egp)}
-                        onChange={(e) => setNewItem((p) => ({ ...p, price_egp: toInt(e.target.value, 0) }))}
-                      />
-                    </div>
-
-                    <div className="flex items-end">
-                      <label className="flex items-center gap-2 text-sm">
-                        <input
-                          type="checkbox"
-                          checked={!!newItem.is_active}
-                          onChange={(e) => setNewItem((p) => ({ ...p, is_active: e.target.checked }))}
-                        />
-                        Active
-                      </label>
-                    </div>
-                  </div>
-
-                  <div className="mt-4 flex items-center gap-2">
-                    <Button onClick={createOne} disabled={saving}>
-                      Save
-                    </Button>
-                    <Button
-                      variant="outline"
-                      onClick={() => {
-                        setAdding(false)
-                        setErr('')
-                      }}
-                      disabled={saving}
-                    >
-                      Cancel
-                    </Button>
-                  </div>
-                </div>
+                <div className="mt-2">{addForm}</div>
               )}
             </div>
           ) : null}
@@ -273,27 +377,30 @@ export default function PricesList({ items, canEdit }: Props) {
             <tbody>
               {items.map((it) => {
                 const isEditing = editingId === it.id
-                const row = isEditing ? (draft as any) : it
+                const row = isEditing ? (draft as PackageItem) : it
 
                 return (
                   <tr key={it.id} className="odd:bg-[hsl(var(--card))] even:bg-[hsl(var(--bg))] align-top">
-                    <td className="border-t border-[hsl(var(--border))] p-3">
+                    <td className="min-w-[220px] border-t border-[hsl(var(--border))] p-3">
                       {isEditing ? (
-                        <Input
-                          value={String(row.name ?? '')}
-                          onChange={(e) => setDraft((p) => ({ ...p, name: e.target.value }))}
-                        />
+                        <div className="space-y-3">
+                          <div>
+                            <div className="text-xs text-[hsl(var(--muted))]">Name</div>
+                            <Input value={String(row.name ?? '')} onChange={(e) => setDraft((p) => ({ ...p, name: e.target.value }))} />
+                          </div>
+                          <BenefitsEditor value={row.benefits} onChange={(benefits) => setDraft((p) => ({ ...p, benefits }))} />
+                        </div>
                       ) : (
-                        <div className="font-medium">{it.name}</div>
+                        <div>
+                          <div className="font-medium">{it.name}</div>
+                          <BenefitsDisplay benefits={it.benefits} />
+                        </div>
                       )}
                     </td>
 
                     <td className="border-t border-[hsl(var(--border))] p-3">
                       {isEditing ? (
-                        <Select
-                          value={String(row.type ?? 'membership')}
-                          onChange={(e) => setDraft((p) => ({ ...p, type: e.target.value as any }))}
-                        >
+                        <Select value={String(row.type ?? 'membership')} onChange={(e) => setDraft((p) => ({ ...p, type: e.target.value as any }))}>
                           <option value="membership">membership</option>
                           <option value="private">private</option>
                         </Select>
@@ -316,10 +423,7 @@ export default function PricesList({ items, canEdit }: Props) {
 
                     <td className="border-t border-[hsl(var(--border))] p-3">
                       {isEditing ? (
-                        <Select
-                          value={String(row.unit ?? 'month')}
-                          onChange={(e) => setDraft((p) => ({ ...p, unit: e.target.value as any }))}
-                        >
+                        <Select value={String(row.unit ?? 'month')} onChange={(e) => setDraft((p) => ({ ...p, unit: e.target.value as any }))}>
                           <option value="month">month</option>
                           <option value="session">session</option>
                         </Select>
@@ -351,7 +455,7 @@ export default function PricesList({ items, canEdit }: Props) {
                           Active
                         </label>
                       ) : it.is_active ? (
-                        <Badge className="bg-black text-white border-black">Active</Badge>
+                        <Badge className="border-black bg-black text-white">Active</Badge>
                       ) : (
                         <Badge>Inactive</Badge>
                       )}
@@ -361,7 +465,7 @@ export default function PricesList({ items, canEdit }: Props) {
                       {canEdit ? (
                         isEditing ? (
                           <div className="flex flex-col gap-2">
-                            <Button onClick={saveEdit} disabled={saving}>
+                            <Button onClick={saveEdit} loading={saving} loadingText="Saving…">
                               Save
                             </Button>
                             <Button variant="outline" onClick={cancelEdit} disabled={saving}>
@@ -369,9 +473,19 @@ export default function PricesList({ items, canEdit }: Props) {
                             </Button>
                           </div>
                         ) : (
-                          <Button variant="outline" onClick={() => startEdit(it.id)}>
-                            Edit
-                          </Button>
+                          <div className="flex flex-col gap-2">
+                            <Button variant="outline" onClick={() => startEdit(it.id)} disabled={saving}>
+                              Edit
+                            </Button>
+                            <Button
+                              variant="outline"
+                              onClick={() => deleteOne(it.id, it.name)}
+                              disabled={saving}
+                              className="border-red-200 text-red-700 hover:bg-red-50"
+                            >
+                              Delete
+                            </Button>
+                          </div>
                         )
                       ) : null}
                     </td>
@@ -388,81 +502,7 @@ export default function PricesList({ items, canEdit }: Props) {
                   Add a package
                 </Button>
               ) : (
-                <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] p-4">
-                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                    <div>
-                      <div className="text-xs text-[hsl(var(--muted))]">Name</div>
-                      <Input value={newItem.name} onChange={(e) => setNewItem((p) => ({ ...p, name: e.target.value }))} />
-                    </div>
-
-                    <div>
-                      <div className="text-xs text-[hsl(var(--muted))]">Type</div>
-                      <Select
-                        value={newItem.type}
-                        onChange={(e) => setNewItem((p) => ({ ...p, type: e.target.value as any }))}
-                      >
-                        <option value="membership">membership</option>
-                        <option value="private">private</option>
-                      </Select>
-                    </div>
-
-                    <div>
-                      <div className="text-xs text-[hsl(var(--muted))]">Unit</div>
-                      <Select
-                        value={newItem.unit}
-                        onChange={(e) => setNewItem((p) => ({ ...p, unit: e.target.value as any }))}
-                      >
-                        <option value="month">month</option>
-                        <option value="session">session</option>
-                      </Select>
-                    </div>
-
-                    <div>
-                      <div className="text-xs text-[hsl(var(--muted))]">Qty</div>
-                      <Input
-                        type="number"
-                        value={String(newItem.qty)}
-                        onChange={(e) => setNewItem((p) => ({ ...p, qty: toInt(e.target.value, 1) }))}
-                      />
-                    </div>
-
-                    <div>
-                      <div className="text-xs text-[hsl(var(--muted))]">Price (EGP)</div>
-                      <Input
-                        type="number"
-                        value={String(newItem.price_egp)}
-                        onChange={(e) => setNewItem((p) => ({ ...p, price_egp: toInt(e.target.value, 0) }))}
-                      />
-                    </div>
-
-                    <div className="flex items-end">
-                      <label className="flex items-center gap-2 text-sm">
-                        <input
-                          type="checkbox"
-                          checked={!!newItem.is_active}
-                          onChange={(e) => setNewItem((p) => ({ ...p, is_active: e.target.checked }))}
-                        />
-                        Active
-                      </label>
-                    </div>
-                  </div>
-
-                  <div className="mt-4 flex items-center gap-2">
-                    <Button onClick={createOne} disabled={saving}>
-                      Save
-                    </Button>
-                    <Button
-                      variant="outline"
-                      onClick={() => {
-                        setAdding(false)
-                        setErr('')
-                      }}
-                      disabled={saving}
-                    >
-                      Cancel
-                    </Button>
-                  </div>
-                </div>
+                addForm
               )}
             </div>
           ) : null}
