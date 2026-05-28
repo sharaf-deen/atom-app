@@ -15,22 +15,11 @@ function json(status: number, body: any) {
   return noStore(NextResponse.json(body, { status }))
 }
 
-function isUuid(v: string) {
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{12}$/i.test(v)
-}
-
-function isPositiveIntegerId(v: string) {
-  return /^[1-9][0-9]*$/.test(v)
-}
-
 function normalizePackageId(v: any) {
   const id = String(v ?? '').trim()
   if (!id) return ''
-  return id
-}
-
-function isValidPackageId(v: string) {
-  return isUuid(v) || isPositiveIntegerId(v)
+  if (id === 'undefined' || id === 'null' || id === '[object Object]') return ''
+  return id.slice(0, 140)
 }
 
 function toInt(v: any, def: number) {
@@ -58,6 +47,71 @@ function sanitizeBenefits(v: any) {
   return out
 }
 
+type PackageLookup = {
+  name: string
+  type: 'membership' | 'private'
+  unit: 'month' | 'session'
+  qty: number
+  price_egp: number | null
+}
+
+function normalizeLookup(raw: any): PackageLookup | null {
+  if (!raw || typeof raw !== 'object') return null
+
+  const name = String(raw.name ?? '').trim()
+  const type = String(raw.type ?? '')
+  const unit = String(raw.unit ?? '')
+  const qty = toInt(raw.qty, 0)
+  const priceRaw = raw.price_egp
+  const price = priceRaw === undefined || priceRaw === null || priceRaw === '' ? null : toInt(priceRaw, -1)
+
+  if (!name) return null
+  if (!['membership', 'private'].includes(type)) return null
+  if (!['month', 'session'].includes(unit)) return null
+  if (qty < 1) return null
+  if (price !== null && price < 0) return null
+
+  return {
+    name: name.slice(0, 80),
+    type: type as PackageLookup['type'],
+    unit: unit as PackageLookup['unit'],
+    qty,
+    price_egp: price,
+  }
+}
+
+async function findPackageIdByLookup(admin: any, lookup: PackageLookup) {
+  let query = admin
+    .from('packages_pricing')
+    .select('id')
+    .eq('name', lookup.name)
+    .eq('type', lookup.type)
+    .eq('unit', lookup.unit)
+    .eq('qty', lookup.qty)
+    .limit(2)
+
+  if (lookup.price_egp !== null) {
+    query = query.eq('price_egp', lookup.price_egp)
+  }
+
+  const { data, error } = await query
+
+  if (error) return { id: '', error, ambiguous: false, found: false }
+  if (!Array.isArray(data) || data.length === 0) return { id: '', error: null, ambiguous: false, found: false }
+  if (data.length > 1) return { id: '', error: null, ambiguous: true, found: true }
+
+  return { id: normalizePackageId(data[0]?.id), error: null, ambiguous: false, found: true }
+}
+
+async function updatePackageById(admin: any, id: string, update: any) {
+  return admin
+    .from('packages_pricing')
+    .update(update)
+    .eq('id', id)
+    .select('id,name,type,unit,qty,price_egp,is_active,benefits')
+    .maybeSingle()
+}
+
 export async function POST(req: Request) {
   try {
     const supa = createSupabaseServerActionClient()
@@ -82,15 +136,8 @@ export async function POST(req: Request) {
     }
 
     const id = normalizePackageId(body?.id ?? body?.package_id ?? body?.entry_id)
+    const lookup = normalizeLookup(body?.lookup ?? body?.original ?? body?.package)
     const patch = body?.patch ?? null
-
-    if (!id || !isValidPackageId(id)) {
-      return json(400, {
-        ok: false,
-        error: 'INVALID_ID',
-        details: 'Missing or invalid package id. This route accepts the current UUID ids and the older numeric package ids.',
-      })
-    }
 
     if (!patch || typeof patch !== 'object') return json(400, { ok: false, error: 'INVALID_PATCH' })
 
@@ -141,12 +188,49 @@ export async function POST(req: Request) {
     if (meaningfulKeys.length === 0) return json(400, { ok: false, error: 'NOTHING_TO_UPDATE' })
 
     const admin = createSupabaseAdminClient()
-    const { data: item, error } = await admin
-      .from('packages_pricing')
-      .update(update)
-      .eq('id', id)
-      .select('id,name,type,unit,qty,price_egp,is_active,benefits')
-      .maybeSingle()
+    let lastError: any = null
+
+    if (id) {
+      const { data: item, error } = await updatePackageById(admin, id, update)
+
+      if (error) {
+        lastError = error
+      } else if (item) {
+        return json(200, { ok: true, item })
+      }
+    }
+
+    if (!lookup) {
+      return json(400, {
+        ok: false,
+        error: 'INVALID_PACKAGE_TARGET',
+        details: lastError?.message || 'Missing package target. Please refresh Packages & Promos and try again.',
+      })
+    }
+
+    const resolved = await findPackageIdByLookup(admin, lookup)
+
+    if (resolved.error) {
+      return json(500, { ok: false, error: 'PACKAGE_LOOKUP_FAILED', details: resolved.error.message })
+    }
+
+    if (resolved.ambiguous) {
+      return json(409, {
+        ok: false,
+        error: 'AMBIGUOUS_PACKAGE_TARGET',
+        details: 'More than one package matched this row. Please refresh Packages & Promos and try again.',
+      })
+    }
+
+    if (!resolved.id) {
+      return json(404, {
+        ok: false,
+        error: 'PACKAGE_NOT_FOUND',
+        details: 'Package not found. Please refresh Packages & Promos and try again.',
+      })
+    }
+
+    const { data: item, error } = await updatePackageById(admin, resolved.id, update)
 
     if (error) return json(500, { ok: false, error: 'UPDATE_FAILED', details: error.message })
     if (!item) return json(404, { ok: false, error: 'NOT_FOUND' })

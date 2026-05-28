@@ -66,6 +66,26 @@ function parseBenefitsText(v: string) {
   return normalizeBenefits(v.split('\n'))
 }
 
+function buildPackageLookup(item: Partial<PackageItem> | null | undefined) {
+  if (!item) return null
+
+  const name = String(item.name ?? '').trim()
+  const type = item.type
+  const unit = item.unit
+  const qty = toInt(item.qty, 1)
+  const price_egp = toInt(item.price_egp, 0)
+
+  if (!name || !type || !unit || qty < 1 || price_egp < 0) return null
+
+  return {
+    name,
+    type,
+    unit,
+    qty,
+    price_egp,
+  }
+}
+
 function BenefitsEditor({
   value,
   onChange,
@@ -161,10 +181,13 @@ export default function PricesList({ items, canEdit }: Props) {
         benefits: normalizeBenefits(draft.benefits),
       }
 
+      const original = byId.get(editingId)
+      const lookup = buildPackageLookup(original ?? draft)
+
       const r = await fetch('/api/packages-pricing/update', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: String(editingId), patch }),
+        body: JSON.stringify({ id: String(editingId), lookup, patch }),
       })
       const j: any = await safeJson(r)
       if (!r.ok || !j?.ok) {
@@ -231,10 +254,13 @@ export default function PricesList({ items, canEdit }: Props) {
     }
   }
 
-  async function deleteOne(id: PackageId, name: string) {
+  async function deleteOne(item: PackageItem) {
     if (!canEdit) return
-    const confirmed = window.confirm(`Delete package "${name}"? This will remove it from the price list.`)
+    const confirmed = window.confirm(`Delete package "${item.name}"? This will remove it from the price list.`)
     if (!confirmed) return
+
+    const id = String(item.id ?? '')
+    const lookup = buildPackageLookup(item)
 
     setSaving(true)
     setErr('')
@@ -242,7 +268,7 @@ export default function PricesList({ items, canEdit }: Props) {
       const r = await fetch('/api/packages-pricing/delete', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: String(id) }),
+        body: JSON.stringify({ id, lookup }),
       })
       const j: any = await safeJson(r)
       if (!r.ok || !j?.ok) {
@@ -250,7 +276,7 @@ export default function PricesList({ items, canEdit }: Props) {
         return
       }
 
-      if (editingId === String(id)) {
+      if (editingId === id) {
         setEditingId(null)
         setDraft({})
       }
@@ -482,7 +508,7 @@ export default function PricesList({ items, canEdit }: Props) {
                             </Button>
                             <Button
                               variant="outline"
-                              onClick={() => deleteOne(it.id, it.name)}
+                              onClick={() => deleteOne(it)}
                               disabled={saving}
                               className="border-red-200 text-red-700 hover:bg-red-50"
                             >
