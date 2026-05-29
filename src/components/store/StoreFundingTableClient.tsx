@@ -139,6 +139,7 @@ export default function StoreFundingTableClient({
   } | null>(null)
   const [editing, setEditing] = useState<EditableFunding | null>(null)
   const [editingFile, setEditingFile] = useState<File | null>(null)
+  const [editError, setEditError] = useState<string | null>(null)
   const [deletingFunding, setDeletingFunding] = useState<StoreFundingRow | null>(null)
   const [deleting, setDeleting] = useState(false)
 
@@ -146,33 +147,52 @@ export default function StoreFundingTableClient({
     action: async () => {
       if (!editing) return { ok: false as const, message: 'No funding entry selected.' }
 
-      const form = new FormData()
+      setEditError(null)
+
       const fundingId = String(editing.id || '').trim()
       if (!fundingId) return { ok: false as const, message: 'Missing funding id. Please refresh the page and try again.' }
 
-      form.set('id', fundingId)
-      form.set('funding_id', fundingId)
-      form.set('funding_date', editing.funding_date)
-      form.set('type', editing.type)
-      form.set('title', editing.title)
-      form.set('amount', normalizeDecimalInput(editing.amount))
-      form.set('payment_method', editing.payment_method)
-      form.set('source_name', editing.source_name)
-      form.set('note', editing.note)
-      if (editingFile) form.set('attachment', editingFile)
-
-      const encodedFundingId = encodeURIComponent(fundingId)
-      const res = await fetch(`/api/admin/store/funding/${encodedFundingId}?id=${encodedFundingId}`, {
-        method: 'PATCH',
-        body: form,
-      })
-
-      const data = await res.json().catch(() => ({}))
-      if (!res.ok) {
-        return { ok: false as const, message: parseErrorMessage(data, 'Update failed.') }
+      const buildForm = () => {
+        const form = new FormData()
+        form.set('id', fundingId)
+        form.set('funding_id', fundingId)
+        form.set('entry_id', fundingId)
+        form.set('funding_date', editing.funding_date)
+        form.set('type', editing.type)
+        form.set('title', editing.title)
+        form.set('amount', normalizeDecimalInput(editing.amount))
+        form.set('payment_method', editing.payment_method)
+        form.set('source_name', editing.source_name)
+        form.set('note', editing.note)
+        if (editingFile) form.set('attachment', editingFile)
+        return form
       }
 
-      return { ok: true as const, message: 'Store funding updated', refresh: false }
+      const encodedFundingId = encodeURIComponent(fundingId)
+      const endpoints = [
+        `/api/admin/store/funding/${encodedFundingId}?id=${encodedFundingId}`,
+        `/api/admin/store/funding/update?id=${encodedFundingId}`,
+      ]
+
+      let lastData: any = {}
+
+      for (const endpoint of endpoints) {
+        const res = await fetch(endpoint, {
+          method: 'PATCH',
+          body: buildForm(),
+        })
+
+        const data = await res.json().catch(() => ({}))
+        lastData = data
+
+        if (res.ok) {
+          return { ok: true as const, message: 'Store funding updated', refresh: false }
+        }
+      }
+
+      const message = parseErrorMessage(lastData, 'Update failed.')
+      setEditError(message)
+      return { ok: false as const, message }
     },
     defaultSuccessMessage: 'Store funding updated',
     defaultErrorMessage: 'Update failed.',
@@ -180,6 +200,7 @@ export default function StoreFundingTableClient({
       const href = redirectHref(returnQueryString, { updated: '1', deleted: '', saved: '', error: '' })
       setEditOpen(false)
       setEditingFile(null)
+      setEditError(null)
       router.replace(href)
       router.refresh()
     },
@@ -214,6 +235,7 @@ export default function StoreFundingTableClient({
       note: row.note || '',
     })
     setEditingFile(null)
+    setEditError(null)
     setEditOpen(true)
   }
 
@@ -401,6 +423,11 @@ export default function StoreFundingTableClient({
       <Modal open={editOpen} onClose={() => setEditOpen(false)} title="Edit store funding" className="max-h-[88vh] overflow-y-auto">
         {editing ? (
           <div className="grid gap-3">
+            {editError ? (
+              <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                {editError}
+              </div>
+            ) : null}
             <label className="block">
               <span className="mb-1 block text-sm font-medium">Date</span>
               <input type="date" value={editing.funding_date} onChange={(event) => setEditing({ ...editing, funding_date: event.target.value })} className="w-full rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring" />
