@@ -12,6 +12,16 @@ const STORE_FUNDING_BUCKET = 'store-funding-attachments'
 const FUNDING_TYPES = new Set(['loan_received', 'loan_repayment'])
 const PAYMENT_METHODS = new Set(['cash', 'card', 'bank_transfer', 'instapay'])
 
+type StoreFundingBeforeRow = {
+  id: string
+  funding_date: string | null
+  type: string | null
+  title: string | null
+  amount_cents: number | null
+  payment_method: string | null
+  attachment_path: string | null
+}
+
 function json(status: number, body: any) {
   const res = NextResponse.json(body, { status })
   res.headers.set('Cache-Control', 'no-store')
@@ -30,7 +40,7 @@ function safeStr(value: unknown) {
   return typeof value === 'string' ? value.trim() : ''
 }
 
-function firstValidUuid(values: string[]) {
+function firstValidUuid(values: unknown[]) {
   for (const value of values) {
     const cleaned = safeStr(value)
     if (isUuid(cleaned)) return cleaned
@@ -57,6 +67,60 @@ function normalizePriceInput(value: string) {
   }
 
   return cleaned
+}
+
+function pad2(value: string | number) {
+  return String(value).padStart(2, '0')
+}
+
+function validDateParts(year: number, month: number, day: number) {
+  if (!Number.isInteger(year) || !Number.isInteger(month) || !Number.isInteger(day)) return false
+  if (year < 2000 || year > 2100 || month < 1 || month > 12 || day < 1 || day > 31) return false
+  const d = new Date(Date.UTC(year, month - 1, day))
+  return d.getUTCFullYear() === year && d.getUTCMonth() === month - 1 && d.getUTCDate() === day
+}
+
+function normalizeDateInput(value: unknown) {
+  const raw = safeStr(value)
+  if (!raw) return ''
+  if (isDateOnly(raw)) return raw
+
+  const slash = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/)
+  if (slash) {
+    const first = Number(slash[1])
+    const second = Number(slash[2])
+    const year = Number(slash[3])
+
+    // Browser/date-locale fallback: prefer MM/DD/YYYY unless the first part can only be a day.
+    const month = first > 12 ? second : first
+    const day = first > 12 ? first : second
+
+    if (validDateParts(year, month, day)) return `${year}-${pad2(month)}-${pad2(day)}`
+  }
+
+  return ''
+}
+
+function normalizeToken(value: unknown) {
+  return safeStr(value).toLowerCase().replace(/[\s-]+/g, '_')
+}
+
+function normalizeFundingType(value: unknown) {
+  const token = normalizeToken(value)
+  if (!token) return ''
+  if (token === 'loan_received' || token === 'loan' || token === 'received' || token === 'loanreceived') return 'loan_received'
+  if (token === 'loan_repayment' || token === 'repayment' || token === 'loanrepayment') return 'loan_repayment'
+  return FUNDING_TYPES.has(token) ? token : ''
+}
+
+function normalizePaymentMethod(value: unknown) {
+  const token = normalizeToken(value)
+  if (!token) return ''
+  if (token === 'bank' || token === 'bank_transfer' || token === 'transfer' || token === 'banktransfer') return 'bank_transfer'
+  if (token === 'cash') return 'cash'
+  if (token === 'card' || token === 'visa' || token === 'visa_in_gym') return 'card'
+  if (token === 'instapay' || token === 'insta_pay') return 'instapay'
+  return PAYMENT_METHODS.has(token) ? token : ''
 }
 
 async function requireSuperAdmin() {
@@ -106,7 +170,17 @@ async function uploadAttachment(admin: ReturnType<typeof createSupabaseAdminClie
   }
 }
 
+async function updateFundingRow(admin: ReturnType<typeof createSupabaseAdminClient>, id: string, payload: Record<string, any>) {
+  return admin
+    .from('store_external_funding')
+    .update(payload)
+    .eq('id', id)
+    .is('deleted_at', null)
+}
+
 export async function PATCH(req: Request) {
+  let uploadedPathToCleanup: string | null = null
+
   try {
     const guard = await requireSuperAdmin()
     if (!guard.ok) return guard.response
@@ -116,10 +190,10 @@ export async function PATCH(req: Request) {
 
     const url = new URL(req.url)
     const id = firstValidUuid([
-      safeStr(form.get('id')),
-      safeStr(form.get('funding_id')),
-      safeStr(form.get('entry_id')),
-      safeStr(url.searchParams.get('id')),
+      form.get('id'),
+      form.get('funding_id'),
+      form.get('entry_id'),
+      url.searchParams.get('id'),
     ])
 
     if (!id) {
@@ -130,34 +204,37 @@ export async function PATCH(req: Request) {
       })
     }
 
-    const fundingDate = safeStr(form.get('funding_date'))
-    const type = safeStr(form.get('type'))
-    const title = safeStr(form.get('title'))
-    const amountRaw = safeStr(form.get('amount'))
-    const paymentMethod = safeStr(form.get('payment_method'))
-    const sourceName = safeStr(form.get('source_name'))
-    const note = safeStr(form.get('note'))
-
-    if (!isDateOnly(fundingDate)) return json(400, { ok: false, error: 'INVALID_DATE' })
-    if (!FUNDING_TYPES.has(type)) return json(400, { ok: false, error: 'INVALID_TYPE' })
-    if (!title) return json(400, { ok: false, error: 'TITLE_REQUIRED' })
-    if (!PAYMENT_METHODS.has(paymentMethod)) return json(400, { ok: false, error: 'INVALID_PAYMENT_METHOD' })
-
-    const amountCents = parsePriceToCents(normalizePriceInput(amountRaw))
-    if (!Number.isFinite(amountCents) || amountCents <= 0) {
-      return json(400, { ok: false, error: 'INVALID_AMOUNT', details: 'Amount must be greater than 0. Use 17264 or 17264.00.' })
-    }
-
     const admin = guard.admin
     const { data: before, error: beforeErr } = await admin
       .from('store_external_funding')
-      .select('id,attachment_path')
+      .select('id,funding_date,type,title,amount_cents,payment_method,attachment_path')
       .eq('id', id)
       .is('deleted_at', null)
-      .maybeSingle<{ id: string; attachment_path: string | null }>()
+      .maybeSingle<StoreFundingBeforeRow>()
 
     if (beforeErr) return json(500, { ok: false, error: 'LOOKUP_FAILED', details: beforeErr.message })
     if (!before) return json(404, { ok: false, error: 'NOT_FOUND' })
+
+    const fundingDate = normalizeDateInput(form.get('funding_date')) || before.funding_date || ''
+    const type = normalizeFundingType(form.get('type')) || before.type || ''
+    const title = safeStr(form.get('title')) || before.title || ''
+    const amountRaw = safeStr(form.get('amount'))
+    const paymentMethod = normalizePaymentMethod(form.get('payment_method')) || before.payment_method || ''
+    const sourceName = safeStr(form.get('source_name'))
+    const note = safeStr(form.get('note'))
+
+    if (!isDateOnly(fundingDate)) return json(400, { ok: false, error: 'INVALID_DATE', details: 'Funding date must be YYYY-MM-DD.' })
+    if (!FUNDING_TYPES.has(type)) return json(400, { ok: false, error: 'INVALID_TYPE', details: 'Please choose Loan received or Loan repayment.' })
+    if (!title) return json(400, { ok: false, error: 'TITLE_REQUIRED', details: 'Title is required.' })
+    if (!PAYMENT_METHODS.has(paymentMethod)) return json(400, { ok: false, error: 'INVALID_PAYMENT_METHOD', details: 'Please choose a valid payment method.' })
+
+    const amountCents = amountRaw
+      ? parsePriceToCents(normalizePriceInput(amountRaw))
+      : Number(before.amount_cents ?? 0)
+
+    if (!Number.isFinite(amountCents) || amountCents <= 0) {
+      return json(400, { ok: false, error: 'INVALID_AMOUNT', details: 'Amount must be greater than 0. Use 17264 or 17264.00.' })
+    }
 
     const updatePayload: Record<string, any> = {
       funding_date: fundingDate,
@@ -166,35 +243,41 @@ export async function PATCH(req: Request) {
       amount_cents: amountCents,
       currency: 'EGP',
       payment_method: paymentMethod,
-      source_name: sourceName || '',
-      note: note || '',
+      source_name: sourceName || null,
+      note: note || null,
       updated_by: guard.userId,
     }
 
     const attachment = form.get('attachment')
-    let newPath: string | null = null
 
     if (attachment && typeof (attachment as any)?.arrayBuffer === 'function') {
       const file = attachment as File
       if (file.size > 0) {
         const uploaded = await uploadAttachment(admin, file, fundingDate)
-        newPath = uploaded.attachment_path
+        uploadedPathToCleanup = uploaded.attachment_path
         Object.assign(updatePayload, uploaded)
       }
     }
 
-    const { error: updateErr } = await admin
-      .from('store_external_funding')
-      .update(updatePayload)
-      .eq('id', id)
-      .is('deleted_at', null)
+    const { error: updateErr } = await updateFundingRow(admin, id, updatePayload)
 
     if (updateErr) {
-      if (newPath) await admin.storage.from(STORE_FUNDING_BUCKET).remove([newPath]).catch(() => null)
-      return json(400, { ok: false, error: 'UPDATE_FAILED', details: updateErr.message })
+      // Fallback for production schema drift around audit columns only.
+      const { updated_by: _updatedBy, ...payloadWithoutAudit } = updatePayload
+      const retry = await updateFundingRow(admin, id, payloadWithoutAudit)
+
+      if (retry.error) {
+        if (uploadedPathToCleanup) await admin.storage.from(STORE_FUNDING_BUCKET).remove([uploadedPathToCleanup]).catch(() => null)
+        return json(400, {
+          ok: false,
+          error: 'UPDATE_FAILED',
+          details: retry.error.message || updateErr.message || 'Update failed.',
+          first_error: updateErr.message,
+        })
+      }
     }
 
-    if (newPath && before.attachment_path && before.attachment_path !== newPath) {
+    if (uploadedPathToCleanup && before.attachment_path && before.attachment_path !== uploadedPathToCleanup) {
       await admin.storage.from(STORE_FUNDING_BUCKET).remove([before.attachment_path]).catch(() => null)
     }
 
@@ -205,6 +288,13 @@ export async function PATCH(req: Request) {
 
     return json(200, { ok: true, id })
   } catch (error: any) {
+    if (uploadedPathToCleanup) {
+      try {
+        const admin = createSupabaseAdminClient()
+        await admin.storage.from(STORE_FUNDING_BUCKET).remove([uploadedPathToCleanup]).catch(() => null)
+      } catch {}
+    }
+
     return json(500, { ok: false, error: 'SERVER_ERROR', details: error?.message || String(error) })
   }
 }
