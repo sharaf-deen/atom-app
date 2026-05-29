@@ -11,6 +11,7 @@ import { parsePriceToCents } from '@/lib/money'
 const STORE_FUNDING_BUCKET = 'store-funding-attachments'
 const FUNDING_TYPES = new Set(['loan_received', 'loan_repayment'])
 const PAYMENT_METHODS = new Set(['cash', 'card', 'bank_transfer', 'instapay'])
+const FUNDING_SELECT = 'id,funding_date,type,title,amount_cents,payment_method,attachment_path,created_at,updated_at'
 
 type RouteContext = {
   params?: { id?: string } | Promise<{ id?: string }>
@@ -24,6 +25,8 @@ type StoreFundingBeforeRow = {
   amount_cents: number | null
   payment_method: string | null
   attachment_path: string | null
+  created_at?: string | null
+  updated_at?: string | null
 }
 
 function json(status: number, body: any) {
@@ -33,7 +36,7 @@ function json(status: number, body: any) {
 }
 
 function isUuid(value: string) {
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{12}$/i.test(value)
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)
 }
 
 function isDateOnly(value: string) {
@@ -44,9 +47,21 @@ function safeStr(value: unknown) {
   return typeof value === 'string' ? value.trim() : ''
 }
 
+function cleanIdCandidate(value: unknown) {
+  const raw = safeStr(value)
+  if (!raw) return ''
+
+  let decoded = raw
+  try {
+    decoded = decodeURIComponent(raw)
+  } catch {}
+
+  return decoded.replace(/^['"]+|['"]+$/g, '').trim()
+}
+
 function firstValidUuid(values: unknown[]) {
   for (const value of values) {
-    const cleaned = safeStr(value)
+    const cleaned = cleanIdCandidate(value)
     if (isUuid(cleaned)) return cleaned
   }
   return ''
@@ -95,7 +110,6 @@ function normalizeDateInput(value: unknown) {
     const second = Number(slash[2])
     const year = Number(slash[3])
 
-    // Browser/date-locale fallback: prefer MM/DD/YYYY unless the first part can only be a day.
     const month = first > 12 ? second : first
     const day = first > 12 ? first : second
 
@@ -127,6 +141,11 @@ function normalizePaymentMethod(value: unknown) {
   return PAYMENT_METHODS.has(token) ? token : ''
 }
 
+function parseIntField(value: unknown) {
+  const n = Number.parseInt(safeStr(value), 10)
+  return Number.isFinite(n) ? n : null
+}
+
 async function readParams(context?: RouteContext) {
   const params = context?.params
   if (!params) return {}
@@ -139,13 +158,122 @@ async function readFundingId(req: Request, context?: RouteContext, form?: FormDa
   const lastPathSegment = decodeURIComponent(url.pathname.split('/').filter(Boolean).pop() || '')
 
   return firstValidUuid([
+    req.headers.get('x-store-funding-id'),
+    req.headers.get('x-funding-id'),
+    req.headers.get('x-entry-id'),
     params?.id,
     url.searchParams.get('id'),
+    url.searchParams.get('funding_id'),
+    url.searchParams.get('entry_id'),
+    url.searchParams.get('target_id'),
     form?.get('id'),
     form?.get('funding_id'),
     form?.get('entry_id'),
+    form?.get('target_id'),
+    form?.get('store_funding_id'),
+    form?.get('original_id'),
     lastPathSegment,
   ])
+}
+
+async function lookupById(admin: ReturnType<typeof createSupabaseAdminClient>, id: string) {
+  return admin
+    .from('store_external_funding')
+    .select(FUNDING_SELECT)
+    .eq('id', id)
+    .is('deleted_at', null)
+    .maybeSingle<StoreFundingBeforeRow>()
+}
+
+async function lookupByOriginalRow(admin: ReturnType<typeof createSupabaseAdminClient>, form: FormData) {
+  const originalId = firstValidUuid([
+    form.get('original_id'),
+    form.get('id'),
+    form.get('funding_id'),
+    form.get('entry_id'),
+    form.get('target_id'),
+    form.get('store_funding_id'),
+  ])
+
+  if (originalId) {
+    const byOriginalId = await lookupById(admin, originalId)
+    if (byOriginalId.error) return { data: null, error: byOriginalId.error, ambiguous: false }
+    if (byOriginalId.data) return { data: byOriginalId.data, error: null, ambiguous: false }
+  }
+
+  const originalCreatedAt = safeStr(form.get('original_created_at'))
+  if (originalCreatedAt) {
+    const byCreatedAt = await admin
+      .from('store_external_funding')
+      .select(FUNDING_SELECT)
+      .eq('created_at', originalCreatedAt)
+      .is('deleted_at', null)
+      .limit(2)
+
+    if (byCreatedAt.error) return { data: null, error: byCreatedAt.error, ambiguous: false }
+    if ((byCreatedAt.data || []).length === 1) return { data: byCreatedAt.data![0] as StoreFundingBeforeRow, error: null, ambiguous: false }
+    if ((byCreatedAt.data || []).length > 1) return { data: null, error: null, ambiguous: true }
+  }
+
+  const fundingDate = normalizeDateInput(form.get('original_funding_date'))
+  const type = normalizeFundingType(form.get('original_type'))
+  const title = safeStr(form.get('original_title'))
+  const amountCents = parseIntField(form.get('original_amount_cents'))
+  const paymentMethod = normalizePaymentMethod(form.get('original_payment_method'))
+
+  if (!fundingDate || !type || !title || amountCents === null || !paymentMethod) {
+    return { data: null, error: null, ambiguous: false }
+  }
+
+  const bySignature = await admin
+    .from('store_external_funding')
+    .select(FUNDING_SELECT)
+    .eq('funding_date', fundingDate)
+    .eq('type', type)
+    .eq('title', title)
+    .eq('amount_cents', amountCents)
+    .eq('payment_method', paymentMethod)
+    .is('deleted_at', null)
+    .limit(2)
+
+  if (bySignature.error) return { data: null, error: bySignature.error, ambiguous: false }
+  if ((bySignature.data || []).length === 1) return { data: bySignature.data![0] as StoreFundingBeforeRow, error: null, ambiguous: false }
+  if ((bySignature.data || []).length > 1) return { data: null, error: null, ambiguous: true }
+
+  return { data: null, error: null, ambiguous: false }
+}
+
+async function resolveTargetFunding(admin: ReturnType<typeof createSupabaseAdminClient>, req: Request, context: RouteContext | undefined, form: FormData) {
+  const id = await readFundingId(req, context, form)
+
+  if (id) {
+    const byId = await lookupById(admin, id)
+    if (byId.error) return { row: null, response: json(500, { ok: false, error: 'LOOKUP_FAILED', details: byId.error.message }) }
+    if (byId.data) return { row: byId.data, response: null }
+  }
+
+  const fallback = await lookupByOriginalRow(admin, form)
+  if (fallback.error) return { row: null, response: json(500, { ok: false, error: 'LOOKUP_FAILED', details: fallback.error.message }) }
+  if (fallback.ambiguous) {
+    return {
+      row: null,
+      response: json(400, {
+        ok: false,
+        error: 'AMBIGUOUS_FUNDING_TARGET',
+        details: 'Could not safely identify one unique funding entry. Please refresh the Store funding page and try again.',
+      }),
+    }
+  }
+  if (fallback.data) return { row: fallback.data, response: null }
+
+  return {
+    row: null,
+    response: json(400, {
+      ok: false,
+      error: 'INVALID_ID',
+      details: 'Could not identify this funding entry from the id or original row data. Please refresh the Store funding page and try again.',
+    }),
+  }
 }
 
 async function requireSuperAdmin() {
@@ -213,26 +341,14 @@ export async function PATCH(req: Request, context: RouteContext) {
     const form = await req.formData().catch(() => null)
     if (!form) return json(400, { ok: false, error: 'INVALID_FORM_DATA' })
 
-    const id = await readFundingId(req, context, form)
-    if (!id) {
-      return json(400, {
-        ok: false,
-        error: 'INVALID_ID',
-        details: 'Missing or invalid funding id. Please refresh the Store funding page and try again.',
-      })
-    }
-
     const admin = guard.admin
-    const { data: before, error: beforeErr } = await admin
-      .from('store_external_funding')
-      .select('id,funding_date,type,title,amount_cents,payment_method,attachment_path')
-      .eq('id', id)
-      .is('deleted_at', null)
-      .maybeSingle<StoreFundingBeforeRow>()
+    const target = await resolveTargetFunding(admin, req, context, form)
+    if (target.response) return target.response
 
-    if (beforeErr) return json(500, { ok: false, error: 'LOOKUP_FAILED', details: beforeErr.message })
-    if (!before) return json(404, { ok: false, error: 'NOT_FOUND' })
+    const before = target.row
+    if (!before) return json(400, { ok: false, error: 'INVALID_ID', details: 'Missing or invalid funding target.' })
 
+    const id = before.id
     const fundingDate = normalizeDateInput(form.get('funding_date')) || before.funding_date || ''
     const type = normalizeFundingType(form.get('type')) || before.type || ''
     const title = safeStr(form.get('title')) || before.title || ''
@@ -280,7 +396,6 @@ export async function PATCH(req: Request, context: RouteContext) {
     const { error: updateErr } = await updateFundingRow(admin, id, updatePayload)
 
     if (updateErr) {
-      // Fallback for production schema drift around audit columns only.
       const { updated_by: _updatedBy, ...payloadWithoutAudit } = updatePayload
       const retry = await updateFundingRow(admin, id, payloadWithoutAudit)
 
@@ -323,7 +438,7 @@ export async function DELETE(req: Request, context: RouteContext) {
     if (!guard.ok) return guard.response
 
     const id = await readFundingId(req, context, null)
-    if (!id) return json(400, { ok: false, error: 'INVALID_ID' })
+    if (!id) return json(400, { ok: false, error: 'INVALID_ID', details: 'Missing or invalid funding id. Please refresh the Store funding page and try again.' })
 
     const { data: before, error: beforeErr } = await guard.admin
       .from('store_external_funding')

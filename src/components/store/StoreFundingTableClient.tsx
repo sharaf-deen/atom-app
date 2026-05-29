@@ -45,6 +45,14 @@ type EditableFunding = {
   payment_method: string
   source_name: string
   note: string
+  original_id: string
+  original_funding_date: string
+  original_type: string
+  original_title: string
+  original_amount_cents: string
+  original_payment_method: string
+  original_created_at: string
+  original_updated_at: string
 }
 
 function typeLabel(types: Option[], value?: string | null) {
@@ -157,6 +165,16 @@ export default function StoreFundingTableClient({
         form.set('id', fundingId)
         form.set('funding_id', fundingId)
         form.set('entry_id', fundingId)
+        form.set('target_id', fundingId)
+        form.set('store_funding_id', fundingId)
+        form.set('original_id', editing.original_id)
+        form.set('original_funding_date', editing.original_funding_date)
+        form.set('original_type', editing.original_type)
+        form.set('original_title', editing.original_title)
+        form.set('original_amount_cents', editing.original_amount_cents)
+        form.set('original_payment_method', editing.original_payment_method)
+        form.set('original_created_at', editing.original_created_at)
+        form.set('original_updated_at', editing.original_updated_at)
         form.set('funding_date', editing.funding_date)
         form.set('type', editing.type)
         form.set('title', editing.title)
@@ -170,8 +188,8 @@ export default function StoreFundingTableClient({
 
       const encodedFundingId = encodeURIComponent(fundingId)
       const endpoints = [
-        `/api/admin/store/funding/${encodedFundingId}?id=${encodedFundingId}`,
-        `/api/admin/store/funding/update?id=${encodedFundingId}`,
+        `/api/admin/store/funding/${encodedFundingId}?id=${encodedFundingId}&funding_id=${encodedFundingId}`,
+        `/api/admin/store/funding/update?id=${encodedFundingId}&funding_id=${encodedFundingId}`,
       ]
 
       let lastData: any = {}
@@ -179,6 +197,10 @@ export default function StoreFundingTableClient({
       for (const endpoint of endpoints) {
         const res = await fetch(endpoint, {
           method: 'PATCH',
+          headers: {
+            'x-store-funding-id': fundingId,
+            'x-funding-id': fundingId,
+          },
           body: buildForm(),
         })
 
@@ -233,6 +255,14 @@ export default function StoreFundingTableClient({
       payment_method: row.payment_method || 'cash',
       source_name: row.source_name || '',
       note: row.note || '',
+      original_id: row.id,
+      original_funding_date: row.funding_date,
+      original_type: row.type || '',
+      original_title: row.title || '',
+      original_amount_cents: String(row.amount_cents ?? ''),
+      original_payment_method: row.payment_method || '',
+      original_created_at: row.created_at || '',
+      original_updated_at: row.updated_at || '',
     })
     setEditingFile(null)
     setEditError(null)
@@ -254,8 +284,13 @@ export default function StoreFundingTableClient({
 
     try {
       setDeleting(true)
-      const res = await fetch(`/api/admin/store/funding/${encodeURIComponent(deletingFunding.id)}`, {
+      const fundingId = String(deletingFunding.id || '').trim()
+      const res = await fetch(`/api/admin/store/funding/${encodeURIComponent(fundingId)}?id=${encodeURIComponent(fundingId)}`, {
         method: 'DELETE',
+        headers: {
+          'x-store-funding-id': fundingId,
+          'x-funding-id': fundingId,
+        },
       })
       const data = await res.json().catch(() => ({}))
       if (!res.ok) throw new Error(parseErrorMessage(data, 'Delete failed.'))
