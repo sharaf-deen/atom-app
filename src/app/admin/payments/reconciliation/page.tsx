@@ -282,6 +282,25 @@ function revalidateReconciliationPageSafely(scope: string) {
   }
 }
 
+
+async function assertActorCanWriteValidation(actorId: string, actorRole: string, returnQS: string) {
+  const actionAdmin = getSupabaseAdminClientCached()
+  if (actorRole === 'super_admin') return actionAdmin
+
+  const { data: isApprover } = await actionAdmin
+    .from('payment_validation_approvers')
+    .select('user_id')
+    .eq('user_id', actorId)
+    .eq('is_active', true)
+    .maybeSingle()
+
+  if (!isApprover?.user_id) {
+    redirect(withFlash(returnQS, { error: 'Only active payment approvers can manage validation batches.' }))
+  }
+
+  return actionAdmin
+}
+
 function formatCairoDateTime(iso?: string | null) {
   const raw = String(iso ?? '').trim()
   if (!raw) return '—'
@@ -467,23 +486,6 @@ export default async function AdminPaymentsReconciliationPage({
     { key: 'shawki', label: 'Shawki', expectedRole: 'Admin approver', hint: 'Should appear as an active admin approver once the known Shawki admin profile is matched.' },
   ]
 
-  async function assertActorCanWriteValidation(actorId: string, actorRole: string, returnQS: string) {
-    const actionAdmin = getSupabaseAdminClientCached()
-    if (actorRole === 'super_admin') return actionAdmin
-
-    const { data: isApprover } = await actionAdmin
-      .from('payment_validation_approvers')
-      .select('user_id')
-      .eq('user_id', actorId)
-      .eq('is_active', true)
-      .maybeSingle()
-
-    if (!isApprover?.user_id) {
-      redirect(withFlash(returnQS, { error: 'Only active payment approvers can manage validation batches.' }))
-    }
-
-    return actionAdmin
-  }
 
   async function createValidationAction(formData: FormData) {
     'use server'
