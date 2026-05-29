@@ -261,6 +261,27 @@ function safeActionErrorMessage(error: unknown, fallback: string) {
   return (normalized || fallback).slice(0, 220)
 }
 
+function isNextRedirectError(error: unknown) {
+  const digest =
+    error && typeof error === 'object' && 'digest' in error
+      ? String((error as { digest?: unknown }).digest ?? '')
+      : ''
+  return digest.startsWith('NEXT_REDIRECT')
+}
+
+function logValidationActionError(scope: string, error: unknown) {
+  const message = safeActionErrorMessage(error, 'Unknown validation action error.')
+  console.error(`[payments-reconciliation] ${scope}: ${message}`)
+}
+
+function revalidateReconciliationPageSafely(scope: string) {
+  try {
+    revalidatePath('/admin/payments/reconciliation')
+  } catch (error) {
+    logValidationActionError(`${scope} revalidate`, error)
+  }
+}
+
 function formatCairoDateTime(iso?: string | null) {
   const raw = String(iso ?? '').trim()
   if (!raw) return '—'
@@ -467,57 +488,64 @@ export default async function AdminPaymentsReconciliationPage({
   async function createValidationAction(formData: FormData) {
     'use server'
 
-    const actor = await getSessionUserCached()
     const returnQS = String(formData.get('return_qs') ?? '')
-    if (!actor) redirect(`/login?next=/admin/payments/reconciliation`)
-    if (!canAccessPayments(actor.role)) redirect(withFlash(returnQS, { error: 'Only Admin / Super Admin can access reconciliation.' }))
-
-    const paymentMethod = parseMethod(formData.get('payment_method'))
-    const validationMode = parseValidationMode(formData.get('validation_mode'))
-    const businessDateRaw = parseIsoDateOnly(String(formData.get('business_date') ?? '').trim())
-    const businessDate = businessDateRaw || null
-    const countedAmount = parseMoney(formData.get('counted_amount'))
-    const expectedAmount = parseMoney(formData.get('expected_amount'))
-    const lineCount = parsePositiveInt(formData.get('line_count'))
-    const note = String(formData.get('note') ?? '').trim()
-
-    if (!paymentMethod) redirect(withFlash(returnQS, { error: 'Invalid payment method.' }))
-    if (!validationMode) redirect(withFlash(returnQS, { error: 'Invalid validation mode.' }))
-    if (validationMode === 'daily' && !businessDate) redirect(withFlash(returnQS, { error: 'A valid business date is required. Refresh and try again.' }))
-    if (!Number.isFinite(expectedAmount) || expectedAmount < 0) redirect(withFlash(returnQS, { error: 'Expected amount snapshot is missing.' }))
-    if (!Number.isFinite(countedAmount) || countedAmount < 0) redirect(withFlash(returnQS, { error: 'Counted amount must be 0 or greater.' }))
-    if (!Number.isFinite(lineCount) || lineCount <= 0) redirect(withFlash(returnQS, { error: 'Line count snapshot is missing.' }))
-
-    const actionAdmin = await assertActorCanWriteValidation(actor.id, actor.role, returnQS)
-
-    let data: unknown = null
-    let rpcError: { message?: string } | null = null
 
     try {
-      const result = await actionAdmin.rpc('create_payment_validation_batch_v1', {
-        p_payment_method: paymentMethod,
-        p_validation_mode: validationMode,
-        p_business_date: validationMode === 'daily' ? businessDate : null,
-        p_expected_amount: expectedAmount,
-        p_line_count: lineCount,
-        p_counted_amount: countedAmount,
-        p_note: note || null,
-        p_actor: actor.id,
-      })
-      data = result.data as unknown
-      rpcError = result.error as { message?: string } | null
+      const actor = await getSessionUserCached()
+      if (!actor) redirect(`/login?next=/admin/payments/reconciliation`)
+      if (!canAccessPayments(actor.role)) redirect(withFlash(returnQS, { error: 'Only Admin / Super Admin can access reconciliation.' }))
+
+      const paymentMethod = parseMethod(formData.get('payment_method'))
+      const validationMode = parseValidationMode(formData.get('validation_mode'))
+      const businessDateRaw = parseIsoDateOnly(String(formData.get('business_date') ?? '').trim())
+      const businessDate = businessDateRaw || null
+      const countedAmount = parseMoney(formData.get('counted_amount'))
+      const expectedAmount = parseMoney(formData.get('expected_amount'))
+      const lineCount = parsePositiveInt(formData.get('line_count'))
+      const note = String(formData.get('note') ?? '').trim()
+
+      if (!paymentMethod) redirect(withFlash(returnQS, { error: 'Invalid payment method.' }))
+      if (!validationMode) redirect(withFlash(returnQS, { error: 'Invalid validation mode.' }))
+      if (validationMode === 'daily' && !businessDate) redirect(withFlash(returnQS, { error: 'A valid business date is required. Refresh and try again.' }))
+      if (!Number.isFinite(expectedAmount) || expectedAmount < 0) redirect(withFlash(returnQS, { error: 'Expected amount snapshot is missing.' }))
+      if (!Number.isFinite(countedAmount) || countedAmount < 0) redirect(withFlash(returnQS, { error: 'Counted amount must be 0 or greater.' }))
+      if (!Number.isFinite(lineCount) || lineCount <= 0) redirect(withFlash(returnQS, { error: 'Line count snapshot is missing.' }))
+
+      const actionAdmin = await assertActorCanWriteValidation(actor.id, actor.role, returnQS)
+
+      let data: unknown = null
+      let rpcError: { message?: string } | null = null
+
+      try {
+        const result = await actionAdmin.rpc('create_payment_validation_batch_v1', {
+          p_payment_method: paymentMethod,
+          p_validation_mode: validationMode,
+          p_business_date: validationMode === 'daily' ? businessDate : null,
+          p_expected_amount: expectedAmount,
+          p_line_count: lineCount,
+          p_counted_amount: countedAmount,
+          p_note: note || null,
+          p_actor: actor.id,
+        })
+        data = result.data as unknown
+        rpcError = result.error as { message?: string } | null
+      } catch (error) {
+        redirect(withFlash(returnQS, { error: safeActionErrorMessage(error, 'Could not create validation batch.') }))
+      }
+
+      if (rpcError) redirect(withFlash(returnQS, { error: safeActionErrorMessage(rpcError, 'Could not create validation batch.') }))
+
+      const row = (Array.isArray(data) ? data[0] : data) as ValidationResultRow | null
+      revalidateReconciliationPageSafely('create validation batch')
+      redirect(withFlash(returnQS, {
+        created: '1',
+        batch: row?.batch_id ? String(row.batch_id).slice(0, 8) : 'saved',
+      }))
     } catch (error) {
+      if (isNextRedirectError(error)) throw error
+      logValidationActionError('create validation batch', error)
       redirect(withFlash(returnQS, { error: safeActionErrorMessage(error, 'Could not create validation batch.') }))
     }
-
-    if (rpcError) redirect(withFlash(returnQS, { error: safeActionErrorMessage(rpcError, 'Could not create validation batch.') }))
-
-    const row = (Array.isArray(data) ? data[0] : data) as ValidationResultRow | null
-    revalidatePath('/admin/payments/reconciliation')
-    redirect(withFlash(returnQS, {
-      created: '1',
-      batch: row?.batch_id ? String(row.batch_id).slice(0, 8) : 'saved',
-    }))
   }
 
   async function updateValidationBatchAction(formData: FormData) {
