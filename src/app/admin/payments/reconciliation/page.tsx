@@ -7,6 +7,7 @@ import { redirect } from 'next/navigation'
 import AccessDeniedCard from '@/components/AccessDeniedCard'
 import Badge from '@/components/ui/Badge'
 import Button from '@/components/ui/Button'
+import ConfirmSubmitButton from '@/components/ui/ConfirmSubmitButton'
 import InlineAlert from '@/components/ui/InlineAlert'
 import Input from '@/components/ui/Input'
 import Textarea from '@/components/ui/Textarea'
@@ -1321,9 +1322,26 @@ export default async function AdminPaymentsReconciliationPage({
                           />
                         </label>
 
-                        <Button type="submit" disabled={!canCreateValidations}>
+                        <ConfirmSubmitButton
+                          disabled={!canCreateValidations}
+                          confirmTitle="Confirm cash validation"
+                          confirmDescription="This will create a payment validation batch for the current open cash closure."
+                          confirmButtonLabel="Confirm cash validation"
+                          pendingLabel="Validating…"
+                          staticItems={[
+                            { label: 'Scope', value: formatRangeLabel(cashOpen) },
+                            { label: 'Method', value: labelMethod(cashOpen.payment_method) },
+                            { label: 'Expected amount', value: formatEGP(cashOpen.expected_amount) },
+                            { label: 'Entries', value: cashOpen.line_count },
+                          ]}
+                          fieldItems={[
+                            { label: 'Counted amount', name: 'counted_amount', kind: 'egp' },
+                            { label: 'Note', name: 'note', emptyValue: 'No note', maxLength: 140 },
+                          ]}
+                          difference={{ expectedName: 'expected_amount', countedName: 'counted_amount', label: 'Difference' }}
+                        >
                           Validate cash
-                        </Button>
+                        </ConfirmSubmitButton>
                       </form>
                     </CardContent>
                   </Card>
@@ -1396,9 +1414,26 @@ export default async function AdminPaymentsReconciliationPage({
                                         />
                                       </label>
 
-                                      <Button type="submit" disabled={!canCreateValidations}>
+                                      <ConfirmSubmitButton
+                                        disabled={!canCreateValidations}
+                                        confirmTitle="Confirm day validation"
+                                        confirmDescription="This will create a payment validation batch for this Cairo business date."
+                                        confirmButtonLabel="Confirm day validation"
+                                        pendingLabel="Validating…"
+                                        staticItems={[
+                                          { label: 'Date', value: formatDateOnly(row.business_date) },
+                                          { label: 'Method', value: labelMethod(row.payment_method) },
+                                          { label: 'Expected amount', value: formatEGP(row.expected_amount) },
+                                          { label: 'Entries', value: row.line_count },
+                                        ]}
+                                        fieldItems={[
+                                          { label: 'Counted amount', name: 'counted_amount', kind: 'egp' },
+                                          { label: 'Note', name: 'note', emptyValue: 'No note', maxLength: 140 },
+                                        ]}
+                                        difference={{ expectedName: 'expected_amount', countedName: 'counted_amount', label: 'Difference' }}
+                                      >
                                         Validate day
-                                      </Button>
+                                      </ConfirmSubmitButton>
                                     </div>
                                   </form>
                                 </div>
@@ -1460,9 +1495,26 @@ export default async function AdminPaymentsReconciliationPage({
                                               />
                                             </label>
 
-                                            <Button type="submit" disabled={!canCreateValidations}>
+                                            <ConfirmSubmitButton
+                                              disabled={!canCreateValidations}
+                                              confirmTitle="Confirm day validation"
+                                              confirmDescription="This will create a payment validation batch for this Cairo business date."
+                                              confirmButtonLabel="Confirm day validation"
+                                              pendingLabel="Validating…"
+                                              staticItems={[
+                                                { label: 'Date', value: formatDateOnly(row.business_date) },
+                                                { label: 'Method', value: labelMethod(row.payment_method) },
+                                                { label: 'Expected amount', value: formatEGP(row.expected_amount) },
+                                                { label: 'Entries', value: row.line_count },
+                                              ]}
+                                              fieldItems={[
+                                                { label: 'Counted amount', name: 'counted_amount', kind: 'egp' },
+                                                { label: 'Note', name: 'note', emptyValue: 'No note', maxLength: 140 },
+                                              ]}
+                                              difference={{ expectedName: 'expected_amount', countedName: 'counted_amount', label: 'Difference' }}
+                                            >
                                               Validate day
-                                            </Button>
+                                            </ConfirmSubmitButton>
                                           </div>
                                         </form>
                                       </div>
