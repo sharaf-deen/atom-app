@@ -215,6 +215,15 @@ function paymentLabel(value: PreorderRow['deposit_payment_method']) {
   }
 }
 
+function preorderBuyerLabel(row: PreorderRow) {
+  return row.buyer_full_name || row.buyer_email || row.buyer_phone || 'Member'
+}
+
+function preorderProductLabel(row: PreorderRow) {
+  const details = [row.product_name, row.product_color || null, row.product_size || null].filter(Boolean)
+  return details.join(' · ') || 'Product'
+}
+
 function preorderStatusPill(status: PreorderStatus) {
   switch (status) {
     case 'pending':
@@ -568,6 +577,9 @@ export default async function AdminStorePreordersPage({
                                 depositPaymentMethod={row.deposit_payment_method}
                                 status={row.status}
                                 note={row.note}
+                                productLabel={preorderProductLabel(row)}
+                                buyerLabel={preorderBuyerLabel(row)}
+                                qty={row.qty}
                               />
                               <CompletePreorderAsSaleButton
                                 id={row.id}
@@ -576,6 +588,9 @@ export default async function AdminStorePreordersPage({
                                 balanceDueCents={row.balance_due_cents}
                                 depositPaymentMethod={row.deposit_payment_method}
                                 convertedSaleId={row.converted_sale_id}
+                                productLabel={preorderProductLabel(row)}
+                                buyerLabel={preorderBuyerLabel(row)}
+                                qty={row.qty}
                               />
                             </div>
                           </div>

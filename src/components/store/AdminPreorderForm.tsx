@@ -8,6 +8,7 @@ import Input from '@/components/ui/Input'
 import Select from '@/components/ui/Select'
 import Textarea from '@/components/ui/Textarea'
 import InlineAlert from '@/components/ui/InlineAlert'
+import ConfirmActionModal from '@/components/ui/ConfirmActionModal'
 import { parsePriceToCents, toPriceString } from '@/lib/money'
 
 type PaymentMethod = 'cash' | 'card' | 'bank_transfer' | 'instapay'
@@ -51,6 +52,16 @@ const PREORDER_STATUSES: Array<{ value: PreorderStatus; label: string }> = [
   { value: 'canceled', label: 'Canceled' },
 ]
 
+function paymentMethodLabel(value: PaymentMethod | null | undefined) {
+  if (!value) return '—'
+  return PAYMENT_METHODS.find((method) => method.value === value)?.label ?? value
+}
+
+function preorderStatusLabel(value: PreorderStatus | null | undefined) {
+  if (!value) return '—'
+  return PREORDER_STATUSES.find((status) => status.value === value)?.label ?? value
+}
+
 function productLabel(p: ProductOption) {
   const bits = [p.name, p.color || null, p.size || null].filter(Boolean)
   return bits.join(' · ')
@@ -84,6 +95,7 @@ export default function AdminPreorderForm({ products }: { products: ProductOptio
   const [note, setNote] = useState('')
   const [busy, setBusy] = useState(false)
   const [status, setStatus] = useState<{ kind: '' | 'success' | 'error'; msg: string }>({ kind: '', msg: '' })
+  const [confirmOpen, setConfirmOpen] = useState(false)
 
   const selectedProduct = useMemo(
     () => products.find((p) => p.id === productId) ?? null,
@@ -148,8 +160,9 @@ export default function AdminPreorderForm({ products }: { products: ProductOptio
     setBuyerResults([])
   }
 
-  async function onSubmit(e: React.FormEvent) {
-    e.preventDefault()
+  function openCreateConfirmation() {
+    if (busy) return
+
     if (!selectedProduct) {
       toast.error('Select a preorder product')
       return
@@ -158,6 +171,12 @@ export default function AdminPreorderForm({ products }: { products: ProductOptio
       toast.error('Select a member for the preorder')
       return
     }
+
+    setConfirmOpen(true)
+  }
+
+  async function createPreorder() {
+    if (!selectedProduct || !selectedBuyer || busy) return
 
     setBusy(true)
     setStatus({ kind: '', msg: '' })
@@ -184,6 +203,7 @@ export default function AdminPreorderForm({ products }: { products: ProductOptio
         return
       }
 
+      setConfirmOpen(false)
       setStatus({ kind: 'success', msg: 'Preorder created' })
       toast.success('Preorder created')
       clearBuyer()
@@ -202,6 +222,11 @@ export default function AdminPreorderForm({ products }: { products: ProductOptio
     } finally {
       setBusy(false)
     }
+  }
+
+  function onSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    openCreateConfirmation()
   }
 
   return (
@@ -353,6 +378,29 @@ export default function AdminPreorderForm({ products }: { products: ProductOptio
           Create preorder
         </Button>
       </div>
+
+      <ConfirmActionModal
+        open={confirmOpen}
+        title="Confirm preorder creation"
+        description="Review the preorder before creating it. This does not reduce stock."
+        confirmLabel="Confirm & create"
+        pendingLabel="Creating…"
+        pending={busy}
+        onCancel={() => setConfirmOpen(false)}
+        onConfirm={createPreorder}
+        summaryItems={[
+          { label: 'Customer', value: selectedBuyer ? buyerName(selectedBuyer) : '—' },
+          { label: 'Product', value: selectedProduct ? productLabel(selectedProduct) : '—' },
+          { label: 'Quantity', value: Math.max(1, Math.floor(qty || 0)) },
+          { label: 'Total amount', value: `${toPriceString(totalCents)} ${selectedProduct?.currency || 'EGP'}` },
+          { label: 'Deposit', value: `${toPriceString(depositCents)} ${selectedProduct?.currency || 'EGP'}` },
+          { label: 'Balance', value: `${toPriceString(balancePreviewCents)} ${selectedProduct?.currency || 'EGP'}` },
+          { label: 'Payment method', value: depositCents > 0 ? paymentMethodLabel(paymentMethod) : 'No deposit' },
+          { label: 'Initial status', value: preorderStatusLabel(preorderStatus) },
+          { label: 'Stock impact', value: 'None — preorder only' },
+          { label: 'Note', value: note.trim() || '—' },
+        ]}
+      />
     </form>
   )
 }

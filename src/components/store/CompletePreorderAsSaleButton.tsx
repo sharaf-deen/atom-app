@@ -6,6 +6,7 @@ import { toast } from 'sonner'
 import Button from '@/components/ui/Button'
 import Select from '@/components/ui/Select'
 import InlineAlert from '@/components/ui/InlineAlert'
+import ConfirmActionModal from '@/components/ui/ConfirmActionModal'
 import { formatCurrency } from '@/lib/money'
 
 type PaymentMethod = 'cash' | 'card' | 'bank_transfer' | 'instapay'
@@ -18,6 +19,9 @@ type Props = {
   balanceDueCents: number
   depositPaymentMethod: PaymentMethod | null
   convertedSaleId: string | null
+  productLabel?: string
+  buyerLabel?: string
+  qty?: number
 }
 
 const PAYMENT_METHODS: Array<{ value: PaymentMethod; label: string }> = [
@@ -31,6 +35,10 @@ function shortId(id: string | null | undefined) {
   return String(id || '').slice(0, 8)
 }
 
+function paymentMethodLabel(value: PaymentMethod) {
+  return PAYMENT_METHODS.find((method) => method.value === value)?.label ?? value
+}
+
 export default function CompletePreorderAsSaleButton({
   id,
   status,
@@ -38,23 +46,27 @@ export default function CompletePreorderAsSaleButton({
   balanceDueCents,
   depositPaymentMethod,
   convertedSaleId,
+  productLabel = '—',
+  buyerLabel = '—',
+  qty = 0,
 }: Props) {
   const router = useRouter()
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>(depositPaymentMethod || 'cash')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const [confirmOpen, setConfirmOpen] = useState(false)
 
   const alreadyConverted = Boolean(convertedSaleId)
   const disabledByStatus = status === 'completed' || status === 'canceled'
   const canComplete = !alreadyConverted && !disabledByStatus
 
-  async function onComplete() {
+  function requestComplete() {
     if (!canComplete || busy) return
+    setConfirmOpen(true)
+  }
 
-    const ok = window.confirm(
-      'Confirm that the customer received the preorder and paid the full amount? This will create a delivered sale and apply stock deduction.'
-    )
-    if (!ok) return
+  async function completeConfirmed() {
+    if (!canComplete || busy) return
 
     setBusy(true)
     setError('')
@@ -72,6 +84,7 @@ export default function CompletePreorderAsSaleButton({
         toast.error(msg)
         return
       }
+      setConfirmOpen(false)
       toast.success('Preorder completed and sale created')
       router.refresh()
       setTimeout(() => router.refresh(), 250)
@@ -134,12 +147,34 @@ export default function CompletePreorderAsSaleButton({
             ))}
           </Select>
           <div className="flex items-end">
-            <Button type="button" onClick={onComplete} disabled={busy} loading={busy} loadingText="Completing…">
+            <Button type="button" onClick={requestComplete} disabled={busy} loading={busy} loadingText="Completing…">
               Complete & create sale
             </Button>
           </div>
         </div>
       )}
+
+      <ConfirmActionModal
+        open={confirmOpen}
+        title="Complete preorder and create sale?"
+        description="Use this only after the customer received the item and paid the full amount."
+        confirmLabel="Confirm & create sale"
+        pendingLabel="Completing…"
+        pending={busy}
+        onCancel={() => setConfirmOpen(false)}
+        onConfirm={completeConfirmed}
+        summaryItems={[
+          { label: 'Customer', value: buyerLabel },
+          { label: 'Product', value: productLabel },
+          { label: 'Quantity', value: qty || '—' },
+          { label: 'Total amount', value: formatCurrency(totalCents) },
+          { label: 'Balance to collect', value: formatCurrency(balanceDueCents) },
+          { label: 'Final payment method', value: paymentMethodLabel(paymentMethod) },
+          { label: 'Sale status', value: 'Delivered' },
+          { label: 'Stock impact', value: 'Stock will be deducted' },
+          { label: 'Preorder impact', value: 'Marked as completed' },
+        ]}
+      />
 
       {error ? (
         <InlineAlert compact variant="error" className="mt-3">
