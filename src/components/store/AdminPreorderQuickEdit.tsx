@@ -6,6 +6,7 @@ import { toast } from 'sonner'
 import Button from '@/components/ui/Button'
 import Textarea from '@/components/ui/Textarea'
 import InlineAlert from '@/components/ui/InlineAlert'
+import ConfirmActionModal from '@/components/ui/ConfirmActionModal'
 import { STORE_PAYMENT_METHODS, STORE_PREORDER_STATUSES, type StorePaymentMethod, type StorePreorderStatus } from '@/lib/storeV2'
 
 type Props = {
@@ -15,6 +16,9 @@ type Props = {
   depositPaymentMethod: StorePaymentMethod | null
   status: StorePreorderStatus
   note?: string | null
+  productLabel?: string
+  buyerLabel?: string
+  qty?: number
 }
 
 function centsToAmount(cents: number) {
@@ -67,6 +71,9 @@ export default function AdminPreorderQuickEdit({
   depositPaymentMethod,
   status,
   note,
+  productLabel = '—',
+  buyerLabel = '—',
+  qty = 0,
 }: Props) {
   const router = useRouter()
   const [depositAmount, setDepositAmount] = useState(centsToAmount(depositCents))
@@ -76,6 +83,7 @@ export default function AdminPreorderQuickEdit({
   const [loading, setLoading] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [error, setError] = useState('')
+  const [confirmMode, setConfirmMode] = useState<null | 'save' | 'delete'>(null)
 
   const nextDepositCents = useMemo(() => amountToCents(depositAmount), [depositAmount])
   const nextBalanceCents = useMemo(() => {
@@ -93,7 +101,7 @@ export default function AdminPreorderQuickEdit({
     )
   }, [depositCents, depositPaymentMethod, nextDepositCents, nextNote, nextStatus, note, paymentMethod, status])
 
-  async function save() {
+  function requestSave() {
     if (loading || !dirty) return
 
     if (!Number.isFinite(nextDepositCents) || nextDepositCents < 0) {
@@ -116,6 +124,12 @@ export default function AdminPreorderQuickEdit({
       toast.error(msg)
       return
     }
+
+    setConfirmMode('save')
+  }
+
+  async function saveConfirmed() {
+    if (loading || !dirty) return
 
     setLoading(true)
     setError('')
@@ -141,6 +155,7 @@ export default function AdminPreorderQuickEdit({
         return
       }
 
+      setConfirmMode(null)
       toast.success('Preorder updated')
       router.refresh()
       setTimeout(() => router.refresh(), 200)
@@ -153,10 +168,13 @@ export default function AdminPreorderQuickEdit({
     }
   }
 
-  async function removePreorder() {
+  function requestRemovePreorder() {
     if (deleting) return
-    const confirmed = window.confirm('Delete this preorder? This action cannot be undone.')
-    if (!confirmed) return
+    setConfirmMode('delete')
+  }
+
+  async function removePreorderConfirmed() {
+    if (deleting) return
 
     setDeleting(true)
     setError('')
@@ -174,6 +192,7 @@ export default function AdminPreorderQuickEdit({
         return
       }
 
+      setConfirmMode(null)
       toast.success('Preorder deleted')
       router.refresh()
       setTimeout(() => router.refresh(), 200)
@@ -253,12 +272,12 @@ export default function AdminPreorderQuickEdit({
       {error ? <InlineAlert variant="error">{error}</InlineAlert> : null}
 
       <div className="flex flex-wrap items-center gap-2">
-        <Button onClick={save} disabled={!dirty || loading || deleting} loading={loading} loadingText="Saving…">
+        <Button onClick={requestSave} disabled={!dirty || loading || deleting} loading={loading} loadingText="Saving…">
           Save changes
         </Button>
         <Button
           variant="outline"
-          onClick={removePreorder}
+          onClick={requestRemovePreorder}
           disabled={loading || deleting}
           loading={deleting}
           loadingText="Deleting…"
@@ -266,6 +285,51 @@ export default function AdminPreorderQuickEdit({
           Delete preorder
         </Button>
       </div>
+
+      <ConfirmActionModal
+        open={confirmMode === 'save'}
+        title="Confirm preorder update"
+        description="Review the preorder changes before saving."
+        confirmLabel="Confirm & save"
+        pendingLabel="Saving…"
+        pending={loading}
+        onCancel={() => setConfirmMode(null)}
+        onConfirm={saveConfirmed}
+        summaryItems={[
+          { label: 'Customer', value: buyerLabel },
+          { label: 'Product', value: productLabel },
+          { label: 'Quantity', value: qty || '—' },
+          { label: 'Status', value: `${preorderStatusLabel(status)} → ${preorderStatusLabel(nextStatus)}` },
+          { label: 'Deposit', value: `${centsToAmount(depositCents)} EGP → ${centsToAmount(nextDepositCents)} EGP` },
+          { label: 'Payment method', value: nextDepositCents > 0 && paymentMethod ? paymentLabel(paymentMethod) : 'No deposit' },
+          { label: 'Next balance', value: `${centsToAmount(nextBalanceCents)} EGP` },
+          { label: 'Stock impact', value: 'None — preorder update only' },
+          { label: 'Note', value: nextNote.trim() || '—' },
+        ]}
+      />
+
+      <ConfirmActionModal
+        open={confirmMode === 'delete'}
+        title="Delete preorder?"
+        description="This will delete this preorder record."
+        confirmLabel="Confirm delete"
+        pendingLabel="Deleting…"
+        tone="destructive"
+        pending={deleting}
+        warning="This action is destructive. Review the preorder before deleting it."
+        onCancel={() => setConfirmMode(null)}
+        onConfirm={removePreorderConfirmed}
+        summaryItems={[
+          { label: 'Customer', value: buyerLabel },
+          { label: 'Product', value: productLabel },
+          { label: 'Quantity', value: qty || '—' },
+          { label: 'Status', value: preorderStatusLabel(status) },
+          { label: 'Total', value: `${centsToAmount(totalCents)} EGP` },
+          { label: 'Deposit', value: `${centsToAmount(depositCents)} EGP` },
+          { label: 'Current balance', value: `${centsToAmount(Math.max(totalCents - depositCents, 0))} EGP` },
+          { label: 'Impact', value: 'Preorder record will be removed' },
+        ]}
+      />
     </div>
   )
 }
