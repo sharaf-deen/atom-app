@@ -8,7 +8,7 @@ import Section from '@/components/layout/Section'
 import AccessDeniedPage from '@/components/AccessDeniedPage'
 import InlineAlert from '@/components/ui/InlineAlert'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card'
-import ExpenseSubmitButton from '@/components/ExpenseSubmitButton'
+import ConfirmSubmitButton from '@/components/ui/ConfirmSubmitButton'
 import StoreAdminNav from '@/components/store/StoreAdminNav'
 import StoreExpensesTableClient, { type StoreExpenseRow } from '@/components/store/StoreExpensesTableClient'
 import { canAccessStoreExpenses, canManageStoreExpenses } from '@/lib/rbac'
@@ -715,8 +715,30 @@ export default async function StoreExpensesPage({ searchParams }: { searchParams
                   <input type="file" name="attachment" accept="image/*,application/pdf" className="block w-full rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm file:mr-3 file:rounded-lg file:border-0 file:bg-black file:px-3 file:py-2 file:text-white" />
                   <span className="mt-1 block text-xs text-[hsl(var(--muted))]">Accepted: JPG, PNG, WEBP, PDF. Max 8MB.</span>
                 </label>
-                <div className="sm:col-span-4">
-                  <ExpenseSubmitButton idleLabel="Save store expense" pendingLabel="Saving…" />
+                <div className="sm:col-span-4 space-y-1">
+                  <ConfirmSubmitButton
+                    confirmTitle="Confirm store expense"
+                    confirmDescription="Please review this expense before saving. It affects Store expenses and Net store cash only."
+                    confirmButtonLabel="Confirm & save"
+                    pendingLabel="Saving…"
+                    staticItems={[
+                      { label: 'Impact', value: 'Affects Store expenses and Net store cash' },
+                    ]}
+                    fieldItems={[
+                      { label: 'Date', name: 'expense_date', kind: 'date' },
+                      { label: 'Category', name: 'category', kind: 'select' },
+                      { label: 'Title', name: 'title', emptyValue: 'Required' },
+                      { label: 'Amount', name: 'amount', kind: 'egp' },
+                      { label: 'Payment', name: 'payment_method', kind: 'select' },
+                      { label: 'Supplier order', name: 'supplier_order_id', kind: 'select', emptyValue: 'No supplier order link', maxLength: 90 },
+                      { label: 'Vendor / supplier', name: 'vendor_name', emptyValue: '—' },
+                      { label: 'Note', name: 'note', emptyValue: '—', maxLength: 90 },
+                      { label: 'Attachment', name: 'attachment', kind: 'file', emptyValue: 'No' },
+                    ]}
+                  >
+                    Save store expense
+                  </ConfirmSubmitButton>
+                  <p className="text-xs text-[hsl(var(--muted))]">Uploading attachment and saving after confirmation. Please avoid tapping twice.</p>
                 </div>
               </form>
             </CardContent>
