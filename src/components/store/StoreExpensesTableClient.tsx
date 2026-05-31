@@ -4,7 +4,6 @@ import { useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import Modal from '@/components/ui/Modal'
-import SaveButton from '@/components/forms/SaveButton'
 import { useSafeSubmit } from '@/lib/forms/useSafeSubmit'
 import { formatCurrency, toPriceString } from '@/lib/money'
 
@@ -108,6 +107,88 @@ function parseErrorMessage(data: any, fallback: string) {
   return data?.details || data?.error || fallback
 }
 
+type SummaryItem = {
+  label: string
+  value: string | number | null | undefined
+}
+
+function emptyLabel(value: string | null | undefined, fallback = '—') {
+  const text = String(value ?? '').trim()
+  return text || fallback
+}
+
+function shortLabel(value: string | null | undefined, fallback = '—', maxLength = 90) {
+  const text = emptyLabel(value, fallback)
+  return text.length > maxLength ? `${text.slice(0, maxLength).trim()}…` : text
+}
+
+function normalizeDecimalInput(value: string) {
+  const raw = String(value || '').trim()
+  if (!raw) return raw
+
+  let cleaned = raw.replace(/\s+/g, '').replace(/[^0-9.,-]/g, '')
+  const lastComma = cleaned.lastIndexOf(',')
+  const lastDot = cleaned.lastIndexOf('.')
+
+  if (lastComma >= 0 && lastDot >= 0) {
+    if (lastComma > lastDot) {
+      cleaned = cleaned.replace(/\./g, '').replace(',', '.')
+    } else {
+      cleaned = cleaned.replace(/,/g, '')
+    }
+  } else if (lastComma >= 0) {
+    cleaned = cleaned.replace(',', '.')
+  }
+
+  return cleaned
+}
+
+function formatInputAmount(value: string) {
+  const normalized = normalizeDecimalInput(value)
+  const amount = Number(normalized)
+  if (!Number.isFinite(amount)) return '—'
+  return formatCurrency(Math.round(amount * 100), 'en-EG', 'EGP')
+}
+
+function formatExpenseDate(value: string) {
+  const raw = String(value || '').trim()
+  if (!raw) return '—'
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw
+
+  const date = new Date(`${raw}T00:00:00Z`)
+  if (Number.isNaN(date.getTime())) return raw
+
+  try {
+    return new Intl.DateTimeFormat('en-GB', {
+      timeZone: 'Africa/Cairo',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).format(date)
+  } catch {
+    return raw
+  }
+}
+
+function supplierOrderOptionLabel(options: Props['supplierOrders'], value?: string | null) {
+  const id = String(value || '').trim()
+  if (!id) return 'No supplier order link'
+  return options.find((item) => item.value === id)?.label ?? `Order ${id.slice(0, 8)}`
+}
+
+function SummaryList({ items }: { items: SummaryItem[] }) {
+  return (
+    <dl className="divide-y divide-[hsl(var(--border))] rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))]/40 text-sm">
+      {items.map((item) => (
+        <div key={`${item.label}:${String(item.value ?? '')}`} className="grid grid-cols-[0.9fr_1.1fr] gap-3 px-3 py-2">
+          <dt className="text-[hsl(var(--muted))]">{item.label}</dt>
+          <dd className="break-words text-right font-medium text-black">{String(item.value ?? '—')}</dd>
+        </div>
+      ))}
+    </dl>
+  )
+}
+
 export default function StoreExpensesTableClient({
   expenses,
   categories,
@@ -120,6 +201,7 @@ export default function StoreExpensesTableClient({
   const router = useRouter()
   const [previewOpen, setPreviewOpen] = useState(false)
   const [editOpen, setEditOpen] = useState(false)
+  const [confirmEditOpen, setConfirmEditOpen] = useState(false)
   const [deleteOpen, setDeleteOpen] = useState(false)
   const [activeAttachment, setActiveAttachment] = useState<{
     id: string
@@ -141,7 +223,7 @@ export default function StoreExpensesTableClient({
       form.set('expense_date', editing.expense_date)
       form.set('category', editing.category)
       form.set('title', editing.title)
-      form.set('amount', editing.amount)
+      form.set('amount', normalizeDecimalInput(editing.amount))
       form.set('payment_method', editing.payment_method)
       form.set('supplier_order_id', editing.supplier_order_id)
       form.set('vendor_name', editing.vendor_name)
@@ -164,6 +246,7 @@ export default function StoreExpensesTableClient({
     defaultErrorMessage: 'Update failed.',
     onSuccess: async () => {
       const href = redirectHref(returnQueryString, { updated: '1', deleted: '', saved: '', error: '' })
+      setConfirmEditOpen(false)
       setEditOpen(false)
       setEditingFile(null)
       router.replace(href)
@@ -199,6 +282,40 @@ export default function StoreExpensesTableClient({
     return isImageAttachment(activeAttachment.mime, activeAttachment.path)
   }, [activeAttachment])
 
+  const editSummaryItems = useMemo<SummaryItem[]>(() => {
+    if (!editing) return []
+
+    return [
+      { label: 'Date', value: formatExpenseDate(editing.expense_date) },
+      { label: 'Category', value: categoryLabel(categories, editing.category) },
+      { label: 'Title', value: emptyLabel(editing.title, 'Required') },
+      { label: 'Amount', value: formatInputAmount(editing.amount) },
+      { label: 'Payment', value: paymentLabel(paymentMethods, editing.payment_method) },
+      { label: 'Supplier order', value: supplierOrderOptionLabel(supplierOrders, editing.supplier_order_id) },
+      { label: 'Vendor / supplier', value: emptyLabel(editing.vendor_name) },
+      { label: 'Note', value: shortLabel(editing.note) },
+      { label: 'Attachment', value: editingFile ? `Replace with ${editingFile.name || 'selected file'}` : 'Keep current attachment' },
+      { label: 'Impact', value: 'Updates Store expenses and Net store cash only' },
+    ]
+  }, [categories, editing, editingFile, paymentMethods, supplierOrders])
+
+  const deleteSummaryItems = useMemo<SummaryItem[]>(() => {
+    if (!deletingExpense) return []
+
+    return [
+      { label: 'Date', value: formatExpenseDate(deletingExpense.expense_date) },
+      { label: 'Category', value: categoryLabel(categories, deletingExpense.category) },
+      { label: 'Title', value: emptyLabel(deletingExpense.title, 'Store expense') },
+      { label: 'Amount', value: formatCurrency(deletingExpense.amount_cents, 'en-EG', deletingExpense.currency || 'EGP') },
+      { label: 'Payment', value: paymentLabel(paymentMethods, deletingExpense.payment_method) },
+      { label: 'Supplier order', value: supplierOrderOptionLabel(supplierOrders, deletingExpense.supplier_order_id) },
+      { label: 'Vendor / supplier', value: emptyLabel(deletingExpense.vendor_name) },
+      { label: 'Note', value: shortLabel(deletingExpense.note) },
+      { label: 'Attachment', value: deletingExpense.attachment_path ? 'Kept in audit record' : 'No attachment' },
+      { label: 'Action', value: 'Soft delete from active Store expenses view' },
+    ]
+  }, [categories, deletingExpense, paymentMethods, supplierOrders])
+
   function openPreview(expense: StoreExpenseRow) {
     setActiveAttachment({
       id: expense.id,
@@ -224,6 +341,7 @@ export default function StoreExpensesTableClient({
       note: expense.note || '',
     })
     setEditingFile(null)
+    setConfirmEditOpen(false)
     setEditOpen(true)
   }
 
@@ -234,6 +352,7 @@ export default function StoreExpensesTableClient({
   }
 
   async function onSaveEdit() {
+    setConfirmEditOpen(false)
     await submitEdit()
   }
 
@@ -418,7 +537,7 @@ export default function StoreExpensesTableClient({
         )}
       </Modal>
 
-      <Modal open={editOpen} onClose={() => setEditOpen(false)} title="Edit store expense" className="max-h-[88vh] overflow-y-auto">
+      <Modal open={editOpen} onClose={() => { setConfirmEditOpen(false); setEditOpen(false) }} title="Edit store expense" className="max-h-[88vh] overflow-y-auto">
         {editing ? (
           <div className="grid gap-3">
             <label className="block">
@@ -469,31 +588,55 @@ export default function StoreExpensesTableClient({
               <span className="mt-1 block text-xs text-[hsl(var(--muted))]">Leave empty to keep the current attachment.</span>
             </label>
             <div className="flex justify-end gap-2 pt-2">
-              <button type="button" onClick={() => setEditOpen(false)} className="rounded-xl border border-[hsl(var(--border))] px-4 py-2 text-sm font-medium hover:bg-[hsl(var(--bg))]/80">
+              <button type="button" onClick={() => { setConfirmEditOpen(false); setEditOpen(false) }} className="rounded-xl border border-[hsl(var(--border))] px-4 py-2 text-sm font-medium hover:bg-[hsl(var(--bg))]/80">
                 Cancel
               </button>
-              <SaveButton type="button" loading={saving} pendingLabel="Saving…" idleLabel="Save changes" onClick={onSaveEdit} />
+              <button type="button" disabled={saving} onClick={() => setConfirmEditOpen(true)} className="inline-flex min-h-11 items-center justify-center rounded-2xl border border-black bg-black px-4 py-2.5 text-sm font-semibold text-white shadow-soft transition hover:opacity-95 disabled:pointer-events-none disabled:opacity-60">
+                {saving ? 'Saving…' : 'Save changes'}
+              </button>
             </div>
           </div>
         ) : null}
       </Modal>
 
-      <Modal open={deleteOpen} onClose={() => setDeleteOpen(false)} title="Delete store expense">
+      <Modal open={confirmEditOpen} onClose={() => setConfirmEditOpen(false)} title="Confirm store expense update">
+        {editing ? (
+          <div className="space-y-4">
+            <p className="text-sm text-[hsl(var(--muted))]">
+              Please review this expense update before saving. This affects Store expenses and Net store cash only; it does not update stock or supplier order status.
+            </p>
+            <SummaryList items={editSummaryItems} />
+            <div className="rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+              Confirm only if the date, category, amount, payment method, and supplier order link are correct.
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <button type="button" disabled={saving} onClick={() => setConfirmEditOpen(false)} className="rounded-xl border border-[hsl(var(--border))] px-4 py-2 text-sm font-medium hover:bg-[hsl(var(--bg))]/80 disabled:opacity-60">
+                Cancel
+              </button>
+              <button type="button" disabled={saving} onClick={onSaveEdit} className="rounded-xl border border-black bg-black px-4 py-2 text-sm font-medium text-white hover:opacity-95 disabled:opacity-60">
+                {saving ? 'Saving…' : 'Confirm & save'}
+              </button>
+            </div>
+          </div>
+        ) : null}
+      </Modal>
+
+      <Modal open={deleteOpen} onClose={() => setDeleteOpen(false)} title="Confirm store expense delete">
         {deletingExpense ? (
           <div className="space-y-4">
             <p className="text-sm text-[hsl(var(--muted))]">
-              This will remove the expense from the active Store accounting view, but keep the row as a soft-deleted audit record.
+              This will remove the expense from the active Store accounting view, while keeping the row as a soft-deleted audit record.
             </p>
-            <div className="rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))]/50 p-3 text-sm">
-              <div className="font-semibold">{deletingExpense.title || 'Store expense'}</div>
-              <div className="text-[hsl(var(--muted))]">{deletingExpense.expense_date} · {formatCurrency(deletingExpense.amount_cents, 'en-EG', deletingExpense.currency || 'EGP')}</div>
+            <SummaryList items={deleteSummaryItems} />
+            <div className="rounded-2xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-800">
+              Destructive action: confirm only if this expense should no longer appear in Store expenses and Net store cash views.
             </div>
-            <div className="flex justify-end gap-2">
-              <button type="button" onClick={() => setDeleteOpen(false)} className="rounded-xl border border-[hsl(var(--border))] px-4 py-2 text-sm font-medium hover:bg-[hsl(var(--bg))]/80">
+            <div className="grid grid-cols-2 gap-3">
+              <button type="button" disabled={deleting} onClick={() => setDeleteOpen(false)} className="rounded-xl border border-[hsl(var(--border))] px-4 py-2 text-sm font-medium hover:bg-[hsl(var(--bg))]/80 disabled:opacity-60">
                 Cancel
               </button>
-              <button type="button" disabled={deleting} onClick={onDeleteExpense} className="rounded-xl border border-rose-200 bg-rose-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-60">
-                {deleting ? 'Deleting…' : 'Delete'}
+              <button type="button" disabled={deleting} onClick={onDeleteExpense} className="rounded-xl border border-rose-600 bg-rose-600 px-4 py-2 text-sm font-medium text-white hover:bg-rose-700 disabled:opacity-60">
+                {deleting ? 'Deleting…' : 'Confirm delete'}
               </button>
             </div>
           </div>

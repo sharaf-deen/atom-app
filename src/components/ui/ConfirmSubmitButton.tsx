@@ -11,7 +11,7 @@ type SummaryItem = {
 type FieldSummaryItem = {
   label: string
   name: string
-  kind?: 'text' | 'egp' | 'method' | 'date' | 'file'
+  kind?: 'text' | 'egp' | 'method' | 'date' | 'file' | 'select'
   emptyValue?: string
   maxLength?: number
 }
@@ -96,7 +96,7 @@ function formatDate(value: string) {
   }
 }
 
-function formatFieldValue(value: FormDataEntryValue | null, item: FieldSummaryItem) {
+function formatFieldValue(value: FormDataEntryValue | null, item: FieldSummaryItem, form?: HTMLFormElement | null) {
   if (item.kind === 'file') {
     if (typeof File !== 'undefined' && value instanceof File && value.size > 0) {
       return value.name ? `Yes — ${value.name}` : 'Yes'
@@ -106,6 +106,16 @@ function formatFieldValue(value: FormDataEntryValue | null, item: FieldSummaryIt
 
   const textValue = entryToString(value)
   if (!textValue) return item.emptyValue ?? '—'
+
+  if (item.kind === 'select' && form && typeof HTMLSelectElement !== 'undefined') {
+    const field = form.elements.namedItem(item.name)
+    const select = field instanceof HTMLSelectElement ? field : null
+    const selectedLabel = select?.selectedOptions?.[0]?.textContent?.trim() || ''
+    if (selectedLabel) {
+      const maxLength = item.maxLength ?? 120
+      return selectedLabel.length > maxLength ? `${selectedLabel.slice(0, maxLength).trim()}…` : selectedLabel
+    }
+  }
 
   if (item.kind === 'egp') return formatEGP(textValue)
   if (item.kind === 'method') return formatMethod(textValue)
@@ -179,7 +189,7 @@ export default function ConfirmSubmitButton({
     for (const item of fieldItems) {
       nextItems.push({
         label: item.label,
-        value: formatFieldValue(readFormValue(formData, item.name), item),
+        value: formatFieldValue(readFormValue(formData, item.name), item, form),
       })
     }
 
