@@ -4,7 +4,6 @@ import { useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import Modal from '@/components/ui/Modal'
-import SaveButton from '@/components/forms/SaveButton'
 import { useSafeSubmit } from '@/lib/forms/useSafeSubmit'
 import { formatCurrency, toPriceString } from '@/lib/money'
 
@@ -126,6 +125,61 @@ function normalizeDecimalInput(value: string) {
   return cleaned
 }
 
+type SummaryItem = {
+  label: string
+  value: string | number | null | undefined
+}
+
+function emptyLabel(value: string | null | undefined, fallback = '—') {
+  const text = String(value ?? '').trim()
+  return text || fallback
+}
+
+function shortLabel(value: string | null | undefined, fallback = '—', maxLength = 90) {
+  const text = emptyLabel(value, fallback)
+  return text.length > maxLength ? `${text.slice(0, maxLength).trim()}…` : text
+}
+
+function formatInputAmount(value: string) {
+  const normalized = normalizeDecimalInput(value)
+  const amount = Number(normalized)
+  if (!Number.isFinite(amount)) return '—'
+  return formatCurrency(Math.round(amount * 100), 'en-EG', 'EGP')
+}
+
+function formatFundingDate(value: string) {
+  const raw = String(value || '').trim()
+  if (!raw) return '—'
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw
+
+  const date = new Date(`${raw}T00:00:00Z`)
+  if (Number.isNaN(date.getTime())) return raw
+
+  try {
+    return new Intl.DateTimeFormat('en-GB', {
+      timeZone: 'Africa/Cairo',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).format(date)
+  } catch {
+    return raw
+  }
+}
+
+function SummaryList({ items }: { items: SummaryItem[] }) {
+  return (
+    <dl className="divide-y divide-[hsl(var(--border))] rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))]/40 text-sm">
+      {items.map((item) => (
+        <div key={`${item.label}:${String(item.value ?? '')}`} className="grid grid-cols-[0.9fr_1.1fr] gap-3 px-3 py-2">
+          <dt className="text-[hsl(var(--muted))]">{item.label}</dt>
+          <dd className="break-words text-right font-medium text-black">{String(item.value ?? '—')}</dd>
+        </div>
+      ))}
+    </dl>
+  )
+}
+
 export default function StoreFundingTableClient({
   fundingRows,
   fundingTypes,
@@ -137,6 +191,7 @@ export default function StoreFundingTableClient({
   const router = useRouter()
   const [previewOpen, setPreviewOpen] = useState(false)
   const [editOpen, setEditOpen] = useState(false)
+  const [confirmEditOpen, setConfirmEditOpen] = useState(false)
   const [deleteOpen, setDeleteOpen] = useState(false)
   const [activeAttachment, setActiveAttachment] = useState<{
     id: string
@@ -233,6 +288,39 @@ export default function StoreFundingTableClient({
     return isImageAttachment(activeAttachment.mime, activeAttachment.path)
   }, [activeAttachment])
 
+
+  const editSummaryItems = useMemo<SummaryItem[]>(() => {
+    if (!editing) return []
+
+    return [
+      { label: 'Date', value: formatFundingDate(editing.funding_date) },
+      { label: 'Type', value: typeLabel(fundingTypes, editing.type) },
+      { label: 'Title', value: emptyLabel(editing.title, 'Required') },
+      { label: 'Amount', value: formatInputAmount(editing.amount) },
+      { label: 'Payment', value: paymentLabel(paymentMethods, editing.payment_method) },
+      { label: 'Source / lender', value: emptyLabel(editing.source_name) },
+      { label: 'Note', value: shortLabel(editing.note) },
+      { label: 'Attachment', value: editingFile ? `Replace with ${editingFile.name || 'selected file'}` : 'Keep current attachment' },
+      { label: 'Impact', value: 'Updates Store funding cash/debt view only' },
+    ]
+  }, [editing, editingFile, fundingTypes, paymentMethods])
+
+  const deleteSummaryItems = useMemo<SummaryItem[]>(() => {
+    if (!deletingFunding) return []
+
+    return [
+      { label: 'Date', value: formatFundingDate(deletingFunding.funding_date) },
+      { label: 'Type', value: typeLabel(fundingTypes, deletingFunding.type) },
+      { label: 'Title', value: emptyLabel(deletingFunding.title, 'Store funding') },
+      { label: 'Amount', value: formatCurrency(deletingFunding.amount_cents, 'en-EG', deletingFunding.currency || 'EGP') },
+      { label: 'Payment', value: paymentLabel(paymentMethods, deletingFunding.payment_method) },
+      { label: 'Source / lender', value: emptyLabel(deletingFunding.source_name) },
+      { label: 'Note', value: shortLabel(deletingFunding.note) },
+      { label: 'Attachment', value: deletingFunding.attachment_path ? 'Kept in audit record' : 'No attachment' },
+      { label: 'Action', value: 'Soft delete from active Store funding view' },
+    ]
+  }, [deletingFunding, fundingTypes, paymentMethods])
+
   function openPreview(row: StoreFundingRow) {
     setActiveAttachment({
       id: row.id,
@@ -276,6 +364,7 @@ export default function StoreFundingTableClient({
   }
 
   async function onSaveEdit() {
+    setConfirmEditOpen(false)
     await submitEdit()
   }
 
@@ -455,7 +544,7 @@ export default function StoreFundingTableClient({
         )}
       </Modal>
 
-      <Modal open={editOpen} onClose={() => setEditOpen(false)} title="Edit store funding" className="max-h-[88vh] overflow-y-auto">
+      <Modal open={editOpen} onClose={() => { setConfirmEditOpen(false); setEditOpen(false) }} title="Edit store funding" className="max-h-[88vh] overflow-y-auto">
         {editing ? (
           <div className="grid gap-3">
             {editError ? (
@@ -503,31 +592,55 @@ export default function StoreFundingTableClient({
               <span className="mt-1 block text-xs text-[hsl(var(--muted))]">Leave empty to keep the current attachment.</span>
             </label>
             <div className="flex justify-end gap-2 pt-2">
-              <button type="button" onClick={() => setEditOpen(false)} className="rounded-xl border border-[hsl(var(--border))] px-4 py-2 text-sm font-medium hover:bg-[hsl(var(--bg))]/80">
+              <button type="button" onClick={() => { setConfirmEditOpen(false); setEditOpen(false) }} className="rounded-xl border border-[hsl(var(--border))] px-4 py-2 text-sm font-medium hover:bg-[hsl(var(--bg))]/80">
                 Cancel
               </button>
-              <SaveButton type="button" loading={saving} pendingLabel="Saving…" idleLabel="Save changes" onClick={onSaveEdit} />
+              <button type="button" disabled={saving} onClick={() => setConfirmEditOpen(true)} className="inline-flex min-h-11 items-center justify-center rounded-2xl border border-black bg-black px-4 py-2.5 text-sm font-semibold text-white shadow-soft transition hover:opacity-95 disabled:pointer-events-none disabled:opacity-60">
+                {saving ? 'Saving…' : 'Save changes'}
+              </button>
             </div>
           </div>
         ) : null}
       </Modal>
 
-      <Modal open={deleteOpen} onClose={() => setDeleteOpen(false)} title="Delete store funding">
+      <Modal open={confirmEditOpen} onClose={() => setConfirmEditOpen(false)} title="Confirm store funding update">
+        {editing ? (
+          <div className="space-y-4">
+            <p className="text-sm text-[hsl(var(--muted))]">
+              Please review the funding update before saving. This affects Store funding visibility only; it does not create revenue, expenses, sales, or stock movement.
+            </p>
+            <SummaryList items={editSummaryItems} />
+            <div className="rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+              Confirm only if the date, amount, payment method, and funding type are correct.
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <button type="button" disabled={saving} onClick={() => setConfirmEditOpen(false)} className="rounded-xl border border-[hsl(var(--border))] px-4 py-2 text-sm font-medium hover:bg-[hsl(var(--bg))]/80 disabled:opacity-60">
+                Cancel
+              </button>
+              <button type="button" disabled={saving} onClick={onSaveEdit} className="rounded-xl border border-black bg-black px-4 py-2 text-sm font-medium text-white hover:opacity-95 disabled:opacity-60">
+                {saving ? 'Saving…' : 'Confirm & save'}
+              </button>
+            </div>
+          </div>
+        ) : null}
+      </Modal>
+
+      <Modal open={deleteOpen} onClose={() => setDeleteOpen(false)} title="Confirm store funding delete">
         {deletingFunding ? (
           <div className="space-y-4">
             <p className="text-sm text-[hsl(var(--muted))]">
-              This will remove the funding entry from the active Store accounting view, but keep the row as a soft-deleted audit record.
+              This will remove the funding entry from the active Store accounting view, while keeping the row as a soft-deleted audit record.
             </p>
-            <div className="rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))]/50 p-3 text-sm">
-              <div className="font-semibold">{deletingFunding.title || 'Store funding'}</div>
-              <div className="text-[hsl(var(--muted))]">{deletingFunding.funding_date} · {formatCurrency(deletingFunding.amount_cents, 'en-EG', deletingFunding.currency || 'EGP')}</div>
+            <SummaryList items={deleteSummaryItems} />
+            <div className="rounded-2xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-800">
+              Destructive action: confirm only if this funding entry should no longer appear in Store cash/funding views.
             </div>
-            <div className="flex justify-end gap-2">
-              <button type="button" onClick={() => setDeleteOpen(false)} className="rounded-xl border border-[hsl(var(--border))] px-4 py-2 text-sm font-medium hover:bg-[hsl(var(--bg))]/80">
+            <div className="grid grid-cols-2 gap-3">
+              <button type="button" disabled={deleting} onClick={() => setDeleteOpen(false)} className="rounded-xl border border-[hsl(var(--border))] px-4 py-2 text-sm font-medium hover:bg-[hsl(var(--bg))]/80 disabled:opacity-60">
                 Cancel
               </button>
-              <button type="button" disabled={deleting} onClick={onDeleteFunding} className="rounded-xl border border-rose-200 bg-rose-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-60">
-                {deleting ? 'Deleting…' : 'Delete'}
+              <button type="button" disabled={deleting} onClick={onDeleteFunding} className="rounded-xl border border-rose-600 bg-rose-600 px-4 py-2 text-sm font-medium text-white hover:bg-rose-700 disabled:opacity-60">
+                {deleting ? 'Deleting…' : 'Confirm delete'}
               </button>
             </div>
           </div>

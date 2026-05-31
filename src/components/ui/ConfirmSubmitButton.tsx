@@ -11,7 +11,7 @@ type SummaryItem = {
 type FieldSummaryItem = {
   label: string
   name: string
-  kind?: 'text' | 'egp' | 'method' | 'date'
+  kind?: 'text' | 'egp' | 'method' | 'date' | 'file'
   emptyValue?: string
   maxLength?: number
 }
@@ -40,7 +40,10 @@ type Props = {
 }
 
 function readFormValue(formData: FormData, name: string) {
-  const value = formData.get(name)
+  return formData.get(name)
+}
+
+function entryToString(value: FormDataEntryValue | null | undefined) {
   return typeof value === 'string' ? value.trim() : ''
 }
 
@@ -93,15 +96,23 @@ function formatDate(value: string) {
   }
 }
 
-function formatFieldValue(value: string, item: FieldSummaryItem) {
-  if (!value) return item.emptyValue ?? '—'
+function formatFieldValue(value: FormDataEntryValue | null, item: FieldSummaryItem) {
+  if (item.kind === 'file') {
+    if (typeof File !== 'undefined' && value instanceof File && value.size > 0) {
+      return value.name ? `Yes — ${value.name}` : 'Yes'
+    }
+    return item.emptyValue ?? 'No'
+  }
 
-  if (item.kind === 'egp') return formatEGP(value)
-  if (item.kind === 'method') return formatMethod(value)
-  if (item.kind === 'date') return formatDate(value)
+  const textValue = entryToString(value)
+  if (!textValue) return item.emptyValue ?? '—'
+
+  if (item.kind === 'egp') return formatEGP(textValue)
+  if (item.kind === 'method') return formatMethod(textValue)
+  if (item.kind === 'date') return formatDate(textValue)
 
   const maxLength = item.maxLength ?? 120
-  return value.length > maxLength ? `${value.slice(0, maxLength).trim()}…` : value
+  return textValue.length > maxLength ? `${textValue.slice(0, maxLength).trim()}…` : textValue
 }
 
 function formatDifference(value: number) {
@@ -173,8 +184,8 @@ export default function ConfirmSubmitButton({
     }
 
     if (difference) {
-      const expected = parseAmount(readFormValue(formData, difference.expectedName ?? 'expected_amount'))
-      const counted = parseAmount(readFormValue(formData, difference.countedName ?? 'counted_amount'))
+      const expected = parseAmount(entryToString(readFormValue(formData, difference.expectedName ?? 'expected_amount')))
+      const counted = parseAmount(entryToString(readFormValue(formData, difference.countedName ?? 'counted_amount')))
 
       if (expected != null && counted != null) {
         nextItems.push({
