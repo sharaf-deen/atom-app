@@ -4,6 +4,7 @@ import { useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import Button from '@/components/ui/Button'
+import ConfirmActionModal from '@/components/ui/ConfirmActionModal'
 import InlineAlert from '@/components/ui/InlineAlert'
 import Input from '@/components/ui/Input'
 import Select from '@/components/ui/Select'
@@ -50,6 +51,15 @@ function productLabel(product: ProductOption) {
   return parts.join(' — ')
 }
 
+function statusLabel(value: SupplierOrderStatus) {
+  return STATUS_OPTIONS.find((option) => option.value === value)?.label ?? value
+}
+
+function formatDateValue(value: string) {
+  if (!value) return '—'
+  return value
+}
+
 export default function SupplierOrderForm({
   products,
 }: {
@@ -65,6 +75,7 @@ export default function SupplierOrderForm({
   const [notes, setNotes] = useState('')
   const [lines, setLines] = useState<LineState[]>([makeLine()])
   const [busy, setBusy] = useState(false)
+  const [confirmOpen, setConfirmOpen] = useState(false)
   const [feedback, setFeedback] = useState<{ kind: '' | 'success' | 'error'; msg: string }>({ kind: '', msg: '' })
 
   function updateLine(key: string, patch: Partial<LineState>) {
@@ -107,30 +118,80 @@ export default function SupplierOrderForm({
   }, [lines, productMap])
 
   const totalCents = linePreview.reduce((sum, line) => sum + line.subtotalCents, 0)
+  const totalOrderedQty = linePreview.reduce((sum, line) => sum + Math.max(0, Number(line.qty || 0)), 0)
 
-  async function onSubmit(e: React.FormEvent) {
-    e.preventDefault()
-    if (busy) return
+  const confirmationItems = useMemo(() => {
+    const itemSummary = linePreview.length ? (
+      <div className="space-y-1 text-right">
+        {linePreview.slice(0, 5).map((line, index) => (
+          <div key={line.key}>
+            {index + 1}. {productLabel(line.product as ProductOption)} · qty {line.qty} · {toPriceString(line.subtotalCents)} EGP
+          </div>
+        ))}
+        {linePreview.length > 5 ? <div>+{linePreview.length - 5} more line(s)</div> : null}
+      </div>
+    ) : (
+      '—'
+    )
 
-    const items = lines
+    return [
+      { label: 'Supplier', value: supplierName.trim() || '—' },
+      { label: 'Reference', value: reference.trim() || '—' },
+      { label: 'Status', value: statusLabel(status) },
+      { label: 'Expected date', value: formatDateValue(expectedAt) },
+      { label: 'Items', value: itemSummary },
+      { label: 'Ordered qty', value: totalOrderedQty },
+      { label: 'Estimated cost', value: `${toPriceString(totalCents)} EGP` },
+      { label: 'Notes', value: notes.trim() || '—' },
+      { label: 'Stock impact', value: 'No stock change until received quantities are applied.' },
+      { label: 'Linked expenses', value: 'None automatic.' },
+    ]
+  }, [expectedAt, linePreview, notes, reference, status, supplierName, totalCents, totalOrderedQty])
+
+  function buildValidItems() {
+    return lines
       .map((line) => ({
         product_id: line.productId,
         ordered_qty: Math.max(0, Math.floor(Number(line.orderedQty || 0))),
         unit_cost_cents: Math.max(0, parsePriceToCents(line.unitCost)),
       }))
       .filter((line) => line.product_id && line.ordered_qty > 0)
+  }
+
+  function validateBeforeCreate() {
+    const items = buildValidItems()
 
     if (!supplierName.trim()) {
       setFeedback({ kind: 'error', msg: 'Supplier name is required.' })
       toast.error('Supplier name is required')
-      return
+      return null
     }
 
     if (items.length === 0) {
       setFeedback({ kind: 'error', msg: 'Add at least one valid supplier-order line.' })
       toast.error('Add at least one valid line')
-      return
+      return null
     }
+
+    return items
+  }
+
+  function onSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    if (busy) return
+
+    const items = validateBeforeCreate()
+    if (!items) return
+
+    setFeedback({ kind: '', msg: '' })
+    setConfirmOpen(true)
+  }
+
+  async function createConfirmed() {
+    if (busy) return
+
+    const items = validateBeforeCreate()
+    if (!items) return
 
     setBusy(true)
     setFeedback({ kind: '', msg: '' })
@@ -156,6 +217,7 @@ export default function SupplierOrderForm({
         return
       }
 
+      setConfirmOpen(false)
       setFeedback({ kind: 'success', msg: 'Supplier order created.' })
       toast.success('Supplier order created')
       setReference('')
@@ -276,6 +338,19 @@ export default function SupplierOrderForm({
           {busy ? 'Saving…' : 'Create supplier order'}
         </Button>
       </div>
+
+      <ConfirmActionModal
+        open={confirmOpen}
+        title="Confirm supplier order creation"
+        description="Please review this supplier order before creating it."
+        confirmLabel="Confirm & create"
+        pendingLabel="Creating…"
+        pending={busy}
+        summaryItems={confirmationItems}
+        warning="This creates a supplier order only. Stock will not change until received quantities are applied."
+        onCancel={() => setConfirmOpen(false)}
+        onConfirm={createConfirmed}
+      />
     </form>
   )
 }
