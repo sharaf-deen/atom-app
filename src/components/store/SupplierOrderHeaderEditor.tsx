@@ -4,18 +4,32 @@ import { useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import Button from '@/components/ui/Button'
+import ConfirmActionModal from '@/components/ui/ConfirmActionModal'
 import InlineAlert from '@/components/ui/InlineAlert'
 import Input from '@/components/ui/Input'
 import Select from '@/components/ui/Select'
 
 type EditableStatus = 'draft' | 'ordered' | 'canceled'
 type Status = EditableStatus | 'partially_received' | 'received'
+type ConfirmMode = 'save' | 'delete' | null
 
 const EDITABLE_STATUS_OPTIONS: Array<{ value: EditableStatus; label: string }> = [
   { value: 'draft', label: 'Draft' },
   { value: 'ordered', label: 'Ordered' },
   { value: 'canceled', label: 'Canceled' },
 ]
+
+function statusLabel(value: Status | EditableStatus | null | undefined) {
+  if (!value) return '—'
+  return EDITABLE_STATUS_OPTIONS.find((option) => option.value === value)?.label ?? value.replaceAll('_', ' ')
+}
+
+function changedValue(previousValue: string | null | undefined, nextValue: string | null | undefined) {
+  const previous = String(previousValue ?? '').trim()
+  const next = String(nextValue ?? '').trim()
+  if (previous === next) return next || '—'
+  return `${previous || '—'} → ${next || '—'}`
+}
 
 export default function SupplierOrderHeaderEditor({
   id,
@@ -46,6 +60,7 @@ export default function SupplierOrderHeaderEditor({
   )
   const [busy, setBusy] = useState(false)
   const [deleting, setDeleting] = useState(false)
+  const [confirmMode, setConfirmMode] = useState<ConfirmMode>(null)
   const [feedback, setFeedback] = useState<{ kind: '' | 'success' | 'error'; msg: string }>({ kind: '', msg: '' })
 
   const statusEditable = status === 'draft' || status === 'ordered' || status === 'canceled'
@@ -59,7 +74,46 @@ export default function SupplierOrderHeaderEditor({
     [nextReference, reference, nextSupplierName, supplierName, nextExpectedAt, expectedAt, nextNotes, notes, nextStatus, statusEditable, status]
   )
 
-  async function save() {
+  const saveSummaryItems = useMemo(
+    () => [
+      { label: 'Order ID', value: id.slice(0, 8) },
+      { label: 'Supplier', value: changedValue(supplierName, nextSupplierName) },
+      { label: 'Reference', value: changedValue(reference, nextReference) },
+      { label: 'Expected date', value: changedValue(expectedAt, nextExpectedAt) },
+      { label: 'Status', value: statusEditable ? `${statusLabel(status)} → ${statusLabel(nextStatus)}` : statusLabel(status) },
+      { label: 'Notes', value: changedValue(notes, nextNotes) },
+      { label: 'Stock impact', value: 'No stock movement from header changes.' },
+      { label: 'Linked expenses', value: 'None automatic.' },
+    ],
+    [expectedAt, id, nextExpectedAt, nextNotes, nextReference, nextStatus, nextSupplierName, notes, reference, status, statusEditable, supplierName]
+  )
+
+  const deleteSummaryItems = useMemo(
+    () => [
+      { label: 'Order ID', value: id.slice(0, 8) },
+      { label: 'Supplier', value: supplierName || '—' },
+      { label: 'Reference', value: reference || '—' },
+      { label: 'Expected date', value: expectedAt || '—' },
+      { label: 'Status', value: statusLabel(status) },
+      { label: 'Notes', value: notes || '—' },
+      { label: 'Impact', value: 'The supplier order will be deleted only if the backend allows it.' },
+    ],
+    [expectedAt, id, notes, reference, status, supplierName]
+  )
+
+  function requestSave() {
+    if (!dirty || busy || deleting) return
+    if (!nextSupplierName.trim()) {
+      setFeedback({ kind: 'error', msg: 'Supplier name is required.' })
+      toast.error('Supplier name is required')
+      return
+    }
+
+    setFeedback({ kind: '', msg: '' })
+    setConfirmMode('save')
+  }
+
+  async function saveConfirmed() {
     if (!dirty || busy || deleting) return
     if (!nextSupplierName.trim()) {
       setFeedback({ kind: 'error', msg: 'Supplier name is required.' })
@@ -91,6 +145,7 @@ export default function SupplierOrderHeaderEditor({
         return
       }
 
+      setConfirmMode(null)
       setFeedback({ kind: 'success', msg: 'Supplier order updated.' })
       toast.success('Supplier order updated')
       router.refresh()
@@ -104,10 +159,14 @@ export default function SupplierOrderHeaderEditor({
     }
   }
 
-  async function removeOrder() {
+  function requestDelete() {
     if (!canDelete || busy || deleting) return
-    const confirmed = window.confirm('Delete this supplier order? This action cannot be undone.')
-    if (!confirmed) return
+    setFeedback({ kind: '', msg: '' })
+    setConfirmMode('delete')
+  }
+
+  async function deleteConfirmed() {
+    if (!canDelete || busy || deleting) return
 
     setDeleting(true)
     setFeedback({ kind: '', msg: '' })
@@ -124,6 +183,7 @@ export default function SupplierOrderHeaderEditor({
         return
       }
 
+      setConfirmMode(null)
       toast.success('Supplier order deleted')
       router.refresh()
       setTimeout(() => router.refresh(), 250)
@@ -164,13 +224,13 @@ export default function SupplierOrderHeaderEditor({
       {feedback.msg ? <InlineAlert variant={feedback.kind === 'error' ? 'error' : 'success'}>{feedback.msg}</InlineAlert> : null}
 
       <div className="flex flex-wrap items-center gap-2">
-        <Button type="button" onClick={save} disabled={!dirty || busy || deleting} loading={busy} loadingText="Saving…">
+        <Button type="button" onClick={requestSave} disabled={!dirty || busy || deleting} loading={busy} loadingText="Saving…">
           Save header
         </Button>
         <Button
           type="button"
           variant="outline"
-          onClick={removeOrder}
+          onClick={requestDelete}
           disabled={!canDelete || busy || deleting}
           loading={deleting}
           loadingText="Deleting…"
@@ -178,6 +238,33 @@ export default function SupplierOrderHeaderEditor({
           Delete order
         </Button>
       </div>
+
+      <ConfirmActionModal
+        open={confirmMode === 'save'}
+        title="Confirm supplier order update"
+        description="Please review the supplier order header changes before saving."
+        confirmLabel="Confirm & save"
+        pendingLabel="Saving…"
+        pending={busy}
+        summaryItems={saveSummaryItems}
+        warning="This updates the supplier order header only. Stock is not changed by this action."
+        onCancel={() => setConfirmMode(null)}
+        onConfirm={saveConfirmed}
+      />
+
+      <ConfirmActionModal
+        open={confirmMode === 'delete'}
+        title="Delete supplier order?"
+        description="Please review this supplier order before deleting it."
+        confirmLabel="Confirm delete"
+        pendingLabel="Deleting…"
+        tone="destructive"
+        pending={deleting}
+        summaryItems={deleteSummaryItems}
+        warning="This is a destructive action. Existing backend guards still decide if the order can be deleted."
+        onCancel={() => setConfirmMode(null)}
+        onConfirm={deleteConfirmed}
+      />
     </div>
   )
 }
