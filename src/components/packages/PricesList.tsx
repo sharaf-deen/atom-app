@@ -6,6 +6,7 @@ import Button from '@/components/ui/Button'
 import Input from '@/components/ui/Input'
 import Select from '@/components/ui/Select'
 import Badge from '@/components/ui/Badge'
+import ConfirmActionModal, { type ConfirmActionSummaryItem } from '@/components/ui/ConfirmActionModal'
 
 export type PackageId = string | number
 
@@ -124,12 +125,78 @@ function BenefitsDisplay({ benefits }: { benefits: string[] | null | undefined }
   )
 }
 
+
+function formatMoney(value: any) {
+  const n = Number(value)
+  if (!Number.isFinite(n)) return '0 EGP'
+  return `${Math.max(0, Math.floor(n)).toLocaleString()} EGP`
+}
+
+function formatBenefitsSummary(value: any) {
+  const list = normalizeBenefits(value)
+  if (list.length === 0) return '—'
+  return list.join(' / ')
+}
+
+function packageTypeLabel(value: any) {
+  if (value === 'private') return 'Private coaching'
+  return 'Membership'
+}
+
+function packageUnitLabel(value: any) {
+  if (value === 'session') return 'session(s)'
+  return 'month(s)'
+}
+
+function buildPackageSummary(
+  item: Partial<PackageItem>,
+  impact: string,
+): ConfirmActionSummaryItem[] {
+  return [
+    { label: 'Package', value: String(item.name ?? '').trim() || '—' },
+    { label: 'Type', value: packageTypeLabel(item.type) },
+    { label: 'Quantity / duration', value: `${toInt(item.qty, 1)} ${packageUnitLabel(item.unit)}` },
+    { label: 'Price', value: formatMoney(item.price_egp) },
+    { label: 'Status', value: item.is_active ? 'Active' : 'Inactive' },
+    { label: 'Benefits', value: formatBenefitsSummary(item.benefits) },
+    { label: 'Impact', value: impact },
+  ]
+}
+
+type PendingConfirmation =
+  | {
+      type: 'create'
+      title: string
+      description: string
+      confirmLabel: string
+      warning: string
+      summaryItems: ConfirmActionSummaryItem[]
+    }
+  | {
+      type: 'edit'
+      title: string
+      description: string
+      confirmLabel: string
+      warning: string
+      summaryItems: ConfirmActionSummaryItem[]
+    }
+  | {
+      type: 'delete'
+      title: string
+      description: string
+      confirmLabel: string
+      warning: string
+      summaryItems: ConfirmActionSummaryItem[]
+      item: PackageItem
+    }
+
 export default function PricesList({ items, canEdit }: Props) {
   const router = useRouter()
 
   const [editingId, setEditingId] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [err, setErr] = useState<string>('')
+  const [pendingConfirmation, setPendingConfirmation] = useState<PendingConfirmation | null>(null)
 
   const [adding, setAdding] = useState(false)
   const [newItem, setNewItem] = useState<Omit<PackageItem, 'id'>>({
@@ -205,7 +272,7 @@ export default function PricesList({ items, canEdit }: Props) {
     }
   }
 
-  async function createOne() {
+  async function performCreateOne() {
     if (!canEdit) return
     setSaving(true)
     setErr('')
@@ -254,10 +321,8 @@ export default function PricesList({ items, canEdit }: Props) {
     }
   }
 
-  async function deleteOne(item: PackageItem) {
+  async function performDeleteOne(item: PackageItem) {
     if (!canEdit) return
-    const confirmed = window.confirm(`Delete package "${item.name}"? This will remove it from the price list.`)
-    if (!confirmed) return
 
     const id = String(item.id ?? '')
     const lookup = buildPackageLookup(item)
@@ -286,6 +351,100 @@ export default function PricesList({ items, canEdit }: Props) {
     } finally {
       setSaving(false)
     }
+  }
+
+
+  function requestCreate() {
+    if (!canEdit || saving) return
+
+    const payload = {
+      name: String(newItem.name ?? '').trim(),
+      type: newItem.type,
+      unit: newItem.unit,
+      qty: toInt(newItem.qty, 1),
+      price_egp: toInt(newItem.price_egp, 0),
+      is_active: !!newItem.is_active,
+      benefits: normalizeBenefits(newItem.benefits),
+    }
+
+    if (!payload.name) {
+      setErr('Name is required')
+      return
+    }
+
+    setErr('')
+    setPendingConfirmation({
+      type: 'create',
+      title: 'Create package?',
+      description: 'Review this package before adding it to the public pricing list.',
+      confirmLabel: 'Confirm & create',
+      warning: 'This package will appear in Packages & Promos according to its active status.',
+      summaryItems: buildPackageSummary(payload, 'Public pricing list will be updated.'),
+    })
+  }
+
+  function requestSaveEdit() {
+    if (!editingId || saving) return
+
+    const patch = {
+      name: String(draft.name ?? '').trim(),
+      type: draft.type,
+      unit: draft.unit,
+      qty: toInt(draft.qty, 1),
+      price_egp: toInt(draft.price_egp, 0),
+      is_active: !!draft.is_active,
+      benefits: normalizeBenefits(draft.benefits),
+    }
+
+    if (!patch.name) {
+      setErr('Name is required')
+      return
+    }
+
+    setErr('')
+    setPendingConfirmation({
+      type: 'edit',
+      title: 'Save package changes?',
+      description: 'Review the new package details before saving.',
+      confirmLabel: 'Confirm & save',
+      warning: 'This change may affect the public pricing display immediately.',
+      summaryItems: buildPackageSummary(patch, 'Public pricing list will be updated.'),
+    })
+  }
+
+  function requestDelete(item: PackageItem) {
+    if (!canEdit || saving) return
+
+    setErr('')
+    setPendingConfirmation({
+      type: 'delete',
+      title: 'Delete package?',
+      description: 'This will remove the package from the pricing list.',
+      confirmLabel: 'Confirm delete',
+      warning: 'This is a destructive action for the pricing display. Existing historical records are not changed by this UI action.',
+      summaryItems: buildPackageSummary(item, 'Package will be removed from the public pricing list.'),
+      item,
+    })
+  }
+
+  async function confirmPendingAction() {
+    const confirmation = pendingConfirmation
+    if (!confirmation) return
+
+    if (confirmation.type === 'create') {
+      await performCreateOne()
+      setPendingConfirmation(null)
+      return
+    }
+
+    if (confirmation.type === 'edit') {
+      await saveEdit()
+      setPendingConfirmation(null)
+      return
+    }
+
+    await performDeleteOne(confirmation.item)
+    setPendingConfirmation(null)
   }
 
   const addForm = (
@@ -347,7 +506,7 @@ export default function PricesList({ items, canEdit }: Props) {
       </div>
 
       <div className="mt-4 flex flex-wrap items-center gap-2">
-        <Button onClick={createOne} loading={saving} loadingText="Saving…">
+        <Button onClick={requestCreate} loading={saving} loadingText="Saving…">
           Save
         </Button>
         <Button
@@ -494,7 +653,7 @@ export default function PricesList({ items, canEdit }: Props) {
                       {canEdit ? (
                         isEditing ? (
                           <div className="flex flex-col gap-2">
-                            <Button onClick={saveEdit} loading={saving} loadingText="Saving…">
+                            <Button onClick={requestSaveEdit} loading={saving} loadingText="Saving…">
                               Save
                             </Button>
                             <Button variant="outline" onClick={cancelEdit} disabled={saving}>
@@ -508,7 +667,7 @@ export default function PricesList({ items, canEdit }: Props) {
                             </Button>
                             <Button
                               variant="outline"
-                              onClick={() => deleteOne(it)}
+                              onClick={() => requestDelete(it)}
                               disabled={saving}
                               className="border-red-200 text-red-700 hover:bg-red-50"
                             >
@@ -537,6 +696,22 @@ export default function PricesList({ items, canEdit }: Props) {
           ) : null}
         </div>
       )}
+      <ConfirmActionModal
+        open={!!pendingConfirmation}
+        title={pendingConfirmation?.title ?? ''}
+        description={pendingConfirmation?.description}
+        confirmLabel={pendingConfirmation?.confirmLabel ?? 'Confirm'}
+        pendingLabel="Saving…"
+        cancelLabel="Cancel"
+        tone={pendingConfirmation?.type === 'delete' ? 'destructive' : 'default'}
+        pending={saving}
+        summaryItems={pendingConfirmation?.summaryItems ?? []}
+        warning={pendingConfirmation?.warning}
+        onCancel={() => {
+          if (!saving) setPendingConfirmation(null)
+        }}
+        onConfirm={confirmPendingAction}
+      />
     </div>
   )
 }
