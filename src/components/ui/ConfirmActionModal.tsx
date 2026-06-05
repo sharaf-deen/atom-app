@@ -58,7 +58,7 @@ export default function ConfirmActionModal({
   if (!open) return null
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/45 p-3 sm:items-center" role="presentation">
+    <div className="fixed inset-0 z-[1200] flex items-end justify-center bg-black/45 p-3 sm:items-center" role="presentation">
       <div
         role="dialog"
         aria-modal="true"

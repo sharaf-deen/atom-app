@@ -11,6 +11,7 @@ import Select from '@/components/ui/Select'
 import { Card, CardContent } from '@/components/ui/Card'
 import InlineAlert from '@/components/ui/InlineAlert'
 import SaveButton from '@/components/forms/SaveButton'
+import ConfirmActionModal from '@/components/ui/ConfirmActionModal'
 
 type PaymentMethod = 'cash' | 'instapay' | 'card' | 'bank_transfer'
 
@@ -21,6 +22,21 @@ type SubLite = {
   amount: number | null
   amount_due: number | null
   payment_method?: string | null
+}
+
+function formatEGP(value: number | string | null | undefined) {
+  const amount = typeof value === 'number' ? value : Number(value ?? '')
+  if (!Number.isFinite(amount)) return '—'
+
+  try {
+    return new Intl.NumberFormat('en-EG', {
+      style: 'currency',
+      currency: 'EGP',
+      maximumFractionDigits: 2,
+    }).format(amount)
+  } catch {
+    return `${amount.toFixed(2)} EGP`
+  }
 }
 
 function humanPayment(m?: string | null) {
@@ -60,6 +76,7 @@ export default function SettleDueDialog({
 
   const [open, setOpen] = useState(false)
   const [busy, setBusy] = useState(false)
+  const [confirmOpen, setConfirmOpen] = useState(false)
   const [amountPaid, setAmountPaid] = useState<string>(String(due))
   const [method, setMethod] = useState<PaymentMethod>(initialMethod)
   const [paymentDate, setPaymentDate] = useState<string>(() => {
@@ -76,6 +93,7 @@ export default function SettleDueDialog({
   useEffect(() => {
     if (!open) return
     setBusy(false)
+    setConfirmOpen(false)
     setAmountPaid(String(due))
     setMethod(initialMethod)
     const d = new Date()
@@ -93,14 +111,14 @@ export default function SettleDueDialog({
     const prev = document.body.style.overflow
     document.body.style.overflow = 'hidden'
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && !busy) setOpen(false)
+      if (e.key === 'Escape' && !busy && !confirmOpen) setOpen(false)
     }
     window.addEventListener('keydown', onKey)
     return () => {
       document.body.style.overflow = prev
       window.removeEventListener('keydown', onKey)
     }
-  }, [open, busy])
+  }, [open, busy, confirmOpen])
 
   const paidNum = Number(amountPaid)
   const paidOk = amountPaid !== '' && Number.isFinite(paidNum) && paidNum > 0 && paidNum <= due
@@ -113,6 +131,19 @@ export default function SettleDueDialog({
   if (!sub) return null
   const show = Number.isFinite(due) && due > 0
   if (!show) return null
+
+
+  function requestConfirmation() {
+    if (busy) return
+
+    if (!paidOk) {
+      setStatus({ kind: 'error', msg: `Amount paid must be between 1 and ${due}.` })
+      toast.error('Please check the amount')
+      return
+    }
+
+    setConfirmOpen(true)
+  }
 
   async function submit() {
     if (busy) return
@@ -184,7 +215,7 @@ export default function SettleDueDialog({
 
       {open ? (
         <>
-          <div className="fixed inset-0 z-[100] bg-black/60" onClick={() => !busy && setOpen(false)} aria-hidden="true" />
+          <div className="fixed inset-0 z-[100] bg-black/60" onClick={() => !busy && !confirmOpen && setOpen(false)} aria-hidden="true" />
           <div className="fixed inset-0 z-[101] flex items-center justify-center p-4">
             <Card className="w-full max-w-lg rounded-3xl border border-[hsl(var(--border))] bg-white shadow-soft">
               <CardContent className="p-6">
@@ -196,7 +227,7 @@ export default function SettleDueDialog({
                       <span className="font-medium">{due}</span> · Total: <span className="font-medium">{totalNow}</span>
                     </p>
                   </div>
-                  <Button variant="ghost" onClick={() => !busy && setOpen(false)}>
+                  <Button variant="ghost" onClick={() => !busy && !confirmOpen && setOpen(false)}>
                     Close
                   </Button>
                 </div>
@@ -279,12 +310,12 @@ export default function SettleDueDialog({
                   ) : null}
 
                   <div className="flex justify-end gap-2 pt-2">
-                    <Button variant="outline" onClick={() => setOpen(false)} disabled={busy}>
+                    <Button variant="outline" onClick={() => setOpen(false)} disabled={busy || confirmOpen}>
                       Cancel
                     </Button>
                     <SaveButton
                       type="button"
-                      onClick={submit}
+                      onClick={requestConfirmation}
                       loading={busy}
                       disabled={busy || !paidOk}
                       idleLabel="Confirm"
@@ -295,6 +326,31 @@ export default function SettleDueDialog({
               </CardContent>
             </Card>
           </div>
+          <ConfirmActionModal
+            open={confirmOpen}
+            title="Confirm due payment"
+            description="Please review the payment before updating the subscription balance."
+            confirmLabel="Confirm payment"
+            pendingLabel="Saving…"
+            pending={busy}
+            onCancel={() => !busy && setConfirmOpen(false)}
+            onConfirm={async () => {
+              setConfirmOpen(false)
+              await submit()
+            }}
+            summaryItems={[
+              { label: 'Paid so far', value: formatEGP(paidSoFar) },
+              { label: 'Current due', value: formatEGP(due) },
+              { label: 'Paid now', value: formatEGP(paidNum) },
+              { label: 'New due', value: nextDue !== null ? formatEGP(nextDue) : '—' },
+              { label: 'Payment method', value: humanPayment(method) },
+              { label: 'Payment date', value: paymentDate || '—' },
+              { label: 'Invoice', value: genInvoice ? (allowEmailOption && emailInvoice ? 'Generate + send by email' : 'Generate PDF') : 'No updated invoice' },
+              { label: 'Impact', value: 'Updates subscription paid amount and remaining due.' },
+            ]}
+            warning="This will update the financial balance for this subscription."
+          />
+
         </>
       ) : null}
     </>
