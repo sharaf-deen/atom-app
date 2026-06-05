@@ -183,7 +183,7 @@ export default async function PackagesAndPromosPage() {
                                 Edit
                               </Button>
                             </Link>
-                            <DeletePromoButton id={p.id} />
+                            <DeletePromoButton id={p.id} title={p.title} />
                           </div>
                         ) : null}
                       </div>
