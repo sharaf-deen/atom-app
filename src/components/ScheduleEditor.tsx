@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import Button from '@/components/ui/Button'
+import ConfirmActionModal from '@/components/ui/ConfirmActionModal'
 
 type Props = {
   initialContent: string
@@ -586,6 +587,7 @@ export default function ScheduleEditor({ initialContent, canEdit, updatedAt }: P
   const [content, setContent] = useState(initialContent)
   const [draft, setDraft] = useState(initialContent)
   const [saving, setSaving] = useState(false)
+  const [confirmSaveOpen, setConfirmSaveOpen] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [ok, setOk] = useState<string | null>(null)
 
@@ -796,6 +798,7 @@ async function onSave() {
   function onCancel() {
     setDraft(content)
     setEditing(false)
+    setConfirmSaveOpen(false)
     setError(null)
   }
 
@@ -817,6 +820,36 @@ async function onSave() {
     : kidsStructured.baby
       ? [kidsStructured.baby]
       : []
+
+  const scheduleSaveSummaryItems = useMemo(() => {
+    const draftLinesRaw = draft.split(/\r?\n/)
+    const currentLinesRaw = content.split(/\r?\n/)
+    const nonEmptyLines = draftLinesRaw.filter((line) => line.trim().length > 0).length
+    const maxLines = Math.max(draftLinesRaw.length, currentLinesRaw.length)
+    let changedLines = 0
+
+    for (let index = 0; index < maxLines; index += 1) {
+      if ((draftLinesRaw[index] ?? '') !== (currentLinesRaw[index] ?? '')) changedLines += 1
+    }
+
+    const draftParts = splitByMarker(draft)
+    const draftProgram = parseProgram(draftParts.a)
+    const draftDays = draftParts.b ? parseByDay(draftParts.b) : []
+    const draftSections = draftProgram.tops.length ? draftProgram.tops.join(', ') : 'Not detected'
+
+    return [
+      { label: 'Action', value: 'Save schedule changes' },
+      { label: 'Main sections', value: draftSections },
+      { label: 'Program blocks', value: `${draftProgram.blocks.length}` },
+      { label: 'By-day schedule', value: draftDays.length ? `${draftDays.length} days` : 'Not detected' },
+      { label: 'Content lines', value: `${nonEmptyLines} lines` },
+      {
+        label: 'Changed lines',
+        value: changedLines ? `${changedLines} line${changedLines === 1 ? '' : 's'}` : 'No visible line change',
+      },
+      { label: 'Impact', value: 'Public/member schedule display will be updated' },
+    ]
+  }, [content, draft])
 
 return (
     <div className="space-y-4">
@@ -850,7 +883,14 @@ return (
                 <Button variant="outline" onClick={onCancel} disabled={saving}>
                   Cancel
                 </Button>
-                <Button onClick={onSave} disabled={saving || !draft.trim()}>
+                <Button
+                  onClick={() => {
+                    setError(null)
+                    setOk(null)
+                    setConfirmSaveOpen(true)
+                  }}
+                  disabled={saving || !draft.trim()}
+                >
                   {saving ? 'Saving…' : 'Save'}
                 </Button>
               </>
@@ -861,6 +901,23 @@ return (
         {error ? (
           <div className="mt-3 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>
         ) : null}
+
+        <ConfirmActionModal
+          open={confirmSaveOpen}
+          title="Confirm schedule update"
+          description="Please review the schedule update before publishing it."
+          confirmLabel="Confirm & save"
+          pendingLabel="Saving…"
+          cancelLabel="Cancel"
+          pending={saving}
+          summaryItems={scheduleSaveSummaryItems}
+          warning="This will update the schedule shown to members and admins."
+          onCancel={() => setConfirmSaveOpen(false)}
+          onConfirm={async () => {
+            await onSave()
+            setConfirmSaveOpen(false)
+          }}
+        />
 
         {editing ? (
           <div className="mt-5 space-y-2">
