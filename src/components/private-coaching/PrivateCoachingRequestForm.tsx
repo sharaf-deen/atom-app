@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import Button from '@/components/ui/Button'
 import Select from '@/components/ui/Select'
 import InlineAlert from '@/components/ui/InlineAlert'
+import ConfirmActionModal, { type ConfirmActionSummaryItem } from '@/components/ui/ConfirmActionModal'
 import {
   PRIVATE_COACHING_INSTAPAY_NUMBER,
   PRIVATE_COACHING_PACKAGES,
@@ -31,13 +32,37 @@ export default function PrivateCoachingRequestForm({ coaches, hasPendingRequest 
   const [sessions, setSessions] = React.useState<PrivateCoachingPackageSessions>(1)
   const [paymentMethod, setPaymentMethod] = React.useState<PrivateCoachingPaymentMethod>('cash')
   const [busy, setBusy] = React.useState(false)
+  const [confirmOpen, setConfirmOpen] = React.useState(false)
   const [status, setStatus] = React.useState<{ kind: 'success' | 'error' | ''; message: string }>({ kind: '', message: '' })
 
   const selectedPackage = PRIVATE_COACHING_PACKAGES.find((item) => item.sessions === sessions) ?? PRIVATE_COACHING_PACKAGES[0]
+  const selectedCoach = coaches.find((coach) => coach.user_id === coachId)
   const disabled = busy || hasPendingRequest || !coachId || coaches.length === 0
 
-  async function submit(e: React.FormEvent<HTMLFormElement>) {
+  const requestSummaryItems: ConfirmActionSummaryItem[] = [
+    { label: 'Coach', value: selectedCoach?.full_name || '—' },
+    { label: 'Package', value: selectedPackage.label },
+    { label: 'Sessions / tokens', value: `${selectedPackage.sessions} token(s) after payment confirmation` },
+    { label: 'Amount', value: formatPrivateCoachingMoney(selectedPackage.amountCents) },
+    { label: 'Payment method', value: privateCoachingPaymentMethodLabel(paymentMethod) },
+    {
+      label: 'Payment instructions',
+      value: paymentMethod === 'instapay' ? `Instapay ${PRIVATE_COACHING_INSTAPAY_NUMBER}` : 'Cash at reception',
+    },
+    { label: 'Request status', value: 'Payment pending' },
+    { label: 'Token impact', value: 'No token created until payment is confirmed' },
+  ]
+
+  function submit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
+    if (disabled) return
+    setStatus({ kind: '', message: '' })
+    setConfirmOpen(true)
+  }
+
+  async function confirmRequest() {
+    if (disabled) return
+
     setBusy(true)
     setStatus({ kind: '', message: '' })
 
@@ -54,6 +79,7 @@ export default function PrivateCoachingRequestForm({ coaches, hasPendingRequest 
         return
       }
 
+      setConfirmOpen(false)
       setStatus({ kind: 'success', message: 'Request sent. Your sessions will be available after payment confirmation.' })
       router.refresh()
     } catch (error: any) {
@@ -64,87 +90,104 @@ export default function PrivateCoachingRequestForm({ coaches, hasPendingRequest 
   }
 
   return (
-    <form onSubmit={submit} className="space-y-4">
-      {coaches.length === 0 ? (
-        <InlineAlert variant="warning" title="No head coach available">
-          No head coach profile was found yet. Please contact ATOM reception.
-        </InlineAlert>
-      ) : null}
+    <>
+      <form onSubmit={submit} className="space-y-4">
+        {coaches.length === 0 ? (
+          <InlineAlert variant="warning" title="No head coach available">
+            No head coach profile was found yet. Please contact ATOM reception.
+          </InlineAlert>
+        ) : null}
 
-      {hasPendingRequest ? (
-        <InlineAlert variant="warning" title="Payment pending">
-          You already have a private coaching request waiting for payment confirmation.
-        </InlineAlert>
-      ) : null}
+        {hasPendingRequest ? (
+          <InlineAlert variant="warning" title="Payment pending">
+            You already have a private coaching request waiting for payment confirmation.
+          </InlineAlert>
+        ) : null}
 
-      <div className="grid gap-4 md:grid-cols-2">
-        <Select
-          label="Coach"
-          value={coachId}
-          onChange={(event) => setCoachId(event.target.value)}
-          disabled={busy || hasPendingRequest || coaches.length <= 1}
-        >
-          {coaches.map((coach) => (
-            <option key={coach.user_id} value={coach.user_id}>
-              {coach.full_name}
-            </option>
-          ))}
-        </Select>
+        <div className="grid gap-4 md:grid-cols-2">
+          <Select
+            label="Coach"
+            value={coachId}
+            onChange={(event) => setCoachId(event.target.value)}
+            disabled={busy || hasPendingRequest || coaches.length <= 1}
+          >
+            {coaches.map((coach) => (
+              <option key={coach.user_id} value={coach.user_id}>
+                {coach.full_name}
+              </option>
+            ))}
+          </Select>
 
-        <Select
-          label="Payment method"
-          value={paymentMethod}
-          onChange={(event) => setPaymentMethod(event.target.value as PrivateCoachingPaymentMethod)}
-          disabled={busy || hasPendingRequest}
-        >
-          <option value="cash">Cash at reception</option>
-          <option value="instapay">Instapay</option>
-        </Select>
-      </div>
+          <Select
+            label="Payment method"
+            value={paymentMethod}
+            onChange={(event) => setPaymentMethod(event.target.value as PrivateCoachingPaymentMethod)}
+            disabled={busy || hasPendingRequest}
+          >
+            <option value="cash">Cash at reception</option>
+            <option value="instapay">Instapay</option>
+          </Select>
+        </div>
 
-      <div className="grid gap-3 md:grid-cols-3">
-        {PRIVATE_COACHING_PACKAGES.map((item) => {
-          const active = item.sessions === sessions
-          return (
-            <button
-              key={item.sessions}
-              type="button"
-              onClick={() => setSessions(item.sessions)}
-              disabled={busy || hasPendingRequest}
-              className={[
-                'rounded-3xl border p-4 text-left shadow-soft transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
-                active ? 'border-black bg-black text-white' : 'border-[hsl(var(--border))] bg-white text-black hover:bg-[hsl(var(--bg))]',
-                busy || hasPendingRequest ? 'opacity-60' : '',
-              ].filter(Boolean).join(' ')}
-            >
-              <div className="text-sm font-semibold">{item.label}</div>
-              <div className="mt-2 text-xl font-semibold tracking-tight">{formatPrivateCoachingMoney(item.amountCents)}</div>
-              {item.highlight ? <div className={active ? 'mt-2 text-xs text-white/80' : 'mt-2 text-xs text-[hsl(var(--muted))]'}>{item.highlight}</div> : null}
-            </button>
-          )
-        })}
-      </div>
+        <div className="grid gap-3 md:grid-cols-3">
+          {PRIVATE_COACHING_PACKAGES.map((item) => {
+            const active = item.sessions === sessions
+            return (
+              <button
+                key={item.sessions}
+                type="button"
+                onClick={() => setSessions(item.sessions)}
+                disabled={busy || hasPendingRequest}
+                className={[
+                  'rounded-3xl border p-4 text-left shadow-soft transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
+                  active ? 'border-black bg-black text-white' : 'border-[hsl(var(--border))] bg-white text-black hover:bg-[hsl(var(--bg))]',
+                  busy || hasPendingRequest ? 'opacity-60' : '',
+                ].filter(Boolean).join(' ')}
+              >
+                <div className="text-sm font-semibold">{item.label}</div>
+                <div className="mt-2 text-xl font-semibold tracking-tight">{formatPrivateCoachingMoney(item.amountCents)}</div>
+                {item.highlight ? <div className={active ? 'mt-2 text-xs text-white/80' : 'mt-2 text-xs text-[hsl(var(--muted))]'}>{item.highlight}</div> : null}
+              </button>
+            )
+          })}
+        </div>
 
-      <div className="rounded-3xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] p-4 text-sm">
-        <div className="font-semibold">Payment instructions</div>
-        {paymentMethod === 'instapay' ? (
-          <p className="mt-1 text-[hsl(var(--muted))]">
-            Pay {formatPrivateCoachingMoney(selectedPackage.amountCents)} by Instapay to <span className="font-semibold text-black">{PRIVATE_COACHING_INSTAPAY_NUMBER}</span>. Your sessions unlock after the head coach confirms the payment.
-          </p>
-        ) : (
-          <p className="mt-1 text-[hsl(var(--muted))]">
-            Pay {formatPrivateCoachingMoney(selectedPackage.amountCents)} by cash at reception. Your sessions unlock after the head coach confirms the payment.
-          </p>
-        )}
-      </div>
+        <div className="rounded-3xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] p-4 text-sm">
+          <div className="font-semibold">Payment instructions</div>
+          {paymentMethod === 'instapay' ? (
+            <p className="mt-1 text-[hsl(var(--muted))]">
+              Pay {formatPrivateCoachingMoney(selectedPackage.amountCents)} by Instapay to <span className="font-semibold text-black">{PRIVATE_COACHING_INSTAPAY_NUMBER}</span>. Your sessions unlock after the head coach confirms the payment.
+            </p>
+          ) : (
+            <p className="mt-1 text-[hsl(var(--muted))]">
+              Pay {formatPrivateCoachingMoney(selectedPackage.amountCents)} by cash at reception. Your sessions unlock after the head coach confirms the payment.
+            </p>
+          )}
+        </div>
 
-      {status.message ? (
-        <InlineAlert variant={status.kind === 'error' ? 'error' : 'success'}>{status.message}</InlineAlert>
-      ) : null}
+        {status.message ? (
+          <InlineAlert variant={status.kind === 'error' ? 'error' : 'success'}>{status.message}</InlineAlert>
+        ) : null}
 
-      <Button type="submit" disabled={disabled} loading={busy} loadingText="Sending…">
-        Request private lesson
-      </Button>
-    </form>
+        <Button type="submit" disabled={disabled} loading={busy} loadingText="Sending…">
+          Request private lesson
+        </Button>
+      </form>
+
+      <ConfirmActionModal
+        open={confirmOpen}
+        title="Confirm private coaching request"
+        description="Please review the package and payment method before sending this request."
+        confirmLabel="Confirm request"
+        pendingLabel="Sending…"
+        pending={busy}
+        summaryItems={requestSummaryItems}
+        warning="This will create a payment pending private coaching request. Tokens are created only after payment confirmation."
+        onCancel={() => {
+          if (!busy) setConfirmOpen(false)
+        }}
+        onConfirm={confirmRequest}
+      />
+    </>
   )
 }
