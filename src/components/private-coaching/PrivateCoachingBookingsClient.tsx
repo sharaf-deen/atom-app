@@ -4,6 +4,7 @@ import * as React from 'react'
 import { useRouter } from 'next/navigation'
 import Button from '@/components/ui/Button'
 import InlineAlert from '@/components/ui/InlineAlert'
+import ConfirmActionModal, { type ConfirmActionSummaryItem } from '@/components/ui/ConfirmActionModal'
 import {
   formatPrivateCoachingSlotTime,
   privateCoachingBookingStatusLabel,
@@ -65,10 +66,39 @@ function statusCount(rows: BookingRow[], status: string) {
   return rows.filter((row) => row.status === status).length
 }
 
+function slotTimeLabel(startTime: string, endTime: string) {
+  return `${formatPrivateCoachingSlotTime(startTime)} - ${formatPrivateCoachingSlotTime(endTime)}`
+}
+
+function actionSummaryItems(row: BookingRow | null, action: 'complete' | 'cancel' | ''): ConfirmActionSummaryItem[] {
+  if (!row || !action) return []
+
+  return [
+    { label: 'Member', value: row.memberName },
+    { label: 'Member info', value: row.memberMeta || '—' },
+    { label: 'Coach', value: row.coachName },
+    { label: 'Date', value: formatSlotDate(row.slotDate) },
+    { label: 'Time', value: slotTimeLabel(row.startTime, row.endTime) },
+    { label: 'Current status', value: privateCoachingBookingStatusLabel(row.status) },
+    { label: 'Booked', value: formatDateTime(row.bookedAt) },
+    { label: 'Note', value: row.note || '—' },
+    {
+      label: 'Token impact',
+      value: action === 'complete' ? 'Token stays consumed' : '1 token will be returned to the member',
+    },
+    {
+      label: 'Booking impact',
+      value: action === 'complete' ? 'Booking will be marked completed' : 'Booking will be cancelled',
+    },
+  ]
+}
+
 export default function PrivateCoachingBookingsClient({ rows }: Props) {
   const router = useRouter()
   const [busyId, setBusyId] = React.useState('')
   const [busyAction, setBusyAction] = React.useState<'complete' | 'cancel' | ''>('')
+  const [confirmRow, setConfirmRow] = React.useState<BookingRow | null>(null)
+  const [confirmAction, setConfirmAction] = React.useState<'complete' | 'cancel' | ''>('')
   const [filter, setFilter] = React.useState<(typeof STATUS_FILTERS)[number]['value']>('all')
   const [status, setStatus] = React.useState<{ kind: 'success' | 'error' | ''; message: string }>({ kind: '', message: '' })
 
@@ -77,16 +107,25 @@ export default function PrivateCoachingBookingsClient({ rows }: Props) {
     return rows.filter((row) => row.status === filter)
   }, [filter, rows])
 
-  async function completeBooking(id: string) {
-    const ok = window.confirm('Mark this private coaching session as completed?')
-    if (!ok) return
+  function openConfirm(row: BookingRow, action: 'complete' | 'cancel') {
+    setStatus({ kind: '', message: '' })
+    setConfirmRow(row)
+    setConfirmAction(action)
+  }
 
-    setBusyId(id)
+  function closeConfirm() {
+    if (busyId) return
+    setConfirmRow(null)
+    setConfirmAction('')
+  }
+
+  async function completeBooking(row: BookingRow) {
+    setBusyId(row.id)
     setBusyAction('complete')
     setStatus({ kind: '', message: '' })
 
     try {
-      const res = await fetch(`/api/private-coaching/bookings/${encodeURIComponent(id)}/complete`, {
+      const res = await fetch(`/api/private-coaching/bookings/${encodeURIComponent(row.id)}/complete`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
       })
@@ -95,6 +134,8 @@ export default function PrivateCoachingBookingsClient({ rows }: Props) {
         setStatus({ kind: 'error', message: json?.details || json?.error || 'Could not mark booking as completed.' })
         return
       }
+      setConfirmRow(null)
+      setConfirmAction('')
       setStatus({ kind: 'success', message: 'Session marked as completed.' })
       router.refresh()
     } catch (error: any) {
@@ -105,16 +146,13 @@ export default function PrivateCoachingBookingsClient({ rows }: Props) {
     }
   }
 
-  async function cancelBooking(id: string) {
-    const ok = window.confirm('Cancel this private coaching booking? The member token will be returned.')
-    if (!ok) return
-
-    setBusyId(id)
+  async function cancelBooking(row: BookingRow) {
+    setBusyId(row.id)
     setBusyAction('cancel')
     setStatus({ kind: '', message: '' })
 
     try {
-      const res = await fetch(`/api/private-coaching/bookings/${encodeURIComponent(id)}/cancel`, {
+      const res = await fetch(`/api/private-coaching/bookings/${encodeURIComponent(row.id)}/cancel`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
       })
@@ -123,6 +161,8 @@ export default function PrivateCoachingBookingsClient({ rows }: Props) {
         setStatus({ kind: 'error', message: json?.details || json?.error || 'Could not cancel booking.' })
         return
       }
+      setConfirmRow(null)
+      setConfirmAction('')
       setStatus({ kind: 'success', message: 'Booking cancelled. The member token has been returned.' })
       router.refresh()
     } catch (error: any) {
@@ -224,7 +264,7 @@ export default function PrivateCoachingBookingsClient({ rows }: Props) {
                 <div className="flex w-full flex-col gap-2 lg:w-auto">
                   <Button
                     type="button"
-                    onClick={() => completeBooking(row.id)}
+                    onClick={() => openConfirm(row, 'complete')}
                     disabled={Boolean(busyId)}
                     loading={busyId === row.id && busyAction === 'complete'}
                     loadingText="Saving…"
@@ -235,7 +275,7 @@ export default function PrivateCoachingBookingsClient({ rows }: Props) {
                   <Button
                     type="button"
                     variant="outline"
-                    onClick={() => cancelBooking(row.id)}
+                    onClick={() => openConfirm(row, 'cancel')}
                     disabled={Boolean(busyId)}
                     loading={busyId === row.id && busyAction === 'cancel'}
                     loadingText="Cancelling…"
@@ -253,6 +293,33 @@ export default function PrivateCoachingBookingsClient({ rows }: Props) {
           </div>
         ))}
       </div>
+
+      <ConfirmActionModal
+        open={Boolean(confirmRow && confirmAction)}
+        title={confirmAction === 'cancel' ? 'Cancel private coaching booking?' : 'Mark private coaching session completed?'}
+        description={
+          confirmAction === 'cancel'
+            ? 'Please confirm before cancelling this private coaching booking.'
+            : 'Please confirm that this private coaching session has been completed.'
+        }
+        confirmLabel={confirmAction === 'cancel' ? 'Confirm cancel' : 'Confirm completed'}
+        pendingLabel={confirmAction === 'cancel' ? 'Cancelling…' : 'Saving…'}
+        pending={Boolean(confirmRow && busyId === confirmRow.id)}
+        tone={confirmAction === 'cancel' ? 'destructive' : 'default'}
+        summaryItems={actionSummaryItems(confirmRow, confirmAction)}
+        warning={
+          confirmAction === 'cancel'
+            ? 'Cancelling returns 1 private coaching token to the member.'
+            : 'Completed sessions keep the token consumed and cannot be returned by this action.'
+        }
+        onCancel={closeConfirm}
+        onConfirm={() => {
+          if (!confirmRow) return undefined
+          if (confirmAction === 'cancel') return cancelBooking(confirmRow)
+          if (confirmAction === 'complete') return completeBooking(confirmRow)
+          return undefined
+        }}
+      />
     </div>
   )
 }
