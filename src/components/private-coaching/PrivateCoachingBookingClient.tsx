@@ -4,6 +4,7 @@ import * as React from 'react'
 import { useRouter } from 'next/navigation'
 import Button from '@/components/ui/Button'
 import InlineAlert from '@/components/ui/InlineAlert'
+import ConfirmActionModal, { type ConfirmActionSummaryItem } from '@/components/ui/ConfirmActionModal'
 import {
   formatPrivateCoachingSlotTime,
   privateCoachingBookingStatusLabel,
@@ -72,9 +73,29 @@ function bookingStatusClass(status: string) {
   return 'border-slate-200 bg-slate-50 text-slate-700'
 }
 
+function slotTimeLabel(startTime: string, endTime: string) {
+  return `${formatPrivateCoachingSlotTime(startTime)} - ${formatPrivateCoachingSlotTime(endTime)}`
+}
+
+function bookSlotSummaryItems(slot: AvailableSlotRow | null, totalRemaining: number): ConfirmActionSummaryItem[] {
+  if (!slot) return []
+
+  return [
+    { label: 'Coach', value: slot.coachName },
+    { label: 'Date', value: formatSlotDate(slot.slotDate) },
+    { label: 'Time', value: slotTimeLabel(slot.startTime, slot.endTime) },
+    { label: 'Note', value: slot.note || '—' },
+    { label: 'Current tokens', value: totalRemaining },
+    { label: 'Token impact', value: '1 token will be used' },
+    { label: 'Remaining after booking', value: Math.max(totalRemaining - 1, 0) },
+    { label: 'Booking status', value: 'Booked' },
+  ]
+}
+
 export default function PrivateCoachingBookingClient({ totalRemaining, availableSlots, bookings }: Props) {
   const router = useRouter()
   const [busySlotId, setBusySlotId] = React.useState('')
+  const [confirmBookSlot, setConfirmBookSlot] = React.useState<AvailableSlotRow | null>(null)
   const [status, setStatus] = React.useState<{ kind: 'success' | 'error' | ''; message: string }>({ kind: '', message: '' })
   const [bookingFilter, setBookingFilter] = React.useState<(typeof BOOKING_FILTERS)[number]['value']>('all')
 
@@ -83,12 +104,12 @@ export default function PrivateCoachingBookingClient({ totalRemaining, available
     return bookings.filter((booking) => booking.status === bookingFilter)
   }, [bookingFilter, bookings])
 
-  async function bookSlot(slotId: string) {
-    setBusySlotId(slotId)
+  async function bookSlot(slot: AvailableSlotRow) {
+    setBusySlotId(slot.id)
     setStatus({ kind: '', message: '' })
 
     try {
-      const res = await fetch(`/api/private-coaching/slots/${encodeURIComponent(slotId)}/book`, {
+      const res = await fetch(`/api/private-coaching/slots/${encodeURIComponent(slot.id)}/book`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
       })
@@ -97,6 +118,7 @@ export default function PrivateCoachingBookingClient({ totalRemaining, available
         setStatus({ kind: 'error', message: json?.details || json?.error || 'Could not book this slot.' })
         return
       }
+      setConfirmBookSlot(null)
       setStatus({ kind: 'success', message: 'Private coaching slot booked. One token has been used.' })
       router.refresh()
     } catch (error: any) {
@@ -145,7 +167,7 @@ export default function PrivateCoachingBookingClient({ totalRemaining, available
                   </div>
                   <Button
                     type="button"
-                    onClick={() => bookSlot(slot.id)}
+                    onClick={() => setConfirmBookSlot(slot)}
                     loading={busySlotId === slot.id}
                     loadingText="Booking…"
                     disabled={Boolean(busySlotId)}
@@ -229,6 +251,23 @@ export default function PrivateCoachingBookingClient({ totalRemaining, available
           </div>
         )}
       </div>
+
+      <ConfirmActionModal
+        open={Boolean(confirmBookSlot)}
+        title="Confirm private coaching booking"
+        description="Please review the slot before booking it."
+        confirmLabel="Confirm booking"
+        pendingLabel="Booking…"
+        pending={Boolean(confirmBookSlot && busySlotId === confirmBookSlot.id)}
+        summaryItems={bookSlotSummaryItems(confirmBookSlot, totalRemaining)}
+        warning="This booking will use 1 private coaching token."
+        onCancel={() => {
+          if (!busySlotId) setConfirmBookSlot(null)
+        }}
+        onConfirm={() => {
+          if (confirmBookSlot) return bookSlot(confirmBookSlot)
+        }}
+      />
     </div>
   )
 }

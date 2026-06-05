@@ -4,6 +4,7 @@ import * as React from 'react'
 import { useRouter } from 'next/navigation'
 import Button from '@/components/ui/Button'
 import InlineAlert from '@/components/ui/InlineAlert'
+import ConfirmActionModal, { type ConfirmActionSummaryItem } from '@/components/ui/ConfirmActionModal'
 import {
   formatPrivateCoachingMoney,
   privateCoachingPaymentMethodLabel,
@@ -46,17 +47,35 @@ function statusClass(status: string) {
   return 'border-slate-200 bg-slate-50 text-slate-700'
 }
 
+function paymentSummaryItems(row: RequestRow | null): ConfirmActionSummaryItem[] {
+  if (!row) return []
+
+  return [
+    { label: 'Member', value: row.memberName },
+    { label: 'Member info', value: row.memberMeta || '—' },
+    { label: 'Coach', value: row.coachName },
+    { label: 'Package', value: `${row.packageSessions} session(s)` },
+    { label: 'Amount', value: formatPrivateCoachingMoney(row.amountCents) },
+    { label: 'Payment method', value: privateCoachingPaymentMethodLabel(row.paymentMethod) },
+    { label: 'Current status', value: privateCoachingStatusLabel(row.status) },
+    { label: 'Requested', value: formatDateTime(row.createdAt) },
+    { label: 'Token impact', value: `${row.packageSessions} active token(s) will be created` },
+    { label: 'Payment impact', value: 'Request becomes active after confirmation' },
+  ]
+}
+
 export default function PrivateCoachingAdminClient({ rows }: Props) {
   const router = useRouter()
   const [busyId, setBusyId] = React.useState('')
+  const [confirmPaymentRow, setConfirmPaymentRow] = React.useState<RequestRow | null>(null)
   const [status, setStatus] = React.useState<{ kind: 'success' | 'error' | ''; message: string }>({ kind: '', message: '' })
 
-  async function confirmPayment(id: string) {
-    setBusyId(id)
+  async function confirmPayment(row: RequestRow) {
+    setBusyId(row.id)
     setStatus({ kind: '', message: '' })
 
     try {
-      const res = await fetch(`/api/private-coaching/requests/${encodeURIComponent(id)}/confirm-payment`, {
+      const res = await fetch(`/api/private-coaching/requests/${encodeURIComponent(row.id)}/confirm-payment`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
       })
@@ -65,6 +84,7 @@ export default function PrivateCoachingAdminClient({ rows }: Props) {
         setStatus({ kind: 'error', message: json?.details || json?.error || 'Could not confirm payment.' })
         return
       }
+      setConfirmPaymentRow(null)
       setStatus({ kind: 'success', message: 'Payment confirmed. Sessions are now active for the member.' })
       router.refresh()
     } catch (error: any) {
@@ -124,7 +144,7 @@ export default function PrivateCoachingAdminClient({ rows }: Props) {
               {row.status === 'payment_pending' ? (
                 <Button
                   type="button"
-                  onClick={() => confirmPayment(row.id)}
+                  onClick={() => setConfirmPaymentRow(row)}
                   disabled={Boolean(busyId)}
                   loading={busyId === row.id}
                   loadingText="Confirming…"
@@ -141,6 +161,23 @@ export default function PrivateCoachingAdminClient({ rows }: Props) {
           </div>
         ))}
       </div>
+
+      <ConfirmActionModal
+        open={Boolean(confirmPaymentRow)}
+        title="Confirm private coaching payment"
+        description="Please confirm that the payment was received before activating private coaching tokens."
+        confirmLabel="Confirm payment"
+        pendingLabel="Confirming…"
+        pending={Boolean(confirmPaymentRow && busyId === confirmPaymentRow.id)}
+        summaryItems={paymentSummaryItems(confirmPaymentRow)}
+        warning="This action creates active private coaching tokens for the member."
+        onCancel={() => {
+          if (!busyId) setConfirmPaymentRow(null)
+        }}
+        onConfirm={() => {
+          if (confirmPaymentRow) return confirmPayment(confirmPaymentRow)
+        }}
+      />
     </div>
   )
 }

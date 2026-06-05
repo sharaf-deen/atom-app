@@ -4,6 +4,7 @@ import * as React from 'react'
 import { useRouter } from 'next/navigation'
 import Button from '@/components/ui/Button'
 import InlineAlert from '@/components/ui/InlineAlert'
+import ConfirmActionModal, { type ConfirmActionSummaryItem } from '@/components/ui/ConfirmActionModal'
 import {
   formatPrivateCoachingSlotTime,
   privateCoachingSlotStatusLabel,
@@ -55,6 +56,23 @@ function statusClass(status: string) {
   return 'border-slate-200 bg-slate-50 text-slate-700'
 }
 
+function slotTimeLabel(startTime: string, endTime: string) {
+  return `${formatPrivateCoachingSlotTime(startTime)} - ${formatPrivateCoachingSlotTime(endTime)}`
+}
+
+function cancelSlotSummaryItems(row: SlotRow | null): ConfirmActionSummaryItem[] {
+  if (!row) return []
+
+  return [
+    { label: 'Coach', value: row.coachName },
+    { label: 'Date', value: formatSlotDate(row.slotDate) },
+    { label: 'Time', value: slotTimeLabel(row.startTime, row.endTime) },
+    { label: 'Current status', value: privateCoachingSlotStatusLabel(row.status) },
+    { label: 'Note', value: row.note || '—' },
+    { label: 'Booking impact', value: 'This available slot will no longer be bookable' },
+  ]
+}
+
 export default function PrivateCoachingSlotsClient({ rows, coaches, canChooseCoach, defaultCoachId }: Props) {
   const router = useRouter()
   const [coachId, setCoachId] = React.useState(defaultCoachId || coaches[0]?.user_id || '')
@@ -64,10 +82,30 @@ export default function PrivateCoachingSlotsClient({ rows, coaches, canChooseCoa
   const [note, setNote] = React.useState('')
   const [busy, setBusy] = React.useState(false)
   const [busyCancelId, setBusyCancelId] = React.useState('')
+  const [confirmCreateOpen, setConfirmCreateOpen] = React.useState(false)
+  const [confirmCancelRow, setConfirmCancelRow] = React.useState<SlotRow | null>(null)
   const [status, setStatus] = React.useState<{ kind: 'success' | 'error' | ''; message: string }>({ kind: '', message: '' })
 
-  async function createSlot(event: React.FormEvent<HTMLFormElement>) {
+  const selectedCoach = coaches.find((coach) => coach.user_id === coachId)
+  const createSlotSummaryItems: ConfirmActionSummaryItem[] = [
+    { label: 'Coach', value: selectedCoach?.full_name || '—' },
+    { label: 'Date', value: formatSlotDate(slotDate) },
+    { label: 'Time', value: slotTimeLabel(startTime, endTime) },
+    { label: 'Note', value: note.trim() || '—' },
+    { label: 'Status impact', value: 'Slot will be available for members with active private coaching tokens' },
+    { label: 'Token impact', value: 'No token is consumed until a member books this slot' },
+  ]
+
+  function handleCreateSlotSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
+    if (busy || !coachId) return
+    setStatus({ kind: '', message: '' })
+    setConfirmCreateOpen(true)
+  }
+
+  async function createSlot() {
+    if (busy || !coachId) return
+
     setBusy(true)
     setStatus({ kind: '', message: '' })
 
@@ -88,6 +126,7 @@ export default function PrivateCoachingSlotsClient({ rows, coaches, canChooseCoa
         setStatus({ kind: 'error', message: json?.details || json?.error || 'Could not create slot.' })
         return
       }
+      setConfirmCreateOpen(false)
       setNote('')
       setStatus({ kind: 'success', message: 'Availability slot created.' })
       router.refresh()
@@ -98,12 +137,12 @@ export default function PrivateCoachingSlotsClient({ rows, coaches, canChooseCoa
     }
   }
 
-  async function cancelSlot(id: string) {
-    setBusyCancelId(id)
+  async function cancelSlot(row: SlotRow) {
+    setBusyCancelId(row.id)
     setStatus({ kind: '', message: '' })
 
     try {
-      const res = await fetch(`/api/private-coaching/slots/${encodeURIComponent(id)}/cancel`, {
+      const res = await fetch(`/api/private-coaching/slots/${encodeURIComponent(row.id)}/cancel`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
       })
@@ -112,6 +151,7 @@ export default function PrivateCoachingSlotsClient({ rows, coaches, canChooseCoa
         setStatus({ kind: 'error', message: json?.details || json?.error || 'Could not cancel slot.' })
         return
       }
+      setConfirmCancelRow(null)
       setStatus({ kind: 'success', message: 'Slot cancelled.' })
       router.refresh()
     } catch (error: any) {
@@ -125,7 +165,7 @@ export default function PrivateCoachingSlotsClient({ rows, coaches, canChooseCoa
     <div className="space-y-5">
       {status.message ? <InlineAlert variant={status.kind === 'error' ? 'error' : 'success'}>{status.message}</InlineAlert> : null}
 
-      <form onSubmit={createSlot} className="rounded-3xl border border-[hsl(var(--border))] bg-white p-4 shadow-soft">
+      <form onSubmit={handleCreateSlotSubmit} className="rounded-3xl border border-[hsl(var(--border))] bg-white p-4 shadow-soft">
         <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
           <div>
             <h4 className="text-lg font-semibold tracking-tight">Add availability</h4>
@@ -237,7 +277,7 @@ export default function PrivateCoachingSlotsClient({ rows, coaches, canChooseCoa
                 <Button
                   type="button"
                   variant="outline"
-                  onClick={() => cancelSlot(row.id)}
+                  onClick={() => setConfirmCancelRow(row)}
                   loading={busyCancelId === row.id}
                   loadingText="Cancelling…"
                   disabled={Boolean(busyCancelId)}
@@ -254,6 +294,39 @@ export default function PrivateCoachingSlotsClient({ rows, coaches, canChooseCoa
           </div>
         ))}
       </div>
+
+      <ConfirmActionModal
+        open={confirmCreateOpen}
+        title="Confirm availability slot"
+        description="Please review the slot before making it available to members."
+        confirmLabel="Confirm & create"
+        pendingLabel="Saving…"
+        pending={busy}
+        summaryItems={createSlotSummaryItems}
+        warning="Members with active private coaching tokens will be able to book this slot."
+        onCancel={() => {
+          if (!busy) setConfirmCreateOpen(false)
+        }}
+        onConfirm={createSlot}
+      />
+
+      <ConfirmActionModal
+        open={Boolean(confirmCancelRow)}
+        title="Cancel availability slot?"
+        description="Please confirm before cancelling this available private coaching slot."
+        confirmLabel="Confirm cancel"
+        pendingLabel="Cancelling…"
+        pending={Boolean(confirmCancelRow && busyCancelId === confirmCancelRow.id)}
+        tone="destructive"
+        summaryItems={cancelSlotSummaryItems(confirmCancelRow)}
+        warning="The slot will no longer be visible for new member bookings."
+        onCancel={() => {
+          if (!busyCancelId) setConfirmCancelRow(null)
+        }}
+        onConfirm={() => {
+          if (confirmCancelRow) return cancelSlot(confirmCancelRow)
+        }}
+      />
     </div>
   )
 }
