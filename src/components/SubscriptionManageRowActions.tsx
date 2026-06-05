@@ -9,6 +9,7 @@ import Input from '@/components/ui/Input'
 import Select from '@/components/ui/Select'
 import SettleDueDialog from '@/components/SettleDueDialog'
 import SaveButton from '@/components/forms/SaveButton'
+import ConfirmActionModal, { type ConfirmActionSummaryItem } from '@/components/ui/ConfirmActionModal'
 import { freezePlanSummaryLabel, getFreezeTokenAllowance, toInclusiveFreezeEnd, type SubscriptionFreezeHistoryRow } from '@/lib/subscriptionFreeze'
 import { cairoTodayDateOnly } from '@/lib/cairoTime'
 // Note: we intentionally avoid depending on a specific Alert component API here.
@@ -19,6 +20,12 @@ type SubscriptionType = 'time' | 'sessions'
 type PaymentMethod = 'cash' | 'instapay' | 'card' | 'bank_transfer'
 
 type IsoDateOnly = string
+
+type PendingConfirmation =
+  | { kind: 'subscription-update' }
+  | { kind: 'subscription-delete' }
+  | { kind: 'freeze-save' }
+  | { kind: 'freeze-delete'; freezeId: string }
 
 function isISODateOnly(s?: string | null): s is IsoDateOnly {
   return !!s && /^\d{4}-\d{2}-\d{2}$/.test(s)
@@ -32,6 +39,38 @@ function normalizePaymentMethod(v?: string | null): PaymentMethod {
   const s = String(v ?? '').trim().toLowerCase()
   if (s === 'instapay' || s === 'card' || s === 'bank_transfer') return s
   return 'cash'
+}
+
+function humanPaymentMethod(v?: string | null) {
+  const s = normalizePaymentMethod(v)
+  if (s === 'instapay') return 'Instapay'
+  if (s === 'card') return 'Card'
+  if (s === 'bank_transfer') return 'Bank transfer'
+  return 'Cash'
+}
+
+function humanPlan(value?: string | null, stype?: SubscriptionType) {
+  if (stype === 'sessions' || value === 'sessions') return 'Per sessions'
+  if (value === '1m') return '1 month'
+  if (value === '3m') return '3 months'
+  if (value === '6m') return '6 months'
+  if (value === '12m') return '12 months'
+  return value ? String(value) : '—'
+}
+
+function formatEGP(value: number | string | null | undefined) {
+  const amount = typeof value === 'number' ? value : Number(value ?? '')
+  if (!Number.isFinite(amount)) return '—'
+
+  try {
+    return new Intl.NumberFormat('en-EG', {
+      style: 'currency',
+      currency: 'EGP',
+      maximumFractionDigits: 2,
+    }).format(amount)
+  } catch {
+    return `${amount.toFixed(2)} EGP`
+  }
 }
 
 
@@ -111,6 +150,7 @@ export default function SubscriptionManageRowActions({
   const [openEdit, setOpenEdit] = useState(false)
   const [openFreeze, setOpenFreeze] = useState(false)
   const [busy, setBusy] = useState(false)
+  const [pendingConfirmation, setPendingConfirmation] = useState<PendingConfirmation | null>(null)
 
   const [amount, setAmount] = useState<string>(String(sub.amount ?? 0))
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>(() => normalizePaymentMethod(sub.payment_method))
@@ -221,6 +261,83 @@ export default function SubscriptionManageRowActions({
   }, [freezeFrom, freezeTo])
 
   const canEdit = !busy
+
+
+  function validateSubscriptionUpdateForConfirmation() {
+    const amountNum = Number(amount)
+    if (!Number.isFinite(amountNum) || amountNum < 0) {
+      setStatus({ kind: 'error', msg: 'Amount must be a valid number.' })
+      toast.error('Save failed')
+      return false
+    }
+
+    if (isTime) {
+      if (!isISODateOnly(startDate)) {
+        setStatus({ kind: 'error', msg: 'Start date must be YYYY-MM-DD.' })
+        toast.error('Save failed')
+        return false
+      }
+    } else {
+      const st = Number(sessionsTotal)
+      if (!Number.isFinite(st) || st < 1) {
+        setStatus({ kind: 'error', msg: 'Sessions total must be a valid number.' })
+        toast.error('Save failed')
+        return false
+      }
+    }
+
+    return true
+  }
+
+  function requestSubscriptionUpdateConfirmation() {
+    if (busy) return
+    if (!validateSubscriptionUpdateForConfirmation()) return
+    setPendingConfirmation({ kind: 'subscription-update' })
+  }
+
+  function requestSubscriptionDeleteConfirmation() {
+    if (busy) return
+    setPendingConfirmation({ kind: 'subscription-delete' })
+  }
+
+  function validateFreezeForConfirmation() {
+    if (!editingFreezeId && !canCreateFreeze) {
+      setStatus({ kind: 'error', msg: 'Freeze cannot be created for this subscription right now.' })
+      toast.error('Freeze failed')
+      return false
+    }
+
+    if (!isISODateOnly(freezeFrom) || !isISODateOnly(freezeTo)) {
+      setStatus({ kind: 'error', msg: 'Please choose valid dates.' })
+      toast.error('Freeze failed')
+      return false
+    }
+
+    if (freezeFrom > freezeTo) {
+      setStatus({ kind: 'error', msg: 'Freeze end date must be after start date.' })
+      toast.error('Freeze failed')
+      return false
+    }
+
+    if (typeof freezeDurationDays === 'number' && freezeDurationDays > 30) {
+      setStatus({ kind: 'error', msg: 'Each freeze is limited to 30 days maximum.' })
+      toast.error('Freeze failed')
+      return false
+    }
+
+    return true
+  }
+
+  function requestFreezeSaveConfirmation() {
+    if (busy) return
+    if (!validateFreezeForConfirmation()) return
+    setPendingConfirmation({ kind: 'freeze-save' })
+  }
+
+  function requestFreezeDeleteConfirmation(freezeId: string) {
+    if (busy) return
+    setPendingConfirmation({ kind: 'freeze-delete', freezeId })
+  }
 
   async function doUpdate() {
     if (busy) return
@@ -381,7 +498,6 @@ export default function SubscriptionManageRowActions({
 
   async function doFreezeDelete(freezeId: string) {
     if (busy) return
-    if (!confirm('Delete this freeze? The freeze token will be restored.')) return
 
     setBusy(true)
     setStatus({ kind: 'info', msg: 'Deleting freeze…' })
@@ -417,7 +533,6 @@ export default function SubscriptionManageRowActions({
 
   async function doDelete() {
     if (busy) return
-    if (!confirm('Delete this subscription?')) return
 
     setBusy(true)
     setStatus({ kind: 'info', msg: 'Deleting…' })
@@ -452,6 +567,111 @@ export default function SubscriptionManageRowActions({
     { label: 'Card', value: 'card' },
     { label: 'Bank transfer', value: 'bank_transfer' },
   ]
+
+
+  function getConfirmationTitle() {
+    if (pendingConfirmation?.kind === 'subscription-update') return 'Confirm subscription update'
+    if (pendingConfirmation?.kind === 'subscription-delete') return 'Delete subscription?'
+    if (pendingConfirmation?.kind === 'freeze-delete') return 'Delete freeze?'
+    if (pendingConfirmation?.kind === 'freeze-save') return editingFreezeId ? 'Confirm freeze update' : 'Confirm freeze creation'
+    return 'Confirm action'
+  }
+
+  function getConfirmationButtonLabel() {
+    if (pendingConfirmation?.kind === 'subscription-update') return 'Confirm & save'
+    if (pendingConfirmation?.kind === 'subscription-delete') return 'Confirm delete'
+    if (pendingConfirmation?.kind === 'freeze-delete') return 'Confirm delete'
+    if (pendingConfirmation?.kind === 'freeze-save') return editingFreezeId ? 'Confirm update' : 'Confirm freeze'
+    return 'Confirm'
+  }
+
+  function getConfirmationWarning() {
+    if (pendingConfirmation?.kind === 'subscription-delete') return 'This will delete the subscription record if the backend allows it.'
+    if (pendingConfirmation?.kind === 'freeze-delete') return 'Deleting this freeze restores the token and recalculates the subscription end date.'
+    if (pendingConfirmation?.kind === 'freeze-save') return 'Creating or editing a freeze recalculates the subscription end date and can affect access.'
+    return 'This will update subscription/access details once confirmed.'
+  }
+
+  function getConfirmationSummaryItems(): ConfirmActionSummaryItem[] {
+    if (!pendingConfirmation) return []
+
+    if (pendingConfirmation.kind === 'subscription-update') {
+      return [
+        { label: 'Subscription', value: sub.id },
+        { label: 'Current package', value: humanPlan(sub.plan, stype) },
+        { label: 'New package', value: isTime ? humanPlan(plan, stype) : 'Per sessions' },
+        { label: 'Current period', value: `${sub.start_date ?? '—'} → ${sub.end_date ?? '—'}` },
+        { label: 'New start date', value: isTime ? startDate || '—' : sub.start_date ?? '—' },
+        { label: 'New end preview', value: isTime ? previewEnd ?? '—' : sub.end_date ?? '—' },
+        { label: 'Sessions total', value: isTime ? '—' : sessionsTotal || '—' },
+        { label: 'Amount', value: formatEGP(amount) },
+        { label: 'Payment method', value: humanPaymentMethod(paymentMethod) },
+        { label: 'Invoice', value: reissueInvoice ? (emailInvoice ? 'Generate + send by email' : 'Generate PDF') : 'No new invoice' },
+        { label: 'Impact', value: 'Updates member access/subscription details.' },
+      ]
+    }
+
+    if (pendingConfirmation.kind === 'subscription-delete') {
+      return [
+        { label: 'Subscription', value: sub.id },
+        { label: 'Package', value: humanPlan(sub.plan, stype) },
+        { label: 'Status', value: sub.status ?? '—' },
+        { label: 'Period', value: `${sub.start_date ?? '—'} → ${sub.end_date ?? '—'}` },
+        { label: 'Amount', value: formatEGP(sub.amount) },
+        { label: 'Remaining due', value: formatEGP(sub.amount_due ?? 0) },
+        { label: 'Payment method', value: humanPaymentMethod(sub.payment_method) },
+        { label: 'Impact', value: 'Removes this subscription if the backend permits deletion.' },
+      ]
+    }
+
+    if (pendingConfirmation.kind === 'freeze-save') {
+      const isBackdated = isISODateOnly(freezeFrom) && freezeFrom < today
+      return [
+        { label: 'Subscription', value: sub.id },
+        { label: 'Package', value: humanPlan(sub.plan, stype) },
+        { label: 'Subscription period', value: `${sub.start_date ?? '—'} → ${sub.end_date ?? '—'}` },
+        { label: 'Freeze action', value: editingFreezeId ? 'Update existing freeze' : 'Create new freeze' },
+        { label: 'Freeze start', value: freezeFrom || '—' },
+        { label: 'Freeze end', value: freezeTo || '—' },
+        { label: 'Duration', value: typeof freezeDurationDays === 'number' ? `${freezeDurationDays} day(s)` : '—' },
+        { label: 'Backdated', value: isBackdated ? 'Yes' : 'No' },
+        { label: 'Token impact', value: editingFreezeId ? 'Keeps the same token' : 'Consumes 1 freeze token' },
+        { label: 'End date impact', value: typeof freezeDurationDays === 'number' ? `+${freezeDurationDays} day(s), recalculated by server` : 'Recalculated by server' },
+      ]
+    }
+
+    const freezeRow = manageableFreezeHistory.find((row) => row.id === pendingConfirmation.freezeId)
+    return [
+      { label: 'Subscription', value: sub.id },
+      { label: 'Package', value: humanPlan(sub.plan, stype) },
+      { label: 'Freeze start', value: freezeRow?.freeze_from ?? '—' },
+      { label: 'Freeze end', value: toInclusiveFreezeEnd(freezeRow?.freeze_until) ?? '—' },
+      { label: 'Duration', value: typeof freezeRow?.days === 'number' ? `${freezeRow.days} day(s)` : '—' },
+      { label: 'Token impact', value: 'Restores 1 freeze token' },
+      { label: 'End date impact', value: 'Subscription end date will be recalculated by server' },
+    ]
+  }
+
+  async function confirmPendingAction() {
+    const action = pendingConfirmation
+    if (!action) return
+
+    setPendingConfirmation(null)
+
+    if (action.kind === 'subscription-update') {
+      await doUpdate()
+      return
+    }
+    if (action.kind === 'subscription-delete') {
+      await doDelete()
+      return
+    }
+    if (action.kind === 'freeze-save') {
+      await doFreezeSave()
+      return
+    }
+    await doFreezeDelete(action.freezeId)
+  }
 
   const planOptions = [
     { label: '1 month', value: '1m' },
@@ -498,7 +718,7 @@ export default function SubscriptionManageRowActions({
       <Button
         size="sm"
         variant="outline"
-        onClick={doDelete}
+        onClick={requestSubscriptionDeleteConfirmation}
         disabled={!canEdit}
         className="border-rose-300 text-rose-700 hover:bg-rose-50"
       >
@@ -620,7 +840,7 @@ export default function SubscriptionManageRowActions({
                 <Button variant="outline" onClick={() => setOpenEdit(false)} disabled={busy}>
                   Cancel
                 </Button>
-                <SaveButton onClick={doUpdate} type="button" loading={busy} disabled={busy} idleLabel="Save" pendingLabel="Saving..." />
+                <SaveButton onClick={requestSubscriptionUpdateConfirmation} type="button" loading={busy} disabled={busy} idleLabel="Save" pendingLabel="Saving..." />
               </div>
             </div>
           </div>
@@ -717,7 +937,7 @@ export default function SubscriptionManageRowActions({
                               <Button type="button" size="sm" variant="outline" onClick={() => startFreezeEdit(row)} disabled={busy}>
                                 Edit
                               </Button>
-                              <Button type="button" size="sm" variant="outline" onClick={() => doFreezeDelete(row.id)} disabled={busy} className="border-rose-300 text-rose-700 hover:bg-rose-50">
+                              <Button type="button" size="sm" variant="outline" onClick={() => requestFreezeDeleteConfirmation(row.id)} disabled={busy} className="border-rose-300 text-rose-700 hover:bg-rose-50">
                                 Delete
                               </Button>
                             </div>
@@ -779,7 +999,7 @@ export default function SubscriptionManageRowActions({
                     Cancel
                   </Button>
                   <SaveButton
-                    onClick={doFreezeSave}
+                    onClick={requestFreezeSaveConfirmation}
                     type="button"
                     loading={busy}
                     disabled={busy || freezeDurationDays === null || (!editingFreezeId && !canCreateFreeze)}
@@ -792,6 +1012,21 @@ export default function SubscriptionManageRowActions({
           </div>
         </div>
       )}
+    
+
+      <ConfirmActionModal
+        open={pendingConfirmation !== null}
+        title={getConfirmationTitle()}
+        description="Please review the summary before confirming."
+        confirmLabel={getConfirmationButtonLabel()}
+        pendingLabel="Saving…"
+        pending={busy}
+        tone={pendingConfirmation?.kind === 'subscription-delete' || pendingConfirmation?.kind === 'freeze-delete' ? 'destructive' : 'default'}
+        summaryItems={getConfirmationSummaryItems()}
+        warning={getConfirmationWarning()}
+        onCancel={() => !busy && setPendingConfirmation(null)}
+        onConfirm={confirmPendingAction}
+      />
     </div>
   )
 }

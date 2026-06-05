@@ -11,6 +11,7 @@ import Select from '@/components/ui/Select'
 import { Card, CardContent } from '@/components/ui/Card'
 import InlineAlert from '@/components/ui/InlineAlert'
 import SaveButton from '@/components/forms/SaveButton'
+import ConfirmActionModal from '@/components/ui/ConfirmActionModal'
 
 export type Plan = '1m' | '3m' | '6m' | '12m' | 'sessions'
 export type SubscriptionPaymentMethod = 'cash' | 'instapay' | 'card' | 'bank_transfer'
@@ -75,6 +76,21 @@ function humanPlan(p: Plan) {
   }
 }
 
+function formatEGP(value: number | string | null | undefined) {
+  const amount = typeof value === 'number' ? value : Number(value ?? '')
+  if (!Number.isFinite(amount)) return '—'
+
+  try {
+    return new Intl.NumberFormat('en-EG', {
+      style: 'currency',
+      currency: 'EGP',
+      maximumFractionDigits: 2,
+    }).format(amount)
+  } catch {
+    return `${amount.toFixed(2)} EGP`
+  }
+}
+
 type StatusKind = '' | 'info' | 'success' | 'error'
 
 export default function SubscribeDialog({
@@ -111,6 +127,7 @@ export default function SubscribeDialog({
   const [amountDue, setAmountDue] = useState<string>('0')
   const [startDate, setStartDate] = useState<string>(defaultStartDate ?? todayLocalDateStr())
   const [busy, setBusy] = useState(false)
+  const [confirmOpen, setConfirmOpen] = useState(false)
   const [status, setStatus] = useState<{ kind: StatusKind; msg: string }>({ kind: '', msg: '' })
 
   useEffect(() => {
@@ -123,6 +140,7 @@ export default function SubscribeDialog({
     setPaymentDate(todayLocalDateStr())
     setAmountDue('0')
     setBusy(false)
+    setConfirmOpen(false)
     setStatus({ kind: '', msg: '' })
   }, [defaultPlan, defaultSessions, defaultStartDate, open])
 
@@ -131,14 +149,14 @@ export default function SubscribeDialog({
     const prev = document.body.style.overflow
     document.body.style.overflow = 'hidden'
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && !busy) setOpen(false)
+      if (e.key === 'Escape' && !busy && !confirmOpen) setOpen(false)
     }
     window.addEventListener('keydown', onKey)
     return () => {
       document.body.style.overflow = prev
       window.removeEventListener('keydown', onKey)
     }
-  }, [open, busy])
+  }, [open, busy, confirmOpen])
 
   const fullName = useMemo(() => {
     const n = [member.first_name ?? '', member.last_name ?? ''].join(' ').trim()
@@ -182,6 +200,19 @@ export default function SubscribeDialog({
     const base = j?.details || j?.error || 'Failed to save subscription'
     const hint = j?.hint ? ` (${String(j.hint)})` : ''
     return String(base) + hint
+  }
+
+
+  function requestConfirmation() {
+    if (busy || status.kind === 'success') return
+
+    if (!canSubmit) {
+      setStatus({ kind: 'error', msg: 'Please check fields (plan, start date / sessions, amount).' })
+      toast.error('Please check fields')
+      return
+    }
+
+    setConfirmOpen(true)
   }
 
   async function submit() {
@@ -272,7 +303,7 @@ export default function SubscribeDialog({
 
       {open && (
         <>
-          <div className="fixed inset-0 z-[100] bg-black/60" onClick={() => !busy && setOpen(false)} aria-hidden="true" />
+          <div className="fixed inset-0 z-[100] bg-black/60" onClick={() => !busy && !confirmOpen && setOpen(false)} aria-hidden="true" />
 
           <div className="fixed inset-0 z-[101] flex items-center justify-center p-4">
             <Card className="w-[92vw] max-w-md">
@@ -409,7 +440,7 @@ export default function SubscribeDialog({
                   </Button>
                   <SaveButton
                     type="button"
-                    onClick={submit}
+                    onClick={requestConfirmation}
                     loading={busy}
                     disabled={!canSubmit || status.kind === 'success'}
                     idleLabel={mode === 'renew' ? 'Renew / Extend' : 'Create subscription'}
@@ -419,6 +450,33 @@ export default function SubscribeDialog({
               </CardContent>
             </Card>
           </div>
+
+          <ConfirmActionModal
+            open={confirmOpen}
+            title={mode === 'renew' ? 'Confirm subscription renewal' : 'Confirm new subscription'}
+            description="Please review the subscription details before saving."
+            confirmLabel={mode === 'renew' ? 'Confirm renewal' : 'Confirm subscription'}
+            pendingLabel="Saving…"
+            pending={busy}
+            onCancel={() => !busy && setConfirmOpen(false)}
+            onConfirm={async () => {
+              setConfirmOpen(false)
+              await submit()
+            }}
+            summaryItems={[
+              { label: 'Member', value: fullName },
+              { label: 'Package', value: humanPlan(plan) },
+              { label: 'Start date', value: dateOk ? startDate : '—' },
+              { label: 'End date preview', value: previewEnd ?? '—' },
+              { label: 'Sessions', value: plan === 'sessions' ? `${sessions} session(s)` : '—' },
+              { label: 'Paid now', value: formatEGP(amountNum) },
+              { label: 'Remaining due', value: formatEGP(amountDueNum) },
+              { label: 'Payment method', value: humanPaymentMethod(paymentMethod) },
+              { label: 'Payment date', value: paymentDate || '—' },
+              { label: 'Access impact', value: plan === 'sessions' ? 'Creates a sessions pass.' : 'Creates or extends member access dates.' },
+            ]}
+            warning="This will update the member subscription/access once confirmed."
+          />
 
           <div role="dialog" aria-modal="true" aria-label="Create subscription" className="sr-only" />
         </>
