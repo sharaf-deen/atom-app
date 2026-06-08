@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from 'react'
 import Button from '@/components/ui/Button'
+import ConfirmActionModal, { type ConfirmActionSummaryItem } from '@/components/ui/ConfirmActionModal'
 import type { Role } from '@/lib/session'
 
 export type RoleOption = { id: Role; label: string }
@@ -10,6 +11,10 @@ type Props = {
   userId: string
   currentRole: Role
   options: RoleOption[]
+  memberName?: string
+  memberEmail?: string | null
+  memberPhone?: string | null
+  memberId?: string | null
   compact?: boolean
   className?: string
 }
@@ -29,11 +34,22 @@ function isRole(v: unknown): v is Role {
   )
 }
 
-export default function AdminRoleEditor({ userId, currentRole, options, compact, className }: Props) {
+export default function AdminRoleEditor({
+  userId,
+  currentRole,
+  options,
+  memberName,
+  memberEmail,
+  memberPhone,
+  memberId,
+  compact,
+  className,
+}: Props) {
   const initial = (currentRole ?? 'member') as Role
   const [savedRole, setSavedRole] = useState<Role>(initial)
   const [role, setRole] = useState<Role>(initial)
   const [saving, setSaving] = useState(false)
+  const [confirmOpen, setConfirmOpen] = useState(false)
   const [msg, setMsg] = useState<string | null>(null)
   const [isError, setIsError] = useState(false)
 
@@ -67,9 +83,32 @@ export default function AdminRoleEditor({ userId, currentRole, options, compact,
 
   const dirty = role !== savedRole
 
-  async function onSave() {
+  const labelForRole = (value: Role) =>
+    roleOptions.find((option) => option.id === value)?.label ?? value
+
+  const confirmSummaryItems = useMemo<ConfirmActionSummaryItem[]>(
+    () => [
+      { label: 'Member', value: memberName?.trim() || '—' },
+      { label: 'Email', value: memberEmail || '—' },
+      { label: 'Phone', value: memberPhone || '—' },
+      { label: 'Member ID', value: memberId || '—' },
+      { label: 'Current role', value: labelForRole(savedRole) },
+      { label: 'New role', value: labelForRole(role) },
+      { label: 'Access impact', value: 'Role, menus, permissions and app access may change.' },
+      { label: 'Scan/access impact', value: role === 'scan_terminal' ? 'This account will be treated as a scan terminal.' : 'Member/admin access may be affected by this role.' },
+    ],
+    [memberEmail, memberId, memberName, memberPhone, role, roleOptions, savedRole]
+  )
+
+  function onSave() {
+    if (!dirty || saving) return
+    setConfirmOpen(true)
+  }
+
+  async function confirmRoleChange() {
     if (!dirty || saving) return
 
+    setConfirmOpen(false)
     setSaving(true)
     setMsg(null)
     setIsError(false)
@@ -148,6 +187,22 @@ export default function AdminRoleEditor({ userId, currentRole, options, compact,
       {msg ? (
         <span className={`text-[11px] ${isError ? 'text-rose-700' : 'text-emerald-600'}`}>{msg}</span>
       ) : null}
+
+      <ConfirmActionModal
+        open={confirmOpen}
+        title="Confirm member role change"
+        description="Please review the member and role change before saving."
+        confirmLabel="Confirm role change"
+        pendingLabel="Saving…"
+        cancelLabel="Cancel"
+        pending={saving}
+        summaryItems={confirmSummaryItems}
+        warning="Changing a role can affect app menus, permissions, scan access and admin access. Verify the member carefully before confirming."
+        onCancel={() => {
+          if (!saving) setConfirmOpen(false)
+        }}
+        onConfirm={confirmRoleChange}
+      />
     </div>
   )
 }

@@ -240,7 +240,16 @@ export default async function AdminMembersPage({
 
                 <div className={`mt-3 flex flex-col gap-2 border-t border-[hsl(var(--border))] pt-3 sm:flex-row sm:items-center ${canEdit ? 'sm:justify-between' : 'sm:justify-end'}`}>
                   {canEdit ? (
-                    <AdminRoleEditor userId={m.user_id} currentRole={(m.role ?? 'member') as Role} options={roleOptions} compact />
+                    <AdminRoleEditor
+                      userId={m.user_id}
+                      currentRole={(m.role ?? 'member') as Role}
+                      options={roleOptions}
+                      memberName={name}
+                      memberEmail={m.email}
+                      memberPhone={m.phone}
+                      memberId={m.member_id}
+                      compact
+                    />
                   ) : null}
                   <Button asChild variant="outline" size="sm" className="w-full sm:w-auto" href={`/members/${m.user_id}`}>
                     Open
@@ -271,11 +280,11 @@ export default async function AdminMembersPage({
               </tr>
             </thead>
             <tbody>
-              {rows.map((m) => (
-                <tr key={m.user_id} className="odd:bg-[hsl(var(--card))] even:bg-[hsl(var(--bg))]">
-                  <td className="border-t border-[hsl(var(--border))] px-4 py-3">
-                    {`${m.first_name ?? ''} ${m.last_name ?? ''}`.trim() || '—'}
-                  </td>
+              {rows.map((m) => {
+                const name = `${m.first_name ?? ''} ${m.last_name ?? ''}`.trim() || '—'
+                return (
+                  <tr key={m.user_id} className="odd:bg-[hsl(var(--card))] even:bg-[hsl(var(--bg))]">
+                    <td className="border-t border-[hsl(var(--border))] px-4 py-3">{name}</td>
                   <td className="border-t border-[hsl(var(--border))] px-4 py-3">
                     <code className="text-xs">{m.member_id?.trim() || '—'}</code>
                   </td>
@@ -284,7 +293,16 @@ export default async function AdminMembersPage({
                   <td className="border-t border-[hsl(var(--border))] px-4 py-3 text-center">
                     {canEdit ? (
                       <div className="inline-flex justify-center">
-                        <AdminRoleEditor userId={m.user_id} currentRole={(m.role ?? 'member') as Role} options={roleOptions} compact />
+                        <AdminRoleEditor
+                          userId={m.user_id}
+                          currentRole={(m.role ?? 'member') as Role}
+                          options={roleOptions}
+                          memberName={name}
+                          memberEmail={m.email}
+                          memberPhone={m.phone}
+                          memberId={m.member_id}
+                          compact
+                        />
                       </div>
                     ) : (
                       <span className="inline-flex items-center rounded-full border border-[hsl(var(--border))] bg-[hsl(var(--bg))] px-2 py-0.5 text-[11px] font-semibold">
@@ -297,8 +315,9 @@ export default async function AdminMembersPage({
                       Open
                     </Button>
                   </td>
-                </tr>
-              ))}
+                  </tr>
+                )
+              })}
 
               {rows.length === 0 && !error && (
                 <tr>
