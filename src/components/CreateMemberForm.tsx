@@ -7,6 +7,7 @@ import { toast } from 'sonner'
 
 import Button from '@/components/ui/Button'
 import InlineAlert from '@/components/ui/InlineAlert'
+import ConfirmActionModal, { type ConfirmActionSummaryItem } from '@/components/ui/ConfirmActionModal'
 import { cairoToday } from '@/lib/cairoDate'
 
 type NewMemberPayload = {
@@ -76,6 +77,30 @@ function ageFromDob(dob?: string) {
   return age
 }
 
+function formatDateForSummary(dateOnly?: string) {
+  const raw = (dateOnly || '').trim()
+  if (!raw) return '—'
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw
+
+  const date = new Date(`${raw}T00:00:00Z`)
+  if (Number.isNaN(date.getTime())) return raw
+
+  try {
+    return new Intl.DateTimeFormat('en-GB', {
+      timeZone: 'Africa/Cairo',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).format(date)
+  } catch {
+    return raw
+  }
+}
+
+function cleanText(value?: string | null) {
+  return (value || '').trim()
+}
+
 export default function CreateMemberForm({
   initialValues,
 }: {
@@ -94,6 +119,7 @@ export default function CreateMemberForm({
   const [busy, setBusy] = useState(false)
   const [status, setStatus] = useState<Status>({ kind: '', msg: '' })
   const [existingMember, setExistingMember] = useState<ExistingMemberRef | null>(null)
+  const [confirmOpen, setConfirmOpen] = useState(false)
 
   function setDobPart(part: 'day' | 'month' | 'year', value: string) {
     setDobParts((prev) => {
@@ -109,6 +135,7 @@ export default function CreateMemberForm({
     setDobParts(dobPartsFromIso(initialForm.date_of_birth))
     setStatus({ kind: '', msg: '' })
     setExistingMember(null)
+    setConfirmOpen(false)
     submitLockRef.current = false
     setBusy(false)
   }, [initialForm])
@@ -123,6 +150,7 @@ export default function CreateMemberForm({
     setDobParts(dobPartsFromIso(initialForm.date_of_birth))
     setStatus({ kind: '', msg: '' })
     setExistingMember(null)
+    setConfirmOpen(false)
   }
 
   const emailOk = !!(form.email || '').trim()
@@ -130,28 +158,68 @@ export default function CreateMemberForm({
   const ageGroup = age === null ? null : age < 17 ? 'Kid' : 'Adult'
   const dobOk = age !== null // valid + not in future
 
+  const memberSummaryItems = useMemo<ConfirmActionSummaryItem[]>(() => {
+    const firstName = cleanText(form.first_name)
+    const lastName = cleanText(form.last_name)
+    const fullName = [firstName, lastName].filter(Boolean).join(' ')
+    const email = cleanText(form.email).toLowerCase()
+    const phone = cleanText(form.phone)
+
+    const items: ConfirmActionSummaryItem[] = [
+      { label: 'Full name', value: fullName || '—' },
+      { label: 'Email', value: email || '—' },
+      { label: 'Phone', value: phone || '—' },
+      { label: 'Date of birth', value: formatDateForSummary(form.date_of_birth) },
+      {
+        label: 'Age / category',
+        value: dobOk && ageGroup && age !== null ? `${age} years old · ${ageGroup}` : 'Invalid or missing',
+      },
+      { label: 'Role', value: 'member' },
+      { label: 'Invite impact', value: 'Invite email will be sent if this is a new email.' },
+      { label: 'Access impact', value: 'A new member profile will be created for app and scan access.' },
+    ]
+
+    if (form.visitor_trial_id) {
+      items.push({ label: 'Visitor trial', value: 'This visitor trial will be linked to the new member.' })
+    }
+
+    return items
+  }, [age, ageGroup, dobOk, form.date_of_birth, form.email, form.first_name, form.last_name, form.phone, form.visitor_trial_id])
+
+  function buildPayload() {
+    const email = cleanText(form.email).toLowerCase()
+
+    return {
+      email,
+      first_name: cleanText(form.first_name) || undefined,
+      last_name: cleanText(form.last_name) || undefined,
+      phone: cleanText(form.phone) || undefined,
+      date_of_birth: cleanText(form.date_of_birth) || undefined,
+      visitor_trial_id: cleanText(form.visitor_trial_id) || undefined,
+      // aliases camelCase (au cas où on les supporte côté API)
+      firstName: cleanText(form.first_name) || undefined,
+      lastName: cleanText(form.last_name) || undefined,
+      dateOfBirth: cleanText(form.date_of_birth) || undefined,
+    }
+  }
+
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault()
-    if (submitLockRef.current || busy) return
+    if (submitLockRef.current || busy || !emailOk || !dobOk) return
+
+    setExistingMember(null)
+    setConfirmOpen(true)
+  }
+
+  async function createMemberConfirmed() {
+    if (submitLockRef.current || busy || !emailOk || !dobOk) return
 
     submitLockRef.current = true
     setBusy(true)
     setStatus({ kind: 'info', msg: 'Creating member…' })
     setExistingMember(null)
 
-    const email = (form.email || '').trim().toLowerCase()
-    const payload = {
-      email,
-      first_name: (form.first_name || '').trim() || undefined,
-      last_name: (form.last_name || '').trim() || undefined,
-      phone: (form.phone || '').trim() || undefined,
-      date_of_birth: (form.date_of_birth || '').trim() || undefined,
-      visitor_trial_id: (form.visitor_trial_id || '').trim() || undefined,
-      // aliases camelCase (au cas où on les supporte côté API)
-      firstName: (form.first_name || '').trim() || undefined,
-      lastName: (form.last_name || '').trim() || undefined,
-      dateOfBirth: (form.date_of_birth || '').trim() || undefined,
-    }
+    const payload = buildPayload()
 
     try {
       const r = await fetch('/api/members/create', {
@@ -223,6 +291,7 @@ export default function CreateMemberForm({
     } finally {
       submitLockRef.current = false
       setBusy(false)
+      setConfirmOpen(false)
     }
   }
 
@@ -403,6 +472,22 @@ export default function CreateMemberForm({
           </Button>
         </div>
       </form>
+
+      <ConfirmActionModal
+        open={confirmOpen}
+        title="Confirm member creation"
+        description="Please verify the new member details before creating the profile. Pay special attention to the email address."
+        confirmLabel="Confirm & create member"
+        pendingLabel="Creating…"
+        cancelLabel="Cancel"
+        pending={busy}
+        summaryItems={memberSummaryItems}
+        warning="This will create a new member profile. If the email is wrong, the account may need manual correction later."
+        onCancel={() => {
+          if (!busy) setConfirmOpen(false)
+        }}
+        onConfirm={createMemberConfirmed}
+      />
     </div>
   )
 }
