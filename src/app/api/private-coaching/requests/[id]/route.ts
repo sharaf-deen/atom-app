@@ -9,7 +9,7 @@ import {
   PRIVATE_COACHING_MANAGER_ROLES,
   isPrivateCoachingPackageSessions,
   isPrivateCoachingPaymentMethod,
-  calculatePrivateCoachingPromoPricing,
+  calculatePrivateCoachingDiscountPricing,
   privateCoachingPackageBySessions,
   privateCoachingMemberName,
 } from '@/lib/privateCoaching'
@@ -30,6 +30,7 @@ type RequestRow = {
   amount_cents: number
   original_amount_cents: number | null
   discount_code: string | null
+  discount_label: string | null
   discount_percent: number | null
   discount_amount_cents: number | null
   payment_method: string
@@ -63,7 +64,7 @@ async function getActorAndRequest(requestId: string) {
 
   const { data: requestBefore, error: requestError } = await admin
     .from('private_coaching_requests')
-    .select('id, member_id, coach_id, package_sessions, amount_cents, original_amount_cents, discount_code, discount_percent, discount_amount_cents, payment_method, status')
+    .select('id, member_id, coach_id, package_sessions, amount_cents, original_amount_cents, discount_code, discount_label, discount_percent, discount_amount_cents, payment_method, status')
     .eq('id', requestId)
     .maybeSingle<RequestRow>()
 
@@ -101,7 +102,11 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
     if (!isPrivateCoachingPaymentMethod(paymentMethodRaw)) return json(400, { ok: false, error: 'INVALID_PAYMENT_METHOD' })
 
     const selectedPackage = privateCoachingPackageBySessions(packageSessionsRaw)
-    const pricing = calculatePrivateCoachingPromoPricing(selectedPackage.amountCents, requestBefore.discount_code)
+    const pricing = calculatePrivateCoachingDiscountPricing(selectedPackage.amountCents, requestBefore.discount_code ? {
+      code: requestBefore.discount_code,
+      title: requestBefore.discount_label,
+      discountPercent: Number(requestBefore.discount_percent ?? 0),
+    } : null)
 
     const { error: updateError } = await admin
       .from('private_coaching_requests')
@@ -110,6 +115,7 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
         amount_cents: pricing.finalAmountCents,
         original_amount_cents: pricing.originalAmountCents,
         discount_code: pricing.discountCode,
+        discount_label: pricing.discountLabel,
         discount_percent: pricing.discountPercent,
         discount_amount_cents: pricing.discountAmountCents,
         payment_method: paymentMethodRaw,
