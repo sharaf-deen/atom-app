@@ -246,7 +246,6 @@ export async function DELETE(_req: Request, { params }: { params: { id: string }
           .from('private_coaching_passes')
           .update({
             status: 'cancelled',
-            remaining_sessions: 0,
           })
           .in('id', passIds)
 
