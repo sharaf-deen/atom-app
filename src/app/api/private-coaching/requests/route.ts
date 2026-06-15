@@ -9,7 +9,8 @@ import {
   PRIVATE_COACHING_ALLOWED_MEMBER_ROLES,
   isPrivateCoachingPackageSessions,
   isPrivateCoachingPaymentMethod,
-  calculatePrivateCoachingPromoPricing,
+  calculatePrivateCoachingDiscountPricing,
+  normalizePrivateCoachingPromoCode,
   privateCoachingPackageBySessions,
   privateCoachingMemberName,
   privateCoachingPaymentMethodLabel,
@@ -24,6 +25,12 @@ type ProfileRow = {
   email: string | null
   phone: string | null
   member_id: string | null
+}
+
+type PromoRow = {
+  code: string
+  title: string | null
+  discount_percent: number
 }
 
 function json(status: number, body: any) {
@@ -58,18 +65,36 @@ export async function POST(req: Request) {
     const coachId = String(body?.coach_id ?? '').trim()
     const packageSessionsRaw = body?.package_sessions
     const paymentMethodRaw = body?.payment_method
-    const promoCodeRaw = body?.promo_code
+    const promoCodeRaw = normalizePrivateCoachingPromoCode(body?.promo_code)
 
     if (!coachId) return json(400, { ok: false, error: 'MISSING_COACH' })
     if (!isPrivateCoachingPackageSessions(packageSessionsRaw)) return json(400, { ok: false, error: 'INVALID_PACKAGE' })
     if (!isPrivateCoachingPaymentMethod(paymentMethodRaw)) return json(400, { ok: false, error: 'INVALID_PAYMENT_METHOD' })
 
     const selectedPackage = privateCoachingPackageBySessions(packageSessionsRaw)
-    const pricing = calculatePrivateCoachingPromoPricing(selectedPackage.amountCents, promoCodeRaw)
 
-    if (pricing.hasCode && !pricing.isValid) {
-      return json(400, { ok: false, error: 'INVALID_PROMO_CODE', details: 'This private coaching promo code is not valid.' })
+    let promo: PromoRow | null = null
+    if (promoCodeRaw) {
+      const { data: promoRow, error: promoError } = await admin
+        .from('private_coaching_promo_codes')
+        .select('code, title, discount_percent')
+        .eq('code', promoCodeRaw)
+        .eq('is_active', true)
+        .is('deleted_at', null)
+        .maybeSingle<PromoRow>()
+
+      if (promoError) return json(500, { ok: false, error: 'PROMO_LOOKUP_FAILED', details: promoError.message })
+      if (!promoRow?.code) {
+        return json(400, { ok: false, error: 'INVALID_PROMO_CODE', details: 'This private coaching promo code is not valid.' })
+      }
+      promo = promoRow
     }
+
+    const pricing = calculatePrivateCoachingDiscountPricing(selectedPackage.amountCents, promo ? {
+      code: promo.code,
+      title: promo.title,
+      discountPercent: Number(promo.discount_percent ?? 0),
+    } : null)
 
     const { data: coach, error: coachError } = await admin
       .from('profiles')
@@ -102,6 +127,7 @@ export async function POST(req: Request) {
         amount_cents: pricing.finalAmountCents,
         original_amount_cents: pricing.originalAmountCents,
         discount_code: pricing.discountCode,
+        discount_label: pricing.discountLabel,
         discount_percent: pricing.discountPercent,
         discount_amount_cents: pricing.discountAmountCents,
         currency: 'EGP',
@@ -122,7 +148,7 @@ export async function POST(req: Request) {
     const notificationBody = [
       `${memberName} requested private coaching with ${coachName}.`,
       `Package: ${selectedPackage.sessions} session(s) · ${formatPrivateCoachingMoney(pricing.finalAmountCents)}`,
-      pricing.discountAmountCents > 0 ? `Promo: ${pricing.discountCode} · -${formatPrivateCoachingMoney(pricing.discountAmountCents)}` : '',
+      pricing.discountAmountCents > 0 ? `Private code: ${pricing.discountLabel ? `${pricing.discountLabel} · ` : ''}${pricing.discountCode} · -${formatPrivateCoachingMoney(pricing.discountAmountCents)}` : '',
       `Payment method: ${paymentLabel}`,
       '',
       'Open /head-coach/private-coaching to confirm payment received and unlock the member sessions.',

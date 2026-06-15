@@ -33,6 +33,7 @@ type RequestRow = {
   amount_cents: number
   original_amount_cents: number | null
   discount_code: string | null
+  discount_label: string | null
   discount_percent: number | null
   discount_amount_cents: number | null
   payment_method: string
@@ -117,7 +118,7 @@ export default async function PrivateCoachingPage() {
       .order('first_name', { ascending: true }),
     admin
       .from('private_coaching_requests')
-      .select('id, coach_id, package_sessions, amount_cents, original_amount_cents, discount_code, discount_percent, discount_amount_cents, payment_method, status, created_at, confirmed_at')
+      .select('id, coach_id, package_sessions, amount_cents, original_amount_cents, discount_code, discount_label, discount_percent, discount_amount_cents, payment_method, status, created_at, confirmed_at')
       .eq('member_id', me.id)
       .order('created_at', { ascending: false })
       .limit(10),
@@ -287,7 +288,7 @@ export default async function PrivateCoachingPage() {
                       </div>
                       <div className="flex items-center justify-between gap-3 rounded-2xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-emerald-700">
                         <span>Promo</span>
-                        <span className="font-semibold">{privateCoachingPromoSummary(latestRequest.discount_code, latestRequest.discount_percent, latestRequest.discount_amount_cents)}</span>
+                        <span className="font-semibold">{privateCoachingPromoSummary(latestRequest.discount_code, latestRequest.discount_percent, latestRequest.discount_amount_cents, latestRequest.discount_label)}</span>
                       </div>
                     </>
                   ) : null}

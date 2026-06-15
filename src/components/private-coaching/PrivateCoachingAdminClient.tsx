@@ -24,6 +24,7 @@ type RequestRow = {
   amountCents: number
   originalAmountCents: number | null
   discountCode: string | null
+  discountLabel: string | null
   discountPercent: number | null
   discountAmountCents: number | null
   paymentMethod: string
@@ -94,7 +95,7 @@ function paymentSummaryItems(row: RequestRow | null): ConfirmActionSummaryItem[]
     { label: 'Package', value: `${row.packageSessions} session(s)` },
     { label: 'Amount', value: formatPrivateCoachingMoney(row.amountCents) },
     row.discountAmountCents && row.discountAmountCents > 0
-      ? { label: 'Promo code', value: privateCoachingPromoSummary(row.discountCode, row.discountPercent, row.discountAmountCents) }
+      ? { label: 'Promo code', value: privateCoachingPromoSummary(row.discountCode, row.discountPercent, row.discountAmountCents, row.discountLabel) }
       : { label: 'Promo code', value: 'No promo code' },
     { label: 'Payment method', value: privateCoachingPaymentMethodLabel(row.paymentMethod) },
     { label: 'Current status', value: privateCoachingStatusLabel(row.status) },
@@ -115,7 +116,7 @@ function editSummaryItems(row: RequestRow | null, sessions: number, paymentMetho
     { label: 'New package', value: `${sessions} session(s)` },
     { label: 'Original amount', value: formatPrivateCoachingMoney(packageAmountCents(sessions)) },
     row.discountCode && row.discountPercent
-      ? { label: 'Promo kept', value: privateCoachingPromoSummary(row.discountCode, row.discountPercent, Math.max(0, packageAmountCents(sessions) - discountedAmountCents(packageAmountCents(sessions), row.discountPercent))) }
+      ? { label: 'Promo kept', value: privateCoachingPromoSummary(row.discountCode, row.discountPercent, Math.max(0, packageAmountCents(sessions) - discountedAmountCents(packageAmountCents(sessions), row.discountPercent)), row.discountLabel) }
       : { label: 'Promo kept', value: 'No promo code' },
     { label: 'New final amount', value: formatPrivateCoachingMoney(discountedAmountCents(packageAmountCents(sessions), row.discountPercent)) },
     { label: 'Payment method', value: privateCoachingPaymentMethodLabel(paymentMethod) },
@@ -134,7 +135,7 @@ function deleteSummaryItems(row: RequestRow | null): ConfirmActionSummaryItem[] 
     { label: 'Package', value: `${row.packageSessions} session(s)` },
     { label: 'Amount', value: formatPrivateCoachingMoney(row.amountCents) },
     row.discountAmountCents && row.discountAmountCents > 0
-      ? { label: 'Promo code', value: privateCoachingPromoSummary(row.discountCode, row.discountPercent, row.discountAmountCents) }
+      ? { label: 'Promo code', value: privateCoachingPromoSummary(row.discountCode, row.discountPercent, row.discountAmountCents, row.discountLabel) }
       : { label: 'Promo code', value: 'No promo code' },
     { label: 'Payment method', value: privateCoachingPaymentMethodLabel(row.paymentMethod) },
     { label: 'Current status', value: privateCoachingStatusLabel(row.status) },
@@ -434,7 +435,7 @@ export default function PrivateCoachingAdminClient({ rows }: Props) {
                   </div>
                   {editingRow?.discountAmountCents && editingRow.discountAmountCents > 0 ? (
                     <div className="mt-3 rounded-2xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
-                      Existing promo kept: {privateCoachingPromoSummary(editingRow.discountCode, editingRow.discountPercent, editingRow.discountAmountCents)}. The discount will be recalculated if you change the package.
+                      Existing promo kept: {privateCoachingPromoSummary(editingRow.discountCode, editingRow.discountPercent, editingRow.discountAmountCents, editingRow.discountLabel)}. The discount will be recalculated if you change the package.
                     </div>
                   ) : null}
                   <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:justify-end">

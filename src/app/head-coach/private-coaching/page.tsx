@@ -10,10 +10,9 @@ import AccessDeniedPage from '@/components/AccessDeniedPage'
 import PrivateCoachingAdminClient from '@/components/private-coaching/PrivateCoachingAdminClient'
 import PrivateCoachingSlotsClient from '@/components/private-coaching/PrivateCoachingSlotsClient'
 import PrivateCoachingBookingsClient from '@/components/private-coaching/PrivateCoachingBookingsClient'
+import PrivateCoachingPromoCodesClient from '@/components/private-coaching/PrivateCoachingPromoCodesClient'
 import { getSessionUserCached, getSupabaseAdminClientCached } from '@/lib/requestCache'
 import {
-  PRIVATE_COACHING_PROMO_CODE,
-  PRIVATE_COACHING_PROMO_PERCENT,
   formatPrivateCoachingMoney,
   privateCoachingMemberName,
 } from '@/lib/privateCoaching'
@@ -26,12 +25,23 @@ type RequestRow = {
   amount_cents: number
   original_amount_cents: number | null
   discount_code: string | null
+  discount_label: string | null
   discount_percent: number | null
   discount_amount_cents: number | null
   payment_method: string
   status: string
   created_at: string
   confirmed_at: string | null
+}
+
+type PromoRow = {
+  id: string
+  code: string
+  title: string | null
+  discount_percent: number
+  is_active: boolean
+  created_at: string
+  updated_at: string | null
 }
 
 type ProfileRow = {
@@ -116,7 +126,7 @@ export default async function HeadCoachPrivateCoachingPage() {
 
   let requestsQuery = admin
     .from('private_coaching_requests')
-    .select('id, member_id, coach_id, package_sessions, amount_cents, original_amount_cents, discount_code, discount_percent, discount_amount_cents, payment_method, status, created_at, confirmed_at')
+    .select('id, member_id, coach_id, package_sessions, amount_cents, original_amount_cents, discount_code, discount_label, discount_percent, discount_amount_cents, payment_method, status, created_at, confirmed_at')
     .order('created_at', { ascending: false })
     .limit(100)
 
@@ -141,7 +151,14 @@ export default async function HeadCoachPrivateCoachingPage() {
 
   if (me.role === 'head_coach') bookingsQuery = bookingsQuery.eq('coach_id', me.id)
 
-  const [requestsRes, passesRes, coachesRes, slotsRes, bookingsRes] = await Promise.all([
+  const promoCodesQuery = admin
+    .from('private_coaching_promo_codes')
+    .select('id, code, title, discount_percent, is_active, created_at, updated_at')
+    .is('deleted_at', null)
+    .order('created_at', { ascending: false })
+    .limit(100)
+
+  const [requestsRes, passesRes, coachesRes, slotsRes, bookingsRes, promoCodesRes] = await Promise.all([
     requestsQuery,
     admin
       .from('private_coaching_passes')
@@ -156,6 +173,7 @@ export default async function HeadCoachPrivateCoachingPage() {
       .order('first_name', { ascending: true }),
     slotsQuery,
     bookingsQuery,
+    promoCodesQuery,
   ])
 
   const requests = (requestsRes.data ?? []) as RequestRow[]
@@ -163,6 +181,7 @@ export default async function HeadCoachPrivateCoachingPage() {
   const coaches = ((coachesRes.data ?? []) as CoachRow[]).filter((coach) => coach.user_id)
   const slots = (slotsRes.data ?? []) as SlotRow[]
   const bookings = (bookingsRes.data ?? []) as BookingRow[]
+  const promoCodes = (promoCodesRes.data ?? []) as PromoRow[]
   const profileIds = Array.from(new Set([
     ...requests.flatMap((row) => [row.member_id, row.coach_id]),
     ...bookings.flatMap((row) => [row.member_id, row.coach_id]),
@@ -242,6 +261,7 @@ export default async function HeadCoachPrivateCoachingPage() {
       amountCents: Number(row.amount_cents ?? 0),
       originalAmountCents: row.original_amount_cents === null ? null : Number(row.original_amount_cents ?? 0),
       discountCode: row.discount_code,
+      discountLabel: row.discount_label,
       discountPercent: row.discount_percent === null ? null : Number(row.discount_percent ?? 0),
       discountAmountCents: row.discount_amount_cents === null ? null : Number(row.discount_amount_cents ?? 0),
       paymentMethod: row.payment_method,
@@ -250,6 +270,16 @@ export default async function HeadCoachPrivateCoachingPage() {
       confirmedAt: row.confirmed_at,
     }
   })
+
+  const promoCodeRows = promoCodes.map((row) => ({
+    id: row.id,
+    code: row.code,
+    title: row.title,
+    discountPercent: Number(row.discount_percent ?? 0),
+    isActive: Boolean(row.is_active),
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  }))
 
   return (
     <main>
@@ -307,14 +337,10 @@ export default async function HeadCoachPrivateCoachingPage() {
 
         <Card>
           <CardHeader>
-            <CardTitle>Private coaching promo code</CardTitle>
+            <CardTitle>Private coaching promo codes</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="rounded-3xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800">
-              <div className="text-xs font-semibold uppercase tracking-wide">Share with selected members</div>
-              <div className="mt-2 text-2xl font-semibold tracking-tight">{PRIVATE_COACHING_PROMO_CODE}</div>
-              <p className="mt-2">This code gives {PRIVATE_COACHING_PROMO_PERCENT}% off private coaching packages. It changes only the amount to pay; sessions/tokens stay unchanged.</p>
-            </div>
+            <PrivateCoachingPromoCodesClient rows={promoCodeRows} />
           </CardContent>
         </Card>
 
