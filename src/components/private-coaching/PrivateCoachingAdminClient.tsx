@@ -9,6 +9,7 @@ import {
   PRIVATE_COACHING_PACKAGES,
   formatPrivateCoachingMoney,
   privateCoachingPaymentMethodLabel,
+  privateCoachingPromoSummary,
   privateCoachingStatusLabel,
   type PrivateCoachingPackageSessions,
   type PrivateCoachingPaymentMethod,
@@ -21,6 +22,10 @@ type RequestRow = {
   coachName: string
   packageSessions: number
   amountCents: number
+  originalAmountCents: number | null
+  discountCode: string | null
+  discountPercent: number | null
+  discountAmountCents: number | null
   paymentMethod: string
   status: string
   createdAt: string
@@ -72,6 +77,13 @@ function packageAmountCents(sessions: number) {
   return PRIVATE_COACHING_PACKAGES.find((item) => item.sessions === sessions)?.amountCents ?? 0
 }
 
+function discountedAmountCents(originalAmountCents: number, discountPercent?: number | null) {
+  const original = Math.max(0, Number(originalAmountCents ?? 0))
+  const percent = Math.max(0, Number(discountPercent ?? 0))
+  if (percent <= 0) return original
+  return Math.max(0, original - Math.round((original * percent) / 100))
+}
+
 function paymentSummaryItems(row: RequestRow | null): ConfirmActionSummaryItem[] {
   if (!row) return []
 
@@ -81,6 +93,9 @@ function paymentSummaryItems(row: RequestRow | null): ConfirmActionSummaryItem[]
     { label: 'Coach', value: row.coachName },
     { label: 'Package', value: `${row.packageSessions} session(s)` },
     { label: 'Amount', value: formatPrivateCoachingMoney(row.amountCents) },
+    row.discountAmountCents && row.discountAmountCents > 0
+      ? { label: 'Promo code', value: privateCoachingPromoSummary(row.discountCode, row.discountPercent, row.discountAmountCents) }
+      : { label: 'Promo code', value: 'No promo code' },
     { label: 'Payment method', value: privateCoachingPaymentMethodLabel(row.paymentMethod) },
     { label: 'Current status', value: privateCoachingStatusLabel(row.status) },
     { label: 'Requested', value: formatDateTime(row.createdAt) },
@@ -98,7 +113,11 @@ function editSummaryItems(row: RequestRow | null, sessions: number, paymentMetho
     { label: 'Coach', value: row.coachName },
     { label: 'Current package', value: `${row.packageSessions} session(s)` },
     { label: 'New package', value: `${sessions} session(s)` },
-    { label: 'New amount', value: formatPrivateCoachingMoney(packageAmountCents(sessions)) },
+    { label: 'Original amount', value: formatPrivateCoachingMoney(packageAmountCents(sessions)) },
+    row.discountCode && row.discountPercent
+      ? { label: 'Promo kept', value: privateCoachingPromoSummary(row.discountCode, row.discountPercent, Math.max(0, packageAmountCents(sessions) - discountedAmountCents(packageAmountCents(sessions), row.discountPercent))) }
+      : { label: 'Promo kept', value: 'No promo code' },
+    { label: 'New final amount', value: formatPrivateCoachingMoney(discountedAmountCents(packageAmountCents(sessions), row.discountPercent)) },
     { label: 'Payment method', value: privateCoachingPaymentMethodLabel(paymentMethod) },
     { label: 'Current status', value: privateCoachingStatusLabel(row.status) },
     { label: 'Request impact', value: 'Only pending request details will be updated' },
@@ -114,6 +133,9 @@ function deleteSummaryItems(row: RequestRow | null): ConfirmActionSummaryItem[] 
     { label: 'Coach', value: row.coachName },
     { label: 'Package', value: `${row.packageSessions} session(s)` },
     { label: 'Amount', value: formatPrivateCoachingMoney(row.amountCents) },
+    row.discountAmountCents && row.discountAmountCents > 0
+      ? { label: 'Promo code', value: privateCoachingPromoSummary(row.discountCode, row.discountPercent, row.discountAmountCents) }
+      : { label: 'Promo code', value: 'No promo code' },
     { label: 'Payment method', value: privateCoachingPaymentMethodLabel(row.paymentMethod) },
     { label: 'Current status', value: privateCoachingStatusLabel(row.status) },
     { label: 'Request impact', value: 'Payment pending request will be cancelled' },
@@ -320,6 +342,9 @@ export default function PrivateCoachingAdminClient({ rows }: Props) {
                     <div>
                       <div className="text-[11px] font-semibold uppercase tracking-wide text-[hsl(var(--muted))]">Amount</div>
                       <div className="font-semibold">{formatPrivateCoachingMoney(row.amountCents)}</div>
+                      {row.discountAmountCents && row.discountAmountCents > 0 ? (
+                        <div className="mt-1 text-[11px] font-semibold text-emerald-700">{row.discountCode} · -{formatPrivateCoachingMoney(row.discountAmountCents)}</div>
+                      ) : null}
                     </div>
                     <div>
                       <div className="text-[11px] font-semibold uppercase tracking-wide text-[hsl(var(--muted))]">Payment</div>
@@ -407,6 +432,11 @@ export default function PrivateCoachingAdminClient({ rows }: Props) {
                       </select>
                     </label>
                   </div>
+                  {editingRow?.discountAmountCents && editingRow.discountAmountCents > 0 ? (
+                    <div className="mt-3 rounded-2xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
+                      Existing promo kept: {privateCoachingPromoSummary(editingRow.discountCode, editingRow.discountPercent, editingRow.discountAmountCents)}. The discount will be recalculated if you change the package.
+                    </div>
+                  ) : null}
                   <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:justify-end">
                     <Button type="button" variant="outline" onClick={closeEdit} disabled={Boolean(busyId)}>
                       Cancel edit
