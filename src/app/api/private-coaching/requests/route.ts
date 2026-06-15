@@ -9,6 +9,7 @@ import {
   PRIVATE_COACHING_ALLOWED_MEMBER_ROLES,
   isPrivateCoachingPackageSessions,
   isPrivateCoachingPaymentMethod,
+  calculatePrivateCoachingPromoPricing,
   privateCoachingPackageBySessions,
   privateCoachingMemberName,
   privateCoachingPaymentMethodLabel,
@@ -57,12 +58,18 @@ export async function POST(req: Request) {
     const coachId = String(body?.coach_id ?? '').trim()
     const packageSessionsRaw = body?.package_sessions
     const paymentMethodRaw = body?.payment_method
+    const promoCodeRaw = body?.promo_code
 
     if (!coachId) return json(400, { ok: false, error: 'MISSING_COACH' })
     if (!isPrivateCoachingPackageSessions(packageSessionsRaw)) return json(400, { ok: false, error: 'INVALID_PACKAGE' })
     if (!isPrivateCoachingPaymentMethod(paymentMethodRaw)) return json(400, { ok: false, error: 'INVALID_PAYMENT_METHOD' })
 
     const selectedPackage = privateCoachingPackageBySessions(packageSessionsRaw)
+    const pricing = calculatePrivateCoachingPromoPricing(selectedPackage.amountCents, promoCodeRaw)
+
+    if (pricing.hasCode && !pricing.isValid) {
+      return json(400, { ok: false, error: 'INVALID_PROMO_CODE', details: 'This private coaching promo code is not valid.' })
+    }
 
     const { data: coach, error: coachError } = await admin
       .from('profiles')
@@ -92,7 +99,11 @@ export async function POST(req: Request) {
         member_id: auth.user.id,
         coach_id: coach.user_id,
         package_sessions: selectedPackage.sessions,
-        amount_cents: selectedPackage.amountCents,
+        amount_cents: pricing.finalAmountCents,
+        original_amount_cents: pricing.originalAmountCents,
+        discount_code: pricing.discountCode,
+        discount_percent: pricing.discountPercent,
+        discount_amount_cents: pricing.discountAmountCents,
         currency: 'EGP',
         payment_method: paymentMethodRaw,
         status: 'payment_pending',
@@ -110,11 +121,12 @@ export async function POST(req: Request) {
     const title = 'New private coaching request'
     const notificationBody = [
       `${memberName} requested private coaching with ${coachName}.`,
-      `Package: ${selectedPackage.sessions} session(s) · ${formatPrivateCoachingMoney(selectedPackage.amountCents)}`,
+      `Package: ${selectedPackage.sessions} session(s) · ${formatPrivateCoachingMoney(pricing.finalAmountCents)}`,
+      pricing.discountAmountCents > 0 ? `Promo: ${pricing.discountCode} · -${formatPrivateCoachingMoney(pricing.discountAmountCents)}` : '',
       `Payment method: ${paymentLabel}`,
       '',
       'Open /head-coach/private-coaching to confirm payment received and unlock the member sessions.',
-    ].join('\n')
+    ].filter(Boolean).join('\n')
 
     await admin.from('notifications').insert({
       user_id: coach.user_id,
