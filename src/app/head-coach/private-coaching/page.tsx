@@ -55,6 +55,7 @@ type ProfileRow = {
 
 type PassRow = {
   id: string
+  request_id: string | null
   member_id: string
   coach_id: string
   total_sessions: number
@@ -162,7 +163,7 @@ export default async function HeadCoachPrivateCoachingPage() {
     requestsQuery,
     admin
       .from('private_coaching_passes')
-      .select('id, member_id, coach_id, total_sessions, used_sessions, remaining_sessions, status')
+      .select('id, request_id, member_id, coach_id, total_sessions, used_sessions, remaining_sessions, status')
       .in('status', ['active', 'depleted'])
       .limit(1000),
     admin
@@ -249,9 +250,30 @@ export default async function HeadCoachPrivateCoachingPage() {
     }
   })
 
+  const passesByRequestId = new Map<string, PassRow>()
+  const fallbackPassesBySignature = new Map<string, PassRow>()
+
+  for (const pass of passes) {
+    if (pass.request_id) passesByRequestId.set(pass.request_id, pass)
+
+    const signature = `${pass.member_id}||${pass.coach_id}||${Number(pass.total_sessions ?? 0)}`
+    const existing = fallbackPassesBySignature.get(signature)
+    if (!existing || Number(pass.remaining_sessions ?? 0) > Number(existing.remaining_sessions ?? 0)) {
+      fallbackPassesBySignature.set(signature, pass)
+    }
+  }
+
+  const openBookingsBySignature = new Map<string, number>()
+  for (const booking of bookings) {
+    if (booking.status !== 'booked') continue
+    const signature = `${booking.member_id}||${booking.coach_id}`
+    openBookingsBySignature.set(signature, (openBookingsBySignature.get(signature) ?? 0) + 1)
+  }
+
   const clientRows = requests.map((row) => {
     const member = profilesById.get(row.member_id)
     const coach = profilesById.get(row.coach_id)
+    const pass = passesByRequestId.get(row.id) ?? fallbackPassesBySignature.get(`${row.member_id}||${row.coach_id}||${Number(row.package_sessions ?? 0)}`) ?? null
     return {
       id: row.id,
       memberName: privateCoachingMemberName(member ?? {}),
@@ -268,6 +290,11 @@ export default async function HeadCoachPrivateCoachingPage() {
       status: row.status,
       createdAt: row.created_at,
       confirmedAt: row.confirmed_at,
+      passTotalSessions: pass ? Number(pass.total_sessions ?? 0) : null,
+      passUsedSessions: pass ? Number(pass.used_sessions ?? 0) : null,
+      passRemainingSessions: pass ? Number(pass.remaining_sessions ?? 0) : null,
+      passStatus: pass?.status ?? null,
+      openBookingCount: openBookingsBySignature.get(`${row.member_id}||${row.coach_id}`) ?? 0,
     }
   })
 

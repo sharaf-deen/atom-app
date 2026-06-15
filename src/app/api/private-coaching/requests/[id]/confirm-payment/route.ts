@@ -81,6 +81,13 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
 
     if (rpcError) return json(500, { ok: false, error: 'CONFIRM_FAILED', details: rpcError.message })
 
+    if (passId) {
+      await admin
+        .from('private_coaching_passes')
+        .update({ request_id: requestId })
+        .eq('id', passId)
+    }
+
     const profileIds = Array.from(new Set([requestBefore.member_id, requestBefore.coach_id, auth.user.id].filter(Boolean)))
     const { data: profiles } = await admin
       .from('profiles')
