@@ -31,6 +31,11 @@ type RequestRow = {
   status: string
   createdAt: string
   confirmedAt: string | null
+  passTotalSessions: number | null
+  passUsedSessions: number | null
+  passRemainingSessions: number | null
+  passStatus: string | null
+  openBookingCount: number
 }
 
 type Props = {
@@ -128,6 +133,11 @@ function editSummaryItems(row: RequestRow | null, sessions: number, paymentMetho
 function deleteSummaryItems(row: RequestRow | null): ConfirmActionSummaryItem[] {
   if (!row) return []
 
+  const isActive = row.status === 'active'
+  const passSummary = row.passTotalSessions
+    ? `${row.passUsedSessions ?? 0} used · ${row.passRemainingSessions ?? 0} remaining · ${privateCoachingStatusLabel(row.passStatus)}`
+    : 'No active pass found'
+
   return [
     { label: 'Member', value: row.memberName },
     { label: 'Member info', value: row.memberMeta || '—' },
@@ -139,8 +149,11 @@ function deleteSummaryItems(row: RequestRow | null): ConfirmActionSummaryItem[] 
       : { label: 'Promo code', value: 'No promo code' },
     { label: 'Payment method', value: privateCoachingPaymentMethodLabel(row.paymentMethod) },
     { label: 'Current status', value: privateCoachingStatusLabel(row.status) },
-    { label: 'Request impact', value: 'Payment pending request will be cancelled' },
-    { label: 'Token impact', value: 'No token will be created' },
+    isActive ? { label: 'Pass / tokens', value: passSummary } : { label: 'Pass / tokens', value: 'No token has been created yet' },
+    isActive ? { label: 'Open bookings', value: `${row.openBookingCount} booked/upcoming booking(s)` } : { label: 'Open bookings', value: 'None' },
+    isActive ? { label: 'Request impact', value: 'Confirmed request will be marked as cancelled' } : { label: 'Request impact', value: 'Payment pending request will be cancelled' },
+    isActive ? { label: 'Token impact', value: 'Remaining tokens will no longer be usable' } : { label: 'Token impact', value: 'No token will be created' },
+    isActive ? { label: 'Refund impact', value: 'No automatic refund will be created' } : { label: 'Refund impact', value: 'No payment was confirmed in the app' },
   ]
 }
 
@@ -251,6 +264,7 @@ export default function PrivateCoachingAdminClient({ rows }: Props) {
   }
 
   async function deleteRequest(row: RequestRow) {
+    const wasActive = row.status === 'active'
     setBusyId(row.id)
     setBusyAction('delete-request')
     setStatus({ kind: '', message: '' })
@@ -267,7 +281,7 @@ export default function PrivateCoachingAdminClient({ rows }: Props) {
       }
       setConfirmDeleteRow(null)
       setEditingRow(null)
-      setStatus({ kind: 'success', message: 'Private coaching request cancelled.' })
+      setStatus({ kind: 'success', message: wasActive ? 'Confirmed private coaching request cancelled. Remaining tokens are no longer usable.' : 'Private coaching request cancelled.' })
       router.refresh()
     } catch (error: any) {
       setStatus({ kind: 'error', message: error?.message || 'Could not delete request.' })
@@ -321,6 +335,7 @@ export default function PrivateCoachingAdminClient({ rows }: Props) {
       <div className="grid gap-3">
         {paginatedRows.map((row) => {
           const canManagePending = row.status === 'payment_pending'
+          const canCancelConfirmed = row.status === 'active'
           const isEditing = editingRow?.id === row.id
 
           return (
@@ -396,8 +411,23 @@ export default function PrivateCoachingAdminClient({ rows }: Props) {
                     </Button>
                   </div>
                 ) : (
-                  <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-700">
-                    {row.confirmedAt ? `Confirmed ${formatDateTime(row.confirmedAt)}` : privateCoachingStatusLabel(row.status)}
+                  <div className="flex w-full flex-col gap-2 lg:w-auto lg:items-end">
+                    <div className={`rounded-2xl border px-3 py-2 text-sm font-semibold ${canCancelConfirmed ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-slate-200 bg-slate-50 text-slate-700'}`}>
+                      {row.confirmedAt ? `Confirmed ${formatDateTime(row.confirmedAt)}` : privateCoachingStatusLabel(row.status)}
+                    </div>
+                    {canCancelConfirmed ? (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() => setConfirmDeleteRow(row)}
+                        disabled={Boolean(busyId)}
+                        loading={busyId === row.id && busyAction === 'delete-request'}
+                        loadingText="Cancelling…"
+                        className="w-full lg:w-auto"
+                      >
+                        Cancel request
+                      </Button>
+                    ) : null}
                   </div>
                 )}
               </div>
@@ -503,14 +533,14 @@ export default function PrivateCoachingAdminClient({ rows }: Props) {
 
       <ConfirmActionModal
         open={Boolean(confirmDeleteRow)}
-        title="Delete private coaching request?"
-        description="Please confirm before cancelling this pending private coaching request."
-        confirmLabel="Confirm delete"
-        pendingLabel="Deleting…"
+        title={confirmDeleteRow?.status === 'active' ? 'Cancel confirmed private coaching request?' : 'Delete private coaching request?'}
+        description={confirmDeleteRow?.status === 'active' ? 'Please confirm before cancelling this confirmed private coaching request.' : 'Please confirm before cancelling this pending private coaching request.'}
+        confirmLabel={confirmDeleteRow?.status === 'active' ? 'Confirm cancellation' : 'Confirm delete'}
+        pendingLabel={confirmDeleteRow?.status === 'active' ? 'Cancelling…' : 'Deleting…'}
         pending={Boolean(confirmDeleteRow && busyId === confirmDeleteRow.id && busyAction === 'delete-request')}
         tone="destructive"
         summaryItems={deleteSummaryItems(confirmDeleteRow)}
-        warning="This is a safe cancellation for payment pending requests only. Active requests with tokens cannot be deleted here."
+        warning={confirmDeleteRow?.status === 'active' ? 'This is a safe cancellation. The request history is preserved, remaining tokens are blocked, and no automatic refund is created.' : 'This is a safe cancellation for payment pending requests. No token has been created yet.'}
         onCancel={() => {
           if (!busyId) setConfirmDeleteRow(null)
         }}
