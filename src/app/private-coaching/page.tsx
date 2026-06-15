@@ -15,6 +15,7 @@ import {
   formatPrivateCoachingMoney,
   privateCoachingMemberName,
   privateCoachingPaymentMethodLabel,
+  privateCoachingPromoSummary,
   privateCoachingStatusLabel,
 } from '@/lib/privateCoaching'
 
@@ -30,6 +31,10 @@ type RequestRow = {
   coach_id: string
   package_sessions: number
   amount_cents: number
+  original_amount_cents: number | null
+  discount_code: string | null
+  discount_percent: number | null
+  discount_amount_cents: number | null
   payment_method: string
   status: string
   created_at: string
@@ -112,7 +117,7 @@ export default async function PrivateCoachingPage() {
       .order('first_name', { ascending: true }),
     admin
       .from('private_coaching_requests')
-      .select('id, coach_id, package_sessions, amount_cents, payment_method, status, created_at, confirmed_at')
+      .select('id, coach_id, package_sessions, amount_cents, original_amount_cents, discount_code, discount_percent, discount_amount_cents, payment_method, status, created_at, confirmed_at')
       .eq('member_id', me.id)
       .order('created_at', { ascending: false })
       .limit(10),
@@ -274,6 +279,18 @@ export default async function PrivateCoachingPage() {
                     <span className="text-[hsl(var(--muted))]">Payment</span>
                     <span className="font-semibold">{privateCoachingPaymentMethodLabel(latestRequest.payment_method)}</span>
                   </div>
+                  {latestRequest.discount_amount_cents && Number(latestRequest.discount_amount_cents) > 0 ? (
+                    <>
+                      <div className="flex items-center justify-between gap-3 rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] px-3 py-2">
+                        <span className="text-[hsl(var(--muted))]">Original amount</span>
+                        <span className="font-semibold line-through">{formatPrivateCoachingMoney(latestRequest.original_amount_cents ?? latestRequest.amount_cents)}</span>
+                      </div>
+                      <div className="flex items-center justify-between gap-3 rounded-2xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-emerald-700">
+                        <span>Promo</span>
+                        <span className="font-semibold">{privateCoachingPromoSummary(latestRequest.discount_code, latestRequest.discount_percent, latestRequest.discount_amount_cents)}</span>
+                      </div>
+                    </>
+                  ) : null}
                 </div>
               ) : (
                 <div className="rounded-3xl border border-dashed border-[hsl(var(--border))] bg-white p-4 text-sm text-[hsl(var(--muted))]">

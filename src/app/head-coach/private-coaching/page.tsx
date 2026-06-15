@@ -11,7 +11,12 @@ import PrivateCoachingAdminClient from '@/components/private-coaching/PrivateCoa
 import PrivateCoachingSlotsClient from '@/components/private-coaching/PrivateCoachingSlotsClient'
 import PrivateCoachingBookingsClient from '@/components/private-coaching/PrivateCoachingBookingsClient'
 import { getSessionUserCached, getSupabaseAdminClientCached } from '@/lib/requestCache'
-import { formatPrivateCoachingMoney, privateCoachingMemberName } from '@/lib/privateCoaching'
+import {
+  PRIVATE_COACHING_PROMO_CODE,
+  PRIVATE_COACHING_PROMO_PERCENT,
+  formatPrivateCoachingMoney,
+  privateCoachingMemberName,
+} from '@/lib/privateCoaching'
 
 type RequestRow = {
   id: string
@@ -19,6 +24,10 @@ type RequestRow = {
   coach_id: string
   package_sessions: number
   amount_cents: number
+  original_amount_cents: number | null
+  discount_code: string | null
+  discount_percent: number | null
+  discount_amount_cents: number | null
   payment_method: string
   status: string
   created_at: string
@@ -107,7 +116,7 @@ export default async function HeadCoachPrivateCoachingPage() {
 
   let requestsQuery = admin
     .from('private_coaching_requests')
-    .select('id, member_id, coach_id, package_sessions, amount_cents, payment_method, status, created_at, confirmed_at')
+    .select('id, member_id, coach_id, package_sessions, amount_cents, original_amount_cents, discount_code, discount_percent, discount_amount_cents, payment_method, status, created_at, confirmed_at')
     .order('created_at', { ascending: false })
     .limit(100)
 
@@ -231,6 +240,10 @@ export default async function HeadCoachPrivateCoachingPage() {
       coachName: privateCoachingMemberName(coach ?? {}),
       packageSessions: Number(row.package_sessions ?? 0),
       amountCents: Number(row.amount_cents ?? 0),
+      originalAmountCents: row.original_amount_cents === null ? null : Number(row.original_amount_cents ?? 0),
+      discountCode: row.discount_code,
+      discountPercent: row.discount_percent === null ? null : Number(row.discount_percent ?? 0),
+      discountAmountCents: row.discount_amount_cents === null ? null : Number(row.discount_amount_cents ?? 0),
       paymentMethod: row.payment_method,
       status: row.status,
       createdAt: row.created_at,
@@ -289,6 +302,21 @@ export default async function HeadCoachPrivateCoachingPage() {
             </CardContent>
           </Card>
         </div>
+
+
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Private coaching promo code</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="rounded-3xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800">
+              <div className="text-xs font-semibold uppercase tracking-wide">Share with selected members</div>
+              <div className="mt-2 text-2xl font-semibold tracking-tight">{PRIVATE_COACHING_PROMO_CODE}</div>
+              <p className="mt-2">This code gives {PRIVATE_COACHING_PROMO_PERCENT}% off private coaching packages. It changes only the amount to pay; sessions/tokens stay unchanged.</p>
+            </div>
+          </CardContent>
+        </Card>
 
         <Card>
           <CardHeader>

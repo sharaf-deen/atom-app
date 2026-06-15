@@ -9,6 +9,7 @@ import {
   PRIVATE_COACHING_MANAGER_ROLES,
   formatPrivateCoachingMoney,
   privateCoachingMemberName,
+  privateCoachingPromoSummary,
 } from '@/lib/privateCoaching'
 
 type ProfileRow = {
@@ -25,6 +26,9 @@ type RequestRow = {
   coach_id: string
   package_sessions: number
   amount_cents: number
+  discount_code: string | null
+  discount_percent: number | null
+  discount_amount_cents: number | null
   status: string
 }
 
@@ -59,7 +63,7 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
 
     const { data: requestBefore, error: requestBeforeError } = await admin
       .from('private_coaching_requests')
-      .select('id, member_id, coach_id, package_sessions, amount_cents, status')
+      .select('id, member_id, coach_id, package_sessions, amount_cents, discount_code, discount_percent, discount_amount_cents, status')
       .eq('id', requestId)
       .maybeSingle<RequestRow>()
 
@@ -96,9 +100,10 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
       body: [
         `${coachName} confirmed your private coaching payment.`,
         `Package: ${requestBefore.package_sessions} session(s) · ${formatPrivateCoachingMoney(requestBefore.amount_cents)}`,
+        requestBefore.discount_amount_cents ? `Promo: ${privateCoachingPromoSummary(requestBefore.discount_code, requestBefore.discount_percent, requestBefore.discount_amount_cents)}` : '',
         '',
         'Your private coaching sessions are now active. Slot booking will be available when coach availability is opened.',
-      ].join('\n'),
+      ].filter(Boolean).join('\n'),
     })
 
     return json(200, { ok: true, pass_id: passId })

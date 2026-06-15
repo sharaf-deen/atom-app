@@ -16,6 +16,9 @@ export const PRIVATE_COACHING_PACKAGES: Array<{
   { sessions: 10, label: '10 sessions', amountCents: 1100000, highlight: 'Best value' },
 ]
 
+export const PRIVATE_COACHING_PROMO_CODE = 'PC10'
+export const PRIVATE_COACHING_PROMO_PERCENT = 10
+
 export const PRIVATE_COACHING_ALLOWED_MEMBER_ROLES = ['member', 'champion', 'vip'] as const
 export const PRIVATE_COACHING_MANAGER_ROLES = ['head_coach', 'super_admin'] as const
 
@@ -67,6 +70,43 @@ export function privateCoachingMemberName(profile: {
   email?: string | null
 }) {
   return [profile.first_name ?? '', profile.last_name ?? ''].join(' ').trim() || profile.email || 'Member'
+}
+
+export function normalizePrivateCoachingPromoCode(value: unknown) {
+  return String(value ?? '').trim().toUpperCase().replace(/\s+/g, '')
+}
+
+export function isValidPrivateCoachingPromoCode(value: unknown) {
+  return normalizePrivateCoachingPromoCode(value) === PRIVATE_COACHING_PROMO_CODE
+}
+
+export function calculatePrivateCoachingPromoPricing(amountCents: number, promoCode?: unknown) {
+  const originalAmountCents = Math.max(0, Math.round(Number(amountCents ?? 0)))
+  const normalizedCode = normalizePrivateCoachingPromoCode(promoCode)
+  const hasCode = normalizedCode.length > 0
+  const isValid = hasCode && normalizedCode === PRIVATE_COACHING_PROMO_CODE
+  const discountPercent = isValid ? PRIVATE_COACHING_PROMO_PERCENT : 0
+  const discountAmountCents = isValid ? Math.round((originalAmountCents * discountPercent) / 100) : 0
+  const finalAmountCents = Math.max(0, originalAmountCents - discountAmountCents)
+
+  return {
+    hasCode,
+    isValid,
+    originalAmountCents,
+    discountCode: isValid ? normalizedCode : null,
+    discountPercent,
+    discountAmountCents,
+    finalAmountCents,
+  }
+}
+
+export function privateCoachingPromoSummary(code?: string | null, discountPercent?: number | null, discountAmountCents?: number | null) {
+  const normalized = normalizePrivateCoachingPromoCode(code)
+  const percent = Number(discountPercent ?? 0)
+  const discount = Number(discountAmountCents ?? 0)
+
+  if (!normalized || percent <= 0 || discount <= 0) return 'No promo code'
+  return `${normalized} · ${percent}% off · ${formatPrivateCoachingMoney(discount)} discount`
 }
 
 export type PrivateCoachingSlotStatus = 'available' | 'booked' | 'cancelled'
