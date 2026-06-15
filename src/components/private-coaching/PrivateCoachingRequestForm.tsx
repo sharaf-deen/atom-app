@@ -9,9 +9,7 @@ import ConfirmActionModal, { type ConfirmActionSummaryItem } from '@/components/
 import {
   PRIVATE_COACHING_INSTAPAY_NUMBER,
   PRIVATE_COACHING_PACKAGES,
-  PRIVATE_COACHING_PROMO_CODE,
-  PRIVATE_COACHING_PROMO_PERCENT,
-  calculatePrivateCoachingPromoPricing,
+  calculatePrivateCoachingDiscountPricing,
   formatPrivateCoachingMoney,
   normalizePrivateCoachingPromoCode,
   privateCoachingPaymentMethodLabel,
@@ -30,12 +28,30 @@ type Props = {
   hasPendingRequest: boolean
 }
 
+type AppliedPromo = {
+  code: string
+  title: string | null
+  discountPercent: number
+}
+
+function discountPreview(amountCents: number, promo: AppliedPromo | null) {
+  if (!promo) return calculatePrivateCoachingDiscountPricing(amountCents, null)
+  return calculatePrivateCoachingDiscountPricing(amountCents, {
+    code: promo.code,
+    title: promo.title,
+    discountPercent: promo.discountPercent,
+  })
+}
+
 export default function PrivateCoachingRequestForm({ coaches, hasPendingRequest }: Props) {
   const router = useRouter()
   const [coachId, setCoachId] = React.useState(coaches[0]?.user_id ?? '')
   const [sessions, setSessions] = React.useState<PrivateCoachingPackageSessions>(1)
   const [paymentMethod, setPaymentMethod] = React.useState<PrivateCoachingPaymentMethod>('cash')
+  const [promoOpen, setPromoOpen] = React.useState(false)
   const [promoCode, setPromoCode] = React.useState('')
+  const [appliedPromo, setAppliedPromo] = React.useState<AppliedPromo | null>(null)
+  const [promoChecking, setPromoChecking] = React.useState(false)
   const [busy, setBusy] = React.useState(false)
   const [confirmOpen, setConfirmOpen] = React.useState(false)
   const [status, setStatus] = React.useState<{ kind: 'success' | 'error' | ''; message: string }>({ kind: '', message: '' })
@@ -43,9 +59,11 @@ export default function PrivateCoachingRequestForm({ coaches, hasPendingRequest 
   const selectedPackage = PRIVATE_COACHING_PACKAGES.find((item) => item.sessions === sessions) ?? PRIVATE_COACHING_PACKAGES[0]
   const selectedCoach = coaches.find((coach) => coach.user_id === coachId)
   const normalizedPromoCode = normalizePrivateCoachingPromoCode(promoCode)
-  const pricing = calculatePrivateCoachingPromoPricing(selectedPackage.amountCents, promoCode)
-  const promoCodeInvalid = pricing.hasCode && !pricing.isValid
-  const disabled = busy || hasPendingRequest || !coachId || coaches.length === 0 || promoCodeInvalid
+  const promoMatchesApplied = Boolean(appliedPromo?.code && appliedPromo.code === normalizedPromoCode)
+  const activePromo = promoMatchesApplied ? appliedPromo : null
+  const pricing = discountPreview(selectedPackage.amountCents, activePromo)
+  const hasUnappliedPromoCode = normalizedPromoCode.length > 0 && !promoMatchesApplied
+  const disabled = busy || promoChecking || hasPendingRequest || !coachId || coaches.length === 0
 
   const requestSummaryItems: ConfirmActionSummaryItem[] = [
     { label: 'Coach', value: selectedCoach?.full_name || '—' },
@@ -54,7 +72,9 @@ export default function PrivateCoachingRequestForm({ coaches, hasPendingRequest 
     { label: 'Original amount', value: formatPrivateCoachingMoney(pricing.originalAmountCents) },
     {
       label: 'Promo code',
-      value: pricing.discountCode ? `${pricing.discountCode} · ${pricing.discountPercent}% off` : 'No promo code',
+      value: pricing.discountCode
+        ? [pricing.discountLabel, pricing.discountCode, `${pricing.discountPercent}% off`].filter(Boolean).join(' · ')
+        : 'No promo code',
     },
     { label: 'Discount', value: pricing.discountAmountCents > 0 ? formatPrivateCoachingMoney(pricing.discountAmountCents) : '—' },
     { label: 'Final amount', value: formatPrivateCoachingMoney(pricing.finalAmountCents) },
@@ -67,10 +87,57 @@ export default function PrivateCoachingRequestForm({ coaches, hasPendingRequest 
     { label: 'Token impact', value: 'No token created until payment is confirmed' },
   ]
 
-  function submit(e: React.FormEvent<HTMLFormElement>) {
+  async function validatePromoCode(targetSessions = sessions) {
+    const code = normalizePrivateCoachingPromoCode(promoCode)
+    if (!code) {
+      setAppliedPromo(null)
+      return null
+    }
+
+    setPromoChecking(true)
+    setStatus({ kind: '', message: '' })
+
+    try {
+      const res = await fetch('/api/private-coaching/promo-codes/validate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code, package_sessions: targetSessions }),
+      })
+      const json = await res.json().catch(() => ({}))
+
+      if (!res.ok || !json?.ok || !json?.valid) {
+        setAppliedPromo(null)
+        setStatus({ kind: 'error', message: json?.details || json?.error || 'This private coaching code is not valid.' })
+        return null
+      }
+
+      const promo: AppliedPromo = {
+        code: String(json.code ?? code),
+        title: json.title ? String(json.title) : null,
+        discountPercent: Number(json.discount_percent ?? 0),
+      }
+      setAppliedPromo(promo)
+      setStatus({ kind: 'success', message: `Private code applied: ${promo.discountPercent}% off.` })
+      return promo
+    } catch (error: any) {
+      setAppliedPromo(null)
+      setStatus({ kind: 'error', message: error?.message || 'Could not validate this private coaching code.' })
+      return null
+    } finally {
+      setPromoChecking(false)
+    }
+  }
+
+  async function submit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
     if (disabled) return
     setStatus({ kind: '', message: '' })
+
+    if (normalizedPromoCode && !promoMatchesApplied) {
+      const promo = await validatePromoCode(sessions)
+      if (!promo) return
+    }
+
     setConfirmOpen(true)
   }
 
@@ -88,7 +155,7 @@ export default function PrivateCoachingRequestForm({ coaches, hasPendingRequest 
           coach_id: coachId,
           package_sessions: sessions,
           payment_method: paymentMethod,
-          promo_code: normalizedPromoCode || null,
+          promo_code: promoMatchesApplied ? normalizedPromoCode : null,
         }),
       })
       const json = await res.json().catch(() => ({}))
@@ -105,6 +172,14 @@ export default function PrivateCoachingRequestForm({ coaches, hasPendingRequest 
       setStatus({ kind: 'error', message: error?.message || 'Could not create private coaching request.' })
     } finally {
       setBusy(false)
+    }
+  }
+
+  function selectPackage(nextSessions: PrivateCoachingPackageSessions) {
+    setSessions(nextSessions)
+    if (appliedPromo) {
+      setAppliedPromo(null)
+      setStatus({ kind: 'error', message: 'Package changed. Please apply your private code again before confirming.' })
     }
   }
 
@@ -151,12 +226,12 @@ export default function PrivateCoachingRequestForm({ coaches, hasPendingRequest 
         <div className="grid gap-3 md:grid-cols-3">
           {PRIVATE_COACHING_PACKAGES.map((item) => {
             const active = item.sessions === sessions
-            const itemPricing = calculatePrivateCoachingPromoPricing(item.amountCents, promoCode)
+            const itemPricing = discountPreview(item.amountCents, activePromo)
             return (
               <button
                 key={item.sessions}
                 type="button"
-                onClick={() => setSessions(item.sessions)}
+                onClick={() => selectPackage(item.sessions)}
                 disabled={busy || hasPendingRequest}
                 className={[
                   'rounded-3xl border p-4 text-left shadow-soft transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
@@ -179,28 +254,58 @@ export default function PrivateCoachingRequestForm({ coaches, hasPendingRequest 
           })}
         </div>
 
-        <div className="rounded-3xl border border-[hsl(var(--border))] bg-white p-4 shadow-soft">
-          <label className="grid gap-1">
-            <span className="text-sm font-semibold">Promo code</span>
-            <input
-              value={promoCode}
-              onChange={(event) => setPromoCode(event.target.value)}
+        {!promoOpen ? (
+          <div className="rounded-3xl border border-dashed border-[hsl(var(--border))] bg-white p-4 text-sm shadow-soft">
+            <button
+              type="button"
+              onClick={() => setPromoOpen(true)}
               disabled={busy || hasPendingRequest}
-              placeholder={`Example: ${PRIVATE_COACHING_PROMO_CODE}`}
-              className="min-h-11 rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm shadow-soft outline-none focus:border-black"
-            />
-          </label>
+              className="font-semibold underline-offset-4 hover:underline disabled:opacity-50"
+            >
+              I have a private code
+            </button>
+          </div>
+        ) : (
+          <div className="rounded-3xl border border-[hsl(var(--border))] bg-white p-4 shadow-soft">
+            <label className="grid gap-1">
+              <span className="text-sm font-semibold">Private code</span>
+              <input
+                value={promoCode}
+                onChange={(event) => {
+                  setPromoCode(event.target.value)
+                  setAppliedPromo(null)
+                }}
+                disabled={busy || hasPendingRequest}
+                placeholder="Enter your private code"
+                className="min-h-11 rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm shadow-soft outline-none focus:border-black"
+              />
+            </label>
 
-          {promoCodeInvalid ? (
-            <p className="mt-2 text-sm font-semibold text-rose-700">This promo code is not valid.</p>
-          ) : pricing.discountAmountCents > 0 ? (
-            <div className="mt-3 rounded-2xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
-              Promo applied: {PRIVATE_COACHING_PROMO_PERCENT}% off · You save {formatPrivateCoachingMoney(pricing.discountAmountCents)}.
+            <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <p className="text-sm text-[hsl(var(--muted))]">
+                Optional. Enter the private code you received from the head coach.
+              </p>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => validatePromoCode(sessions)}
+                disabled={busy || hasPendingRequest || !normalizedPromoCode || promoChecking}
+                loading={promoChecking}
+                loadingText="Checking…"
+              >
+                Apply code
+              </Button>
             </div>
-          ) : (
-            <p className="mt-2 text-sm text-[hsl(var(--muted))]">Optional. Use the code provided by the head coach to apply a private coaching discount.</p>
-          )}
-        </div>
+
+            {hasUnappliedPromoCode ? (
+              <p className="mt-2 text-sm font-semibold text-amber-700">Apply the private code before confirming the request.</p>
+            ) : pricing.discountAmountCents > 0 ? (
+              <div className="mt-3 rounded-2xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
+                Code applied: {pricing.discountLabel ? `${pricing.discountLabel} · ` : ''}{pricing.discountPercent}% off · You save {formatPrivateCoachingMoney(pricing.discountAmountCents)}.
+              </div>
+            ) : null}
+          </div>
+        )}
 
         <div className="rounded-3xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] p-4 text-sm">
           <div className="font-semibold">Payment instructions</div>
@@ -235,7 +340,7 @@ export default function PrivateCoachingRequestForm({ coaches, hasPendingRequest 
       <ConfirmActionModal
         open={confirmOpen}
         title="Confirm private coaching request"
-        description="Please review the package, promo code and payment method before sending this request."
+        description="Please review the package, private code and payment method before sending this request."
         confirmLabel="Confirm request"
         pendingLabel="Sending…"
         pending={busy}
