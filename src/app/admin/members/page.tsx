@@ -185,9 +185,12 @@ export default async function AdminMembersPage({
           </p>
         </div>
 
-        <div className="grid w-full gap-2 sm:w-auto sm:grid-cols-2">
+        <div className="grid w-full gap-2 sm:w-auto sm:grid-cols-3">
           <Button asChild variant="outline" className="w-full" href="/admin">
             ← Admin
+          </Button>
+          <Button asChild variant="outline" className="w-full" href="/admin/members/inactive">
+            Inactive accounts
           </Button>
           <Button asChild variant="outline" className="w-full" href="/members">
             Members (public)
