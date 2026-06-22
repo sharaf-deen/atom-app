@@ -6,6 +6,7 @@ import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import AccessDeniedCard from '@/components/AccessDeniedCard'
 import Button from '@/components/ui/Button'
+import InactiveFollowupActions from '@/components/admin/members/InactiveFollowupActions'
 import { getSessionUser } from '@/lib/session'
 import { getSupabaseAdminClientCached } from '@/lib/requestCache'
 import {
@@ -57,9 +58,30 @@ type SubscriptionRow = {
   created_at: string | null
 }
 
+type FollowupStatus =
+  | 'all'
+  | 'to_contact'
+  | 'contacted'
+  | 'will_renew'
+  | 'not_interested'
+  | 'moved_academy'
+  | 'created_by_mistake'
+  | 'resolved'
+
+type FollowupRow = {
+  member_id: string
+  status: Exclude<FollowupStatus, 'all'>
+  note: string | null
+  reviewed_at: string | null
+  reviewed_by: string | null
+  next_follow_up_at: string | null
+  updated_at: string | null
+}
+
 type InactiveMember = {
   member: MemberRow
   latestSub: SubscriptionRow | null
+  followup: FollowupRow | null
   primaryReason: Exclude<InactiveReason, 'all'>
   reasonLabel: string
   reasonDetail: string
@@ -70,6 +92,16 @@ type InactiveMember = {
 }
 
 const PAGE_SIZE_OPTIONS = [10, 20, 50] as const
+const FOLLOWUP_STATUS_OPTIONS: { value: FollowupStatus; label: string }[] = [
+  { value: 'all', label: 'All follow-ups' },
+  { value: 'to_contact', label: 'To contact' },
+  { value: 'contacted', label: 'Contacted' },
+  { value: 'will_renew', label: 'Will renew' },
+  { value: 'not_interested', label: 'Not interested' },
+  { value: 'moved_academy', label: 'Moved academy' },
+  { value: 'created_by_mistake', label: 'Created by mistake' },
+  { value: 'resolved', label: 'Resolved' },
+]
 const DEFAULT_PAGE_SIZE = 20
 const REASON_OPTIONS: { value: InactiveReason; label: string }[] = [
   { value: 'all', label: 'All reasons' },
@@ -100,6 +132,16 @@ function clampInt(value: unknown, fallback: number, min: number, max: number) {
 function normalizeReason(value: unknown): InactiveReason {
   const s = typeof value === 'string' ? value : 'all'
   return REASON_OPTIONS.some((option) => option.value === s) ? (s as InactiveReason) : 'all'
+}
+
+function normalizeFollowupStatus(value: unknown): FollowupStatus {
+  const s = typeof value === 'string' ? value : 'all'
+  return FOLLOWUP_STATUS_OPTIONS.some((option) => option.value === s) ? (s as FollowupStatus) : 'all'
+}
+
+function followupStatusLabel(value?: FollowupStatus | null) {
+  const status = value || 'to_contact'
+  return FOLLOWUP_STATUS_OPTIONS.find((option) => option.value === status)?.label ?? 'To contact'
 }
 
 function normalizeMemberRoleFilter(value: unknown): '' | Role {
@@ -200,7 +242,7 @@ function latestSubscriptionFor(memberId: string, byMember: Map<string, Subscript
   })[0]
 }
 
-function buildInactiveMember(member: MemberRow, latestSub: SubscriptionRow | null, today: string): InactiveMember {
+function buildInactiveMember(member: MemberRow, latestSub: SubscriptionRow | null, today: string, followup: FollowupRow | null): InactiveMember {
   const issues = profileIssues(member)
   const due = Number(latestSub?.amount_due ?? 0)
   const hasDue = Number.isFinite(due) && due > 0
@@ -268,6 +310,7 @@ function buildInactiveMember(member: MemberRow, latestSub: SubscriptionRow | nul
   return {
     member,
     latestSub,
+    followup,
     primaryReason,
     reasonLabel,
     reasonDetail,
@@ -284,6 +327,7 @@ function buildPageHref(args: {
   reason: InactiveReason
   role: '' | Role
   inactiveSince: number
+  followupStatus: FollowupStatus
   pageSize: number
 }) {
   const sp = new URLSearchParams()
@@ -291,6 +335,7 @@ function buildPageHref(args: {
   if (args.reason !== 'all') sp.set('reason', args.reason)
   if (args.role) sp.set('role', args.role)
   if (args.inactiveSince > 0) sp.set('inactiveSince', String(args.inactiveSince))
+  if (args.followupStatus !== 'all') sp.set('followupStatus', args.followupStatus)
   if (args.pageSize !== DEFAULT_PAGE_SIZE) sp.set('pageSize', String(args.pageSize))
   if (args.page > 1) sp.set('page', String(args.page))
   const qs = sp.toString()
@@ -306,11 +351,12 @@ export default async function AdminInactiveMembersPage({
   const reason = normalizeReason(firstParam(searchParams?.reason))
   const role = normalizeMemberRoleFilter(firstParam(searchParams?.role))
   const inactiveSince = clampInt(firstParam(searchParams?.inactiveSince), 0, 0, 3650)
+  const followupStatus = normalizeFollowupStatus(firstParam(searchParams?.followupStatus))
   const pageSizeRaw = clampInt(firstParam(searchParams?.pageSize), DEFAULT_PAGE_SIZE, 5, 50)
   const pageSize = (PAGE_SIZE_OPTIONS as readonly number[]).includes(pageSizeRaw) ? pageSizeRaw : DEFAULT_PAGE_SIZE
   const page = clampInt(firstParam(searchParams?.page), 1, 1, 1_000_000)
 
-  const currentPath = buildPageHref({ page, q, reason, role, inactiveSince, pageSize })
+  const currentPath = buildPageHref({ page, q, reason, role, inactiveSince, followupStatus, pageSize })
   const me = await getSessionUser()
   if (!me) redirect(`/login?next=${encodeURIComponent(currentPath)}`)
 
@@ -356,8 +402,18 @@ export default async function AdminInactiveMembersPage({
     .select('id,member_id,plan,subscription_type,status,start_date,end_date,frozen_from,frozen_until,sessions_total,sessions_used,amount,amount_due,payment_method,created_at')
     .order('created_at', { ascending: false })
 
+  const { data: followupsData, error: followupsError } = await admin
+    .from('member_inactive_followups')
+    .select('member_id,status,note,reviewed_at,reviewed_by,next_follow_up_at,updated_at')
+
   const profiles = ((profilesData ?? []) as MemberRow[]).filter((member) => !hasLifetimeGymAccess(member.role))
   const subscriptions = (subscriptionsData ?? []) as SubscriptionRow[]
+  const followups = followupsError ? [] : ((followupsData ?? []) as FollowupRow[])
+  const followupByMember = new Map<string, FollowupRow>()
+  for (const followup of followups) {
+    if (!followup?.member_id) continue
+    followupByMember.set(followup.member_id, followup)
+  }
 
   const subsByMember = new Map<string, SubscriptionRow[]>()
   for (const sub of subscriptions) {
@@ -380,7 +436,7 @@ export default async function AdminInactiveMembersPage({
 
   const inactiveAll = profiles
     .filter((member) => !activeIds.has(member.user_id))
-    .map((member) => buildInactiveMember(member, latestSubscriptionFor(member.user_id, subsByMember), today))
+    .map((member) => buildInactiveMember(member, latestSubscriptionFor(member.user_id, subsByMember), today, followupByMember.get(member.user_id) ?? null))
 
   const counts = inactiveAll.reduce(
     (acc, item) => {
@@ -403,6 +459,7 @@ export default async function AdminInactiveMembersPage({
   const filtered = inactiveAll.filter((item) => {
     if (reason !== 'all' && item.primaryReason !== reason) return false
     if (role && item.member.role !== role) return false
+    if (followupStatus !== 'all' && (item.followup?.status ?? 'to_contact') !== followupStatus) return false
     if (inactiveSince > 0 && (item.inactiveDays === null || item.inactiveDays < inactiveSince)) return false
     if (!needle) return true
 
@@ -426,8 +483,18 @@ export default async function AdminInactiveMembersPage({
   const from = (safePage - 1) * pageSize
   const rows = filtered.slice(from, from + pageSize)
 
-  const baseArgs = { q, reason, role, inactiveSince, pageSize }
-  const hasFilters = Boolean(q || reason !== 'all' || role || inactiveSince > 0 || pageSize !== DEFAULT_PAGE_SIZE)
+  const followupCounts = inactiveAll.reduce(
+    (acc, item) => {
+      const status = item.followup?.status ?? 'to_contact'
+      acc[status] = (acc[status] ?? 0) + 1
+      if (item.followup?.reviewed_at) acc.reviewed += 1
+      return acc
+    },
+    { reviewed: 0 } as Record<string, number>,
+  )
+
+  const baseArgs = { q, reason, role, inactiveSince, followupStatus, pageSize }
+  const hasFilters = Boolean(q || reason !== 'all' || role || inactiveSince > 0 || followupStatus !== 'all' || pageSize !== DEFAULT_PAGE_SIZE)
 
   return (
     <main className="mx-auto max-w-6xl space-y-4 p-4 sm:p-6">
@@ -448,14 +515,15 @@ export default async function AdminInactiveMembersPage({
         </div>
       </div>
 
-      {(profilesError || subscriptionsError) ? (
+      {(profilesError || subscriptionsError || followupsError) ? (
         <div className="rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800">
           {profilesError ? <p>Profiles error: {profilesError.message}</p> : null}
           {subscriptionsError ? <p>Subscriptions error: {subscriptionsError.message}</p> : null}
+          {followupsError ? <p>Follow-up error: {followupsError.message}. Apply the Members Inactive Lot 2 migration if this is the first deployment.</p> : null}
         </div>
       ) : null}
 
-      <section className="grid gap-3 md:grid-cols-4">
+      <section className="grid gap-3 md:grid-cols-4 xl:grid-cols-6">
         <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4 shadow-soft">
           <p className="text-xs font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Inactive total</p>
           <p className="mt-2 text-3xl font-bold">{counts.total}</p>
@@ -472,10 +540,18 @@ export default async function AdminInactiveMembersPage({
           <p className="text-xs font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Remaining due</p>
           <p className="mt-2 text-3xl font-bold">{counts.remaining_due}</p>
         </div>
+        <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4 shadow-soft">
+          <p className="text-xs font-medium uppercase tracking-wide text-[hsl(var(--muted))]">To contact</p>
+          <p className="mt-2 text-3xl font-bold">{followupCounts.to_contact ?? 0}</p>
+        </div>
+        <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4 shadow-soft">
+          <p className="text-xs font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Reviewed</p>
+          <p className="mt-2 text-3xl font-bold">{followupCounts.reviewed ?? 0}</p>
+        </div>
       </section>
 
       <form action="/admin/members/inactive" className="rounded-3xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4 shadow-soft">
-        <div className="grid gap-3 lg:grid-cols-[minmax(0,1.3fr)_220px_180px_160px_130px_auto] lg:items-end">
+        <div className="grid gap-3 lg:grid-cols-[minmax(0,1.3fr)_190px_170px_160px_170px_110px_auto] lg:items-end">
           <label className="block">
             <span className="text-sm font-semibold">Search</span>
             <input
@@ -517,6 +593,15 @@ export default async function AdminInactiveMembersPage({
               <option value="30">30+ days</option>
               <option value="60">60+ days</option>
               <option value="90">90+ days</option>
+            </select>
+          </label>
+
+          <label className="block">
+            <span className="text-sm font-semibold">Follow-up</span>
+            <select name="followupStatus" defaultValue={followupStatus} className="mt-1 w-full rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] px-4 py-3 text-sm outline-none focus:border-black">
+              {FOLLOWUP_STATUS_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>{option.label}</option>
+              ))}
             </select>
           </label>
 
@@ -588,6 +673,42 @@ export default async function AdminInactiveMembersPage({
                 </div>
               </div>
 
+              <div className="mt-4 rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] p-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <p className="text-xs font-semibold uppercase text-[hsl(var(--muted))]">Follow-up</p>
+                    <p className="mt-1 text-sm font-medium">{followupStatusLabel(item.followup?.status)}</p>
+                    {item.followup?.reviewed_at ? (
+                      <p className="mt-1 text-xs text-[hsl(var(--muted))]">Reviewed {formatDate(item.followup.reviewed_at)}</p>
+                    ) : null}
+                  </div>
+                  {item.followup?.next_follow_up_at ? (
+                    <span className="rounded-full border border-[hsl(var(--border))] bg-[hsl(var(--card))] px-3 py-1 text-xs font-semibold">
+                      Next: {formatDate(item.followup.next_follow_up_at)}
+                    </span>
+                  ) : null}
+                </div>
+                {item.followup?.note ? (
+                  <p className="mt-2 whitespace-pre-wrap text-sm text-[hsl(var(--muted))]">{item.followup.note}</p>
+                ) : null}
+                <InactiveFollowupActions
+                  memberId={member.user_id}
+                  memberName={memberName(member)}
+                  atomId={member.member_id}
+                  email={member.email}
+                  phone={member.phone}
+                  reasonLabel={item.reasonLabel}
+                  reasonDetail={item.reasonDetail}
+                  suggestedAction={item.suggestedAction}
+                  latestSubscriptionLabel={latest ? `${latest.plan || 'Plan'} · ${latest.status || 'status unknown'}` : 'No subscription history'}
+                  profileHref={`/members/${member.user_id}`}
+                  subscriptionsHref={`/members/${member.user_id}#subscriptions`}
+                  initialStatus={item.followup?.status ?? 'to_contact'}
+                  initialNote={item.followup?.note ?? ''}
+                  initialNextFollowUpAt={item.followup?.next_follow_up_at ?? ''}
+                />
+              </div>
+
               {item.profileIssues.length > 0 ? (
                 <div className="mt-3 rounded-2xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800">
                   Profile issue(s): {item.profileIssues.join(' · ')}
@@ -618,7 +739,7 @@ export default async function AdminInactiveMembersPage({
       </div>
 
       <p className="text-xs text-[hsl(var(--muted))]">
-        Read-only Lot 1. No account is modified from this page. Attendance-based inactivity can be added later if scan history is required.
+Members Inactive Lot 2. This page can save follow-up notes/status only. It does not modify member accounts, subscriptions, access, or roles.
       </p>
     </main>
   )
