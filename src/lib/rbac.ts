@@ -110,6 +110,7 @@ const APP_NAV_BY_ROLE: MenuByRole = {
     { label: 'My Profile', href: '/profile', icon: 'id' },
     { label: 'Scan', href: '/scan', icon: 'scan' },
     { label: 'Members', href: '/members', icon: 'users' },
+    { label: 'Inactive Accounts', href: '/admin/members/inactive', icon: 'users' },
     { label: 'CRM', href: '/admin/crm', icon: 'users' },
     { label: 'Visitors', href: '/admin/visitors', icon: 'users' },
     { label: 'Packages & Promos', href: '/packages-and-promos', icon: 'gift' },
@@ -130,6 +131,7 @@ const APP_NAV_BY_ROLE: MenuByRole = {
     { label: 'Membership', href: '/kiosk', icon: 'id' },
     { label: 'Scan', href: '/scan', icon: 'scan' },
     { label: 'Members', href: '/members', icon: 'users' },
+    { label: 'Inactive Accounts', href: '/admin/members/inactive', icon: 'users' },
     { label: 'CRM', href: '/admin/crm', icon: 'users' },
     { label: 'Visitors', href: '/admin/visitors', icon: 'users' },
     { label: 'Coaches', href: '/coaches', icon: 'user-cog' },
@@ -160,6 +162,7 @@ const APP_NAV_BY_ROLE: MenuByRole = {
     { label: 'Membership', href: '/kiosk', icon: 'id' },
     { label: 'Scan', href: '/scan', icon: 'scan' },
     { label: 'Members', href: '/members', icon: 'users' },
+    { label: 'Inactive Accounts', href: '/admin/members/inactive', icon: 'users' },
     { label: 'CRM', href: '/admin/crm', icon: 'users' },
     { label: 'Visitors', href: '/admin/visitors', icon: 'users' },
     { label: 'Coaches', href: '/coaches', icon: 'user-cog' },
@@ -206,6 +209,10 @@ export function canAccessAdminDashboard(role: Role | null | undefined) {
 }
 
 export function canAccessMembersList(role: Role | null | undefined) {
+  return hasAnyRole(role, FRONT_DESK_ROLES)
+}
+
+export function canAccessInactiveMembers(role: Role | null | undefined) {
   return hasAnyRole(role, FRONT_DESK_ROLES)
 }
 
@@ -429,6 +436,14 @@ const CAPABILITY_BLUEPRINTS: CapabilityBlueprint[] = [
     description: 'Open members search and desk operations list.',
     href: '/members',
     check: (role) => canAccessMembersList(role),
+  },
+  {
+    key: 'inactive_members',
+    category: 'Front desk',
+    label: 'Inactive accounts',
+    description: 'Open inactive member accounts follow-up page.',
+    href: '/admin/members/inactive',
+    check: (role) => canAccessInactiveMembers(role),
   },
   {
     key: 'front_desk_center',
