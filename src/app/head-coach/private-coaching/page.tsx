@@ -13,6 +13,7 @@ import PrivateCoachingBookingsClient from '@/components/private-coaching/Private
 import PrivateCoachingPromoCodesClient from '@/components/private-coaching/PrivateCoachingPromoCodesClient'
 import { getSessionUserCached, getSupabaseAdminClientCached } from '@/lib/requestCache'
 import {
+  PRIVATE_COACHING_ALLOWED_MEMBER_ROLES,
   formatPrivateCoachingMoney,
   privateCoachingMemberName,
 } from '@/lib/privateCoaching'
@@ -80,6 +81,9 @@ type SlotRow = {
   status: string
   note: string | null
   created_at: string
+  is_backdated: boolean | null
+  assigned_member_id: string | null
+  backdated_reason: string | null
 }
 
 type BookingRow = {
@@ -135,11 +139,10 @@ export default async function HeadCoachPrivateCoachingPage() {
 
   let slotsQuery = admin
     .from('private_coaching_slots')
-    .select('id, coach_id, slot_date, start_time, end_time, status, note, created_at')
-    .gte('slot_date', new Date().toISOString().slice(0, 10))
-    .order('slot_date', { ascending: true })
+    .select('id, coach_id, slot_date, start_time, end_time, status, note, created_at, is_backdated, assigned_member_id, backdated_reason')
+    .order('slot_date', { ascending: false })
     .order('start_time', { ascending: true })
-    .limit(100)
+    .limit(200)
 
   if (me.role === 'head_coach') slotsQuery = slotsQuery.eq('coach_id', me.id)
 
@@ -159,7 +162,15 @@ export default async function HeadCoachPrivateCoachingPage() {
     .order('created_at', { ascending: false })
     .limit(100)
 
-  const [requestsRes, passesRes, coachesRes, slotsRes, bookingsRes, promoCodesRes] = await Promise.all([
+  const memberProfilesQuery = admin
+    .from('profiles')
+    .select('user_id, member_id, first_name, last_name, email, phone')
+    .in('role', [...PRIVATE_COACHING_ALLOWED_MEMBER_ROLES])
+    .not('user_id', 'is', null)
+    .order('first_name', { ascending: true })
+    .limit(1000)
+
+  const [requestsRes, passesRes, coachesRes, slotsRes, bookingsRes, promoCodesRes, memberProfilesRes] = await Promise.all([
     requestsQuery,
     admin
       .from('private_coaching_passes')
@@ -175,6 +186,7 @@ export default async function HeadCoachPrivateCoachingPage() {
     slotsQuery,
     bookingsQuery,
     promoCodesQuery,
+    memberProfilesQuery,
   ])
 
   const requests = (requestsRes.data ?? []) as RequestRow[]
@@ -183,9 +195,11 @@ export default async function HeadCoachPrivateCoachingPage() {
   const slots = (slotsRes.data ?? []) as SlotRow[]
   const bookings = (bookingsRes.data ?? []) as BookingRow[]
   const promoCodes = (promoCodesRes.data ?? []) as PromoRow[]
+  const memberProfiles = ((memberProfilesRes.data ?? []) as ProfileRow[]).filter((profile) => profile.user_id)
   const profileIds = Array.from(new Set([
     ...requests.flatMap((row) => [row.member_id, row.coach_id]),
     ...bookings.flatMap((row) => [row.member_id, row.coach_id]),
+    ...slots.flatMap((row) => [row.assigned_member_id]),
   ].filter(Boolean)))
   const profilesById = new Map<string, ProfileRow>()
 
@@ -219,6 +233,12 @@ export default async function HeadCoachPrivateCoachingPage() {
     email: coach.email,
   }))
 
+  const memberOptions = memberProfiles.map((profile) => ({
+    user_id: profile.user_id,
+    full_name: privateCoachingMemberName(profile),
+    meta: profileMeta(profile),
+  }))
+
   const slotRows = slots.map((row) => ({
     id: row.id,
     coachId: row.coach_id,
@@ -229,6 +249,11 @@ export default async function HeadCoachPrivateCoachingPage() {
     status: row.status,
     note: row.note,
     createdAt: row.created_at,
+    isBackdated: Boolean(row.is_backdated),
+    assignedMemberId: row.assigned_member_id,
+    assignedMemberName: row.assigned_member_id ? privateCoachingMemberName(profilesById.get(row.assigned_member_id) ?? {}) : null,
+    assignedMemberMeta: row.assigned_member_id ? profileMeta(profilesById.get(row.assigned_member_id)) : null,
+    backdatedReason: row.backdated_reason,
   }))
 
   const bookingRows = bookings.map((row) => {
@@ -388,6 +413,7 @@ export default async function HeadCoachPrivateCoachingPage() {
             <PrivateCoachingSlotsClient
               rows={slotRows}
               coaches={coachOptions}
+              members={memberOptions}
               canChooseCoach={me.role === 'super_admin'}
               defaultCoachId={me.role === 'head_coach' ? me.id : coachOptions[0]?.user_id ?? ''}
             />

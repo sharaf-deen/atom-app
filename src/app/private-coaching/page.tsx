@@ -60,6 +60,9 @@ type SlotRow = {
   end_time: string
   status: string
   note: string | null
+  is_backdated: boolean | null
+  assigned_member_id: string | null
+  backdated_reason: string | null
 }
 
 type BookingRow = {
@@ -162,10 +165,10 @@ export default async function PrivateCoachingPage() {
       const today = new Date().toISOString().slice(0, 10)
       const { data: slots } = await admin
         .from('private_coaching_slots')
-        .select('id, coach_id, slot_date, start_time, end_time, status, note')
+        .select('id, coach_id, slot_date, start_time, end_time, status, note, is_backdated, assigned_member_id, backdated_reason')
         .in('coach_id', coachIds)
         .eq('status', 'available')
-        .gte('slot_date', today)
+        .or(`slot_date.gte.${today},and(is_backdated.eq.true,assigned_member_id.eq.${me.id})`)
         .order('slot_date', { ascending: true })
         .order('start_time', { ascending: true })
         .limit(20)
@@ -182,6 +185,9 @@ export default async function PrivateCoachingPage() {
     startTime: slot.start_time,
     endTime: slot.end_time,
     note: slot.note,
+    isBackdated: Boolean(slot.is_backdated),
+    assignedMemberId: slot.assigned_member_id,
+    backdatedReason: slot.backdated_reason,
   }))
 
   const bookingRows = bookings.map((booking) => ({

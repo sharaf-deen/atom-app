@@ -57,7 +57,7 @@ function rpcStatus(message?: string | null) {
 function rpcDetails(message?: string | null) {
   const text = String(message ?? '')
   if (text.includes('PRIVATE_COACHING_SLOT_NOT_AVAILABLE')) return 'This slot is no longer available.'
-  if (text.includes('PRIVATE_COACHING_SLOT_IN_PAST')) return 'This slot is in the past and cannot be booked.'
+  if (text.includes('PRIVATE_COACHING_SLOT_IN_PAST')) return 'This slot is in the past and cannot be booked unless it is assigned by the head coach as a correction.'
   if (text.includes('PRIVATE_COACHING_NO_TOKENS')) return 'You do not have an active private coaching token for this coach.'
   if (text.includes('PRIVATE_COACHING_FORBIDDEN')) return 'You are not allowed to book private coaching slots.'
   return message || 'Could not book this slot.'

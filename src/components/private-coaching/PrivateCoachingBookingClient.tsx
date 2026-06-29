@@ -18,6 +18,9 @@ type AvailableSlotRow = {
   startTime: string
   endTime: string
   note: string | null
+  isBackdated: boolean
+  assignedMemberId: string | null
+  backdatedReason: string | null
 }
 
 type BookingRow = {
@@ -46,6 +49,19 @@ const BOOKING_FILTERS = [
   { value: 'completed', label: 'Completed' },
   { value: 'cancelled', label: 'Cancelled' },
 ] as const
+
+function todayInputValue() {
+  const date = new Date()
+  const yyyy = date.getFullYear()
+  const mm = String(date.getMonth() + 1).padStart(2, '0')
+  const dd = String(date.getDate()).padStart(2, '0')
+  return `${yyyy}-${mm}-${dd}`
+}
+
+function isPastDate(value?: string | null) {
+  if (!value) return false
+  return value < todayInputValue()
+}
 
 function formatSlotDate(value?: string | null) {
   if (!value) return '—'
@@ -80,10 +96,16 @@ function slotTimeLabel(startTime: string, endTime: string) {
 function bookSlotSummaryItems(slot: AvailableSlotRow | null, totalRemaining: number): ConfirmActionSummaryItem[] {
   if (!slot) return []
 
+  const isCorrection = slot.isBackdated || isPastDate(slot.slotDate)
+
   return [
     { label: 'Coach', value: slot.coachName },
     { label: 'Date', value: formatSlotDate(slot.slotDate) },
     { label: 'Time', value: slotTimeLabel(slot.startTime, slot.endTime) },
+    { label: 'Past correction', value: isCorrection ? 'Yes' : 'No' },
+    ...(isCorrection ? [
+      { label: 'Reason', value: slot.backdatedReason || slot.note || 'Past session correction' },
+    ] : []),
     { label: 'Note', value: slot.note || '—' },
     { label: 'Current tokens', value: totalRemaining },
     { label: 'Token impact', value: '1 token will be used' },
@@ -98,6 +120,9 @@ export default function PrivateCoachingBookingClient({ totalRemaining, available
   const [confirmBookSlot, setConfirmBookSlot] = React.useState<AvailableSlotRow | null>(null)
   const [status, setStatus] = React.useState<{ kind: 'success' | 'error' | ''; message: string }>({ kind: '', message: '' })
   const [bookingFilter, setBookingFilter] = React.useState<(typeof BOOKING_FILTERS)[number]['value']>('all')
+
+  const backdatedSlots = React.useMemo(() => availableSlots.filter((slot) => slot.isBackdated || isPastDate(slot.slotDate)), [availableSlots])
+  const upcomingSlots = React.useMemo(() => availableSlots.filter((slot) => !(slot.isBackdated || isPastDate(slot.slotDate))), [availableSlots])
 
   const filteredBookings = React.useMemo(() => {
     if (bookingFilter === 'all') return bookings
@@ -119,13 +144,50 @@ export default function PrivateCoachingBookingClient({ totalRemaining, available
         return
       }
       setConfirmBookSlot(null)
-      setStatus({ kind: 'success', message: 'Private coaching slot booked. One token has been used.' })
+      setStatus({ kind: 'success', message: slot.isBackdated || isPastDate(slot.slotDate) ? 'Past private coaching session confirmed. One token has been used.' : 'Private coaching slot booked. One token has been used.' })
       router.refresh()
     } catch (error: any) {
       setStatus({ kind: 'error', message: error?.message || 'Could not book this slot.' })
     } finally {
       setBusySlotId('')
     }
+  }
+
+  function renderSlotCard(slot: AvailableSlotRow, mode: 'backdated' | 'upcoming') {
+    return (
+      <div key={slot.id} className={`rounded-3xl border bg-white p-4 shadow-soft ${mode === 'backdated' ? 'border-amber-200' : 'border-[hsl(var(--border))]'}`}>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            {mode === 'backdated' ? (
+              <span className="mb-2 inline-flex rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-[11px] font-semibold text-amber-800">
+                Past session to confirm
+              </span>
+            ) : null}
+            <div className="font-semibold tracking-tight">
+              {formatSlotDate(slot.slotDate)} · {formatPrivateCoachingSlotTime(slot.startTime)} - {formatPrivateCoachingSlotTime(slot.endTime)}
+            </div>
+            <div className="mt-1 text-sm text-[hsl(var(--muted))]">
+              {slot.coachName}{slot.note ? ` · ${slot.note}` : ''}
+            </div>
+            {mode === 'backdated' ? (
+              <div className="mt-2 rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                {slot.backdatedReason || 'This is a missed-session correction created by the head coach.'}
+              </div>
+            ) : null}
+          </div>
+          <Button
+            type="button"
+            onClick={() => setConfirmBookSlot(slot)}
+            loading={busySlotId === slot.id}
+            loadingText="Booking…"
+            disabled={Boolean(busySlotId)}
+            className="w-full sm:w-auto"
+          >
+            {mode === 'backdated' ? 'Confirm past session' : 'Book slot'}
+          </Button>
+        </div>
+      </div>
+    )
   }
 
   return (
@@ -140,11 +202,35 @@ export default function PrivateCoachingBookingClient({ totalRemaining, available
         </p>
       </div>
 
+      {backdatedSlots.length > 0 ? (
+        <div>
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <div>
+              <h4 className="text-base font-semibold tracking-tight">Past session to confirm</h4>
+              <p className="text-sm text-[hsl(var(--muted))]">These are missed-session corrections assigned to you by the head coach.</p>
+            </div>
+            <span className="rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-800">
+              {backdatedSlots.length} correction(s)
+            </span>
+          </div>
+
+          {totalRemaining <= 0 ? (
+            <div className="rounded-3xl border border-dashed border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+              A past session correction is available, but you need an active private coaching token before confirming it.
+            </div>
+          ) : (
+            <div className="grid gap-3">
+              {backdatedSlots.map((slot) => renderSlotCard(slot, 'backdated'))}
+            </div>
+          )}
+        </div>
+      ) : null}
+
       <div>
         <div className="mb-3 flex items-center justify-between gap-3">
           <h4 className="text-base font-semibold tracking-tight">Available slots</h4>
           <span className="rounded-full border border-[hsl(var(--border))] bg-white px-3 py-1 text-xs font-semibold text-[hsl(var(--muted))]">
-            {availableSlots.length} slot(s)
+            {upcomingSlots.length} slot(s)
           </span>
         </div>
 
@@ -152,36 +238,13 @@ export default function PrivateCoachingBookingClient({ totalRemaining, available
           <div className="rounded-3xl border border-dashed border-[hsl(var(--border))] bg-white p-4 text-sm text-[hsl(var(--muted))]">
             Available coach slots will appear here after your private coaching payment is confirmed and your tokens are active.
           </div>
-        ) : availableSlots.length ? (
+        ) : upcomingSlots.length ? (
           <div className="grid gap-3">
-            {availableSlots.map((slot) => (
-              <div key={slot.id} className="rounded-3xl border border-[hsl(var(--border))] bg-white p-4 shadow-soft">
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                  <div>
-                    <div className="font-semibold tracking-tight">
-                      {formatSlotDate(slot.slotDate)} · {formatPrivateCoachingSlotTime(slot.startTime)} - {formatPrivateCoachingSlotTime(slot.endTime)}
-                    </div>
-                    <div className="mt-1 text-sm text-[hsl(var(--muted))]">
-                      {slot.coachName}{slot.note ? ` · ${slot.note}` : ''}
-                    </div>
-                  </div>
-                  <Button
-                    type="button"
-                    onClick={() => setConfirmBookSlot(slot)}
-                    loading={busySlotId === slot.id}
-                    loadingText="Booking…"
-                    disabled={Boolean(busySlotId)}
-                    className="w-full sm:w-auto"
-                  >
-                    Book slot
-                  </Button>
-                </div>
-              </div>
-            ))}
+            {upcomingSlots.map((slot) => renderSlotCard(slot, 'upcoming'))}
           </div>
         ) : (
           <div className="rounded-3xl border border-dashed border-[hsl(var(--border))] bg-white p-4 text-sm text-[hsl(var(--muted))]">
-            No available slot yet. The head coach will add private coaching availability soon.
+            No future available slot yet. The head coach will add private coaching availability soon.
           </div>
         )}
       </div>
@@ -254,13 +317,13 @@ export default function PrivateCoachingBookingClient({ totalRemaining, available
 
       <ConfirmActionModal
         open={Boolean(confirmBookSlot)}
-        title="Confirm private coaching booking"
-        description="Please review the slot before booking it."
-        confirmLabel="Confirm booking"
+        title={confirmBookSlot && (confirmBookSlot.isBackdated || isPastDate(confirmBookSlot.slotDate)) ? 'Confirm past private coaching session' : 'Confirm private coaching booking'}
+        description={confirmBookSlot && (confirmBookSlot.isBackdated || isPastDate(confirmBookSlot.slotDate)) ? 'This is a missed-session correction. Please confirm before using one token.' : 'Please review the slot before booking it.'}
+        confirmLabel={confirmBookSlot && (confirmBookSlot.isBackdated || isPastDate(confirmBookSlot.slotDate)) ? 'Confirm past session' : 'Confirm booking'}
         pendingLabel="Booking…"
         pending={Boolean(confirmBookSlot && busySlotId === confirmBookSlot.id)}
         summaryItems={bookSlotSummaryItems(confirmBookSlot, totalRemaining)}
-        warning="This booking will use 1 private coaching token."
+        warning={confirmBookSlot && (confirmBookSlot.isBackdated || isPastDate(confirmBookSlot.slotDate)) ? 'This will consume 1 token for a past session correction assigned by the head coach.' : 'This booking will use 1 private coaching token.'}
         onCancel={() => {
           if (!busySlotId) setConfirmBookSlot(null)
         }}
