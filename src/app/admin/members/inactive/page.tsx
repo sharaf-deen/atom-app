@@ -68,6 +68,8 @@ type FollowupStatus =
   | 'created_by_mistake'
   | 'resolved'
 
+type ReviewState = 'all' | 'not_reviewed' | 'reviewed'
+
 type FollowupRow = {
   member_id: string
   status: Exclude<FollowupStatus, 'all'>
@@ -101,6 +103,11 @@ const FOLLOWUP_STATUS_OPTIONS: { value: FollowupStatus; label: string }[] = [
   { value: 'moved_academy', label: 'Moved academy' },
   { value: 'created_by_mistake', label: 'Created by mistake' },
   { value: 'resolved', label: 'Resolved' },
+]
+const REVIEW_STATE_OPTIONS: { value: ReviewState; label: string }[] = [
+  { value: 'all', label: 'All review states' },
+  { value: 'not_reviewed', label: 'Not reviewed' },
+  { value: 'reviewed', label: 'Reviewed' },
 ]
 const DEFAULT_PAGE_SIZE = 20
 const REASON_OPTIONS: { value: InactiveReason; label: string }[] = [
@@ -137,6 +144,11 @@ function normalizeReason(value: unknown): InactiveReason {
 function normalizeFollowupStatus(value: unknown): FollowupStatus {
   const s = typeof value === 'string' ? value : 'all'
   return FOLLOWUP_STATUS_OPTIONS.some((option) => option.value === s) ? (s as FollowupStatus) : 'all'
+}
+
+function normalizeReviewState(value: unknown): ReviewState {
+  const s = typeof value === 'string' ? value : 'all'
+  return REVIEW_STATE_OPTIONS.some((option) => option.value === s) ? (s as ReviewState) : 'all'
 }
 
 function followupStatusLabel(value?: FollowupStatus | null) {
@@ -328,6 +340,7 @@ function buildPageHref(args: {
   role: '' | Role
   inactiveSince: number
   followupStatus: FollowupStatus
+  reviewState: ReviewState
   pageSize: number
 }) {
   const sp = new URLSearchParams()
@@ -336,6 +349,7 @@ function buildPageHref(args: {
   if (args.role) sp.set('role', args.role)
   if (args.inactiveSince > 0) sp.set('inactiveSince', String(args.inactiveSince))
   if (args.followupStatus !== 'all') sp.set('followupStatus', args.followupStatus)
+  if (args.reviewState !== 'all') sp.set('reviewState', args.reviewState)
   if (args.pageSize !== DEFAULT_PAGE_SIZE) sp.set('pageSize', String(args.pageSize))
   if (args.page > 1) sp.set('page', String(args.page))
   const qs = sp.toString()
@@ -352,11 +366,12 @@ export default async function AdminInactiveMembersPage({
   const role = normalizeMemberRoleFilter(firstParam(searchParams?.role))
   const inactiveSince = clampInt(firstParam(searchParams?.inactiveSince), 0, 0, 3650)
   const followupStatus = normalizeFollowupStatus(firstParam(searchParams?.followupStatus))
+  const reviewState = normalizeReviewState(firstParam(searchParams?.reviewState))
   const pageSizeRaw = clampInt(firstParam(searchParams?.pageSize), DEFAULT_PAGE_SIZE, 5, 50)
   const pageSize = (PAGE_SIZE_OPTIONS as readonly number[]).includes(pageSizeRaw) ? pageSizeRaw : DEFAULT_PAGE_SIZE
   const page = clampInt(firstParam(searchParams?.page), 1, 1, 1_000_000)
 
-  const currentPath = buildPageHref({ page, q, reason, role, inactiveSince, followupStatus, pageSize })
+  const currentPath = buildPageHref({ page, q, reason, role, inactiveSince, followupStatus, reviewState, pageSize })
   const me = await getSessionUser()
   if (!me) redirect(`/login?next=${encodeURIComponent(currentPath)}`)
 
@@ -460,6 +475,8 @@ export default async function AdminInactiveMembersPage({
     if (reason !== 'all' && item.primaryReason !== reason) return false
     if (role && item.member.role !== role) return false
     if (followupStatus !== 'all' && (item.followup?.status ?? 'to_contact') !== followupStatus) return false
+    if (reviewState === 'reviewed' && !item.followup?.reviewed_at) return false
+    if (reviewState === 'not_reviewed' && item.followup?.reviewed_at) return false
     if (inactiveSince > 0 && (item.inactiveDays === null || item.inactiveDays < inactiveSince)) return false
     if (!needle) return true
 
@@ -493,8 +510,11 @@ export default async function AdminInactiveMembersPage({
     { reviewed: 0 } as Record<string, number>,
   )
 
-  const baseArgs = { q, reason, role, inactiveSince, followupStatus, pageSize }
-  const hasFilters = Boolean(q || reason !== 'all' || role || inactiveSince > 0 || followupStatus !== 'all' || pageSize !== DEFAULT_PAGE_SIZE)
+  const reviewedCount = followupCounts.reviewed ?? 0
+  const notReviewedCount = Math.max(0, inactiveAll.length - reviewedCount)
+
+  const baseArgs = { q, reason, role, inactiveSince, followupStatus, reviewState, pageSize }
+  const hasFilters = Boolean(q || reason !== 'all' || role || inactiveSince > 0 || followupStatus !== 'all' || reviewState !== 'all' || pageSize !== DEFAULT_PAGE_SIZE)
 
   return (
     <main className="mx-auto max-w-6xl space-y-4 p-4 sm:p-6">
@@ -523,7 +543,7 @@ export default async function AdminInactiveMembersPage({
         </div>
       ) : null}
 
-      <section className="grid gap-3 md:grid-cols-4 xl:grid-cols-6">
+      <section className="grid gap-3 md:grid-cols-4 xl:grid-cols-7">
         <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4 shadow-soft">
           <p className="text-xs font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Inactive total</p>
           <p className="mt-2 text-3xl font-bold">{counts.total}</p>
@@ -545,13 +565,17 @@ export default async function AdminInactiveMembersPage({
           <p className="mt-2 text-3xl font-bold">{followupCounts.to_contact ?? 0}</p>
         </div>
         <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4 shadow-soft">
+          <p className="text-xs font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Not reviewed</p>
+          <p className="mt-2 text-3xl font-bold">{notReviewedCount}</p>
+        </div>
+        <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4 shadow-soft">
           <p className="text-xs font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Reviewed</p>
-          <p className="mt-2 text-3xl font-bold">{followupCounts.reviewed ?? 0}</p>
+          <p className="mt-2 text-3xl font-bold">{reviewedCount}</p>
         </div>
       </section>
 
       <form action="/admin/members/inactive" className="rounded-3xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4 shadow-soft">
-        <div className="grid gap-3 lg:grid-cols-[minmax(0,1.3fr)_190px_170px_160px_170px_110px_auto] lg:items-end">
+        <div className="grid gap-3 lg:grid-cols-[minmax(0,1.3fr)_190px_170px_160px_170px_170px_110px_auto] lg:items-end">
           <label className="block">
             <span className="text-sm font-semibold">Search</span>
             <input
@@ -600,6 +624,15 @@ export default async function AdminInactiveMembersPage({
             <span className="text-sm font-semibold">Follow-up</span>
             <select name="followupStatus" defaultValue={followupStatus} className="mt-1 w-full rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] px-4 py-3 text-sm outline-none focus:border-black">
               {FOLLOWUP_STATUS_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>{option.label}</option>
+              ))}
+            </select>
+          </label>
+
+          <label className="block">
+            <span className="text-sm font-semibold">Reviewed</span>
+            <select name="reviewState" defaultValue={reviewState} className="mt-1 w-full rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] px-4 py-3 text-sm outline-none focus:border-black">
+              {REVIEW_STATE_OPTIONS.map((option) => (
                 <option key={option.value} value={option.value}>{option.label}</option>
               ))}
             </select>
