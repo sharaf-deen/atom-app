@@ -106,6 +106,23 @@ type ProductQueryRow = Omit<ProductRow, 'model'> & {
     | Array<NonNullable<ProductRow['model']>>
 }
 
+type ProductModelGroup = {
+  key: string
+  modelId: string | null
+  modelName: string
+  category: Category
+  products: ProductRow[]
+  representative: ProductRow
+  totalStock: number
+  lowStockCount: number
+  outOfStockCount: number
+  inactiveCount: number
+  preorderCount: number
+  minPriceCents: number
+  maxPriceCents: number
+  latestCreatedAt: string | null
+}
+
 function normalizeProductRow(row: ProductQueryRow): ProductRow {
   const model = Array.isArray(row.model) ? row.model[0] ?? null : row.model ?? null
   return {
@@ -237,6 +254,90 @@ function buildUrl(base: string, params: Record<string, string>) {
 
 function shortId(id: string) {
   return (id || '').slice(0, 8)
+}
+
+function productModelGroupLabel(product: ProductRow) {
+  const modelName = String(product.model?.name ?? '').trim()
+  if (modelName) return modelName
+  const productName = String(product.name ?? '').trim()
+  return productName || `Product ${shortId(product.id)}`
+}
+
+function formatVariantLabel(product: ProductRow) {
+  const parts = [product.color, product.size].map((value) => String(value ?? '').trim()).filter(Boolean)
+  if (parts.length > 0) return parts.join(' / ')
+  return product.name || 'Default variant'
+}
+
+function groupProductsByModel(products: ProductRow[]): ProductModelGroup[] {
+  const groups = new Map<string, ProductModelGroup>()
+
+  for (const product of products) {
+    const key = product.model_id ? `model:${product.model_id}` : `product:${product.id}`
+    const createdAt = product.created_at ?? null
+    const existing = groups.get(key)
+
+    if (!existing) {
+      groups.set(key, {
+        key,
+        modelId: product.model_id,
+        modelName: productModelGroupLabel(product),
+        category: product.category,
+        products: [product],
+        representative: product,
+        totalStock: Math.max(0, Number(product.inventory_qty ?? 0)),
+        lowStockCount: isLowStock(product) ? 1 : 0,
+        outOfStockCount: Math.max(0, Number(product.inventory_qty ?? 0)) <= 0 ? 1 : 0,
+        inactiveCount: product.is_active ? 0 : 1,
+        preorderCount: product.allow_preorder ? 1 : 0,
+        minPriceCents: Math.max(0, Number(product.price_cents ?? 0)),
+        maxPriceCents: Math.max(0, Number(product.price_cents ?? 0)),
+        latestCreatedAt: createdAt,
+      })
+      continue
+    }
+
+    const price = Math.max(0, Number(product.price_cents ?? 0))
+    existing.products.push(product)
+    existing.totalStock += Math.max(0, Number(product.inventory_qty ?? 0))
+    existing.lowStockCount += isLowStock(product) ? 1 : 0
+    existing.outOfStockCount += Math.max(0, Number(product.inventory_qty ?? 0)) <= 0 ? 1 : 0
+    existing.inactiveCount += product.is_active ? 0 : 1
+    existing.preorderCount += product.allow_preorder ? 1 : 0
+    existing.minPriceCents = Math.min(existing.minPriceCents, price)
+    existing.maxPriceCents = Math.max(existing.maxPriceCents, price)
+
+    if (createdAt && (!existing.latestCreatedAt || new Date(createdAt).getTime() > new Date(existing.latestCreatedAt).getTime())) {
+      existing.latestCreatedAt = createdAt
+      existing.representative = product
+    }
+  }
+
+  return Array.from(groups.values()).map((group) => ({
+    ...group,
+    products: group.products.sort((a, b) => {
+      const colorCompare = String(a.color ?? '').localeCompare(String(b.color ?? ''))
+      if (colorCompare !== 0) return colorCompare
+      const sizeCompare = String(a.size ?? '').localeCompare(String(b.size ?? ''), undefined, { numeric: true })
+      if (sizeCompare !== 0) return sizeCompare
+      return String(a.name ?? '').localeCompare(String(b.name ?? ''))
+    }),
+  }))
+}
+
+function groupStockPill(group: Pick<ProductModelGroup, 'totalStock' | 'lowStockCount' | 'outOfStockCount'>) {
+  if (group.totalStock <= 0 || group.outOfStockCount > 0) {
+    return <span className="rounded-full border border-red-200 bg-red-50 px-2 py-0.5 text-[11px] font-medium text-red-700">{group.outOfStockCount} out of stock</span>
+  }
+  if (group.lowStockCount > 0) {
+    return <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700">{group.lowStockCount} low stock</span>
+  }
+  return <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-700">Healthy model</span>
+}
+
+function priceRangeLabel(group: Pick<ProductModelGroup, 'minPriceCents' | 'maxPriceCents'>, currency: string | null | undefined) {
+  if (group.minPriceCents === group.maxPriceCents) return formatCurrency(group.minPriceCents, 'en-EG', currency ?? 'EGP')
+  return `${formatCurrency(group.minPriceCents, 'en-EG', currency ?? 'EGP')} – ${formatCurrency(group.maxPriceCents, 'en-EG', currency ?? 'EGP')}`
 }
 
 function formatDateTime(value?: string | null) {
@@ -484,12 +585,15 @@ export default async function AdminStorePage({
       })
     : []
 
+  const groupedProducts = groupProductsByModel(filteredProducts)
   const metrics = computeMetrics(allProducts, supplierOrders)
   const totalFilteredProducts = filteredProducts.length
-  const totalProductPages = Math.max(1, Math.ceil(totalFilteredProducts / pageSize))
+  const totalFilteredGroups = groupedProducts.length
+  const totalProductPages = Math.max(1, Math.ceil(totalFilteredGroups / pageSize))
   const safeProductPage = Math.min(page, totalProductPages)
   const productStart = (safeProductPage - 1) * pageSize
-  const pagedProducts = filteredProducts.slice(productStart, productStart + pageSize)
+  const pagedProductGroups = groupedProducts.slice(productStart, productStart + pageSize)
+  const shownProductCount = pagedProductGroups.reduce((sum, group) => sum + group.products.length, 0)
   const hasMoreProducts = safeProductPage < totalProductPages
 
   const totalSupplierOrders = supplierOrders.length
@@ -765,7 +869,7 @@ export default async function AdminStorePage({
                 <Card className="p-4">
                   <CardHeader className="mb-2">
                     <CardTitle className="text-lg">Catalog & stock</CardTitle>
-                    <div className="text-xs text-[hsl(var(--muted))]">{totalFilteredProducts} product(s) · {pageSize}/page · showing {pagedProducts.length}</div>
+                    <div className="text-xs text-[hsl(var(--muted))]">{totalFilteredProducts} product(s) in {totalFilteredGroups} model group(s) · {pageSize} group(s)/page · showing {shownProductCount} product(s)</div>
                   </CardHeader>
                   <CardContent className="grid gap-2">
                     {(q || category !== 'all' || active !== 'all' || stock !== 'all' || preorder !== 'all') ? (
@@ -779,99 +883,136 @@ export default async function AdminStorePage({
                         <Link href="/admin/store?tab=catalog" className="ml-auto rounded-full border bg-white px-2 py-1 font-medium hover:bg-gray-50">Clear all</Link>
                       </div>
                     ) : null}
-                    {pagedProducts.length === 0 ? (
+                    {pagedProductGroups.length === 0 ? (
                       <div className="rounded-2xl border border-dashed p-4 text-sm text-[hsl(var(--muted))]">No products match the current filters.</div>
                     ) : (
-                      pagedProducts.map((product) => (
-                        <div key={product.id} className="rounded-2xl border bg-white p-3 shadow-sm">
-                          <div className="flex flex-wrap items-start justify-between gap-2">
-                            <div className="min-w-0 flex-1">
-                              <div className="truncate text-sm font-semibold">{product.name}</div>
-                              <ProductImageStrip
-                                name={product.name}
-                                imageUrls={[
-                                  resolveStoreProductImageUrl(product.image_path),
-                                  resolveStoreProductImageUrl(product.image_path_2),
-                                  resolveStoreProductImageUrl(product.image_path_3),
-                                ]}
-                              />
-                              <div className="mt-1.5 flex flex-wrap gap-1.5 text-[11px] text-[hsl(var(--muted))]">
-                                <span className="rounded-full border px-2 py-0.5">ID: {shortId(product.id)}</span>
-                                <span className="rounded-full border px-2 py-0.5">{categoryLabels.get(product.category) ?? product.category}</span>
-                                {product.model?.name ? (
-                                  <span className="rounded-full border border-sky-200 bg-sky-50 px-2 py-0.5 text-sky-700">Model: {product.model.name}</span>
-                                ) : (
-                                  <span className="rounded-full border border-rose-300 bg-rose-100 px-2 py-0.5 font-medium text-rose-900">Data issue · linked model missing</span>
-                                )}
-                                {product.size ? <span className="rounded-full border px-2 py-0.5">Size: {product.size}</span> : null}
-                                {product.color ? <span className="rounded-full border px-2 py-0.5">Color: {product.color}</span> : null}
+                      pagedProductGroups.map((group) => {
+                        const representative = group.representative
+                        return (
+                          <div key={group.key} className="rounded-2xl border bg-white p-3 shadow-sm">
+                            <div className="flex flex-wrap items-start justify-between gap-3">
+                              <div className="min-w-0 flex-1">
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <div className="truncate text-base font-semibold">{group.modelName}</div>
+                                  <span className="rounded-full border bg-slate-50 px-2 py-0.5 text-[11px] font-medium text-slate-700">{group.products.length} variant{group.products.length === 1 ? '' : 's'}</span>
+                                </div>
+                                <div className="mt-1.5 flex flex-wrap gap-1.5 text-[11px] text-[hsl(var(--muted))]">
+                                  <span className="rounded-full border px-2 py-0.5">{categoryLabels.get(group.category) ?? group.category}</span>
+                                  {group.modelId ? (
+                                    <span className="rounded-full border border-sky-200 bg-sky-50 px-2 py-0.5 text-sky-700">Model ID: {shortId(group.modelId)}</span>
+                                  ) : (
+                                    <span className="rounded-full border border-rose-300 bg-rose-100 px-2 py-0.5 font-medium text-rose-900">Ungrouped product · linked model missing</span>
+                                  )}
+                                  {group.inactiveCount > 0 ? <span className="rounded-full border border-slate-300 bg-slate-100 px-2 py-0.5 text-slate-700">{group.inactiveCount} inactive</span> : null}
+                                  {group.preorderCount > 0 ? <span className="rounded-full border border-violet-200 bg-violet-50 px-2 py-0.5 text-violet-700">{group.preorderCount} preorder</span> : null}
+                                </div>
+                              </div>
+                              <div className="flex flex-wrap items-center gap-2">
+                                {groupStockPill(group)}
+                                <span className="rounded-full border bg-slate-50 px-2 py-0.5 text-[11px] font-medium text-slate-700">Total stock: {group.totalStock}</span>
                               </div>
                             </div>
-                            <div className="flex flex-wrap items-center gap-2">
-                              {stockPill(product)}
-                              <span className={`rounded-full border px-2 py-0.5 text-[11px] font-medium ${product.allow_preorder ? 'border-violet-200 bg-violet-50 text-violet-700' : 'border-slate-200 bg-slate-50 text-slate-700'}`}>
-                                {product.allow_preorder ? 'Preorder enabled' : 'Preorder disabled'}
-                              </span>
+
+                            <div className="mt-3 grid gap-1.5 rounded-xl bg-slate-50 p-2 text-xs sm:grid-cols-2 xl:grid-cols-4">
+                              <div><span className="text-[hsl(var(--muted))]">Price:</span> <span className="font-medium">{priceRangeLabel(group, representative.currency)}</span></div>
+                              <div><span className="text-[hsl(var(--muted))]">Variants:</span> <span className="font-medium">{group.products.length}</span></div>
+                              <div><span className="text-[hsl(var(--muted))]">Low/out:</span> <span className="font-medium">{group.lowStockCount} / {group.outOfStockCount}</span></div>
+                              <div><span className="text-[hsl(var(--muted))]">Latest:</span> <span className="font-medium">{formatDateTime(group.latestCreatedAt)}</span></div>
                             </div>
-                          </div>
 
-                          <div className="mt-2 grid gap-1.5 rounded-xl bg-slate-50 p-2 text-xs sm:grid-cols-2 xl:grid-cols-4">
-                            <div><span className="text-[hsl(var(--muted))]">Price:</span> <span className="font-medium">{formatCurrency(product.price_cents, 'en-EG', product.currency ?? 'EGP')}</span></div>
-                            <div><span className="text-[hsl(var(--muted))]">Stock:</span> <span className="font-medium">{product.inventory_qty}</span></div>
-                            <div><span className="text-[hsl(var(--muted))]">Threshold:</span> <span className="font-medium">{product.low_stock_threshold}</span></div>
-                            <div><span className="text-[hsl(var(--muted))]">Created:</span> <span className="font-medium">{formatDateTime(product.created_at)}</span></div>
-                          </div>
-
-                          {canManageCatalog ? (
-                            <div className="mt-2 flex flex-wrap gap-2">
-                              {product.model_id ? (
-                                <Link
-                                  prefetch={false}
-                                  href={`${buildUrl('/admin/store', {
-                                    ...catalogBaseParams,
-                                    page: String(safeProductPage),
-                                    variant_from: product.id,
-                                    variant_category: product.category,
-                                    variant_model_id: product.model_id,
-                                    variant_model_name: product.model?.name ?? '',
-                                    variant_price_cents: String(product.price_cents),
-                                  })}#quick-add-product`}
-                                  className="inline-flex min-h-[34px] items-center rounded-xl border border-sky-200 bg-sky-50 px-3 py-1.5 text-xs font-semibold text-sky-800 hover:bg-sky-100"
-                                >
-                                  Add variant
-                                </Link>
-                              ) : (
-                                <span className="inline-flex min-h-[34px] items-center rounded-xl border bg-slate-50 px-3 py-1.5 text-xs text-[hsl(var(--muted))]">Add variant unavailable · missing model</span>
-                              )}
-                            </div>
-                          ) : null}
-
-                          <div className="mt-2">
                             {canManageCatalog ? (
-                              <AdminProductQuickEdit
-                                id={product.id}
-                                category={product.category}
-                                modelId={product.model_id}
-                                modelName={product.model?.name ?? null}
-                                name={product.name}
-                                color={product.color}
-                                size={product.size}
-                                priceCents={product.price_cents}
-                                currency={product.currency}
-                                inventoryQty={product.inventory_qty}
-                                isActive={product.is_active}
-                                allowPreorder={product.allow_preorder}
-                                lowStockThreshold={product.low_stock_threshold}
-                                imagePath={product.image_path}
-                                imagePath2={product.image_path_2}
-                                imagePath3={product.image_path_3}
-                              />
-                            ) : (
-                              <div className="text-xs text-[hsl(var(--muted))]">Read-only catalog access for your role.</div>
-                            )}
+                              <div className="mt-3 flex flex-wrap gap-2">
+                                {group.modelId ? (
+                                  <Link
+                                    prefetch={false}
+                                    href={`${buildUrl('/admin/store', {
+                                      ...catalogBaseParams,
+                                      page: String(safeProductPage),
+                                      variant_from: representative.id,
+                                      variant_category: representative.category,
+                                      variant_model_id: group.modelId,
+                                      variant_model_name: group.modelName,
+                                      variant_price_cents: String(representative.price_cents),
+                                    })}#quick-add-product`}
+                                    className="inline-flex min-h-[34px] items-center rounded-xl border border-sky-200 bg-sky-50 px-3 py-1.5 text-xs font-semibold text-sky-800 hover:bg-sky-100"
+                                  >
+                                    Add variant
+                                  </Link>
+                                ) : (
+                                  <span className="inline-flex min-h-[34px] items-center rounded-xl border bg-slate-50 px-3 py-1.5 text-xs text-[hsl(var(--muted))]">Add variant unavailable · missing model</span>
+                                )}
+                              </div>
+                            ) : null}
+
+                            <div className="mt-3 grid gap-2">
+                              {group.products.map((product) => (
+                                <details key={product.id} className="rounded-2xl border bg-white p-3" open={group.products.length === 1}>
+                                  <summary className="cursor-pointer list-none">
+                                    <div className="flex flex-wrap items-start justify-between gap-2">
+                                      <div className="min-w-0 flex-1">
+                                        <div className="truncate text-sm font-semibold">{formatVariantLabel(product)}</div>
+                                        <div className="mt-1 flex flex-wrap gap-1.5 text-[11px] text-[hsl(var(--muted))]">
+                                          <span className="rounded-full border px-2 py-0.5">ID: {shortId(product.id)}</span>
+                                          {product.name && product.name !== group.modelName ? <span className="rounded-full border px-2 py-0.5">Name: {product.name}</span> : null}
+                                          {product.size ? <span className="rounded-full border px-2 py-0.5">Size: {product.size}</span> : null}
+                                          {product.color ? <span className="rounded-full border px-2 py-0.5">Color: {product.color}</span> : null}
+                                        </div>
+                                      </div>
+                                      <div className="flex flex-wrap items-center gap-2">
+                                        {stockPill(product)}
+                                        <span className={`rounded-full border px-2 py-0.5 text-[11px] font-medium ${product.allow_preorder ? 'border-violet-200 bg-violet-50 text-violet-700' : 'border-slate-200 bg-slate-50 text-slate-700'}`}>
+                                          {product.allow_preorder ? 'Preorder' : 'No preorder'}
+                                        </span>
+                                      </div>
+                                    </div>
+                                  </summary>
+
+                                  <div className="mt-3 grid gap-3 border-t pt-3">
+                                    <ProductImageStrip
+                                      name={product.name}
+                                      imageUrls={[
+                                        resolveStoreProductImageUrl(product.image_path),
+                                        resolveStoreProductImageUrl(product.image_path_2),
+                                        resolveStoreProductImageUrl(product.image_path_3),
+                                      ]}
+                                    />
+
+                                    <div className="grid gap-1.5 rounded-xl bg-slate-50 p-2 text-xs sm:grid-cols-2 xl:grid-cols-4">
+                                      <div><span className="text-[hsl(var(--muted))]">Price:</span> <span className="font-medium">{formatCurrency(product.price_cents, 'en-EG', product.currency ?? 'EGP')}</span></div>
+                                      <div><span className="text-[hsl(var(--muted))]">Stock:</span> <span className="font-medium">{product.inventory_qty}</span></div>
+                                      <div><span className="text-[hsl(var(--muted))]">Threshold:</span> <span className="font-medium">{product.low_stock_threshold}</span></div>
+                                      <div><span className="text-[hsl(var(--muted))]">Created:</span> <span className="font-medium">{formatDateTime(product.created_at)}</span></div>
+                                    </div>
+
+                                    {canManageCatalog ? (
+                                      <AdminProductQuickEdit
+                                        id={product.id}
+                                        category={product.category}
+                                        modelId={product.model_id}
+                                        modelName={product.model?.name ?? null}
+                                        name={product.name}
+                                        color={product.color}
+                                        size={product.size}
+                                        priceCents={product.price_cents}
+                                        currency={product.currency}
+                                        inventoryQty={product.inventory_qty}
+                                        isActive={product.is_active}
+                                        allowPreorder={product.allow_preorder}
+                                        lowStockThreshold={product.low_stock_threshold}
+                                        imagePath={product.image_path}
+                                        imagePath2={product.image_path_2}
+                                        imagePath3={product.image_path_3}
+                                      />
+                                    ) : (
+                                      <div className="text-xs text-[hsl(var(--muted))]">Read-only catalog access for your role.</div>
+                                    )}
+                                  </div>
+                                </details>
+                              ))}
+                            </div>
                           </div>
-                        </div>
-                      ))
+                        )
+                      })
                     )}
 
                     <div className="flex flex-wrap items-center justify-between gap-2 pt-2 text-sm">
