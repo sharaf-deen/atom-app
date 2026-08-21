@@ -29,9 +29,9 @@ import {
   type StoreProductCategoryRow,
 } from '@/lib/storeCategories'
 
-const StoreProductForm = dynamicImport(() => import('@/components/StoreProductForm'), {
+const AdminStoreProductCreateForm = dynamicImport(() => import('@/components/store/AdminStoreProductCreateForm'), {
   ssr: false,
-  loading: () => <div className="text-sm text-gray-500">Loading catalog form…</div>,
+  loading: () => <div className="text-sm text-gray-500">Loading quick product form…</div>,
 })
 
 const SupplierOrderForm = dynamicImport(() => import('@/components/store/SupplierOrderForm'), {
@@ -637,9 +637,12 @@ export default async function AdminStorePage({
           <div className={`grid gap-3 ${canManageCatalog ? 'xl:grid-cols-[minmax(0,380px)_minmax(0,1fr)]' : 'xl:grid-cols-1'}`}>
             {canManageCatalog ? (
               <Card className="p-4">
-                <CardHeader className="mb-2"><CardTitle className="text-lg">Create catalog product</CardTitle></CardHeader>
+                <CardHeader className="mb-2">
+                  <CardTitle className="text-lg">Quick add product</CardTitle>
+                  <div className="text-xs text-[hsl(var(--muted))]">Create a sellable Store variant with only the essential fields first.</div>
+                </CardHeader>
                 <CardContent className="space-y-3">
-                  <StoreProductForm />
+                  <AdminStoreProductCreateForm />
                   <div className="rounded-2xl border border-dashed p-3">
                     <StoreCategoryManager />
                   </div>
