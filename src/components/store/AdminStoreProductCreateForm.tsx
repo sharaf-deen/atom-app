@@ -21,6 +21,14 @@ type ModelOption = {
   is_active?: boolean | null
 }
 
+type InitialVariant = {
+  sourceProductId: string
+  category: string
+  modelId: string
+  modelName: string | null
+  priceCents: number | null
+}
+
 type FormState = {
   category: string
   modelId: string
@@ -41,6 +49,24 @@ const EMPTY_FORM: FormState = {
   priceEgp: '',
   inventoryQty: '0',
   isActive: true,
+}
+
+function formatCentsForInput(cents: number | null | undefined) {
+  const n = Number(cents ?? 0)
+  if (!Number.isFinite(n) || n <= 0) return ''
+  const amount = n / 100
+  return Number.isInteger(amount) ? String(amount) : amount.toFixed(2)
+}
+
+function buildInitialForm(initialVariant?: InitialVariant | null): FormState {
+  if (!initialVariant) return EMPTY_FORM
+  return {
+    ...EMPTY_FORM,
+    category: clean(initialVariant.category),
+    modelId: clean(initialVariant.modelId),
+    priceEgp: formatCentsForInput(initialVariant.priceCents),
+    inventoryQty: '0',
+  }
 }
 
 function clean(value: unknown) {
@@ -83,10 +109,16 @@ function buildModelLabel(model: ModelOption) {
   return category ? `${model.name} · ${category}` : model.name
 }
 
-export default function AdminStoreProductCreateForm() {
+export default function AdminStoreProductCreateForm({
+  initialVariant = null,
+}: {
+  initialVariant?: InitialVariant | null
+}) {
   const router = useRouter()
   const formRef = useRef<HTMLFormElement | null>(null)
-  const [form, setForm] = useState<FormState>(EMPTY_FORM)
+  const baseForm = useMemo(() => buildInitialForm(initialVariant), [initialVariant])
+  const isVariantMode = Boolean(initialVariant?.sourceProductId && initialVariant?.modelId)
+  const [form, setForm] = useState<FormState>(baseForm)
   const [categories, setCategories] = useState<CategoryOption[]>([])
   const [models, setModels] = useState<ModelOption[]>([])
   const [loadingOptions, setLoadingOptions] = useState(true)
@@ -94,6 +126,13 @@ export default function AdminStoreProductCreateForm() {
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [saving, setSaving] = useState(false)
   const [photoNames, setPhotoNames] = useState<[string, string, string]>(['', '', ''])
+
+  useEffect(() => {
+    setForm(baseForm)
+    setPhotoNames(['', '', ''])
+    setAdvancedOpen(isVariantMode)
+    formRef.current?.reset()
+  }, [baseForm, isVariantMode])
 
   useEffect(() => {
     let cancelled = false
@@ -185,9 +224,10 @@ export default function AdminStoreProductCreateForm() {
       { label: 'Initial stock', value: inventoryQty == null ? '—' : String(inventoryQty) },
       { label: 'Status', value: form.isActive ? 'Active' : 'Inactive' },
       { label: 'Photos', value: photos.length ? photos.join(', ') : 'No photo' },
-      { label: 'Impact', value: 'A new Store product variant will be created.' },
+      { label: 'Source', value: isVariantMode ? `Variant from ${initialVariant?.modelName || 'existing model'}` : 'New product entry' },
+      { label: 'Impact', value: isVariantMode ? 'A new variant will be created from the selected model. Existing products will not be modified.' : 'A new Store product variant will be created.' },
     ]
-  }, [form.color, form.isActive, form.size, inventoryQty, photoNames, priceCents, resolvedProductName, selectedCategoryLabel, selectedModel])
+  }, [form.color, form.isActive, form.size, initialVariant?.modelName, inventoryQty, isVariantMode, photoNames, priceCents, resolvedProductName, selectedCategoryLabel, selectedModel])
 
   function update<K extends keyof FormState>(key: K, value: FormState[K]) {
     setForm((current) => ({ ...current, [key]: value }))
@@ -262,7 +302,12 @@ export default function AdminStoreProductCreateForm() {
 
       toast.success('Product created')
       setConfirmOpen(false)
-      setForm((current) => ({ ...EMPTY_FORM, category: current.category }))
+      setForm((current) => {
+        if (isVariantMode) {
+          return { ...baseForm, category: current.category || baseForm.category, modelId: current.modelId || baseForm.modelId, priceEgp: current.priceEgp || baseForm.priceEgp }
+        }
+        return { ...EMPTY_FORM, category: current.category }
+      })
       setPhotoNames(['', '', ''])
       formRef.current?.reset()
       router.refresh()
@@ -277,8 +322,12 @@ export default function AdminStoreProductCreateForm() {
   return (
     <>
       <form ref={formRef} onSubmit={openConfirmation} className="space-y-4">
-        <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-900">
-          Quick mode: choose the category and model, then add price and stock. Photos and details can stay optional.
+        <div className={`rounded-2xl border px-3 py-2 text-xs ${isVariantMode ? 'border-sky-200 bg-sky-50 text-sky-900' : 'border-emerald-200 bg-emerald-50 text-emerald-900'}`}>
+          {isVariantMode ? (
+            <>Variant mode: category, model, and price are prefilled from {initialVariant?.modelName || 'the selected model'}. Add the new color/size/stock, then confirm.</>
+          ) : (
+            <>Quick mode: choose the category and model, then add price and stock. Photos and details can stay optional.</>
+          )}
         </div>
 
         <div className="space-y-3 rounded-2xl border bg-white p-3">
@@ -453,7 +502,7 @@ export default function AdminStoreProductCreateForm() {
             type="button"
             disabled={saving}
             onClick={() => {
-              setForm((current) => ({ ...EMPTY_FORM, category: current.category }))
+              setForm((current) => (isVariantMode ? { ...baseForm, category: current.category || baseForm.category, modelId: current.modelId || baseForm.modelId } : { ...EMPTY_FORM, category: current.category }))
               setPhotoNames(['', '', ''])
               formRef.current?.reset()
             }}
@@ -466,13 +515,13 @@ export default function AdminStoreProductCreateForm() {
 
       <ConfirmActionModal
         open={confirmOpen}
-        title="Confirm product creation"
-        description="Review the product details before creating this Store item."
-        confirmLabel="Confirm & create"
+        title={isVariantMode ? 'Confirm variant creation' : 'Confirm product creation'}
+        description={isVariantMode ? 'Review the new variant before adding it to this existing product model.' : 'Review the product details before creating this Store item.'}
+        confirmLabel={isVariantMode ? 'Confirm & add variant' : 'Confirm & create'}
         pendingLabel="Creating…"
         pending={saving}
         summaryItems={summaryItems}
-        warning="This will create a new Store product variant. Existing products and stock history will not be modified."
+        warning={isVariantMode ? 'This creates a new variant only. The original product/model and existing stock history will not be modified.' : 'This will create a new Store product variant. Existing products and stock history will not be modified.'}
         onCancel={() => (saving ? null : setConfirmOpen(false))}
         onConfirm={createProduct}
       />

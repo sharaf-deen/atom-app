@@ -516,6 +516,21 @@ export default async function AdminStorePage({
     s_page_size: String(supplierPageSize),
   }
 
+  const variantSourceProductId = strParam(searchParams?.variant_from).trim()
+  const variantSourceProduct = variantSourceProductId
+    ? allProducts.find((product) => product.id === variantSourceProductId) ?? null
+    : null
+  const variantFallbackPriceCents = Number(strParam(searchParams?.variant_price_cents))
+  const initialVariant = variantSourceProductId
+    ? {
+        sourceProductId: variantSourceProductId,
+        category: variantSourceProduct?.category ?? strParam(searchParams?.variant_category).trim(),
+        modelId: variantSourceProduct?.model_id ?? strParam(searchParams?.variant_model_id).trim(),
+        modelName: variantSourceProduct?.model?.name ?? (strParam(searchParams?.variant_model_name).trim() || null),
+        priceCents: variantSourceProduct?.price_cents ?? (Number.isFinite(variantFallbackPriceCents) && variantFallbackPriceCents > 0 ? Math.floor(variantFallbackPriceCents) : null),
+      }
+    : null
+
   const canSeeDashboard = canAccessStoreDashboard(me.role)
   const canSeeExpenses = canAccessStoreExpenses(me.role)
   const storeExpenseLinkTo = todayDateOnly()
@@ -649,18 +664,20 @@ export default async function AdminStorePage({
         {tab === 'catalog' && (
           <div className={`grid gap-3 ${canManageCatalog ? 'xl:grid-cols-[minmax(0,380px)_minmax(0,1fr)]' : 'xl:grid-cols-1'}`}>
             {canManageCatalog ? (
-              <Card className="p-4">
-                <CardHeader className="mb-2">
-                  <CardTitle className="text-lg">Quick add product</CardTitle>
-                  <div className="text-xs text-[hsl(var(--muted))]">Create a sellable Store variant with only the essential fields first.</div>
-                </CardHeader>
-                <CardContent className="space-y-3">
-                  <AdminStoreProductCreateForm />
-                  <div className="rounded-2xl border border-dashed p-3">
-                    <StoreCategoryManager />
-                  </div>
-                </CardContent>
-              </Card>
+              <div id="quick-add-product">
+                <Card className={`p-4 ${initialVariant ? 'border-sky-200 ring-1 ring-sky-100' : ''}`}>
+                  <CardHeader className="mb-2">
+                    <CardTitle className="text-lg">{initialVariant ? 'Quick add variant' : 'Quick add product'}</CardTitle>
+                    <div className="text-xs text-[hsl(var(--muted))]">{initialVariant ? 'Add a new variant from an existing product model with the main fields prefilled.' : 'Create a sellable Store variant with only the essential fields first.'}</div>
+                  </CardHeader>
+                  <CardContent className="space-y-3">
+                    <AdminStoreProductCreateForm initialVariant={initialVariant} />
+                    <div className="rounded-2xl border border-dashed p-3">
+                      <StoreCategoryManager />
+                    </div>
+                  </CardContent>
+                </Card>
+              </div>
             ) : (
               <Card>
                 <CardHeader><CardTitle>Catalog access</CardTitle></CardHeader>
@@ -804,6 +821,30 @@ export default async function AdminStorePage({
                             <div><span className="text-[hsl(var(--muted))]">Threshold:</span> <span className="font-medium">{product.low_stock_threshold}</span></div>
                             <div><span className="text-[hsl(var(--muted))]">Created:</span> <span className="font-medium">{formatDateTime(product.created_at)}</span></div>
                           </div>
+
+                          {canManageCatalog ? (
+                            <div className="mt-2 flex flex-wrap gap-2">
+                              {product.model_id ? (
+                                <Link
+                                  prefetch={false}
+                                  href={`${buildUrl('/admin/store', {
+                                    ...catalogBaseParams,
+                                    page: String(safeProductPage),
+                                    variant_from: product.id,
+                                    variant_category: product.category,
+                                    variant_model_id: product.model_id,
+                                    variant_model_name: product.model?.name ?? '',
+                                    variant_price_cents: String(product.price_cents),
+                                  })}#quick-add-product`}
+                                  className="inline-flex min-h-[34px] items-center rounded-xl border border-sky-200 bg-sky-50 px-3 py-1.5 text-xs font-semibold text-sky-800 hover:bg-sky-100"
+                                >
+                                  Add variant
+                                </Link>
+                              ) : (
+                                <span className="inline-flex min-h-[34px] items-center rounded-xl border bg-slate-50 px-3 py-1.5 text-xs text-[hsl(var(--muted))]">Add variant unavailable · missing model</span>
+                              )}
+                            </div>
+                          ) : null}
 
                           <div className="mt-2">
                             {canManageCatalog ? (
