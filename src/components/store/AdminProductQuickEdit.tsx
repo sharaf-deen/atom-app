@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import Button from '@/components/ui/Button'
 import Modal from '@/components/ui/Modal'
+import ConfirmActionModal, { type ConfirmActionSummaryItem } from '@/components/ui/ConfirmActionModal'
 import StoreProductForm from '@/components/StoreProductForm'
 
 type Props = {
@@ -26,6 +27,32 @@ type Props = {
   imagePath3?: string | null
   onSaved?: () => void
   onDeleted?: () => void
+}
+
+function formatEGP(cents: number | null | undefined) {
+  const amount = Number(cents ?? 0) / 100
+  try {
+    return new Intl.NumberFormat('en-EG', {
+      style: 'currency',
+      currency: 'EGP',
+      maximumFractionDigits: 2,
+    }).format(amount)
+  } catch {
+    return `${amount.toFixed(2)} EGP`
+  }
+}
+
+function formatCategory(value: string | null | undefined) {
+  const clean = String(value ?? '').trim()
+  if (!clean) return '—'
+  return clean
+    .replace(/_/g, ' ')
+    .replace(/-/g, ' ')
+    .replace(/\b\w/g, (letter) => letter.toUpperCase())
+}
+
+function formatBool(value: boolean, yes: string, no: string) {
+  return value ? yes : no
 }
 
 export default function AdminProductQuickEdit({
@@ -55,6 +82,9 @@ export default function AdminProductQuickEdit({
   const [threshold, setThreshold] = useState<number>(Number.isFinite(lowStockThreshold) ? lowStockThreshold : 0)
   const [loading, setLoading] = useState(false)
   const [editOpen, setEditOpen] = useState(false)
+  const [optionalOpen, setOptionalOpen] = useState(false)
+  const [confirmSaveOpen, setConfirmSaveOpen] = useState(false)
+  const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false)
   const [deleteBusy, setDeleteBusy] = useState(false)
 
   const dirty = useMemo(
@@ -62,16 +92,58 @@ export default function AdminProductQuickEdit({
     [qty, inventoryQty, active, isActive, preorder, allowPreorder, threshold, lowStockThreshold]
   )
 
-  async function save() {
-    if (!dirty || loading) return
+  const productLabel = name || modelName || 'Product'
+  const categoryLabel = formatCategory(category)
+  const modelLabel = modelName || '—'
+  const detailsLabel = [color, size].map((value) => String(value ?? '').trim()).filter(Boolean).join(' · ') || '—'
+
+  const saveSummaryItems = useMemo<ConfirmActionSummaryItem[]>(() => {
+    return [
+      { label: 'Product', value: productLabel },
+      { label: 'Category', value: categoryLabel },
+      { label: 'Model', value: modelLabel },
+      { label: 'Price', value: formatEGP(priceCents) },
+      { label: 'Stock', value: `${inventoryQty} → ${Number.isFinite(qty) ? Math.floor(qty) : '—'}` },
+      { label: 'Status', value: `${formatBool(isActive, 'Active', 'Inactive')} → ${formatBool(active, 'Active', 'Inactive')}` },
+      { label: 'Preorder', value: `${formatBool(allowPreorder, 'Enabled', 'Disabled')} → ${formatBool(preorder, 'Enabled', 'Disabled')}` },
+      { label: 'Low stock alert', value: `${lowStockThreshold} → ${Number.isFinite(threshold) ? Math.floor(threshold) : '—'}` },
+      { label: 'Impact', value: 'Only this product variant will be updated.' },
+    ]
+  }, [active, allowPreorder, categoryLabel, inventoryQty, isActive, lowStockThreshold, modelLabel, preorder, priceCents, productLabel, qty, threshold])
+
+  const deleteSummaryItems = useMemo<ConfirmActionSummaryItem[]>(() => {
+    return [
+      { label: 'Product', value: productLabel },
+      { label: 'Category', value: categoryLabel },
+      { label: 'Model', value: modelLabel },
+      { label: 'Variant details', value: detailsLabel },
+      { label: 'Price', value: formatEGP(priceCents) },
+      { label: 'Current stock', value: String(inventoryQty) },
+      { label: 'Impact', value: 'The backend may block deletion if Store history is linked to this product.' },
+    ]
+  }, [categoryLabel, detailsLabel, inventoryQty, modelLabel, priceCents, productLabel])
+
+  function validateQuickEdit() {
     if (!Number.isFinite(qty) || qty < 0) {
       toast.error('Inventory must be a non-negative number')
-      return
+      return false
     }
     if (!Number.isFinite(threshold) || threshold < 0) {
       toast.error('Low stock threshold must be a non-negative number')
-      return
+      return false
     }
+    return true
+  }
+
+  function openSaveConfirmation() {
+    if (!dirty || loading) return
+    if (!validateQuickEdit()) return
+    setConfirmSaveOpen(true)
+  }
+
+  async function save() {
+    if (!dirty || loading) return
+    if (!validateQuickEdit()) return
 
     setLoading(true)
     try {
@@ -95,6 +167,7 @@ export default function AdminProductQuickEdit({
       }
 
       toast.success('Product updated')
+      setConfirmSaveOpen(false)
       onSaved?.()
       router.refresh()
       setTimeout(() => router.refresh(), 250)
@@ -107,10 +180,6 @@ export default function AdminProductQuickEdit({
 
   async function removeProduct() {
     if (deleteBusy) return
-    const ok = globalThis.confirm(
-      'Delete this product? Existing store history linked to this product may block deletion.'
-    )
-    if (!ok) return
 
     setDeleteBusy(true)
     try {
@@ -124,6 +193,7 @@ export default function AdminProductQuickEdit({
         return
       }
       toast.success('Product deleted')
+      setConfirmDeleteOpen(false)
       onDeleted?.()
       router.refresh()
       setTimeout(() => router.refresh(), 250)
@@ -135,64 +205,106 @@ export default function AdminProductQuickEdit({
   }
 
   return (
-    <div className="grid gap-3">
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-[120px_140px_auto_auto_auto] xl:items-end">
-        <div className="flex flex-col gap-1">
-          <label className="text-[11px] text-[hsl(var(--muted))]">Stock</label>
+    <div className="space-y-3 rounded-2xl border border-[hsl(var(--border))] bg-white p-3">
+      <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+        <div className="rounded-2xl bg-[hsl(var(--surface-2))] px-3 py-2">
+          <div className="text-[11px] font-semibold uppercase tracking-wide text-[hsl(var(--muted))]">Category</div>
+          <div className="mt-0.5 truncate text-sm font-semibold text-black">{categoryLabel}</div>
+        </div>
+        <div className="rounded-2xl bg-[hsl(var(--surface-2))] px-3 py-2">
+          <div className="text-[11px] font-semibold uppercase tracking-wide text-[hsl(var(--muted))]">Model</div>
+          <div className="mt-0.5 truncate text-sm font-semibold text-black">{modelLabel}</div>
+        </div>
+        <div className="rounded-2xl bg-[hsl(var(--surface-2))] px-3 py-2">
+          <div className="text-[11px] font-semibold uppercase tracking-wide text-[hsl(var(--muted))]">Price</div>
+          <div className="mt-0.5 truncate text-sm font-semibold text-black">{formatEGP(priceCents)}</div>
+        </div>
+        <div className="rounded-2xl bg-[hsl(var(--surface-2))] px-3 py-2">
+          <div className="text-[11px] font-semibold uppercase tracking-wide text-[hsl(var(--muted))]">Variant</div>
+          <div className="mt-0.5 truncate text-sm font-semibold text-black">{detailsLabel}</div>
+        </div>
+      </div>
+
+      <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
+        <label className="block">
+          <span className="mb-1.5 block text-sm font-semibold text-black">Stock</span>
           <input
             type="number"
             min={0}
+            step={1}
             value={qty}
             onChange={(e) => setQty(Number(e.target.value || 0))}
-            className="rounded-xl border px-3 py-2 text-sm bg-white"
+            className="min-h-[44px] w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3.5 py-2.5 text-sm text-black shadow-soft outline-none"
           />
-        </div>
-
-        <div className="flex flex-col gap-1">
-          <label className="text-[11px] text-[hsl(var(--muted))]">Low stock threshold</label>
-          <input
-            type="number"
-            min={0}
-            value={threshold}
-            onChange={(e) => setThreshold(Number(e.target.value || 0))}
-            className="rounded-xl border px-3 py-2 text-sm bg-white"
-          />
-        </div>
-
-        <label className="flex items-center gap-2 text-sm select-none pb-2">
-          <input
-            type="checkbox"
-            checked={preorder}
-            onChange={(e) => setPreorder(e.target.checked)}
-            className="h-4 w-4"
-          />
-          Preorder enabled
         </label>
 
-        <label className="flex items-center gap-2 text-sm select-none pb-2">
+        <label className="flex min-h-[44px] items-center gap-2 rounded-2xl border border-[hsl(var(--border))] bg-white px-3.5 py-2.5 text-sm font-semibold text-black shadow-soft select-none">
           <input
             type="checkbox"
             checked={active}
             onChange={(e) => setActive(e.target.checked)}
             className="h-4 w-4"
           />
-          Active
+          Active in catalog
         </label>
-
-        <Button onClick={save} disabled={!dirty || loading} className="h-[40px]">
-          {loading ? 'Saving…' : 'Save'}
-        </Button>
       </div>
 
-      <div className="flex flex-wrap items-center gap-2">
-        <Button type="button" variant="outline" onClick={() => setEditOpen(true)}>
-          Edit details & photos
+      <div className="rounded-2xl border border-[hsl(var(--border))] bg-white">
+        <button
+          type="button"
+          onClick={() => setOptionalOpen((value) => !value)}
+          className="flex min-h-[44px] w-full items-center justify-between px-3.5 py-2.5 text-left text-sm font-semibold text-black"
+        >
+          <span>Optional edit details</span>
+          <span className="text-xs text-[hsl(var(--muted))]">{optionalOpen ? 'Hide' : 'Show'}</span>
+        </button>
+
+        {optionalOpen ? (
+          <div className="space-y-3 border-t border-[hsl(var(--border))] p-3">
+            <div className="grid gap-3 sm:grid-cols-2">
+              <label className="block">
+                <span className="mb-1.5 block text-sm font-semibold text-black">Low stock threshold</span>
+                <input
+                  type="number"
+                  min={0}
+                  step={1}
+                  value={threshold}
+                  onChange={(e) => setThreshold(Number(e.target.value || 0))}
+                  className="min-h-[44px] w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3.5 py-2.5 text-sm text-black shadow-soft outline-none"
+                />
+              </label>
+
+              <label className="flex min-h-[44px] items-center gap-2 rounded-2xl border border-[hsl(var(--border))] bg-white px-3.5 py-2.5 text-sm font-semibold text-black shadow-soft select-none sm:mt-[26px]">
+                <input
+                  type="checkbox"
+                  checked={preorder}
+                  onChange={(e) => setPreorder(e.target.checked)}
+                  className="h-4 w-4"
+                />
+                Preorder enabled
+              </label>
+            </div>
+
+            <div className="rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+              Name, model, category, price and photos stay in the detailed editor to preserve the existing Store V3 flow.
+            </div>
+
+            <Button type="button" variant="outline" onClick={() => setEditOpen(true)}>
+              Edit name, price & photos
+            </Button>
+          </div>
+        ) : null}
+      </div>
+
+      <div className="flex flex-wrap gap-2">
+        <Button onClick={openSaveConfirmation} disabled={!dirty || loading} className="min-h-[44px] flex-1 sm:flex-none">
+          {loading ? 'Saving…' : 'Save changes'}
         </Button>
         <Button
           type="button"
           variant="outline"
           className="border-rose-200 text-rose-700 hover:bg-rose-50"
-          onClick={removeProduct}
+          onClick={() => setConfirmDeleteOpen(true)}
           loading={deleteBusy}
           loadingText="Deleting…"
           disabled={deleteBusy}
@@ -204,7 +316,7 @@ export default function AdminProductQuickEdit({
       <Modal
         open={editOpen}
         onClose={() => setEditOpen(false)}
-        title="Edit product"
+        title="Edit product details"
         className="w-[min(96vw,42rem)]"
       >
         <StoreProductForm
@@ -233,6 +345,33 @@ export default function AdminProductQuickEdit({
           onCancel={() => setEditOpen(false)}
         />
       </Modal>
+
+      <ConfirmActionModal
+        open={confirmSaveOpen}
+        title="Confirm product update"
+        description="Review the product changes before saving."
+        confirmLabel="Confirm & save"
+        pendingLabel="Saving…"
+        pending={loading}
+        summaryItems={saveSummaryItems}
+        warning="This updates only the selected Store product variant. Existing sales, preorders and supplier orders are not changed."
+        onCancel={() => (loading ? null : setConfirmSaveOpen(false))}
+        onConfirm={save}
+      />
+
+      <ConfirmActionModal
+        open={confirmDeleteOpen}
+        title="Delete product?"
+        description="Review this product before deleting."
+        confirmLabel="Confirm delete"
+        pendingLabel="Deleting…"
+        pending={deleteBusy}
+        tone="destructive"
+        summaryItems={deleteSummaryItems}
+        warning="This is a destructive action. Existing Store history linked to this product may block deletion."
+        onCancel={() => (deleteBusy ? null : setConfirmDeleteOpen(false))}
+        onConfirm={removeProduct}
+      />
     </div>
   )
 }
