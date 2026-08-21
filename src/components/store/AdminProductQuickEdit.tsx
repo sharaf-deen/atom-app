@@ -29,6 +29,11 @@ type Props = {
   onDeleted?: () => void
 }
 
+type QuickStockAction = {
+  label: string
+  targetStock: number
+}
+
 function formatEGP(cents: number | null | undefined) {
   const amount = Number(cents ?? 0) / 100
   try {
@@ -53,6 +58,11 @@ function formatCategory(value: string | null | undefined) {
 
 function formatBool(value: boolean, yes: string, no: string) {
   return value ? yes : no
+}
+
+function normalizeStockValue(value: number) {
+  if (!Number.isFinite(value)) return 0
+  return Math.max(0, Math.floor(value))
 }
 
 export default function AdminProductQuickEdit({
@@ -85,6 +95,8 @@ export default function AdminProductQuickEdit({
   const [optionalOpen, setOptionalOpen] = useState(false)
   const [confirmSaveOpen, setConfirmSaveOpen] = useState(false)
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false)
+  const [quickStockAction, setQuickStockAction] = useState<QuickStockAction | null>(null)
+  const [quickStockBusy, setQuickStockBusy] = useState(false)
   const [deleteBusy, setDeleteBusy] = useState(false)
 
   const dirty = useMemo(
@@ -110,6 +122,25 @@ export default function AdminProductQuickEdit({
       { label: 'Impact', value: 'Only this product variant will be updated.' },
     ]
   }, [active, allowPreorder, categoryLabel, inventoryQty, isActive, lowStockThreshold, modelLabel, preorder, priceCents, productLabel, qty, threshold])
+
+
+  const quickStockSummaryItems = useMemo<ConfirmActionSummaryItem[]>(() => {
+    const targetStock = quickStockAction?.targetStock ?? inventoryQty
+    const change = targetStock - inventoryQty
+    const changeLabel = change > 0 ? `+${change}` : String(change)
+
+    return [
+      { label: 'Product', value: productLabel },
+      { label: 'Category', value: categoryLabel },
+      { label: 'Model', value: modelLabel },
+      { label: 'Variant details', value: detailsLabel },
+      { label: 'Action', value: quickStockAction?.label ?? 'Stock update' },
+      { label: 'Current stock', value: String(inventoryQty) },
+      { label: 'New stock', value: String(targetStock) },
+      { label: 'Change', value: changeLabel },
+      { label: 'Impact', value: 'Only this product variant stock will be updated.' },
+    ]
+  }, [categoryLabel, detailsLabel, inventoryQty, modelLabel, productLabel, quickStockAction])
 
   const deleteSummaryItems = useMemo<ConfirmActionSummaryItem[]>(() => {
     return [
@@ -139,6 +170,58 @@ export default function AdminProductQuickEdit({
     if (!dirty || loading) return
     if (!validateQuickEdit()) return
     setConfirmSaveOpen(true)
+  }
+
+  function openQuickStockConfirmation(targetStock: number, label: string) {
+    if (loading || quickStockBusy || deleteBusy) return
+
+    const normalizedTarget = normalizeStockValue(targetStock)
+    if (normalizedTarget === inventoryQty) {
+      toast.error(`Stock is already ${inventoryQty}`)
+      return
+    }
+
+    setQuickStockAction({ label, targetStock: normalizedTarget })
+  }
+
+  async function applyQuickStock() {
+    if (!quickStockAction || quickStockBusy) return
+
+    const targetStock = normalizeStockValue(quickStockAction.targetStock)
+    if (targetStock === inventoryQty) {
+      setQuickStockAction(null)
+      return
+    }
+
+    setQuickStockBusy(true)
+    try {
+      const r = await fetch('/api/store/products/update', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id,
+          inventory_qty: targetStock,
+        }),
+        cache: 'no-store',
+      })
+      const j = await r.json().catch(() => ({}))
+
+      if (!r.ok || !j?.ok) {
+        toast.error(j?.details || j?.error || 'Stock update failed')
+        return
+      }
+
+      toast.success('Stock updated')
+      setQty(targetStock)
+      setQuickStockAction(null)
+      onSaved?.()
+      router.refresh()
+      setTimeout(() => router.refresh(), 250)
+    } catch (e: any) {
+      toast.error(e?.message || 'Network error')
+    } finally {
+      setQuickStockBusy(false)
+    }
   }
 
   async function save() {
@@ -249,6 +332,59 @@ export default function AdminProductQuickEdit({
         </label>
       </div>
 
+      <div className="rounded-2xl border border-[hsl(var(--border))] bg-slate-50 p-3">
+        <div className="flex flex-wrap items-start justify-between gap-2">
+          <div>
+            <div className="text-sm font-semibold text-black">Quick stock adjustment</div>
+            <div className="mt-0.5 text-xs text-[hsl(var(--muted))]">Update stock only without opening the detailed editor.</div>
+          </div>
+          <div className="rounded-full border bg-white px-2.5 py-1 text-xs font-semibold text-black">
+            Current: {inventoryQty}
+          </div>
+        </div>
+        <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => openQuickStockConfirmation(inventoryQty - 1, '-1')}
+            disabled={inventoryQty <= 0 || loading || quickStockBusy || deleteBusy}
+            className="min-h-[40px]"
+          >
+            -1
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => openQuickStockConfirmation(inventoryQty + 1, '+1')}
+            disabled={loading || quickStockBusy || deleteBusy}
+            className="min-h-[40px]"
+          >
+            +1
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => openQuickStockConfirmation(inventoryQty + 5, '+5')}
+            disabled={loading || quickStockBusy || deleteBusy}
+            className="min-h-[40px]"
+          >
+            +5
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => {
+              if (!validateQuickEdit()) return
+              openQuickStockConfirmation(qty, 'Set stock')
+            }}
+            disabled={loading || quickStockBusy || deleteBusy}
+            className="min-h-[40px]"
+          >
+            Set stock
+          </Button>
+        </div>
+      </div>
+
       <div className="rounded-2xl border border-[hsl(var(--border))] bg-white">
         <button
           type="button"
@@ -357,6 +493,19 @@ export default function AdminProductQuickEdit({
         warning="This updates only the selected Store product variant. Existing sales, preorders and supplier orders are not changed."
         onCancel={() => (loading ? null : setConfirmSaveOpen(false))}
         onConfirm={save}
+      />
+
+      <ConfirmActionModal
+        open={quickStockAction !== null}
+        title="Confirm stock update"
+        description="Review the stock adjustment before applying it."
+        confirmLabel="Confirm stock update"
+        pendingLabel="Updating…"
+        pending={quickStockBusy}
+        summaryItems={quickStockSummaryItems}
+        warning="This updates only the stock of the selected Store product variant. Sales, preorders, supplier orders, expenses and funding are not changed."
+        onCancel={() => (quickStockBusy ? null : setQuickStockAction(null))}
+        onConfirm={applyQuickStock}
       />
 
       <ConfirmActionModal
