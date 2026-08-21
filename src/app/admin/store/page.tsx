@@ -123,6 +123,15 @@ type ProductModelGroup = {
   latestCreatedAt: string | null
 }
 
+type RestockSuggestion = {
+  product: ProductRow
+  status: 'out' | 'low' | 'preorder'
+  suggestedQty: number
+  targetStock: number
+}
+
+const RESTOCK_HELPER_LIMIT = 8
+
 function normalizeProductRow(row: ProductQueryRow): ProductRow {
   const model = Array.isArray(row.model) ? row.model[0] ?? null : row.model ?? null
   return {
@@ -377,6 +386,67 @@ function stockPill(product: Pick<ProductRow, 'inventory_qty' | 'low_stock_thresh
   return <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-700">Healthy stock</span>
 }
 
+function restockStatus(product: ProductRow): RestockSuggestion['status'] | null {
+  const qty = Math.max(0, Number(product.inventory_qty ?? 0))
+  const threshold = Math.max(0, Number(product.low_stock_threshold ?? 0))
+
+  if (qty <= 0) return 'out'
+  if (threshold > 0 && qty <= threshold) return 'low'
+  if (product.allow_preorder) return 'preorder'
+  return null
+}
+
+function restockStatusPill(status: RestockSuggestion['status']) {
+  if (status === 'out') {
+    return <span className="rounded-full border border-red-200 bg-red-50 px-2 py-0.5 text-[11px] font-medium text-red-700">Out of stock</span>
+  }
+  if (status === 'low') {
+    return <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700">Low stock</span>
+  }
+  return <span className="rounded-full border border-violet-200 bg-violet-50 px-2 py-0.5 text-[11px] font-medium text-violet-700">Preorder</span>
+}
+
+function suggestedRestock(product: ProductRow) {
+  const qty = Math.max(0, Number(product.inventory_qty ?? 0))
+  const threshold = Math.max(0, Number(product.low_stock_threshold ?? 0))
+  const targetStock = threshold > 0 ? Math.max(threshold * 2, qty + 5, 5) : Math.max(qty + 5, 5)
+
+  return {
+    suggestedQty: Math.max(1, targetStock - qty),
+    targetStock,
+  }
+}
+
+function buildRestockSuggestions(products: ProductRow[]): RestockSuggestion[] {
+  return products
+    .filter((product) => product.is_active)
+    .map((product) => {
+      const status = restockStatus(product)
+      if (!status) return null
+      const restock = suggestedRestock(product)
+      return {
+        product,
+        status,
+        suggestedQty: restock.suggestedQty,
+        targetStock: restock.targetStock,
+      }
+    })
+    .filter((suggestion): suggestion is RestockSuggestion => suggestion !== null)
+    .sort((a, b) => {
+      const priority = { out: 0, low: 1, preorder: 2 } satisfies Record<RestockSuggestion['status'], number>
+      const priorityDiff = priority[a.status] - priority[b.status]
+      if (priorityDiff !== 0) return priorityDiff
+
+      const stockDiff = Math.max(0, Number(a.product.inventory_qty ?? 0)) - Math.max(0, Number(b.product.inventory_qty ?? 0))
+      if (stockDiff !== 0) return stockDiff
+
+      const modelDiff = productModelGroupLabel(a.product).localeCompare(productModelGroupLabel(b.product))
+      if (modelDiff !== 0) return modelDiff
+
+      return formatVariantLabel(a.product).localeCompare(formatVariantLabel(b.product), undefined, { numeric: true })
+    })
+}
+
 function supplierStatusPill(status: SupplierOrderRow['status']) {
   switch (status) {
     case 'draft':
@@ -587,6 +657,10 @@ export default async function AdminStorePage({
 
   const groupedProducts = groupProductsByModel(filteredProducts)
   const metrics = computeMetrics(allProducts, supplierOrders)
+  const restockSuggestions = buildRestockSuggestions(allProducts)
+  const visibleRestockSuggestions = restockSuggestions.slice(0, RESTOCK_HELPER_LIMIT)
+  const urgentRestockCount = restockSuggestions.filter((suggestion) => suggestion.status === 'out' || suggestion.status === 'low').length
+  const preorderRestockCount = restockSuggestions.filter((suggestion) => suggestion.status === 'preorder').length
   const totalFilteredProducts = filteredProducts.length
   const totalFilteredGroups = groupedProducts.length
   const totalProductPages = Math.max(1, Math.ceil(totalFilteredGroups / pageSize))
@@ -861,6 +935,86 @@ export default async function AdminStorePage({
                 </CardContent>
               </Card>
 
+              <Card className="p-4">
+                <CardHeader className="mb-2">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <CardTitle className="text-lg">Restock helper</CardTitle>
+                      <div className="mt-1 text-xs text-[hsl(var(--muted))]">Low stock, out of stock, and preorder-enabled variants that may need attention. No automatic stock change.</div>
+                    </div>
+                    <div className="flex flex-wrap gap-1.5 text-[11px]">
+                      <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-1 font-medium text-amber-800">Urgent: {urgentRestockCount}</span>
+                      <span className="rounded-full border border-violet-200 bg-violet-50 px-2 py-1 font-medium text-violet-800">Preorder: {preorderRestockCount}</span>
+                    </div>
+                  </div>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  {visibleRestockSuggestions.length === 0 ? (
+                    <div className="rounded-2xl border border-dashed p-4 text-sm text-[hsl(var(--muted))]">No active product currently needs restock attention.</div>
+                  ) : (
+                    <div className="grid gap-2">
+                      {visibleRestockSuggestions.map((suggestion) => {
+                        const product = suggestion.product
+                        const modelName = productModelGroupLabel(product)
+                        const variantLabel = formatVariantLabel(product)
+                        const focusParams: Record<string, string> = {
+                          tab: 'catalog',
+                          q: product.model?.name ?? product.name,
+                          category: product.category,
+                          stock: suggestion.status === 'out' ? 'out' : suggestion.status === 'low' ? 'low' : '',
+                          preorder: suggestion.status === 'preorder' ? '1' : '',
+                          page_size: String(pageSize),
+                        }
+                        const focusHref = `${buildUrl('/admin/store', focusParams)}#product-${product.id}`
+
+                        return (
+                          <div key={product.id} className="rounded-2xl border bg-white p-3">
+                            <div className="flex flex-wrap items-start justify-between gap-3">
+                              <div className="min-w-0 flex-1">
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <div className="truncate text-sm font-semibold">{modelName}</div>
+                                  {restockStatusPill(suggestion.status)}
+                                </div>
+                                <div className="mt-1 flex flex-wrap gap-1.5 text-[11px] text-[hsl(var(--muted))]">
+                                  <span className="rounded-full border px-2 py-0.5">{variantLabel}</span>
+                                  <span className="rounded-full border px-2 py-0.5">Stock: {product.inventory_qty}</span>
+                                  <span className="rounded-full border px-2 py-0.5">Threshold: {product.low_stock_threshold}</span>
+                                  <span className="rounded-full border px-2 py-0.5">Suggested: +{suggestion.suggestedQty} → {suggestion.targetStock}</span>
+                                </div>
+                              </div>
+                              <div className="flex flex-wrap gap-2">
+                                <Link
+                                  prefetch={false}
+                                  href={focusHref}
+                                  className="inline-flex min-h-[34px] items-center rounded-xl border px-3 py-1.5 text-xs font-semibold hover:bg-gray-50"
+                                >
+                                  Open variant
+                                </Link>
+                                {canManageSupplierOrders ? (
+                                  <Link
+                                    prefetch={false}
+                                    href="/admin/store?tab=supplier-orders"
+                                    className="inline-flex min-h-[34px] items-center rounded-xl border px-3 py-1.5 text-xs font-semibold hover:bg-gray-50"
+                                  >
+                                    Supplier orders
+                                  </Link>
+                                ) : null}
+                              </div>
+                            </div>
+                          </div>
+                        )
+                      })}
+
+                      {restockSuggestions.length > RESTOCK_HELPER_LIMIT ? (
+                        <div className="rounded-2xl border border-dashed p-3 text-xs text-[hsl(var(--muted))]">
+                          Showing {RESTOCK_HELPER_LIMIT} of {restockSuggestions.length} restock item(s). Use Low stock, Out of stock, or Preorder filters to review the full list.
+                        </div>
+                      ) : null}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+
               {productsError ? (
                 <Card>
                   <CardContent className="text-sm text-red-700">Catalog query failed: {productsError}</CardContent>
@@ -946,7 +1100,7 @@ export default async function AdminStorePage({
 
                             <div className="mt-3 grid gap-2">
                               {group.products.map((product) => (
-                                <details key={product.id} className="rounded-2xl border bg-white p-3" open={group.products.length === 1}>
+                                <details id={`product-${product.id}`} key={product.id} className="scroll-mt-24 rounded-2xl border bg-white p-3" open={group.products.length === 1 || isLowStock(product)}>
                                   <summary className="cursor-pointer list-none">
                                     <div className="flex flex-wrap items-start justify-between gap-2">
                                       <div className="min-w-0 flex-1">
