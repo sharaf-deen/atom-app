@@ -63,7 +63,8 @@ type Tab = 'catalog' | 'supplier-orders'
 
 const STORE_PRODUCT_BUCKET = 'store-product-images'
 const SUPABASE_URL = (process.env.NEXT_PUBLIC_SUPABASE_URL || '').replace(/\/+$/, '')
-const CATALOG_PAGE_SIZE = 5
+const CATALOG_DEFAULT_PAGE_SIZE = 10
+const CATALOG_PAGE_SIZE_OPTIONS = [10, 25, 50] as const
 
 function storeProductImageUrl(path: string | null | undefined) {
   const clean = String(path ?? '').trim()
@@ -378,7 +379,7 @@ export default async function AdminStorePage({
   const tab = normalizeTab(requestedTab)
   if (tab === 'supplier-orders' && !canManageStoreSupplierOrders(me.role)) redirect('/admin/store')
   const page = clampInt(searchParams?.page, 1, 1, 9999)
-  const pageSize = CATALOG_PAGE_SIZE
+  const pageSize = clampInt(searchParams?.page_size, CATALOG_DEFAULT_PAGE_SIZE, 10, 50)
   const q = strParam(searchParams?.q).trim()
   const active = normalizeActive(strParam(searchParams?.active))
   const stock = normalizeStock(strParam(searchParams?.stock))
@@ -428,11 +429,6 @@ export default async function AdminStorePage({
     if (active === 'inactive') productQuery = productQuery.eq('is_active', false)
     if (preorder === '1') productQuery = productQuery.eq('allow_preorder', true)
     if (preorder === '0') productQuery = productQuery.eq('allow_preorder', false)
-    if (q) {
-      const safe = q.replace(/,/g, ' ').trim()
-      productQuery = productQuery.or(`name.ilike.%${safe}%,color.ilike.%${safe}%,size.ilike.%${safe}%,category.ilike.%${safe}%`)
-    }
-
     const { data, error } = await productQuery
     if (error) throw new Error(error.message)
     allProducts = (Array.isArray(data) ? (data as ProductQueryRow[]).map(normalizeProductRow) : [])
@@ -462,12 +458,28 @@ export default async function AdminStorePage({
     supplierError = error?.message || String(error)
   }
 
+  const normalizedProductSearch = q.toLowerCase()
   const filteredProducts = !productsError
     ? allProducts.filter((product) => {
         const qty = Math.max(0, Number(product.inventory_qty ?? 0))
         if (stock === 'in' && qty <= 0) return false
         if (stock === 'out' && qty > 0) return false
         if (stock === 'low' && !isLowStock(product)) return false
+        if (normalizedProductSearch) {
+          const haystack = [
+            product.name,
+            product.model?.name,
+            product.category,
+            categoryLabels.get(product.category),
+            product.color,
+            product.size,
+            shortId(product.id),
+          ]
+            .filter(Boolean)
+            .join(' ')
+            .toLowerCase()
+          if (!haystack.includes(normalizedProductSearch)) return false
+        }
         return true
       })
     : []
@@ -494,6 +506,7 @@ export default async function AdminStorePage({
     active: active === 'all' ? '' : active,
     stock: stock === 'all' ? '' : stock,
     preorder: preorder === 'all' ? '' : preorder,
+    page_size: pageSize === CATALOG_DEFAULT_PAGE_SIZE ? '' : String(pageSize),
   }
 
   const supplierBaseParams = {
@@ -659,39 +672,67 @@ export default async function AdminStorePage({
 
             <div className="grid gap-3">
               <Card className="p-4">
-                <CardHeader className="mb-2"><CardTitle className="text-lg">Catalog filters</CardTitle></CardHeader>
-                <CardContent>
-                  <form className="grid gap-3 lg:grid-cols-6">
+                <CardHeader className="mb-2">
+                  <CardTitle className="text-lg">Find products faster</CardTitle>
+                  <div className="text-xs text-[hsl(var(--muted))]">Search and filter the catalog without changing Store data.</div>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+                    <Link href={buildUrl('/admin/store', { tab: 'catalog', stock: 'low', page_size: String(pageSize) })} className="rounded-2xl border bg-white p-3 text-sm transition hover:bg-gray-50">
+                      <div className="font-semibold">Low stock</div>
+                      <div className="mt-1 text-xs text-[hsl(var(--muted))]">{metrics.lowStockProducts} product(s)</div>
+                    </Link>
+                    <Link href={buildUrl('/admin/store', { tab: 'catalog', stock: 'out', page_size: String(pageSize) })} className="rounded-2xl border bg-white p-3 text-sm transition hover:bg-gray-50">
+                      <div className="font-semibold">Out of stock</div>
+                      <div className="mt-1 text-xs text-[hsl(var(--muted))]">{metrics.outOfStockProducts} product(s)</div>
+                    </Link>
+                    <Link href={buildUrl('/admin/store', { tab: 'catalog', active: 'inactive', page_size: String(pageSize) })} className="rounded-2xl border bg-white p-3 text-sm transition hover:bg-gray-50">
+                      <div className="font-semibold">Inactive</div>
+                      <div className="mt-1 text-xs text-[hsl(var(--muted))]">{metrics.totalProducts - metrics.activeProducts} product(s)</div>
+                    </Link>
+                    <Link href={buildUrl('/admin/store', { tab: 'catalog', preorder: '1', page_size: String(pageSize) })} className="rounded-2xl border bg-white p-3 text-sm transition hover:bg-gray-50">
+                      <div className="font-semibold">Preorders</div>
+                      <div className="mt-1 text-xs text-[hsl(var(--muted))]">{metrics.preorderEnabledProducts} product(s)</div>
+                    </Link>
+                  </div>
+
+                  <form className="grid gap-3 lg:grid-cols-12">
                     <input type="hidden" name="tab" value="catalog" />
-                    <label className="block lg:col-span-2">
+                    <label className="block lg:col-span-4">
                       <span className="mb-1 block text-sm font-medium">Search</span>
-                      <input name="q" defaultValue={q} placeholder="Model, color, size…" className="min-h-[42px] w-full rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm" />
+                      <input name="q" defaultValue={q} placeholder="Name, model, color, size, ID…" className="min-h-[42px] w-full rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm" />
                     </label>
-                    <label className="block">
+                    <label className="block lg:col-span-2">
                       <span className="mb-1 block text-sm font-medium">Category</span>
                       <select name="category" defaultValue={category} className="min-h-[42px] w-full rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm">
                         {categoryOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
                       </select>
                     </label>
-                    <label className="block">
+                    <label className="block lg:col-span-2">
                       <span className="mb-1 block text-sm font-medium">Active</span>
                       <select name="active" defaultValue={active} className="min-h-[42px] w-full rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm">
                         {ACTIVE_FILTERS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
                       </select>
                     </label>
-                    <label className="block">
+                    <label className="block lg:col-span-2">
                       <span className="mb-1 block text-sm font-medium">Stock</span>
                       <select name="stock" defaultValue={stock} className="min-h-[42px] w-full rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm">
                         {STOCK_FILTERS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
                       </select>
                     </label>
-                    <label className="block">
+                    <label className="block lg:col-span-2">
                       <span className="mb-1 block text-sm font-medium">Preorder</span>
                       <select name="preorder" defaultValue={preorder} className="min-h-[42px] w-full rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm">
                         {PREORDER_FILTERS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
                       </select>
                     </label>
-                    <div className="flex items-end gap-2">
+                    <label className="block lg:col-span-2">
+                      <span className="mb-1 block text-sm font-medium">Per page</span>
+                      <select name="page_size" defaultValue={String(pageSize)} className="min-h-[42px] w-full rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm">
+                        {CATALOG_PAGE_SIZE_OPTIONS.map((option) => <option key={option} value={option}>{option}</option>)}
+                      </select>
+                    </label>
+                    <div className="flex items-end gap-2 lg:col-span-10">
                       <button className="min-h-[42px] rounded-xl bg-black px-4 py-2 text-sm font-medium text-white">Apply</button>
                       <Link href="/admin/store?tab=catalog" className="inline-flex min-h-[42px] items-center rounded-xl border px-4 py-2 text-sm font-medium hover:bg-gray-50">Reset</Link>
                     </div>
@@ -707,14 +748,25 @@ export default async function AdminStorePage({
                 <Card className="p-4">
                   <CardHeader className="mb-2">
                     <CardTitle className="text-lg">Catalog & stock</CardTitle>
-                    <div className="text-xs text-[hsl(var(--muted))]">{totalFilteredProducts} product(s) · 5/page</div>
+                    <div className="text-xs text-[hsl(var(--muted))]">{totalFilteredProducts} product(s) · {pageSize}/page · showing {pagedProducts.length}</div>
                   </CardHeader>
                   <CardContent className="grid gap-2">
+                    {(q || category !== 'all' || active !== 'all' || stock !== 'all' || preorder !== 'all') ? (
+                      <div className="flex flex-wrap items-center gap-2 rounded-2xl border bg-slate-50 p-3 text-xs">
+                        <span className="font-semibold">Active filters</span>
+                        {q ? <span className="rounded-full border bg-white px-2 py-1">Search: {q}</span> : null}
+                        {category !== 'all' ? <span className="rounded-full border bg-white px-2 py-1">Category: {categoryLabels.get(category) ?? category}</span> : null}
+                        {active !== 'all' ? <span className="rounded-full border bg-white px-2 py-1">Active: {active}</span> : null}
+                        {stock !== 'all' ? <span className="rounded-full border bg-white px-2 py-1">Stock: {STOCK_FILTERS.find((option) => option.value === stock)?.label ?? stock}</span> : null}
+                        {preorder !== 'all' ? <span className="rounded-full border bg-white px-2 py-1">Preorder: {PREORDER_FILTERS.find((option) => option.value === preorder)?.label ?? preorder}</span> : null}
+                        <Link href="/admin/store?tab=catalog" className="ml-auto rounded-full border bg-white px-2 py-1 font-medium hover:bg-gray-50">Clear all</Link>
+                      </div>
+                    ) : null}
                     {pagedProducts.length === 0 ? (
                       <div className="rounded-2xl border border-dashed p-4 text-sm text-[hsl(var(--muted))]">No products match the current filters.</div>
                     ) : (
                       pagedProducts.map((product) => (
-                        <div key={product.id} className="rounded-2xl border bg-white p-3">
+                        <div key={product.id} className="rounded-2xl border bg-white p-3 shadow-sm">
                           <div className="flex flex-wrap items-start justify-between gap-2">
                             <div className="min-w-0 flex-1">
                               <div className="truncate text-sm font-semibold">{product.name}</div>
@@ -746,7 +798,7 @@ export default async function AdminStorePage({
                             </div>
                           </div>
 
-                          <div className="mt-2 grid gap-1.5 text-xs sm:grid-cols-2 xl:grid-cols-4">
+                          <div className="mt-2 grid gap-1.5 rounded-xl bg-slate-50 p-2 text-xs sm:grid-cols-2 xl:grid-cols-4">
                             <div><span className="text-[hsl(var(--muted))]">Price:</span> <span className="font-medium">{formatCurrency(product.price_cents, 'en-EG', product.currency ?? 'EGP')}</span></div>
                             <div><span className="text-[hsl(var(--muted))]">Stock:</span> <span className="font-medium">{product.inventory_qty}</span></div>
                             <div><span className="text-[hsl(var(--muted))]">Threshold:</span> <span className="font-medium">{product.low_stock_threshold}</span></div>
