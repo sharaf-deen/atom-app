@@ -14,6 +14,7 @@ import { formatCurrency } from '@/lib/money'
 import { canAccessStoreAdmin } from '@/lib/rbac'
 import AdminSaleForm from '@/components/store/AdminSaleForm'
 import AdminSaleQuickEdit from '@/components/store/AdminSaleQuickEdit'
+import AdminSaleReceipt from '@/components/store/AdminSaleReceipt'
 import StoreAdminNav from '@/components/store/StoreAdminNav'
 
 type SearchParams = Record<string, string | string[] | undefined>
@@ -730,6 +731,30 @@ export default async function AdminStoreSalesPage({ searchParams }: { searchPara
                                   ))}
                                 </div>
                               </div>
+
+                              <AdminSaleReceipt
+                                saleId={sale.id}
+                                purchaseDate={sale.purchase_date}
+                                createdAt={sale.created_at}
+                                buyerFullName={sale.buyer_full_name}
+                                buyerEmail={sale.buyer_email}
+                                buyerPhone={sale.buyer_phone}
+                                status={sale.status}
+                                paymentMethod={sale.payment_method}
+                                currency={sale.currency}
+                                totalCents={sale.total_cents}
+                                discountCents={sale.discount_cents}
+                                paidCents={sale.paid_cents}
+                                debtCents={sale.debt_cents}
+                                items={items.map((item) => ({
+                                  productName: item.product_name,
+                                  qty: item.qty,
+                                  unitPriceCents: item.unit_price_cents,
+                                  lineTotalCents: item.line_total_cents,
+                                  currency: item.currency,
+                                  stockApplied: !!item.delivered_stock_applied,
+                                }))}
+                              />
 
                               {sale.buyer_user_id ? (
                                 <div>
