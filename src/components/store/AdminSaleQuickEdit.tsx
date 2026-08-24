@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import Button from '@/components/ui/Button'
@@ -8,6 +8,7 @@ import Input from '@/components/ui/Input'
 import Select from '@/components/ui/Select'
 import Textarea from '@/components/ui/Textarea'
 import InlineAlert from '@/components/ui/InlineAlert'
+import ConfirmActionModal, { type ConfirmActionSummaryItem } from '@/components/ui/ConfirmActionModal'
 import { parsePriceToCents, toPriceString } from '@/lib/money'
 
 type PaymentMethod = 'cash' | 'card' | 'bank_transfer' | 'instapay'
@@ -60,6 +61,24 @@ function centsToInput(cents: number | null | undefined) {
   return (Math.max(0, Math.floor(Number(cents || 0))) / 100).toFixed(2)
 }
 
+
+function formatAmount(cents: number, currency = 'EGP') {
+  return `${toPriceString(cents)} ${currency}`
+}
+
+function saleStatusLabel(totalCents: number, paidCents: number, currentStatus?: SaleStatus) {
+  if (currentStatus === 'delivered') return 'Delivered'
+  if (currentStatus === 'canceled') return 'Canceled'
+  if (totalCents <= 0) return 'Paid'
+  if (paidCents <= 0) return 'Draft'
+  if (paidCents >= totalCents) return 'Paid'
+  return 'Partial paid'
+}
+
+function normalizeCollectPaymentCents(value: string, maxCents: number) {
+  return Math.max(0, Math.min(parsePriceToCents(value), Math.max(0, Math.floor(Number(maxCents || 0)))))
+}
+
 export default function AdminSaleQuickEdit({
   id,
   purchaseDate,
@@ -94,6 +113,10 @@ export default function AdminSaleQuickEdit({
   const [busy, setBusy] = useState(false)
   const [deleteBusy, setDeleteBusy] = useState(false)
   const [message, setMessage] = useState<{ kind: '' | 'success' | 'error'; text: string }>({ kind: '', text: '' })
+  const [collectOpen, setCollectOpen] = useState(false)
+  const [collectBusy, setCollectBusy] = useState(false)
+  const [collectAmountValue, setCollectAmountValue] = useState<string>(centsToInput(debtCents))
+  const [collectPaymentValue, setCollectPaymentValue] = useState<PaymentMethod>(paymentMethod || 'cash')
 
   const preview = useMemo(() => {
     const qty = Math.max(1, Math.floor(Number(qtyValue || 1)))
@@ -105,6 +128,105 @@ export default function AdminSaleQuickEdit({
     const debt = Math.max(0, total - paid)
     return { qty, unitPriceCents, subtotalCents, discount, total, paid, debt }
   }, [discountValue, paidValue, qtyValue, unitPriceValue])
+
+  const currentDebtCents = Math.max(0, Math.floor(Number(debtCents || 0)))
+  const safeTotalCents = Math.max(0, Math.floor(Number(totalCents || 0)))
+  const safePaidCents = Math.max(0, Math.min(Math.floor(Number(paidCents || 0)), safeTotalCents))
+  const canCollectPayment = currentDebtCents > 0 && status !== 'canceled'
+
+  useEffect(() => {
+    setCollectAmountValue(centsToInput(debtCents))
+    setCollectPaymentValue(paymentMethod || 'cash')
+  }, [debtCents, paymentMethod])
+
+  const collectPreview = useMemo(() => {
+    const payment = normalizeCollectPaymentCents(collectAmountValue, currentDebtCents)
+    const newPaid = Math.max(0, Math.min(safePaidCents + payment, safeTotalCents))
+    const newDebt = Math.max(0, safeTotalCents - newPaid)
+    return {
+      payment,
+      newPaid,
+      newDebt,
+      statusLabel: saleStatusLabel(safeTotalCents, newPaid, status),
+    }
+  }, [collectAmountValue, currentDebtCents, safePaidCents, safeTotalCents, status])
+
+  const collectSummaryItems = useMemo<ConfirmActionSummaryItem[]>(() => {
+    const selectedPaymentLabel = PAYMENT_METHODS.find((method) => method.value === collectPaymentValue)?.label || collectPaymentValue
+
+    return [
+      { label: 'Sale', value: item?.productName || `Sale ${id.slice(0, 8)}` },
+      { label: 'Buyer', value: buyerFullName || 'Unknown buyer' },
+      { label: 'Total', value: formatAmount(safeTotalCents, currency || 'EGP') },
+      { label: 'Already paid', value: formatAmount(safePaidCents, currency || 'EGP') },
+      { label: 'Current debt', value: formatAmount(currentDebtCents, currency || 'EGP') },
+      { label: 'Payment now', value: formatAmount(collectPreview.payment, currency || 'EGP') },
+      { label: 'Payment method', value: selectedPaymentLabel },
+      { label: 'New paid', value: formatAmount(collectPreview.newPaid, currency || 'EGP') },
+      { label: 'New remaining debt', value: formatAmount(collectPreview.newDebt, currency || 'EGP') },
+      { label: 'New status', value: collectPreview.statusLabel },
+      { label: 'Impact', value: 'Only this sale payment amount, payment method and money status will be updated. Stock is not changed.' },
+    ]
+  }, [buyerFullName, collectPaymentValue, collectPreview, currency, currentDebtCents, id, item?.productName, safePaidCents, safeTotalCents])
+
+  function openCollectConfirmation() {
+    setMessage({ kind: '', text: '' })
+
+    if (!canCollectPayment) {
+      toast.error(currentDebtCents > 0 ? 'Canceled sales cannot receive payments.' : 'This sale has no remaining debt.')
+      return
+    }
+    if (collectPreview.payment <= 0) {
+      toast.error('Payment amount must be greater than 0')
+      return
+    }
+
+    setCollectOpen(true)
+  }
+
+  async function collectPayment() {
+    if (collectBusy || !canCollectPayment || collectPreview.payment <= 0) return
+
+    setCollectBusy(true)
+    setMessage({ kind: '', text: '' })
+    try {
+      const res = await fetch('/api/store/sales/collect-payment', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sale_id: id,
+          payment_cents: collectPreview.payment,
+          payment_method: collectPaymentValue,
+        }),
+        cache: 'no-store',
+      })
+      const json = await res.json().catch(() => ({}))
+      if (!res.ok || !json?.ok) {
+        const err = json?.details || json?.error || 'Payment collection failed'
+        setMessage({ kind: 'error', text: err })
+        toast.error(err)
+        return
+      }
+
+      const nextPaid = Math.max(0, Math.floor(Number(json?.paid_cents ?? collectPreview.newPaid) || 0))
+      const nextDebt = Math.max(0, Math.floor(Number(json?.debt_cents ?? collectPreview.newDebt) || 0))
+      setPaidValue(centsToInput(nextPaid))
+      setStatusValue((json?.status as SaleStatus) || statusValue)
+      setPaymentValue(collectPaymentValue)
+      setCollectAmountValue(centsToInput(nextDebt))
+      setCollectOpen(false)
+      setMessage({ kind: 'success', text: 'Payment collected' })
+      toast.success('Payment collected')
+      router.refresh()
+      setTimeout(() => router.refresh(), 250)
+    } catch (e: any) {
+      const err = e?.message || 'Network error'
+      setMessage({ kind: 'error', text: err })
+      toast.error(err)
+    } finally {
+      setCollectBusy(false)
+    }
+  }
 
   async function saveChanges() {
     setBusy(true)
@@ -183,7 +305,8 @@ export default function AdminSaleQuickEdit({
   }
 
   return (
-    <div className="rounded-2xl border bg-white p-4">
+    <>
+      <div className="rounded-2xl border bg-white p-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <div className="text-sm font-semibold">Edit sale</div>
@@ -193,6 +316,75 @@ export default function AdminSaleQuickEdit({
           Current debt: {toPriceString(debtCents)} {currency || 'EGP'}
         </div>
       </div>
+
+        {canCollectPayment ? (
+          <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 p-3">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <div className="text-sm font-semibold text-amber-950">Collect remaining payment</div>
+                <div className="text-xs text-amber-800">
+                  Current debt: {formatAmount(currentDebtCents, currency || 'EGP')}. Collect all or part of the remaining balance.
+                </div>
+              </div>
+              <div className="rounded-full border border-amber-300 bg-white px-2.5 py-1 text-xs font-medium text-amber-900">
+                No stock change
+              </div>
+            </div>
+
+            <div className="mt-3 grid gap-3 sm:grid-cols-[minmax(0,1fr)_180px_auto] sm:items-end">
+              <Input
+                label="Collect now (EGP)"
+                type="number"
+                inputMode="decimal"
+                min="0"
+                step="0.01"
+                max={centsToInput(currentDebtCents)}
+                value={collectAmountValue}
+                onChange={(e) => setCollectAmountValue(e.target.value)}
+                disabled={busy || deleteBusy || collectBusy}
+              />
+              <Select
+                label="Payment method"
+                value={collectPaymentValue}
+                onChange={(e) => setCollectPaymentValue(e.target.value as PaymentMethod)}
+                disabled={busy || deleteBusy || collectBusy}
+              >
+                {PAYMENT_METHODS.map((p) => (
+                  <option key={p.value} value={p.value}>{p.label}</option>
+                ))}
+              </Select>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setCollectAmountValue(centsToInput(currentDebtCents))}
+                  disabled={busy || deleteBusy || collectBusy}
+                >
+                  Full debt
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={openCollectConfirmation}
+                  disabled={busy || deleteBusy || collectBusy || collectPreview.payment <= 0}
+                  loading={collectBusy}
+                  loadingText="Collecting…"
+                >
+                  Review payment
+                </Button>
+              </div>
+            </div>
+
+            <div className="mt-2 grid gap-1 text-xs text-amber-900 sm:grid-cols-3">
+              <div>Payment now: <span className="font-medium">{formatAmount(collectPreview.payment, currency || 'EGP')}</span></div>
+              <div>New paid: <span className="font-medium">{formatAmount(collectPreview.newPaid, currency || 'EGP')}</span></div>
+              <div>New debt: <span className="font-medium">{formatAmount(collectPreview.newDebt, currency || 'EGP')}</span></div>
+            </div>
+          </div>
+        ) : currentDebtCents > 0 && status === 'canceled' ? (
+          <InlineAlert compact variant="warning">This sale has remaining debt, but canceled sales cannot receive payments.</InlineAlert>
+        ) : null}
 
       <div className="mt-4 grid gap-3">
         <Input
@@ -345,6 +537,20 @@ export default function AdminSaleQuickEdit({
           </Button>
         </div>
       </div>
-    </div>
+      </div>
+
+      <ConfirmActionModal
+        open={collectOpen}
+        title="Confirm debt payment"
+        description="Review the payment before updating this sale."
+        confirmLabel="Confirm payment"
+        pendingLabel="Collecting…"
+        pending={collectBusy}
+        summaryItems={collectSummaryItems}
+        warning="This updates only the sale payment amount, payment method and money status. Stock, products, preorders, supplier orders, expenses, funding and reconciliation are not changed."
+        onCancel={() => (collectBusy ? null : setCollectOpen(false))}
+        onConfirm={collectPayment}
+      />
+    </>
   )
 }
