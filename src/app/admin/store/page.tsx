@@ -59,6 +59,8 @@ type ActiveFilter = 'all' | 'active' | 'inactive'
 type StockFilter = 'all' | 'in' | 'out' | 'low'
 type PreorderFilter = 'all' | '1' | '0'
 type SupplierStatusFilter = 'all' | 'draft' | 'ordered' | 'partially_received' | 'received' | 'canceled'
+type SupplierReceivingFilter = 'all' | 'pending' | 'partial' | 'received' | 'draft'
+type SupplierPeriodFilter = 'all' | 'month'
 type Tab = 'catalog' | 'supplier-orders'
 
 const STORE_PRODUCT_BUCKET = 'store-product-images'
@@ -189,6 +191,29 @@ type DashboardMetrics = {
   supplierOrderedValueCents: number
 }
 
+type SupplierOrderTotals = {
+  lineCount: number
+  orderedQty: number
+  receivedQty: number
+  remainingQty: number
+  totalCostCents: number
+  receivedLineCount: number
+  pendingLineCount: number
+  progressPercent: number
+}
+
+type SupplierOrderHistoryMetrics = {
+  trackedOrders: number
+  estimatedSupplierTotalCents: number
+  orderedUnits: number
+  receivedUnits: number
+  remainingUnits: number
+  pendingReceiving: number
+  partiallyReceived: number
+  fullyReceived: number
+  draftOrders: number
+}
+
 const ACTIVE_FILTERS: Array<{ value: ActiveFilter; label: string }> = [
   { value: 'all', label: 'All' },
   { value: 'active', label: 'Active' },
@@ -215,6 +240,19 @@ const SUPPLIER_STATUS_FILTERS: Array<{ value: SupplierStatusFilter; label: strin
   { value: 'partially_received', label: 'Partially received' },
   { value: 'received', label: 'Received' },
   { value: 'canceled', label: 'Canceled' },
+]
+
+const SUPPLIER_RECEIVING_FILTERS: Array<{ value: SupplierReceivingFilter; label: string }> = [
+  { value: 'all', label: 'All receiving' },
+  { value: 'pending', label: 'Pending receiving' },
+  { value: 'partial', label: 'Partially received' },
+  { value: 'received', label: 'Fully received' },
+  { value: 'draft', label: 'Draft only' },
+]
+
+const SUPPLIER_PERIOD_FILTERS: Array<{ value: SupplierPeriodFilter; label: string }> = [
+  { value: 'all', label: 'All time' },
+  { value: 'month', label: 'This month' },
 ]
 
 function clampInt(v: unknown, def: number, min: number, max: number) {
@@ -252,6 +290,14 @@ function normalizePreorder(v: string): PreorderFilter {
 
 function normalizeSupplierStatus(v: string): SupplierStatusFilter {
   return v === 'draft' || v === 'ordered' || v === 'partially_received' || v === 'received' || v === 'canceled' ? v : 'all'
+}
+
+function normalizeSupplierReceiving(v: string): SupplierReceivingFilter {
+  return v === 'pending' || v === 'partial' || v === 'received' || v === 'draft' ? v : 'all'
+}
+
+function normalizeSupplierPeriod(v: string): SupplierPeriodFilter {
+  return v === 'month' ? 'month' : 'all'
 }
 
 function buildUrl(base: string, params: Record<string, string>) {
@@ -475,6 +521,116 @@ function supplierLinePill(status: SupplierOrderItemRow['line_status']) {
   }
 }
 
+function computeSupplierOrderTotals(order: SupplierOrderRow): SupplierOrderTotals {
+  const items = order.items ?? []
+  const orderedQty = items.reduce((sum, item) => sum + Math.max(0, Number(item.ordered_qty ?? 0)), 0)
+  const receivedQty = items.reduce((sum, item) => sum + Math.max(0, Number(item.received_qty ?? 0)), 0)
+  const remainingQty = Math.max(0, orderedQty - receivedQty)
+  const totalCostCents = items.reduce((sum, item) => sum + Math.max(0, Number(item.line_total_cents ?? 0)), 0)
+  const receivedLineCount = items.filter((item) => Math.max(0, Number(item.ordered_qty ?? 0) - Number(item.received_qty ?? 0)) <= 0 && Math.max(0, Number(item.ordered_qty ?? 0)) > 0).length
+  const pendingLineCount = items.filter((item) => Math.max(0, Number(item.ordered_qty ?? 0) - Number(item.received_qty ?? 0)) > 0).length
+  const progressPercent = orderedQty > 0 ? Math.min(100, Math.max(0, Math.round((receivedQty / orderedQty) * 100))) : order.status === 'received' ? 100 : 0
+
+  return {
+    lineCount: items.length,
+    orderedQty,
+    receivedQty,
+    remainingQty,
+    totalCostCents,
+    receivedLineCount,
+    pendingLineCount,
+    progressPercent,
+  }
+}
+
+function supplierOrderReceivingLabel(order: SupplierOrderRow, totals = computeSupplierOrderTotals(order)) {
+  if (order.status === 'canceled') return 'Canceled'
+  if (order.status === 'draft') return 'Draft'
+  if (totals.lineCount === 0) return 'No lines'
+  if (totals.remainingQty <= 0 && totals.receivedQty > 0) return 'Fully received'
+  if (totals.receivedQty > 0 && totals.remainingQty > 0) return 'Partially received'
+  if (totals.remainingQty > 0) return 'Pending receiving'
+  return order.status === 'received' ? 'Fully received' : 'Pending receiving'
+}
+
+function supplierReceivingPill(order: SupplierOrderRow, totals = computeSupplierOrderTotals(order)) {
+  const label = supplierOrderReceivingLabel(order, totals)
+  if (label === 'Fully received') {
+    return <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-700">Fully received</span>
+  }
+  if (label === 'Partially received') {
+    return <span className="rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-700">Receiving in progress</span>
+  }
+  if (label === 'Pending receiving') {
+    return <span className="rounded-full border border-sky-200 bg-sky-50 px-2.5 py-1 text-xs font-medium text-sky-700">Pending receiving</span>
+  }
+  if (label === 'Draft') {
+    return <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-medium text-slate-700">Draft</span>
+  }
+  if (label === 'Canceled') {
+    return <span className="rounded-full border border-rose-200 bg-rose-50 px-2.5 py-1 text-xs font-medium text-rose-700">Canceled</span>
+  }
+  return <span className="rounded-full border px-2.5 py-1 text-xs font-medium text-[hsl(var(--muted))]">No lines</span>
+}
+
+function supplierOrderToneClass(order: SupplierOrderRow, totals = computeSupplierOrderTotals(order)) {
+  if (order.status === 'canceled') return 'border-rose-200 bg-rose-50/40'
+  if (order.status === 'draft') return 'border-slate-200 bg-slate-50/50'
+  if (totals.remainingQty <= 0 && totals.receivedQty > 0) return 'border-emerald-200 bg-emerald-50/40'
+  if (totals.receivedQty > 0 && totals.remainingQty > 0) return 'border-amber-200 bg-amber-50/40'
+  if (totals.remainingQty > 0) return 'border-sky-200 bg-sky-50/40'
+  return 'bg-[hsl(var(--card))]'
+}
+
+function supplierOrderMatchesReceivingFilter(order: SupplierOrderRow, filter: SupplierReceivingFilter) {
+  if (filter === 'all') return true
+  const totals = computeSupplierOrderTotals(order)
+  if (filter === 'draft') return order.status === 'draft'
+  if (filter === 'received') return order.status === 'received' || (totals.remainingQty <= 0 && totals.receivedQty > 0)
+  if (filter === 'partial') return order.status === 'partially_received' || (totals.receivedQty > 0 && totals.remainingQty > 0)
+  if (filter === 'pending') {
+    if (order.status === 'draft' || order.status === 'canceled' || order.status === 'received') return false
+    return totals.remainingQty > 0 || order.status === 'ordered' || order.status === 'partially_received'
+  }
+  return true
+}
+
+function supplierOrderMatchesPeriodFilter(order: SupplierOrderRow, filter: SupplierPeriodFilter) {
+  if (filter === 'all') return true
+  const dateValue = order.ordered_at || order.created_at
+  if (!dateValue) return false
+  const d = new Date(dateValue)
+  if (Number.isNaN(d.getTime())) return false
+  const now = new Date()
+  return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth()
+}
+
+function computeSupplierOrderHistoryMetrics(orders: SupplierOrderRow[]): SupplierOrderHistoryMetrics {
+  return orders.reduce((acc, order) => {
+    const totals = computeSupplierOrderTotals(order)
+    acc.trackedOrders += 1
+    acc.estimatedSupplierTotalCents += totals.totalCostCents
+    acc.orderedUnits += totals.orderedQty
+    acc.receivedUnits += totals.receivedQty
+    acc.remainingUnits += totals.remainingQty
+    if (order.status === 'draft') acc.draftOrders += 1
+    if (supplierOrderMatchesReceivingFilter(order, 'pending')) acc.pendingReceiving += 1
+    if (supplierOrderMatchesReceivingFilter(order, 'partial')) acc.partiallyReceived += 1
+    if (supplierOrderMatchesReceivingFilter(order, 'received')) acc.fullyReceived += 1
+    return acc
+  }, {
+    trackedOrders: 0,
+    estimatedSupplierTotalCents: 0,
+    orderedUnits: 0,
+    receivedUnits: 0,
+    remainingUnits: 0,
+    pendingReceiving: 0,
+    partiallyReceived: 0,
+    fullyReceived: 0,
+    draftOrders: 0,
+  })
+}
+
 function computeMetrics(products: ProductRow[], supplierOrders: SupplierOrderRow[]): DashboardMetrics {
   const productMetrics = products.reduce(
     (acc, product) => {
@@ -560,6 +716,8 @@ export default async function AdminStorePage({
   const supplierPageSize = clampInt(searchParams?.s_page_size, 10, 5, 30)
   const supplierQ = strParam(searchParams?.s_q).trim()
   const supplierStatus = normalizeSupplierStatus(strParam(searchParams?.s_status))
+  const supplierReceiving = normalizeSupplierReceiving(strParam(searchParams?.s_receiving))
+  const supplierPeriod = normalizeSupplierPeriod(strParam(searchParams?.s_period))
 
   const supa = getSupabaseAdminClientCached()
 
@@ -670,11 +828,17 @@ export default async function AdminStorePage({
   const shownProductCount = pagedProductGroups.reduce((sum, group) => sum + group.products.length, 0)
   const hasMoreProducts = safeProductPage < totalProductPages
 
-  const totalSupplierOrders = supplierOrders.length
+  const filteredSupplierOrders = supplierOrders.filter((order) => {
+    if (!supplierOrderMatchesReceivingFilter(order, supplierReceiving)) return false
+    if (!supplierOrderMatchesPeriodFilter(order, supplierPeriod)) return false
+    return true
+  })
+  const supplierHistoryMetrics = computeSupplierOrderHistoryMetrics(filteredSupplierOrders)
+  const totalSupplierOrders = filteredSupplierOrders.length
   const totalSupplierPages = Math.max(1, Math.ceil(totalSupplierOrders / supplierPageSize))
   const safeSupplierPage = Math.min(supplierPage, totalSupplierPages)
   const supplierStart = (safeSupplierPage - 1) * supplierPageSize
-  const pagedSupplierOrders = supplierOrders.slice(supplierStart, supplierStart + supplierPageSize)
+  const pagedSupplierOrders = filteredSupplierOrders.slice(supplierStart, supplierStart + supplierPageSize)
   const hasMoreSupplierOrders = safeSupplierPage < totalSupplierPages
 
   const catalogBaseParams = {
@@ -691,6 +855,8 @@ export default async function AdminStorePage({
     tab: 'supplier-orders',
     s_q: supplierQ,
     s_status: supplierStatus === 'all' ? '' : supplierStatus,
+    s_receiving: supplierReceiving === 'all' ? '' : supplierReceiving,
+    s_period: supplierPeriod === 'all' ? '' : supplierPeriod,
     s_page_size: String(supplierPageSize),
   }
 
@@ -1206,21 +1372,77 @@ export default async function AdminStorePage({
 
             <div className="grid gap-4">
               <Card>
+                <CardHeader>
+                  <CardTitle>Supplier receiving overview</CardTitle>
+                  <div className="text-xs text-[hsl(var(--muted))]">Track expected supplier cost and receiving progress for the current view.</div>
+                </CardHeader>
+                <CardContent className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                  <div className="rounded-2xl border bg-white p-3">
+                    <div className="text-xs text-[hsl(var(--muted))]">Orders tracked</div>
+                    <div className="mt-1 text-xl font-semibold">{supplierHistoryMetrics.trackedOrders}</div>
+                    <div className="mt-1 text-[11px] text-[hsl(var(--muted))]">Draft: {supplierHistoryMetrics.draftOrders}</div>
+                  </div>
+                  <div className="rounded-2xl border bg-white p-3">
+                    <div className="text-xs text-[hsl(var(--muted))]">Estimated supplier total</div>
+                    <div className="mt-1 text-xl font-semibold">{formatCurrency(supplierHistoryMetrics.estimatedSupplierTotalCents)}</div>
+                    <div className="mt-1 text-[11px] text-[hsl(var(--muted))]">Current filtered orders</div>
+                  </div>
+                  <div className="rounded-2xl border bg-white p-3">
+                    <div className="text-xs text-[hsl(var(--muted))]">Units</div>
+                    <div className="mt-1 text-xl font-semibold">{supplierHistoryMetrics.receivedUnits} / {supplierHistoryMetrics.orderedUnits}</div>
+                    <div className="mt-1 text-[11px] text-[hsl(var(--muted))]">Received / ordered</div>
+                  </div>
+                  <div className="rounded-2xl border bg-white p-3">
+                    <div className="text-xs text-[hsl(var(--muted))]">Remaining units</div>
+                    <div className="mt-1 text-xl font-semibold">{supplierHistoryMetrics.remainingUnits}</div>
+                    <div className="mt-1 text-[11px] text-[hsl(var(--muted))]">Pending: {supplierHistoryMetrics.pendingReceiving} · Partial: {supplierHistoryMetrics.partiallyReceived} · Received: {supplierHistoryMetrics.fullyReceived}</div>
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card>
                 <CardHeader><CardTitle>Supplier-order filters</CardTitle></CardHeader>
-                <CardContent>
-                  <form className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_180px_auto]">
+                <CardContent className="space-y-3">
+                  <div className="flex flex-wrap gap-2">
+                    <Link href={buildUrl('/admin/store', { tab: 'supplier-orders', s_page_size: String(supplierPageSize) })} className={`rounded-xl border px-3 py-2 text-xs font-medium ${supplierStatus === 'all' && supplierReceiving === 'all' && supplierPeriod === 'all' && !supplierQ ? 'border-black bg-black text-white' : 'hover:bg-gray-50'}`}>All</Link>
+                    <Link href={buildUrl('/admin/store', { tab: 'supplier-orders', s_receiving: 'pending', s_page_size: String(supplierPageSize) })} className={`rounded-xl border px-3 py-2 text-xs font-medium ${supplierReceiving === 'pending' ? 'border-black bg-black text-white' : 'hover:bg-gray-50'}`}>Pending receiving</Link>
+                    <Link href={buildUrl('/admin/store', { tab: 'supplier-orders', s_receiving: 'partial', s_page_size: String(supplierPageSize) })} className={`rounded-xl border px-3 py-2 text-xs font-medium ${supplierReceiving === 'partial' ? 'border-black bg-black text-white' : 'hover:bg-gray-50'}`}>Partially received</Link>
+                    <Link href={buildUrl('/admin/store', { tab: 'supplier-orders', s_receiving: 'received', s_page_size: String(supplierPageSize) })} className={`rounded-xl border px-3 py-2 text-xs font-medium ${supplierReceiving === 'received' ? 'border-black bg-black text-white' : 'hover:bg-gray-50'}`}>Fully received</Link>
+                    <Link href={buildUrl('/admin/store', { tab: 'supplier-orders', s_receiving: 'draft', s_page_size: String(supplierPageSize) })} className={`rounded-xl border px-3 py-2 text-xs font-medium ${supplierReceiving === 'draft' ? 'border-black bg-black text-white' : 'hover:bg-gray-50'}`}>Draft</Link>
+                    <Link href={buildUrl('/admin/store', { tab: 'supplier-orders', s_period: 'month', s_page_size: String(supplierPageSize) })} className={`rounded-xl border px-3 py-2 text-xs font-medium ${supplierPeriod === 'month' ? 'border-black bg-black text-white' : 'hover:bg-gray-50'}`}>This month</Link>
+                  </div>
+
+                  <form className="grid gap-3 lg:grid-cols-12">
                     <input type="hidden" name="tab" value="supplier-orders" />
-                    <label className="block">
+                    <label className="block lg:col-span-4">
                       <span className="mb-1 block text-sm font-medium">Search</span>
                       <input name="s_q" defaultValue={supplierQ} placeholder="Reference or supplier…" className="min-h-[42px] w-full rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm" />
                     </label>
-                    <label className="block">
+                    <label className="block lg:col-span-2">
                       <span className="mb-1 block text-sm font-medium">Status</span>
                       <select name="s_status" defaultValue={supplierStatus} className="min-h-[42px] w-full rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm">
                         {SUPPLIER_STATUS_FILTERS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
                       </select>
                     </label>
-                    <div className="flex items-end gap-2">
+                    <label className="block lg:col-span-2">
+                      <span className="mb-1 block text-sm font-medium">Receiving</span>
+                      <select name="s_receiving" defaultValue={supplierReceiving} className="min-h-[42px] w-full rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm">
+                        {SUPPLIER_RECEIVING_FILTERS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                      </select>
+                    </label>
+                    <label className="block lg:col-span-2">
+                      <span className="mb-1 block text-sm font-medium">Period</span>
+                      <select name="s_period" defaultValue={supplierPeriod} className="min-h-[42px] w-full rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm">
+                        {SUPPLIER_PERIOD_FILTERS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                      </select>
+                    </label>
+                    <label className="block lg:col-span-2">
+                      <span className="mb-1 block text-sm font-medium">Per page</span>
+                      <select name="s_page_size" defaultValue={String(supplierPageSize)} className="min-h-[42px] w-full rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm">
+                        {[5, 10, 20, 30].map((option) => <option key={option} value={option}>{option}</option>)}
+                      </select>
+                    </label>
+                    <div className="flex items-end gap-2 lg:col-span-12">
                       <button className="min-h-[42px] rounded-xl bg-black px-4 py-2 text-sm font-medium text-white">Apply</button>
                       <Link href="/admin/store?tab=supplier-orders" className="inline-flex min-h-[42px] items-center rounded-xl border px-4 py-2 text-sm font-medium hover:bg-gray-50">Reset</Link>
                     </div>
@@ -1236,30 +1458,45 @@ export default async function AdminStorePage({
                 <Card>
                   <CardHeader>
                     <CardTitle>Supplier orders</CardTitle>
-                    <div className="text-xs text-[hsl(var(--muted))]">{totalSupplierOrders} order(s)</div>
+                    <div className="text-xs text-[hsl(var(--muted))]">{totalSupplierOrders} matching order(s) · {supplierHistoryMetrics.remainingUnits} unit(s) still pending</div>
                   </CardHeader>
                   <CardContent className="grid gap-4">
                     {pagedSupplierOrders.length === 0 ? (
                       <div className="rounded-2xl border border-dashed p-4 text-sm text-[hsl(var(--muted))]">No supplier orders match the current filters.</div>
                     ) : (
                       pagedSupplierOrders.map((order) => {
-                        const totalOrderedQty = (order.items ?? []).reduce((sum, item) => sum + Math.max(0, Number(item.ordered_qty ?? 0)), 0)
-                        const totalReceivedQty = (order.items ?? []).reduce((sum, item) => sum + Math.max(0, Number(item.received_qty ?? 0)), 0)
-                        const totalCostCents = (order.items ?? []).reduce((sum, item) => sum + Math.max(0, Number(item.line_total_cents ?? 0)), 0)
+                        const orderTotals = computeSupplierOrderTotals(order)
 
                         return (
-                          <div key={order.id} className="rounded-2xl border bg-[hsl(var(--card))] p-4">
+                          <div key={order.id} className={`rounded-2xl border p-4 ${supplierOrderToneClass(order, orderTotals)}`}>
                             <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
                               <div>
                                 <div className="text-sm font-semibold">{order.supplier_name || 'Supplier'}</div>
                                 <div className="mt-1 flex flex-wrap gap-2 text-xs text-[hsl(var(--muted))]">
                                   <span className="rounded-full border px-2 py-1">Order ID: {shortId(order.id)}</span>
                                   {order.reference ? <span className="rounded-full border px-2 py-1">Ref: {order.reference}</span> : null}
-                                  <span className="rounded-full border px-2 py-1">Ordered qty: {totalOrderedQty}</span>
-                                  <span className="rounded-full border px-2 py-1">Received qty: {totalReceivedQty}</span>
+                                  <span className="rounded-full border px-2 py-1">Ordered qty: {orderTotals.orderedQty}</span>
+                                  <span className="rounded-full border px-2 py-1">Received qty: {orderTotals.receivedQty}</span>
+                                  <span className="rounded-full border px-2 py-1">Remaining qty: {orderTotals.remainingQty}</span>
                                 </div>
                               </div>
-                              <div className="flex flex-wrap items-center gap-2">{supplierStatusPill(order.status)}</div>
+                              <div className="flex flex-wrap items-center gap-2">
+                                {supplierStatusPill(order.status)}
+                                {supplierReceivingPill(order, orderTotals)}
+                              </div>
+                            </div>
+
+                            <div className="mb-4 rounded-2xl border bg-white p-3">
+                              <div className="flex flex-wrap items-center justify-between gap-2">
+                                <div>
+                                  <div className="text-sm font-semibold">Receiving progress</div>
+                                  <div className="text-xs text-[hsl(var(--muted))]">{orderTotals.receivedQty} received · {orderTotals.remainingQty} remaining · {orderTotals.pendingLineCount} pending line(s)</div>
+                                </div>
+                                <div className="text-sm font-semibold">{orderTotals.progressPercent}%</div>
+                              </div>
+                              <div className="mt-3 h-2 overflow-hidden rounded-full bg-gray-100">
+                                <div className="h-full rounded-full bg-black" style={{ width: `${orderTotals.progressPercent}%` }} />
+                              </div>
                             </div>
 
                             {canSeeExpenses ? (
@@ -1283,7 +1520,11 @@ export default async function AdminStorePage({
                               <div><span className="text-[hsl(var(--muted))]">Expected:</span> <span className="font-medium">{order.expected_at || '—'}</span></div>
                               <div><span className="text-[hsl(var(--muted))]">Ordered at:</span> <span className="font-medium">{formatDateTime(order.ordered_at)}</span></div>
                               <div><span className="text-[hsl(var(--muted))]">Received at:</span> <span className="font-medium">{formatDateTime(order.received_at)}</span></div>
-                              <div><span className="text-[hsl(var(--muted))]">Estimated cost:</span> <span className="font-medium">{formatCurrency(totalCostCents)}</span></div>
+                              <div><span className="text-[hsl(var(--muted))]">Estimated cost:</span> <span className="font-medium">{formatCurrency(orderTotals.totalCostCents)}</span></div>
+                              <div><span className="text-[hsl(var(--muted))]">Lines:</span> <span className="font-medium">{orderTotals.lineCount}</span></div>
+                              <div><span className="text-[hsl(var(--muted))]">Received lines:</span> <span className="font-medium">{orderTotals.receivedLineCount}</span></div>
+                              <div><span className="text-[hsl(var(--muted))]">Pending lines:</span> <span className="font-medium">{orderTotals.pendingLineCount}</span></div>
+                              <div><span className="text-[hsl(var(--muted))]">Receiving:</span> <span className="font-medium">{supplierOrderReceivingLabel(order, orderTotals)}</span></div>
                             </div>
 
                             <div className="mt-4">
@@ -1303,6 +1544,7 @@ export default async function AdminStorePage({
                               ) : (
                                 (order.items ?? []).map((item) => {
                                   const remainingQty = Math.max(0, Number(item.ordered_qty ?? 0) - Number(item.received_qty ?? 0))
+                                  const lineProgressPercent = Math.max(0, Number(item.ordered_qty ?? 0)) > 0 ? Math.min(100, Math.round((Math.max(0, Number(item.received_qty ?? 0)) / Math.max(0, Number(item.ordered_qty ?? 0))) * 100)) : 0
                                   return (
                                     <div key={item.id} className="rounded-2xl border bg-white p-3">
                                       <div className="flex flex-wrap items-start justify-between gap-2">
@@ -1324,6 +1566,16 @@ export default async function AdminStorePage({
                                         <div><span className="text-[hsl(var(--muted))]">Received:</span> <span className="font-medium">{item.received_qty}</span></div>
                                         <div><span className="text-[hsl(var(--muted))]">Remaining:</span> <span className="font-medium">{remainingQty}</span></div>
                                         <div><span className="text-[hsl(var(--muted))]">Line total:</span> <span className="font-medium">{formatCurrency(item.line_total_cents)}</span></div>
+                                      </div>
+
+                                      <div className="mt-3 rounded-xl border bg-gray-50 p-2">
+                                        <div className="flex items-center justify-between gap-2 text-xs">
+                                          <span className="text-[hsl(var(--muted))]">Line receiving progress</span>
+                                          <span className="font-medium">{lineProgressPercent}%</span>
+                                        </div>
+                                        <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-white">
+                                          <div className="h-full rounded-full bg-black" style={{ width: `${lineProgressPercent}%` }} />
+                                        </div>
                                       </div>
 
                                       <div className="mt-4">
