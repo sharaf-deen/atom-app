@@ -4,7 +4,7 @@ import { useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import Button from '@/components/ui/Button'
-import ConfirmActionModal from '@/components/ui/ConfirmActionModal'
+import ConfirmActionModal, { type ConfirmActionSummaryItem } from '@/components/ui/ConfirmActionModal'
 import InlineAlert from '@/components/ui/InlineAlert'
 import Input from '@/components/ui/Input'
 import Select from '@/components/ui/Select'
@@ -21,6 +21,7 @@ type ProductOption = {
   size: string | null
   price_cents: number
   currency: string | null
+  inventory_qty?: number | null
   is_active: boolean
 }
 
@@ -31,10 +32,19 @@ type LineState = {
   unitCost: string
 }
 
-const STATUS_OPTIONS: Array<{ value: SupplierOrderStatus; label: string }> = [
-  { value: 'draft', label: 'Draft' },
-  { value: 'ordered', label: 'Ordered' },
-  { value: 'canceled', label: 'Canceled' },
+type LinePreview = {
+  key: string
+  product: ProductOption
+  qty: number
+  unitCostCents: number
+  subtotalCents: number
+  stockAvailable: number | null
+}
+
+const STATUS_OPTIONS: Array<{ value: SupplierOrderStatus; label: string; helper: string }> = [
+  { value: 'ordered', label: 'Ordered', helper: 'Use this when the supplier order is confirmed.' },
+  { value: 'draft', label: 'Draft', helper: 'Use this when you still need to check prices or quantities.' },
+  { value: 'canceled', label: 'Canceled', helper: 'Only use this for an order that should be recorded as canceled.' },
 ]
 
 function makeLine(): LineState {
@@ -47,7 +57,7 @@ function makeLine(): LineState {
 }
 
 function productLabel(product: ProductOption) {
-  const parts = [product.name, product.size, product.color].filter(Boolean)
+  const parts = [product.name, product.color, product.size].filter(Boolean)
   return parts.join(' — ')
 }
 
@@ -55,9 +65,27 @@ function statusLabel(value: SupplierOrderStatus) {
   return STATUS_OPTIONS.find((option) => option.value === value)?.label ?? value
 }
 
+function statusHelper(value: SupplierOrderStatus) {
+  return STATUS_OPTIONS.find((option) => option.value === value)?.helper ?? ''
+}
+
 function formatDateValue(value: string) {
   if (!value) return '—'
   return value
+}
+
+function formatCategory(value: string | null | undefined) {
+  const clean = String(value ?? '').trim()
+  if (!clean) return '—'
+  return clean
+    .replace(/_/g, ' ')
+    .replace(/-/g, ' ')
+    .replace(/\b\w/g, (letter) => letter.toUpperCase())
+}
+
+function stockLabel(product: ProductOption) {
+  if (!Number.isFinite(Number(product.inventory_qty))) return 'Stock not shown'
+  return `${Math.max(0, Math.floor(Number(product.inventory_qty)))} in stock`
 }
 
 export default function SupplierOrderForm({
@@ -100,32 +128,42 @@ export default function SupplierOrderForm({
     setLines((current) => (current.length <= 1 ? current : current.filter((line) => line.key !== key)))
   }
 
-  const linePreview = useMemo(() => {
+  const linePreview = useMemo<LinePreview[]>(() => {
     return lines
       .map((line) => {
         const product = productMap.get(line.productId)
-        const qty = Math.max(0, Number(line.orderedQty || 0))
+        if (!product) return null
+
+        const qty = Math.max(0, Math.floor(Number(line.orderedQty || 0)))
         const unitCostCents = Math.max(0, parsePriceToCents(line.unitCost))
+        const stockAvailable = Number.isFinite(Number(product.inventory_qty)) ? Math.max(0, Math.floor(Number(product.inventory_qty))) : null
+
         return {
           key: line.key,
           product,
           qty,
           unitCostCents,
           subtotalCents: qty * unitCostCents,
+          stockAvailable,
         }
       })
-      .filter((line) => line.product)
+      .filter((line): line is LinePreview => Boolean(line))
   }, [lines, productMap])
 
   const totalCents = linePreview.reduce((sum, line) => sum + line.subtotalCents, 0)
   const totalOrderedQty = linePreview.reduce((sum, line) => sum + Math.max(0, Number(line.qty || 0)), 0)
+  const validLineCount = linePreview.length
+  const activeLineCount = linePreview.filter((line) => line.product.is_active).length
+  const inactiveLineCount = Math.max(0, validLineCount - activeLineCount)
+  const missingProductLines = lines.length - validLineCount
+  const selectedStatusHelper = statusHelper(status)
 
-  const confirmationItems = useMemo(() => {
+  const confirmationItems = useMemo<ConfirmActionSummaryItem[]>(() => {
     const itemSummary = linePreview.length ? (
       <div className="space-y-1 text-right">
         {linePreview.slice(0, 5).map((line, index) => (
           <div key={line.key}>
-            {index + 1}. {productLabel(line.product as ProductOption)} · qty {line.qty} · {toPriceString(line.subtotalCents)} EGP
+            {index + 1}. {productLabel(line.product)} · qty {line.qty} · {toPriceString(line.subtotalCents)} EGP
           </div>
         ))}
         {linePreview.length > 5 ? <div>+{linePreview.length - 5} more line(s)</div> : null}
@@ -140,13 +178,14 @@ export default function SupplierOrderForm({
       { label: 'Status', value: statusLabel(status) },
       { label: 'Expected date', value: formatDateValue(expectedAt) },
       { label: 'Items', value: itemSummary },
-      { label: 'Ordered qty', value: totalOrderedQty },
+      { label: 'Product lines', value: String(validLineCount) },
+      { label: 'Ordered qty', value: String(totalOrderedQty) },
       { label: 'Estimated cost', value: `${toPriceString(totalCents)} EGP` },
       { label: 'Notes', value: notes.trim() || '—' },
       { label: 'Stock impact', value: 'No stock change until received quantities are applied.' },
       { label: 'Linked expenses', value: 'None automatic.' },
     ]
-  }, [expectedAt, linePreview, notes, reference, status, supplierName, totalCents, totalOrderedQty])
+  }, [expectedAt, linePreview, notes, reference, status, supplierName, totalCents, totalOrderedQty, validLineCount])
 
   function buildValidItems() {
     return lines
@@ -239,103 +278,202 @@ export default function SupplierOrderForm({
 
   return (
     <form onSubmit={onSubmit} className="grid gap-4">
-      <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
-        <Input label="Supplier *" value={supplierName} onChange={(e) => setSupplierName(e.target.value)} disabled={busy} />
-        <Input label="Reference" value={reference} onChange={(e) => setReference(e.target.value)} disabled={busy} />
-        <Select label="Status" value={status} onChange={(e) => setStatus(e.target.value as SupplierOrderStatus)} disabled={busy}>
-          {STATUS_OPTIONS.map((option) => (
-            <option key={option.value} value={option.value}>
-              {option.label}
-            </option>
-          ))}
-        </Select>
+      <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-3">
+        <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <div className="text-sm font-semibold text-black">Quick supplier order</div>
+            <div className="text-xs text-[hsl(var(--muted))]">Create the order first. Stock changes only when quantities are received.</div>
+          </div>
+          <div className="rounded-full border border-sky-200 bg-sky-50 px-3 py-1 text-xs font-medium text-sky-800">
+            Status: {statusLabel(status)}
+          </div>
+        </div>
+
+        <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+          <div className="rounded-xl border border-[hsl(var(--border))] bg-white p-2">
+            <div className="text-[11px] uppercase tracking-wide text-[hsl(var(--muted))]">Lines</div>
+            <div className="text-lg font-semibold text-black">{validLineCount}</div>
+          </div>
+          <div className="rounded-xl border border-[hsl(var(--border))] bg-white p-2">
+            <div className="text-[11px] uppercase tracking-wide text-[hsl(var(--muted))]">Units ordered</div>
+            <div className="text-lg font-semibold text-black">{totalOrderedQty}</div>
+          </div>
+          <div className="rounded-xl border border-[hsl(var(--border))] bg-white p-2">
+            <div className="text-[11px] uppercase tracking-wide text-[hsl(var(--muted))]">Estimated total</div>
+            <div className="text-lg font-semibold text-black">{toPriceString(totalCents)} EGP</div>
+          </div>
+          <div className="rounded-xl border border-[hsl(var(--border))] bg-white p-2">
+            <div className="text-[11px] uppercase tracking-wide text-[hsl(var(--muted))]">Stock impact</div>
+            <div className="text-sm font-semibold text-black">On receive only</div>
+          </div>
+        </div>
       </div>
 
-      <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-        <Input label="Expected date" type="date" value={expectedAt} onChange={(e) => setExpectedAt(e.target.value)} disabled={busy} />
-        <Input label="Notes" value={notes} onChange={(e) => setNotes(e.target.value)} disabled={busy} />
+      <div className="rounded-2xl border border-[hsl(var(--border))] bg-white p-3">
+        <div className="mb-3 flex items-center justify-between gap-2">
+          <div>
+            <div className="text-sm font-semibold text-black">Order details</div>
+            <div className="text-xs text-[hsl(var(--muted))]">Supplier, reference, expected date, and order status.</div>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+          <Input label="Supplier *" value={supplierName} onChange={(e) => setSupplierName(e.target.value)} disabled={busy} />
+          <Input label="Reference" value={reference} onChange={(e) => setReference(e.target.value)} disabled={busy} />
+        </div>
+
+        <div className="mt-3 grid grid-cols-1 gap-3 lg:grid-cols-2">
+          <Input label="Expected date" type="date" value={expectedAt} onChange={(e) => setExpectedAt(e.target.value)} disabled={busy} />
+          <Select label="Initial status" value={status} onChange={(e) => setStatus(e.target.value as SupplierOrderStatus)} disabled={busy}>
+            {STATUS_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </Select>
+        </div>
+
+        {selectedStatusHelper ? <div className="mt-2 text-xs text-[hsl(var(--muted))]">{selectedStatusHelper}</div> : null}
+
+        <div className="mt-3">
+          <Input label="Notes" value={notes} onChange={(e) => setNotes(e.target.value)} disabled={busy} />
+        </div>
       </div>
 
-      <div className="grid gap-3">
-        {lines.map((line, index) => {
-          const product = productMap.get(line.productId)
-          return (
-            <div key={line.key} className="rounded-2xl border border-[hsl(var(--border))] bg-white p-3">
-              <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                <div className="text-sm font-medium">Line {index + 1}</div>
-                <div className="flex items-center gap-2">
-                  <Button type="button" variant="outline" size="sm" onClick={() => removeLine(line.key)} disabled={busy || lines.length <= 1}>
+      <div className="rounded-2xl border border-[hsl(var(--border))] bg-white p-3">
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <div className="text-sm font-semibold text-black">Products to order</div>
+            <div className="text-xs text-[hsl(var(--muted))]">Add catalog variants, ordered quantity, and estimated supplier cost.</div>
+          </div>
+          <Button type="button" variant="outline" size="sm" onClick={addLine} disabled={busy}>
+            Add line
+          </Button>
+        </div>
+
+        <div className="grid gap-3">
+          {lines.map((line, index) => {
+            const product = productMap.get(line.productId)
+            const qty = Math.max(0, Math.floor(Number(line.orderedQty || 0)))
+            const unitCostCents = Math.max(0, parsePriceToCents(line.unitCost))
+            const subtotalCents = qty * unitCostCents
+
+            return (
+              <div key={line.key} className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-3">
+                <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <div className="text-sm font-medium text-black">Line {index + 1}</div>
+                    <div className="text-xs text-[hsl(var(--muted))]">
+                      {product ? `${productLabel(product)} · ${toPriceString(subtotalCents)} EGP` : 'Select a product variant'}
+                    </div>
+                  </div>
+                  <Button type="button" variant="ghost" size="sm" onClick={() => removeLine(line.key)} disabled={busy || lines.length <= 1}>
                     Remove
                   </Button>
-                  {index === lines.length - 1 && (
-                    <Button type="button" variant="ghost" size="sm" onClick={addLine} disabled={busy}>
-                      Add line
-                    </Button>
-                  )}
                 </div>
-              </div>
 
-              <div className="grid grid-cols-1 gap-3 lg:grid-cols-[minmax(0,1fr)_140px_140px]">
-                <Select
-                  label="Catalog product *"
-                  value={line.productId}
-                  onChange={(e) => updateLine(line.key, { productId: e.target.value })}
-                  disabled={busy}
-                >
-                  <option value="">Select a product</option>
-                  {products.map((option) => (
-                    <option key={option.id} value={option.id}>
-                      {productLabel(option)}
-                    </option>
-                  ))}
-                </Select>
+                <div className="grid grid-cols-1 gap-3 lg:grid-cols-[minmax(0,1fr)_120px_140px]">
+                  <Select
+                    label="Catalog product *"
+                    value={line.productId}
+                    onChange={(e) => updateLine(line.key, { productId: e.target.value })}
+                    disabled={busy}
+                  >
+                    <option value="">Select a product</option>
+                    {products.map((option) => (
+                      <option key={option.id} value={option.id}>
+                        {productLabel(option)}
+                      </option>
+                    ))}
+                  </Select>
 
-                <Input
-                  label="Ordered qty *"
-                  type="number"
-                  min={1}
-                  value={line.orderedQty}
-                  onChange={(e) => updateLine(line.key, { orderedQty: Math.max(1, Number(e.target.value || 1)) })}
-                  disabled={busy}
-                />
+                  <Input
+                    label="Ordered qty *"
+                    type="number"
+                    min={1}
+                    value={line.orderedQty}
+                    onChange={(e) => updateLine(line.key, { orderedQty: Math.max(1, Math.floor(Number(e.target.value || 1))) })}
+                    disabled={busy}
+                  />
 
-                <Input
-                  label="Unit cost *"
-                  type="number"
-                  inputMode="decimal"
-                  step="0.01"
-                  min="0"
-                  value={line.unitCost}
-                  onChange={(e) => updateLine(line.key, { unitCost: e.target.value })}
-                  disabled={busy}
-                />
-              </div>
-
-              {product ? (
-                <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-[hsl(var(--muted))]">
-                  <span className="rounded-full border px-2 py-1">Product ID: {product.id.slice(0, 8)}</span>
-                  <span className="rounded-full border px-2 py-1">Model: {product.name}</span>
-                  {product.size ? <span className="rounded-full border px-2 py-1">Size: {product.size}</span> : null}
-                  {product.color ? <span className="rounded-full border px-2 py-1">Color: {product.color}</span> : null}
+                  <Input
+                    label="Estimated unit cost *"
+                    type="number"
+                    inputMode="decimal"
+                    step="0.01"
+                    min="0"
+                    value={line.unitCost}
+                    onChange={(e) => updateLine(line.key, { unitCost: e.target.value })}
+                    disabled={busy}
+                  />
                 </div>
-              ) : null}
-            </div>
-          )
-        })}
+
+                <div className="mt-3 grid gap-2 text-xs text-[hsl(var(--muted))] sm:grid-cols-2 xl:grid-cols-4">
+                  <div className="rounded-xl border border-[hsl(var(--border))] bg-white px-2 py-1.5">
+                    <span className="block text-[10px] uppercase tracking-wide">Subtotal</span>
+                    <span className="font-semibold text-black">{toPriceString(subtotalCents)} EGP</span>
+                  </div>
+                  <div className="rounded-xl border border-[hsl(var(--border))] bg-white px-2 py-1.5">
+                    <span className="block text-[10px] uppercase tracking-wide">Retail price</span>
+                    <span className="font-semibold text-black">{product ? `${toPriceString(product.price_cents)} EGP` : '—'}</span>
+                  </div>
+                  <div className="rounded-xl border border-[hsl(var(--border))] bg-white px-2 py-1.5">
+                    <span className="block text-[10px] uppercase tracking-wide">Current stock</span>
+                    <span className="font-semibold text-black">{product ? stockLabel(product) : '—'}</span>
+                  </div>
+                  <div className="rounded-xl border border-[hsl(var(--border))] bg-white px-2 py-1.5">
+                    <span className="block text-[10px] uppercase tracking-wide">Product status</span>
+                    <span className="font-semibold text-black">{product ? (product.is_active ? 'Active' : 'Inactive') : '—'}</span>
+                  </div>
+                </div>
+
+                {product ? (
+                  <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-[hsl(var(--muted))]">
+                    <span className="rounded-full border px-2 py-1">Product ID: {product.id.slice(0, 8)}</span>
+                    <span className="rounded-full border px-2 py-1">Category: {formatCategory(product.category)}</span>
+                    <span className="rounded-full border px-2 py-1">Model: {product.name}</span>
+                    {product.size ? <span className="rounded-full border px-2 py-1">Size: {product.size}</span> : null}
+                    {product.color ? <span className="rounded-full border px-2 py-1">Color: {product.color}</span> : null}
+                    {!product.is_active ? <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-1 text-amber-800">Inactive variant</span> : null}
+                  </div>
+                ) : null}
+              </div>
+            )
+          })}
+        </div>
       </div>
 
       <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-3 text-sm">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <span className="font-medium">Estimated supplier total</span>
-          <span className="text-base font-semibold">{toPriceString(totalCents)} EGP</span>
+        <div className="grid gap-3 lg:grid-cols-3">
+          <div>
+            <div className="text-xs uppercase tracking-wide text-[hsl(var(--muted))]">Estimated supplier total</div>
+            <div className="text-xl font-semibold text-black">{toPriceString(totalCents)} EGP</div>
+          </div>
+          <div>
+            <div className="text-xs uppercase tracking-wide text-[hsl(var(--muted))]">Order size</div>
+            <div className="text-sm font-semibold text-black">{totalOrderedQty} unit(s) · {validLineCount} line(s)</div>
+          </div>
+          <div>
+            <div className="text-xs uppercase tracking-wide text-[hsl(var(--muted))]">Creation impact</div>
+            <div className="text-sm font-semibold text-black">No stock or expense created automatically</div>
+          </div>
         </div>
+        {inactiveLineCount > 0 || missingProductLines > 0 ? (
+          <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+            {inactiveLineCount > 0 ? `${inactiveLineCount} selected line(s) use inactive products. ` : null}
+            {missingProductLines > 0 ? `${missingProductLines} line(s) still need a product.` : null}
+          </div>
+        ) : null}
       </div>
 
       {feedback.msg ? <InlineAlert variant={feedback.kind === 'error' ? 'error' : 'success'}>{feedback.msg}</InlineAlert> : null}
 
       <div className="flex flex-wrap items-center gap-2">
         <Button type="submit" disabled={busy || !supplierName.trim()}>
-          {busy ? 'Saving…' : 'Create supplier order'}
+          {busy ? 'Saving…' : 'Review & create supplier order'}
+        </Button>
+        <Button type="button" variant="ghost" onClick={addLine} disabled={busy}>
+          Add another line
         </Button>
       </div>
 
@@ -347,7 +485,7 @@ export default function SupplierOrderForm({
         pendingLabel="Creating…"
         pending={busy}
         summaryItems={confirmationItems}
-        warning="This creates a supplier order only. Stock will not change until received quantities are applied."
+        warning="This creates a supplier order only. Stock will not change until received quantities are applied. No supplier expense is created automatically."
         onCancel={() => setConfirmOpen(false)}
         onConfirm={createConfirmed}
       />

@@ -1197,6 +1197,7 @@ export default async function AdminStorePage({
                     size: product.size,
                     price_cents: product.price_cents,
                     currency: product.currency,
+                    inventory_qty: product.inventory_qty,
                     is_active: product.is_active,
                   }))}
                 />
