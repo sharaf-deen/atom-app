@@ -453,6 +453,8 @@ export default async function AdminStorePreordersPage({
     dir,
   }
 
+  const productOptionById = new Map(productOptions.map((product) => [product.id, product]))
+
   return (
     <main>
       <PageHeader
@@ -746,12 +748,15 @@ export default async function AdminStorePreordersPage({
                                 id={row.id}
                                 status={row.status}
                                 totalCents={row.total_cents}
+                                depositCents={row.deposit_cents}
                                 balanceDueCents={row.balance_due_cents}
                                 depositPaymentMethod={row.deposit_payment_method}
                                 convertedSaleId={row.converted_sale_id}
                                 productLabel={preorderProductLabel(row)}
                                 buyerLabel={preorderBuyerLabel(row)}
                                 qty={row.qty}
+                                unitPriceCents={row.unit_price_cents}
+                                stockAvailable={row.product_id ? productOptionById.get(row.product_id)?.inventory_qty ?? null : null}
                               />
                             </div>
                           </div>
