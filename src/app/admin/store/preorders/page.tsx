@@ -12,6 +12,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card'
 import { formatCurrency } from '@/lib/money'
 import { canAccessStoreAdmin } from '@/lib/rbac'
 import AdminPreorderQuickEdit from '@/components/store/AdminPreorderQuickEdit'
+import AdminPreorderCollectPayment from '@/components/store/AdminPreorderCollectPayment'
 import AdminPreorderForm from '@/components/store/AdminPreorderForm'
 import CompletePreorderAsSaleButton from '@/components/store/CompletePreorderAsSaleButton'
 import StoreAdminNav from '@/components/store/StoreAdminNav'
@@ -718,6 +719,18 @@ export default async function AdminStorePreordersPage({
                             </div>
 
                             <div className="space-y-4">
+                              <AdminPreorderCollectPayment
+                                id={row.id}
+                                totalCents={row.total_cents}
+                                depositCents={row.deposit_cents}
+                                balanceDueCents={row.balance_due_cents}
+                                depositPaymentMethod={row.deposit_payment_method}
+                                status={row.status}
+                                convertedSaleId={row.converted_sale_id}
+                                productLabel={preorderProductLabel(row)}
+                                buyerLabel={preorderBuyerLabel(row)}
+                                qty={row.qty}
+                              />
                               <AdminPreorderQuickEdit
                                 id={row.id}
                                 totalCents={row.total_cents}
