@@ -1361,6 +1361,147 @@ export default async function AdminStorePage({
           </CardContent>
         </Card>
 
+        <Card className="overflow-hidden border-slate-200">
+          <CardHeader className="border-b bg-slate-50/70">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <CardTitle className="text-lg">Store action shortcuts</CardTitle>
+                <div className="mt-1 text-xs text-[hsl(var(--muted))]">Fast links to the main Store actions and follow-up queues. These links only navigate; they do not change data.</div>
+              </div>
+              <span className="rounded-full border bg-white px-3 py-1 text-xs font-medium text-[hsl(var(--muted))]">Navigation only</span>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div>
+              <div className="mb-2 text-xs font-semibold uppercase tracking-[0.14em] text-[hsl(var(--muted))]">Create / record</div>
+              <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+                {canManageCatalog ? (
+                  <Link href="/admin/store?tab=catalog#quick-add-product" className="rounded-2xl border bg-white p-3 transition hover:bg-gray-50">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="text-sm font-semibold">Add product</div>
+                      <span className="rounded-full border px-2 py-0.5 text-[11px] text-[hsl(var(--muted))]">Catalog</span>
+                    </div>
+                    <div className="mt-1 text-xs text-[hsl(var(--muted))]">Jump to Quick add product / variant.</div>
+                  </Link>
+                ) : null}
+
+                {canManageSales ? (
+                  <Link href="/admin/store/sales#quick-sale" className="rounded-2xl border bg-white p-3 transition hover:bg-gray-50">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="text-sm font-semibold">Quick sale</div>
+                      <span className="rounded-full border px-2 py-0.5 text-[11px] text-[hsl(var(--muted))]">Sales</span>
+                    </div>
+                    <div className="mt-1 text-xs text-[hsl(var(--muted))]">Create a store sale with the simplified flow.</div>
+                  </Link>
+                ) : null}
+
+                {canManagePreorders ? (
+                  <Link href="/admin/store/preorders#quick-preorder" className="rounded-2xl border bg-white p-3 transition hover:bg-gray-50">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="text-sm font-semibold">Create preorder</div>
+                      <span className="rounded-full border px-2 py-0.5 text-[11px] text-[hsl(var(--muted))]">Preorders</span>
+                    </div>
+                    <div className="mt-1 text-xs text-[hsl(var(--muted))]">Open the simplified preorder form.</div>
+                  </Link>
+                ) : null}
+
+                {canManageSupplierOrders ? (
+                  <Link href="/admin/store?tab=supplier-orders#quick-supplier-order" className="rounded-2xl border bg-white p-3 transition hover:bg-gray-50">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="text-sm font-semibold">Create supplier order</div>
+                      <span className="rounded-full border px-2 py-0.5 text-[11px] text-[hsl(var(--muted))]">Supplier</span>
+                    </div>
+                    <div className="mt-1 text-xs text-[hsl(var(--muted))]">Start a supplier order from the compact form.</div>
+                  </Link>
+                ) : null}
+
+                {canSeeExpenses ? (
+                  <Link href="/admin/store/expenses#add-store-expense" className="rounded-2xl border bg-white p-3 transition hover:bg-gray-50">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="text-sm font-semibold">Add expense</div>
+                      <span className="rounded-full border px-2 py-0.5 text-[11px] text-[hsl(var(--muted))]">Expenses</span>
+                    </div>
+                    <div className="mt-1 text-xs text-[hsl(var(--muted))]">Record a store expense with proof details.</div>
+                  </Link>
+                ) : null}
+
+                {canSeeFunding ? (
+                  <Link href="/admin/store/funding#add-store-funding" className="rounded-2xl border bg-white p-3 transition hover:bg-gray-50">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="text-sm font-semibold">Add funding</div>
+                      <span className="rounded-full border px-2 py-0.5 text-[11px] text-[hsl(var(--muted))]">Funding</span>
+                    </div>
+                    <div className="mt-1 text-xs text-[hsl(var(--muted))]">Record loan received or repayment.</div>
+                  </Link>
+                ) : null}
+              </div>
+            </div>
+
+            <div>
+              <div className="mb-2 text-xs font-semibold uppercase tracking-[0.14em] text-[hsl(var(--muted))]">Review attention</div>
+              <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+                <Link href={buildUrl('/admin/store', { tab: 'catalog', stock: metrics.outOfStockProducts > 0 ? 'out' : 'low' })} className="rounded-2xl border bg-white p-3 transition hover:bg-gray-50">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="text-sm font-semibold">Stock attention</div>
+                    <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700">{metrics.lowStockProducts + metrics.outOfStockProducts}</span>
+                  </div>
+                  <div className="mt-1 text-xs text-[hsl(var(--muted))]">Open low / out-of-stock variants.</div>
+                </Link>
+
+                {canManageSales ? (
+                  <Link href="/admin/store/sales?money=outstanding" className="rounded-2xl border bg-white p-3 transition hover:bg-gray-50">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="text-sm font-semibold">Collect sale debt</div>
+                      <span className={`rounded-full border px-2 py-0.5 text-[11px] font-medium ${salesOverview.outstandingCount > 0 ? 'border-rose-200 bg-rose-50 text-rose-700' : 'border-emerald-200 bg-emerald-50 text-emerald-700'}`}>{salesOverview.outstandingCount}</span>
+                    </div>
+                    <div className="mt-1 text-xs text-[hsl(var(--muted))]">Open sales with remaining debt.</div>
+                  </Link>
+                ) : null}
+
+                {canManagePreorders ? (
+                  <Link href="/admin/store/preorders?money=balance_due" className="rounded-2xl border bg-white p-3 transition hover:bg-gray-50">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="text-sm font-semibold">Preorder balances</div>
+                      <span className={`rounded-full border px-2 py-0.5 text-[11px] font-medium ${preorderOverview.balanceDueCount > 0 ? 'border-amber-200 bg-amber-50 text-amber-700' : 'border-emerald-200 bg-emerald-50 text-emerald-700'}`}>{preorderOverview.balanceDueCount}</span>
+                    </div>
+                    <div className="mt-1 text-xs text-[hsl(var(--muted))]">Review balances before completion.</div>
+                  </Link>
+                ) : null}
+
+                {canManageSupplierOrders ? (
+                  <Link href="/admin/store?tab=supplier-orders&s_receiving=pending#supplier-orders-list" className="rounded-2xl border bg-white p-3 transition hover:bg-gray-50">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="text-sm font-semibold">Receive stock</div>
+                      <span className={`rounded-full border px-2 py-0.5 text-[11px] font-medium ${supplierOverview.remainingUnits > 0 ? 'border-sky-200 bg-sky-50 text-sky-700' : 'border-emerald-200 bg-emerald-50 text-emerald-700'}`}>{supplierOverview.remainingUnits}</span>
+                    </div>
+                    <div className="mt-1 text-xs text-[hsl(var(--muted))]">Open supplier orders pending receiving.</div>
+                  </Link>
+                ) : null}
+
+                {canSeeExpenses ? (
+                  <Link href="/admin/store/expenses?proof=missing_proof" className="rounded-2xl border bg-white p-3 transition hover:bg-gray-50">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="text-sm font-semibold">Expenses missing proof</div>
+                      <span className={`rounded-full border px-2 py-0.5 text-[11px] font-medium ${expenseOverview.missingProofCount > 0 ? 'border-rose-200 bg-rose-50 text-rose-700' : 'border-emerald-200 bg-emerald-50 text-emerald-700'}`}>{expenseOverview.missingProofCount}</span>
+                    </div>
+                    <div className="mt-1 text-xs text-[hsl(var(--muted))]">Open store expenses without proof.</div>
+                  </Link>
+                ) : null}
+
+                {canSeeFunding ? (
+                  <Link href="/admin/store/funding?proof=missing" className="rounded-2xl border bg-white p-3 transition hover:bg-gray-50">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="text-sm font-semibold">Funding missing proof</div>
+                      <span className={`rounded-full border px-2 py-0.5 text-[11px] font-medium ${fundingOverview.missingProofCount > 0 ? 'border-rose-200 bg-rose-50 text-rose-700' : 'border-emerald-200 bg-emerald-50 text-emerald-700'}`}>{fundingOverview.missingProofCount}</span>
+                    </div>
+                    <div className="mt-1 text-xs text-[hsl(var(--muted))]">Open funding entries without proof.</div>
+                  </Link>
+                ) : null}
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
         <div className="flex flex-wrap gap-2">
           <Link href="/admin/store?tab=catalog" className={`rounded-xl border px-4 py-2 text-sm font-medium ${tab === 'catalog' ? 'bg-black text-white border-black' : 'hover:bg-gray-50'}`}>
             Catalog & Stock
@@ -1370,9 +1511,9 @@ export default async function AdminStorePage({
               Supplier Orders
             </Link>
           ) : null}
-          {canManageCatalog ? (
-            <Link href="/admin/store/models" className="rounded-xl border px-4 py-2 text-sm font-medium hover:bg-gray-50">
-              Models
+          {canManageSales ? (
+            <Link href="/admin/store/sales" className="rounded-xl border px-4 py-2 text-sm font-medium hover:bg-gray-50">
+              Sales & Debt
             </Link>
           ) : null}
           {canManagePreorders ? (
@@ -1380,9 +1521,24 @@ export default async function AdminStorePage({
               Preorders
             </Link>
           ) : null}
-          {canManageSales ? (
-            <Link href="/admin/store/sales" className="rounded-xl border px-4 py-2 text-sm font-medium hover:bg-gray-50">
-              Sales & Debt
+          {canSeeExpenses ? (
+            <Link href="/admin/store/expenses" className="rounded-xl border px-4 py-2 text-sm font-medium hover:bg-gray-50">
+              Expenses
+            </Link>
+          ) : null}
+          {canSeeFunding ? (
+            <Link href="/admin/store/funding" className="rounded-xl border px-4 py-2 text-sm font-medium hover:bg-gray-50">
+              Funding
+            </Link>
+          ) : null}
+          {canManageCatalog ? (
+            <Link href="/admin/store/models" className="rounded-xl border px-4 py-2 text-sm font-medium hover:bg-gray-50">
+              Models
+            </Link>
+          ) : null}
+          {canSeeDashboard ? (
+            <Link href="/admin/store/dashboard" className="rounded-xl border px-4 py-2 text-sm font-medium hover:bg-gray-50">
+              Dashboard
             </Link>
           ) : null}
         </div>
@@ -1733,10 +1889,11 @@ export default async function AdminStorePage({
 
         {tab === 'supplier-orders' && (
           <div className="grid gap-4 xl:grid-cols-[minmax(0,430px)_minmax(0,1fr)]">
-            <Card>
-              <CardHeader><CardTitle>Create supplier order</CardTitle></CardHeader>
-              <CardContent>
-                <SupplierOrderForm
+            <div id="quick-supplier-order" className="scroll-mt-24">
+              <Card>
+                <CardHeader><CardTitle>Create supplier order</CardTitle></CardHeader>
+                <CardContent>
+                  <SupplierOrderForm
                   products={allProducts.map((product) => ({
                     id: product.id,
                     name: product.name,
@@ -1748,11 +1905,12 @@ export default async function AdminStorePage({
                     inventory_qty: product.inventory_qty,
                     is_active: product.is_active,
                   }))}
-                />
-              </CardContent>
-            </Card>
+                  />
+                </CardContent>
+              </Card>
+            </div>
 
-            <div className="grid gap-4">
+            <div id="supplier-orders-list" className="grid scroll-mt-24 gap-4">
               <Card>
                 <CardHeader>
                   <CardTitle>Supplier receiving overview</CardTitle>
