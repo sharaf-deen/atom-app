@@ -813,6 +813,7 @@ export default async function AdminStorePage({
       })
     : []
 
+  const productById = new Map(allProducts.map((product) => [product.id, product]))
   const groupedProducts = groupProductsByModel(filteredProducts)
   const metrics = computeMetrics(allProducts, supplierOrders)
   const restockSuggestions = buildRestockSuggestions(allProducts)
@@ -1543,6 +1544,7 @@ export default async function AdminStorePage({
                                 <div className="rounded-2xl border border-dashed p-3 text-sm text-[hsl(var(--muted))]">No lines on this supplier order.</div>
                               ) : (
                                 (order.items ?? []).map((item) => {
+                                  const linkedProduct = item.product_id ? productById.get(item.product_id) ?? null : null
                                   const remainingQty = Math.max(0, Number(item.ordered_qty ?? 0) - Number(item.received_qty ?? 0))
                                   const lineProgressPercent = Math.max(0, Number(item.ordered_qty ?? 0)) > 0 ? Math.min(100, Math.round((Math.max(0, Number(item.received_qty ?? 0)) / Math.max(0, Number(item.ordered_qty ?? 0))) * 100)) : 0
                                   return (
@@ -1584,6 +1586,12 @@ export default async function AdminStorePage({
                                           orderedQty={item.ordered_qty}
                                           receivedQty={item.received_qty}
                                           lineStatus={item.line_status}
+                                          productName={item.product_name}
+                                          productId={item.product_id}
+                                          productColor={item.product_color}
+                                          productSize={item.product_size}
+                                          currentStock={linkedProduct?.inventory_qty ?? null}
+                                          productActive={linkedProduct?.is_active ?? null}
                                         />
                                       </div>
                                     </div>
