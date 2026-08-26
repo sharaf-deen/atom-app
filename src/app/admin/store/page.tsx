@@ -14,6 +14,7 @@ import {
   canAccessStoreCatalogAdmin,
   canAccessStoreDashboard,
   canAccessStoreExpenses,
+  canAccessStoreFunding,
   canManageStoreCatalog,
   canManageStorePreorders,
   canManageStoreSales,
@@ -214,6 +215,80 @@ type SupplierOrderHistoryMetrics = {
   draftOrders: number
 }
 
+
+type StoreSalesOverviewRow = {
+  status: string | null
+  total_cents: number | null
+  paid_cents: number | null
+  debt_cents: number | null
+  purchase_date: string | null
+  created_at: string | null
+}
+
+type StorePreorderOverviewRow = {
+  status: string | null
+  total_cents: number | null
+  deposit_cents: number | null
+  balance_due_cents: number | null
+  converted_sale_id: string | null
+  created_at: string | null
+  updated_at: string | null
+}
+
+type StoreExpenseOverviewRow = {
+  expense_date: string | null
+  amount_cents: number | null
+  payment_method: string | null
+  supplier_order_id: string | null
+  attachment_path: string | null
+  created_at: string | null
+}
+
+type StoreFundingOverviewRow = {
+  funding_date: string | null
+  type: string | null
+  amount_cents: number | null
+  attachment_path: string | null
+  created_at: string | null
+}
+
+type StoreSalesOverviewMetrics = {
+  trackedSales: number
+  todaySales: number
+  monthSales: number
+  monthSoldCents: number
+  monthCollectedCents: number
+  outstandingDebtCents: number
+  outstandingCount: number
+}
+
+type StorePreorderOverviewMetrics = {
+  trackedPreorders: number
+  openPreorders: number
+  balanceDueCents: number
+  balanceDueCount: number
+  readyToComplete: number
+  noDepositCount: number
+}
+
+type StoreExpenseOverviewMetrics = {
+  trackedExpenses: number
+  monthExpensesCents: number
+  cashExpensesCents: number
+  supplierLinkedCount: number
+  missingProofCount: number
+  withProofCount: number
+}
+
+type StoreFundingOverviewMetrics = {
+  trackedFunding: number
+  loanReceivedCents: number
+  loanRepaidCents: number
+  remainingToRepayCents: number
+  missingProofCount: number
+  withProofCount: number
+}
+
 const ACTIVE_FILTERS: Array<{ value: ActiveFilter; label: string }> = [
   { value: 'all', label: 'All' },
   { value: 'active', label: 'Active' },
@@ -410,6 +485,34 @@ function formatDateTime(value?: string | null) {
 
 function todayDateOnly() {
   return new Date().toISOString().slice(0, 10)
+}
+
+
+function safeCents(value: unknown) {
+  const n = Number(value ?? 0)
+  return Number.isFinite(n) ? Math.max(0, Math.floor(n)) : 0
+}
+
+function safeDate(value?: string | null) {
+  if (!value) return null
+  const d = new Date(value)
+  return Number.isNaN(d.getTime()) ? null : d
+}
+
+function isSameCalendarDay(value?: string | null, now = new Date()) {
+  const d = safeDate(value)
+  if (!d) return false
+  return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate()
+}
+
+function isSameCalendarMonth(value?: string | null, now = new Date()) {
+  const d = safeDate(value)
+  if (!d) return false
+  return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth()
+}
+
+function proofAttached(row: { attachment_path?: string | null }) {
+  return Boolean(String(row.attachment_path ?? '').trim())
 }
 
 function isLowStock(product: Pick<ProductRow, 'inventory_qty' | 'low_stock_threshold'>) {
@@ -631,6 +734,100 @@ function computeSupplierOrderHistoryMetrics(orders: SupplierOrderRow[]): Supplie
   })
 }
 
+
+function computeSalesOverviewMetrics(rows: StoreSalesOverviewRow[]): StoreSalesOverviewMetrics {
+  const now = new Date()
+  return rows.reduce((acc, row) => {
+    const dateValue = row.purchase_date || row.created_at
+    const debtCents = safeCents(row.debt_cents)
+    acc.trackedSales += 1
+    if (isSameCalendarDay(dateValue, now)) acc.todaySales += 1
+    if (isSameCalendarMonth(dateValue, now)) {
+      acc.monthSales += 1
+      acc.monthSoldCents += safeCents(row.total_cents)
+      acc.monthCollectedCents += safeCents(row.paid_cents)
+    }
+    if (debtCents > 0 && row.status !== 'canceled') {
+      acc.outstandingDebtCents += debtCents
+      acc.outstandingCount += 1
+    }
+    return acc
+  }, {
+    trackedSales: 0,
+    todaySales: 0,
+    monthSales: 0,
+    monthSoldCents: 0,
+    monthCollectedCents: 0,
+    outstandingDebtCents: 0,
+    outstandingCount: 0,
+  })
+}
+
+function computePreorderOverviewMetrics(rows: StorePreorderOverviewRow[]): StorePreorderOverviewMetrics {
+  return rows.reduce((acc, row) => {
+    const status = String(row.status ?? '')
+    const balanceCents = safeCents(row.balance_due_cents)
+    const isClosed = status === 'completed' || status === 'canceled' || Boolean(row.converted_sale_id)
+    acc.trackedPreorders += 1
+    if (!isClosed) acc.openPreorders += 1
+    if (!isClosed && balanceCents > 0) {
+      acc.balanceDueCents += balanceCents
+      acc.balanceDueCount += 1
+    }
+    if (!isClosed && safeCents(row.deposit_cents) <= 0) acc.noDepositCount += 1
+    if (!isClosed && status === 'ready') acc.readyToComplete += 1
+    return acc
+  }, {
+    trackedPreorders: 0,
+    openPreorders: 0,
+    balanceDueCents: 0,
+    balanceDueCount: 0,
+    readyToComplete: 0,
+    noDepositCount: 0,
+  })
+}
+
+function computeExpenseOverviewMetrics(rows: StoreExpenseOverviewRow[]): StoreExpenseOverviewMetrics {
+  const now = new Date()
+  return rows.reduce((acc, row) => {
+    const amountCents = safeCents(row.amount_cents)
+    acc.trackedExpenses += 1
+    if (isSameCalendarMonth(row.expense_date || row.created_at, now)) acc.monthExpensesCents += amountCents
+    if (row.payment_method === 'cash') acc.cashExpensesCents += amountCents
+    if (row.supplier_order_id) acc.supplierLinkedCount += 1
+    if (proofAttached(row)) acc.withProofCount += 1
+    else acc.missingProofCount += 1
+    return acc
+  }, {
+    trackedExpenses: 0,
+    monthExpensesCents: 0,
+    cashExpensesCents: 0,
+    supplierLinkedCount: 0,
+    missingProofCount: 0,
+    withProofCount: 0,
+  })
+}
+
+function computeFundingOverviewMetrics(rows: StoreFundingOverviewRow[]): StoreFundingOverviewMetrics {
+  return rows.reduce((acc, row) => {
+    const amountCents = safeCents(row.amount_cents)
+    acc.trackedFunding += 1
+    if (row.type === 'loan_repayment') acc.loanRepaidCents += amountCents
+    else if (row.type === 'loan_received') acc.loanReceivedCents += amountCents
+    if (proofAttached(row)) acc.withProofCount += 1
+    else acc.missingProofCount += 1
+    acc.remainingToRepayCents = Math.max(0, acc.loanReceivedCents - acc.loanRepaidCents)
+    return acc
+  }, {
+    trackedFunding: 0,
+    loanReceivedCents: 0,
+    loanRepaidCents: 0,
+    remainingToRepayCents: 0,
+    missingProofCount: 0,
+    withProofCount: 0,
+  })
+}
+
 function computeMetrics(products: ProductRow[], supplierOrders: SupplierOrderRow[]): DashboardMetrics {
   const productMetrics = products.reduce(
     (acc, product) => {
@@ -787,6 +984,76 @@ export default async function AdminStorePage({
     supplierError = error?.message || String(error)
   }
 
+  let salesOverview = computeSalesOverviewMetrics([])
+  let preorderOverview = computePreorderOverviewMetrics([])
+  let expenseOverview = computeExpenseOverviewMetrics([])
+  let fundingOverview = computeFundingOverviewMetrics([])
+  let supplierOverviewOrders: SupplierOrderRow[] = []
+
+  try {
+    const { data, error } = await supa
+      .from('store_sales')
+      .select('status,total_cents,paid_cents,debt_cents,purchase_date,created_at')
+      .order('created_at', { ascending: false })
+      .limit(500)
+    if (error) throw new Error(error.message)
+    salesOverview = computeSalesOverviewMetrics((Array.isArray(data) ? data : []) as StoreSalesOverviewRow[])
+  } catch {
+    salesOverview = computeSalesOverviewMetrics([])
+  }
+
+  try {
+    const { data, error } = await supa
+      .from('store_preorders')
+      .select('status,total_cents,deposit_cents,balance_due_cents,converted_sale_id,created_at,updated_at')
+      .order('created_at', { ascending: false })
+      .limit(1000)
+    if (error) throw new Error(error.message)
+    preorderOverview = computePreorderOverviewMetrics((Array.isArray(data) ? data : []) as StorePreorderOverviewRow[])
+  } catch {
+    preorderOverview = computePreorderOverviewMetrics([])
+  }
+
+  try {
+    const { data, error } = await supa
+      .from('store_supplier_orders')
+      .select(
+        'id, reference, supplier_name, status, notes, ordered_at, expected_at, received_at, created_at, updated_at, created_by, updated_by, items:store_supplier_order_items(id, supplier_order_id, product_id, product_name, product_category, product_color, product_size, unit_cost_cents, ordered_qty, received_qty, line_total_cents, line_status, created_at, updated_at)'
+      )
+      .order('created_at', { ascending: false })
+      .limit(200)
+    if (error) throw new Error(error.message)
+    supplierOverviewOrders = (Array.isArray(data) ? data : []) as SupplierOrderRow[]
+  } catch {
+    supplierOverviewOrders = []
+  }
+
+  try {
+    const { data, error } = await supa
+      .from('store_expenses')
+      .select('expense_date,amount_cents,payment_method,supplier_order_id,attachment_path,created_at')
+      .order('expense_date', { ascending: false })
+      .limit(1000)
+    if (error) throw new Error(error.message)
+    expenseOverview = computeExpenseOverviewMetrics((Array.isArray(data) ? data : []) as StoreExpenseOverviewRow[])
+  } catch {
+    expenseOverview = computeExpenseOverviewMetrics([])
+  }
+
+  try {
+    const { data, error } = await supa
+      .from('store_external_funding')
+      .select('funding_date,type,amount_cents,attachment_path,created_at')
+      .order('funding_date', { ascending: false })
+      .limit(1000)
+    if (error) throw new Error(error.message)
+    fundingOverview = computeFundingOverviewMetrics((Array.isArray(data) ? data : []) as StoreFundingOverviewRow[])
+  } catch {
+    fundingOverview = computeFundingOverviewMetrics([])
+  }
+
+  const supplierOverview = computeSupplierOrderHistoryMetrics(supplierOverviewOrders)
+
   const normalizedProductSearch = q.toLowerCase()
   const filteredProducts = !productsError
     ? allProducts.filter((product) => {
@@ -878,6 +1145,7 @@ export default async function AdminStorePage({
 
   const canSeeDashboard = canAccessStoreDashboard(me.role)
   const canSeeExpenses = canAccessStoreExpenses(me.role)
+  const canSeeFunding = canAccessStoreFunding(me.role)
   const storeExpenseLinkTo = todayDateOnly()
   const canManageCatalog = canManageStoreCatalog(me.role)
   const canManageSupplierOrders = canManageStoreSupplierOrders(me.role)
@@ -888,7 +1156,7 @@ export default async function AdminStorePage({
     <main>
       <PageHeader
         title="Store Admin"
-        subtitle="V2 — catalog workspace with role-based access."
+        subtitle="Store V3 — operational hub with role-based access."
         right={
           <div className="flex flex-wrap items-center gap-2">
             {canSeeDashboard ? (
@@ -974,9 +1242,122 @@ export default async function AdminStorePage({
               </Link>
             ) : null}
             <div className="rounded-2xl border bg-white p-3">
-              <div className="text-sm font-semibold">Store V2 hub</div>
+              <div className="text-sm font-semibold">Store V3 hub</div>
               <div className="mt-1 text-xs text-[hsl(var(--muted))]">{canManageCatalog ? 'Full catalog controls stay on super admin. Preorders and sales remain separated.' : 'Preorders, supplier orders, sales, and catalog changes stay restricted to super admin.'}</div>
             </div>
+          </CardContent>
+        </Card>
+
+        <Card className="overflow-hidden border-slate-200">
+          <CardHeader className="border-b bg-slate-50/70">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <CardTitle className="text-lg">Store overview</CardTitle>
+                <div className="mt-1 text-xs text-[hsl(var(--muted))]">A read-only snapshot of stock, sales, preorders, supplier receiving, expenses, and funding.</div>
+              </div>
+              <span className="rounded-full border bg-white px-3 py-1 text-xs font-medium text-[hsl(var(--muted))]">No automatic changes</span>
+            </div>
+          </CardHeader>
+          <CardContent className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+            <Link href={buildUrl('/admin/store', { tab: 'catalog', stock: metrics.outOfStockProducts > 0 ? 'out' : 'low' })} className="rounded-2xl border bg-white p-4 transition hover:bg-gray-50">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <div className="text-sm font-semibold">Stock attention</div>
+                  <div className="mt-1 text-xs text-[hsl(var(--muted))]">Low/out variants and preorder-enabled products.</div>
+                </div>
+                <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700">{metrics.lowStockProducts + metrics.outOfStockProducts}</span>
+              </div>
+              <div className="mt-3 grid grid-cols-3 gap-2 text-xs">
+                <div className="rounded-xl bg-slate-50 p-2"><div className="font-semibold">{metrics.lowStockProducts}</div><div className="text-[hsl(var(--muted))]">Low</div></div>
+                <div className="rounded-xl bg-slate-50 p-2"><div className="font-semibold">{metrics.outOfStockProducts}</div><div className="text-[hsl(var(--muted))]">Out</div></div>
+                <div className="rounded-xl bg-slate-50 p-2"><div className="font-semibold">{metrics.preorderEnabledProducts}</div><div className="text-[hsl(var(--muted))]">Preorder</div></div>
+              </div>
+            </Link>
+
+            {canManageSales ? (
+              <Link href="/admin/store/sales?money=outstanding" className="rounded-2xl border bg-white p-4 transition hover:bg-gray-50">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <div className="text-sm font-semibold">Sales & debt</div>
+                    <div className="mt-1 text-xs text-[hsl(var(--muted))]">Today, this month, and outstanding sale debt.</div>
+                  </div>
+                  <span className={`rounded-full border px-2 py-0.5 text-[11px] font-medium ${salesOverview.outstandingDebtCents > 0 ? 'border-rose-200 bg-rose-50 text-rose-700' : 'border-emerald-200 bg-emerald-50 text-emerald-700'}`}>{salesOverview.outstandingCount} debt</span>
+                </div>
+                <div className="mt-3 grid grid-cols-3 gap-2 text-xs">
+                  <div className="rounded-xl bg-slate-50 p-2"><div className="font-semibold">{salesOverview.todaySales}</div><div className="text-[hsl(var(--muted))]">Today</div></div>
+                  <div className="rounded-xl bg-slate-50 p-2"><div className="font-semibold">{salesOverview.monthSales}</div><div className="text-[hsl(var(--muted))]">Month</div></div>
+                  <div className="rounded-xl bg-slate-50 p-2"><div className="font-semibold">{formatCurrency(salesOverview.outstandingDebtCents, 'en-EG', 'EGP')}</div><div className="text-[hsl(var(--muted))]">Debt</div></div>
+                </div>
+              </Link>
+            ) : null}
+
+            {canManagePreorders ? (
+              <Link href="/admin/store/preorders?money=balance_due" className="rounded-2xl border bg-white p-4 transition hover:bg-gray-50">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <div className="text-sm font-semibold">Preorders</div>
+                    <div className="mt-1 text-xs text-[hsl(var(--muted))]">Open preorders, balances, and ready-to-complete items.</div>
+                  </div>
+                  <span className={`rounded-full border px-2 py-0.5 text-[11px] font-medium ${preorderOverview.balanceDueCents > 0 ? 'border-amber-200 bg-amber-50 text-amber-700' : 'border-emerald-200 bg-emerald-50 text-emerald-700'}`}>{preorderOverview.balanceDueCount} balance</span>
+                </div>
+                <div className="mt-3 grid grid-cols-3 gap-2 text-xs">
+                  <div className="rounded-xl bg-slate-50 p-2"><div className="font-semibold">{preorderOverview.openPreorders}</div><div className="text-[hsl(var(--muted))]">Open</div></div>
+                  <div className="rounded-xl bg-slate-50 p-2"><div className="font-semibold">{formatCurrency(preorderOverview.balanceDueCents, 'en-EG', 'EGP')}</div><div className="text-[hsl(var(--muted))]">Balance</div></div>
+                  <div className="rounded-xl bg-slate-50 p-2"><div className="font-semibold">{preorderOverview.readyToComplete}</div><div className="text-[hsl(var(--muted))]">Ready</div></div>
+                </div>
+              </Link>
+            ) : null}
+
+            {canManageSupplierOrders ? (
+              <Link href="/admin/store?tab=supplier-orders&s_receiving=pending" className="rounded-2xl border bg-white p-4 transition hover:bg-gray-50">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <div className="text-sm font-semibold">Supplier receiving</div>
+                    <div className="mt-1 text-xs text-[hsl(var(--muted))]">Pending and partially received supplier orders.</div>
+                  </div>
+                  <span className={`rounded-full border px-2 py-0.5 text-[11px] font-medium ${supplierOverview.remainingUnits > 0 ? 'border-sky-200 bg-sky-50 text-sky-700' : 'border-emerald-200 bg-emerald-50 text-emerald-700'}`}>{supplierOverview.remainingUnits} units</span>
+                </div>
+                <div className="mt-3 grid grid-cols-3 gap-2 text-xs">
+                  <div className="rounded-xl bg-slate-50 p-2"><div className="font-semibold">{supplierOverview.pendingReceiving}</div><div className="text-[hsl(var(--muted))]">Pending</div></div>
+                  <div className="rounded-xl bg-slate-50 p-2"><div className="font-semibold">{supplierOverview.partiallyReceived}</div><div className="text-[hsl(var(--muted))]">Partial</div></div>
+                  <div className="rounded-xl bg-slate-50 p-2"><div className="font-semibold">{supplierOverview.receivedUnits}/{supplierOverview.orderedUnits}</div><div className="text-[hsl(var(--muted))]">Received</div></div>
+                </div>
+              </Link>
+            ) : null}
+
+            {canSeeExpenses ? (
+              <Link href="/admin/store/expenses?proof=missing_proof" className="rounded-2xl border bg-white p-4 transition hover:bg-gray-50">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <div className="text-sm font-semibold">Expenses proof</div>
+                    <div className="mt-1 text-xs text-[hsl(var(--muted))]">This month expenses and missing proof count.</div>
+                  </div>
+                  <span className={`rounded-full border px-2 py-0.5 text-[11px] font-medium ${expenseOverview.missingProofCount > 0 ? 'border-rose-200 bg-rose-50 text-rose-700' : 'border-emerald-200 bg-emerald-50 text-emerald-700'}`}>{expenseOverview.missingProofCount} missing</span>
+                </div>
+                <div className="mt-3 grid grid-cols-3 gap-2 text-xs">
+                  <div className="rounded-xl bg-slate-50 p-2"><div className="font-semibold">{formatCurrency(expenseOverview.monthExpensesCents, 'en-EG', 'EGP')}</div><div className="text-[hsl(var(--muted))]">Month</div></div>
+                  <div className="rounded-xl bg-slate-50 p-2"><div className="font-semibold">{expenseOverview.supplierLinkedCount}</div><div className="text-[hsl(var(--muted))]">Supplier</div></div>
+                  <div className="rounded-xl bg-slate-50 p-2"><div className="font-semibold">{expenseOverview.withProofCount}</div><div className="text-[hsl(var(--muted))]">Proof</div></div>
+                </div>
+              </Link>
+            ) : null}
+
+            {canSeeFunding ? (
+              <Link href="/admin/store/funding?proof=missing" className="rounded-2xl border bg-white p-4 transition hover:bg-gray-50">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <div className="text-sm font-semibold">Funding repayment</div>
+                    <div className="mt-1 text-xs text-[hsl(var(--muted))]">Loan received, repaid, remaining, and proof status.</div>
+                  </div>
+                  <span className={`rounded-full border px-2 py-0.5 text-[11px] font-medium ${fundingOverview.remainingToRepayCents > 0 ? 'border-violet-200 bg-violet-50 text-violet-700' : 'border-emerald-200 bg-emerald-50 text-emerald-700'}`}>Funding</span>
+                </div>
+                <div className="mt-3 grid grid-cols-3 gap-2 text-xs">
+                  <div className="rounded-xl bg-slate-50 p-2"><div className="font-semibold">{formatCurrency(fundingOverview.loanReceivedCents, 'en-EG', 'EGP')}</div><div className="text-[hsl(var(--muted))]">Received</div></div>
+                  <div className="rounded-xl bg-slate-50 p-2"><div className="font-semibold">{formatCurrency(fundingOverview.loanRepaidCents, 'en-EG', 'EGP')}</div><div className="text-[hsl(var(--muted))]">Repaid</div></div>
+                  <div className="rounded-xl bg-slate-50 p-2"><div className="font-semibold">{formatCurrency(fundingOverview.remainingToRepayCents, 'en-EG', 'EGP')}</div><div className="text-[hsl(var(--muted))]">Remaining</div></div>
+                </div>
+              </Link>
+            ) : null}
           </CardContent>
         </Card>
 
