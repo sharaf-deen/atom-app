@@ -8,8 +8,8 @@ import Section from '@/components/layout/Section'
 import AccessDeniedPage from '@/components/AccessDeniedPage'
 import InlineAlert from '@/components/ui/InlineAlert'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card'
-import ConfirmSubmitButton from '@/components/ui/ConfirmSubmitButton'
 import StoreAdminNav from '@/components/store/StoreAdminNav'
+import AdminStoreExpenseForm from '@/components/store/AdminStoreExpenseForm'
 import StoreExpensesTableClient, { type StoreExpenseRow } from '@/components/store/StoreExpensesTableClient'
 import { canAccessStoreExpenses, canManageStoreExpenses } from '@/lib/rbac'
 import { formatCurrency, parsePriceToCents } from '@/lib/money'
@@ -662,87 +662,27 @@ export default async function StoreExpensesPage({ searchParams }: { searchParams
 
         {canManage ? (
           <div id="add-store-expense">
-            <Card>
-            <CardHeader>
-              <CardTitle>Add store expense</CardTitle>
-              <div className="text-xs text-[hsl(var(--muted))]">Super admin only · EGP only · attachment optional.</div>
-            </CardHeader>
-            <CardContent>
-              <form action={addStoreExpenseAction} className="grid gap-3 sm:grid-cols-4">
-                <input type="hidden" name="return_qs" value={filterReturnQS} />
-                <label className="block">
-                  <span className="mb-1 block text-sm font-medium">Date</span>
-                  <input type="date" name="expense_date" defaultValue={today} className="w-full rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring" />
-                </label>
-                <label className="block sm:col-span-3">
-                  <span className="mb-1 block text-sm font-medium">Related supplier order</span>
-                  <select name="supplier_order_id" defaultValue={defaultLinkedSupplierOrder?.id || ''} className="w-full rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring">
-                    <option value="">No supplier order link</option>
-                    {supplierOrderOptions.map((order) => <option key={order.id} value={order.id}>{supplierOrderLabel(order)}</option>)}
-                  </select>
-                  <span className="mt-1 block text-xs text-[hsl(var(--muted))]">Optional accounting link only. It does not update stock or supplier order status.</span>
-                </label>
-                <label className="block sm:col-span-2">
-                  <span className="mb-1 block text-sm font-medium">Category</span>
-                  <select name="category" defaultValue="supplier_order" required className="w-full rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring">
-                    {STORE_EXPENSE_CATEGORIES.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
-                  </select>
-                </label>
-                <label className="block">
-                  <span className="mb-1 block text-sm font-medium">Amount (EGP)</span>
-                  <input type="number" name="amount" min="0" step="0.01" defaultValue={defaultExpenseAmount} required className="w-full rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring" />
-                </label>
-                <label className="block sm:col-span-2">
-                  <span className="mb-1 block text-sm font-medium">Title</span>
-                  <input name="title" defaultValue={defaultExpenseTitle} placeholder="Example: Pakistan factory order" required className="w-full rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none placeholder:text-[hsl(var(--muted))] focus-visible:ring-2 focus-visible:ring-ring" />
-                </label>
-                <label className="block">
-                  <span className="mb-1 block text-sm font-medium">Payment method</span>
-                  <select name="payment_method" defaultValue="cash" required className="w-full rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring">
-                    {PAYMENT_METHODS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
-                  </select>
-                </label>
-                <label className="block">
-                  <span className="mb-1 block text-sm font-medium">Vendor / supplier</span>
-                  <input name="vendor_name" defaultValue={defaultExpenseVendor} placeholder="Optional" className="w-full rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none placeholder:text-[hsl(var(--muted))] focus-visible:ring-2 focus-visible:ring-ring" />
-                </label>
-                <label className="block sm:col-span-2">
-                  <span className="mb-1 block text-sm font-medium">Note</span>
-                  <input name="note" defaultValue={defaultExpenseNote} placeholder="Optional note…" className="w-full rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none placeholder:text-[hsl(var(--muted))] focus-visible:ring-2 focus-visible:ring-ring" />
-                </label>
-                <label className="block sm:col-span-2">
-                  <span className="mb-1 block text-sm font-medium">Attachment</span>
-                  <input type="file" name="attachment" accept="image/*,application/pdf" className="block w-full rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm file:mr-3 file:rounded-lg file:border-0 file:bg-black file:px-3 file:py-2 file:text-white" />
-                  <span className="mt-1 block text-xs text-[hsl(var(--muted))]">Accepted: JPG, PNG, WEBP, PDF. Max 8MB.</span>
-                </label>
-                <div className="sm:col-span-4 space-y-1">
-                  <ConfirmSubmitButton
-                    confirmTitle="Confirm store expense"
-                    confirmDescription="Please review this expense before saving. It affects Store expenses and Net store cash only."
-                    confirmButtonLabel="Confirm & save"
-                    pendingLabel="Saving…"
-                    staticItems={[
-                      { label: 'Impact', value: 'Affects Store expenses and Net store cash' },
-                    ]}
-                    fieldItems={[
-                      { label: 'Date', name: 'expense_date', kind: 'date' },
-                      { label: 'Category', name: 'category', kind: 'select' },
-                      { label: 'Title', name: 'title', emptyValue: 'Required' },
-                      { label: 'Amount', name: 'amount', kind: 'egp' },
-                      { label: 'Payment', name: 'payment_method', kind: 'select' },
-                      { label: 'Supplier order', name: 'supplier_order_id', kind: 'select', emptyValue: 'No supplier order link', maxLength: 90 },
-                      { label: 'Vendor / supplier', name: 'vendor_name', emptyValue: '—' },
-                      { label: 'Note', name: 'note', emptyValue: '—', maxLength: 90 },
-                      { label: 'Attachment', name: 'attachment', kind: 'file', emptyValue: 'No' },
-                    ]}
-                  >
-                    Save store expense
-                  </ConfirmSubmitButton>
-                  <p className="text-xs text-[hsl(var(--muted))]">Uploading attachment and saving after confirmation. Please avoid tapping twice.</p>
-                </div>
-              </form>
-            </CardContent>
-            </Card>
+            <AdminStoreExpenseForm
+              action={addStoreExpenseAction}
+              returnQueryString={filterReturnQS}
+              today={today}
+              categories={STORE_EXPENSE_CATEGORIES.map((item) => ({ value: item.value, label: item.label }))}
+              paymentMethods={PAYMENT_METHODS.map((item) => ({ value: item.value, label: item.label }))}
+              supplierOrders={supplierOrderOptions.map((order) => ({
+                value: order.id,
+                label: supplierOrderLabel(order),
+                supplierName: order.supplier_name,
+                status: order.status,
+                totalCents: order.total_cents,
+              }))}
+              defaults={{
+                supplierOrderId: defaultLinkedSupplierOrder?.id || '',
+                title: defaultExpenseTitle,
+                vendorName: defaultExpenseVendor,
+                amount: defaultExpenseAmount,
+                note: defaultExpenseNote,
+              }}
+            />
           </div>
         ) : null}
       </Section>
