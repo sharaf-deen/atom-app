@@ -61,6 +61,8 @@ function toAmountInput(cents: number | null | undefined) {
 
 type SearchParams = Record<string, string | string[] | undefined>
 type RangePreset = 'today' | '7d' | 'month' | 'custom'
+type ProofFilter = 'all' | 'with_proof' | 'missing_proof'
+type SupplierLinkFilter = 'all' | 'linked' | 'unlinked'
 
 function safeStr(value: unknown) {
   return typeof value === 'string' ? value : ''
@@ -84,6 +86,16 @@ function parsePageSize(value: unknown) {
 function parsePreset(value: unknown): RangePreset {
   const raw = strParam(value)
   return raw === 'today' || raw === '7d' || raw === 'month' || raw === 'custom' ? raw : 'month'
+}
+
+function parseProofFilter(value: unknown): ProofFilter {
+  const raw = strParam(value)
+  return raw === 'with_proof' || raw === 'missing_proof' ? raw : 'all'
+}
+
+function parseSupplierLinkFilter(value: unknown): SupplierLinkFilter {
+  const raw = strParam(value)
+  return raw === 'linked' || raw === 'unlinked' ? raw : 'all'
 }
 
 function toISODate(date: Date) {
@@ -125,6 +137,18 @@ function categoryLabel(value?: string | null) {
 
 function paymentLabel(value?: string | null) {
   return PAYMENT_METHODS.find((item) => item.value === value)?.label ?? value?.replaceAll('_', ' ') ?? '—'
+}
+
+function proofFilterLabel(value: ProofFilter) {
+  if (value === 'with_proof') return 'With proof'
+  if (value === 'missing_proof') return 'Missing proof'
+  return 'All proof statuses'
+}
+
+function supplierLinkFilterLabel(value: SupplierLinkFilter) {
+  if (value === 'linked') return 'Supplier linked'
+  if (value === 'unlinked') return 'Not supplier linked'
+  return 'All supplier links'
 }
 
 function buildQS(params: Record<string, string>) {
@@ -355,6 +379,8 @@ export default async function StoreExpensesPage({ searchParams }: { searchParams
     : 'all'
   const supplierOrderParam = strParam(searchParams?.supplier_order_id).trim()
   const supplierOrderFilter = supplierOrderParam && isUuid(supplierOrderParam) ? supplierOrderParam : 'all'
+  const supplierLinkFilter = supplierOrderFilter !== 'all' ? 'linked' : parseSupplierLinkFilter(searchParams?.supplier_link)
+  const proofFilter = parseProofFilter(searchParams?.proof)
   const qRaw = strParam(searchParams?.q)
   const q = sanitizeSearch(qRaw)
   const pageSize = parsePageSize(searchParams?.page_size)
@@ -384,6 +410,10 @@ export default async function StoreExpensesPage({ searchParams }: { searchParams
   if (category !== 'all') listQuery = listQuery.eq('category', category)
   if (paymentMethod !== 'all') listQuery = listQuery.eq('payment_method', paymentMethod)
   if (supplierOrderFilter !== 'all') listQuery = listQuery.eq('supplier_order_id', supplierOrderFilter)
+  else if (supplierLinkFilter === 'linked') listQuery = listQuery.not('supplier_order_id', 'is', null)
+  else if (supplierLinkFilter === 'unlinked') listQuery = listQuery.is('supplier_order_id', null)
+  if (proofFilter === 'with_proof') listQuery = listQuery.not('attachment_path', 'is', null)
+  if (proofFilter === 'missing_proof') listQuery = listQuery.is('attachment_path', null)
   if (q) {
     const like = `%${q}%`
     listQuery = listQuery.or(`title.ilike.${like},vendor_name.ilike.${like},note.ilike.${like}`)
@@ -393,7 +423,7 @@ export default async function StoreExpensesPage({ searchParams }: { searchParams
 
   let summaryQuery = admin
     .from('store_expenses')
-    .select('id,amount_cents,payment_method,category,supplier_order_id')
+    .select('id,amount_cents,payment_method,category,supplier_order_id,attachment_path')
     .is('deleted_at', null)
     .gte('expense_date', from)
     .lte('expense_date', to)
@@ -402,6 +432,10 @@ export default async function StoreExpensesPage({ searchParams }: { searchParams
   if (category !== 'all') summaryQuery = summaryQuery.eq('category', category)
   if (paymentMethod !== 'all') summaryQuery = summaryQuery.eq('payment_method', paymentMethod)
   if (supplierOrderFilter !== 'all') summaryQuery = summaryQuery.eq('supplier_order_id', supplierOrderFilter)
+  else if (supplierLinkFilter === 'linked') summaryQuery = summaryQuery.not('supplier_order_id', 'is', null)
+  else if (supplierLinkFilter === 'unlinked') summaryQuery = summaryQuery.is('supplier_order_id', null)
+  if (proofFilter === 'with_proof') summaryQuery = summaryQuery.not('attachment_path', 'is', null)
+  if (proofFilter === 'missing_proof') summaryQuery = summaryQuery.is('attachment_path', null)
   if (q) {
     const like = `%${q}%`
     summaryQuery = summaryQuery.or(`title.ilike.${like},vendor_name.ilike.${like},note.ilike.${like}`)
@@ -418,16 +452,18 @@ export default async function StoreExpensesPage({ searchParams }: { searchParams
       supplier_order_status: supplierOrder?.status ?? null,
     }
   })
-  const summary = (summaryRows ?? []) as Array<{ id: string; amount_cents: number | null; payment_method: string | null; category: string | null; supplier_order_id: string | null }>
+  const summary = (summaryRows ?? []) as Array<{ id: string; amount_cents: number | null; payment_method: string | null; category: string | null; supplier_order_id: string | null; attachment_path: string | null }>
   const filteredTotalCents = summary.reduce((sum, row) => sum + Math.max(0, Number(row.amount_cents ?? 0)), 0)
-  const currentPageTotalCents = expenses.reduce((sum, row) => sum + Math.max(0, Number(row.amount_cents ?? 0)), 0)
   const filteredCount = summary.length
-  const averageCents = filteredCount > 0 ? Math.round(filteredTotalCents / filteredCount) : 0
-  const supplierAndTransportCents = summary.reduce((sum, row) => {
-    return row.category === 'supplier_order' || row.category === 'transport'
-      ? sum + Math.max(0, Number(row.amount_cents ?? 0))
-      : sum
+  const cashExpensesCents = summary.reduce((sum, row) => {
+    return row.payment_method === 'cash' ? sum + Math.max(0, Number(row.amount_cents ?? 0)) : sum
   }, 0)
+  const supplierLinkedRows = summary.filter((row) => Boolean(row.supplier_order_id))
+  const supplierLinkedCents = supplierLinkedRows.reduce((sum, row) => sum + Math.max(0, Number(row.amount_cents ?? 0)), 0)
+  const withProofRows = summary.filter((row) => Boolean(row.attachment_path))
+  const missingProofRows = summary.filter((row) => !row.attachment_path)
+  const withProofCents = withProofRows.reduce((sum, row) => sum + Math.max(0, Number(row.amount_cents ?? 0)), 0)
+  const missingProofCents = missingProofRows.reduce((sum, row) => sum + Math.max(0, Number(row.amount_cents ?? 0)), 0)
 
   const totalCount = typeof count === 'number' ? count : undefined
   const totalPages = totalCount ? Math.max(1, Math.ceil(totalCount / pageSize)) : undefined
@@ -435,14 +471,15 @@ export default async function StoreExpensesPage({ searchParams }: { searchParams
   const hasNext = totalPages ? page < totalPages : expenses.length === pageSize
   const showPagination = totalPages ? totalPages > 1 : hasPrev || hasNext
 
-  const baseQS = { preset, from, to, category, payment_method: paymentMethod, supplier_order_id: supplierOrderFilter === 'all' ? '' : supplierOrderFilter, q: qRaw, page_size: String(pageSize) }
+  const baseQS = { preset, from, to, category, payment_method: paymentMethod, supplier_order_id: supplierOrderFilter === 'all' ? '' : supplierOrderFilter, supplier_link: supplierLinkFilter, proof: proofFilter, q: qRaw, page_size: String(pageSize) }
   const filterReturnQS = buildQS(baseQS)
   const exportHref = `/api/admin/store/expenses/export?${filterReturnQS}`
   const activeFilterChips = [
     `Period: ${from} → ${to}`,
     category !== 'all' ? `Category: ${categoryLabel(category)}` : 'Category: All',
     paymentMethod !== 'all' ? `Payment: ${paymentLabel(paymentMethod)}` : 'Payment: All',
-    supplierOrderFilter !== 'all' ? `Supplier order: ${selectedSupplierOrder ? supplierOrderLabel(selectedSupplierOrder) : supplierOrderFilter.slice(0, 8)}` : 'Supplier order: All',
+    supplierOrderFilter !== 'all' ? `Supplier order: ${selectedSupplierOrder ? supplierOrderLabel(selectedSupplierOrder) : supplierOrderFilter.slice(0, 8)}` : `Supplier link: ${supplierLinkFilterLabel(supplierLinkFilter)}`,
+    `Proof: ${proofFilterLabel(proofFilter)}`,
     q ? `Search: ${q}` : '',
     `Page size: ${pageSize}`,
   ].filter(Boolean)
@@ -451,10 +488,14 @@ export default async function StoreExpensesPage({ searchParams }: { searchParams
 
   const supplierOrderQSValue = supplierOrderFilter === 'all' ? '' : supplierOrderFilter
   const quickLinks = {
-    today: `/admin/store/expenses?${buildQS({ preset: 'today', from: today, to: today, category, payment_method: paymentMethod, supplier_order_id: supplierOrderQSValue, q: qRaw, page_size: String(pageSize) })}`,
-    seven: `/admin/store/expenses?${buildQS({ preset: '7d', from: toISODate(addDays(now, -6)), to: today, category, payment_method: paymentMethod, supplier_order_id: supplierOrderQSValue, q: qRaw, page_size: String(pageSize) })}`,
-    month: `/admin/store/expenses?${buildQS({ preset: 'month', from: thisMonthFrom, to: thisMonthTo, category, payment_method: paymentMethod, supplier_order_id: supplierOrderQSValue, q: qRaw, page_size: String(pageSize) })}`,
-    custom: `/admin/store/expenses?${buildQS({ preset: 'custom', from, to, category, payment_method: paymentMethod, supplier_order_id: supplierOrderQSValue, q: qRaw, page_size: String(pageSize) })}`,
+    all: `/admin/store/expenses?${buildQS({ preset, from, to, category: 'all', payment_method: 'all', supplier_order_id: '', supplier_link: 'all', proof: 'all', q: '', page_size: String(pageSize) })}`,
+    today: `/admin/store/expenses?${buildQS({ preset: 'today', from: today, to: today, category, payment_method: paymentMethod, supplier_order_id: supplierOrderQSValue, supplier_link: supplierLinkFilter, proof: proofFilter, q: qRaw, page_size: String(pageSize) })}`,
+    seven: `/admin/store/expenses?${buildQS({ preset: '7d', from: toISODate(addDays(now, -6)), to: today, category, payment_method: paymentMethod, supplier_order_id: supplierOrderQSValue, supplier_link: supplierLinkFilter, proof: proofFilter, q: qRaw, page_size: String(pageSize) })}`,
+    month: `/admin/store/expenses?${buildQS({ preset: 'month', from: thisMonthFrom, to: thisMonthTo, category, payment_method: paymentMethod, supplier_order_id: supplierOrderQSValue, supplier_link: supplierLinkFilter, proof: proofFilter, q: qRaw, page_size: String(pageSize) })}`,
+    custom: `/admin/store/expenses?${buildQS({ preset: 'custom', from, to, category, payment_method: paymentMethod, supplier_order_id: supplierOrderQSValue, supplier_link: supplierLinkFilter, proof: proofFilter, q: qRaw, page_size: String(pageSize) })}`,
+    supplierLinked: `/admin/store/expenses?${buildQS({ preset, from, to, category, payment_method: paymentMethod, supplier_order_id: '', supplier_link: 'linked', proof: proofFilter, q: qRaw, page_size: String(pageSize) })}`,
+    withProof: `/admin/store/expenses?${buildQS({ preset, from, to, category, payment_method: paymentMethod, supplier_order_id: supplierOrderQSValue, supplier_link: supplierLinkFilter, proof: 'with_proof', q: qRaw, page_size: String(pageSize) })}`,
+    missingProof: `/admin/store/expenses?${buildQS({ preset, from, to, category, payment_method: paymentMethod, supplier_order_id: supplierOrderQSValue, supplier_link: supplierLinkFilter, proof: 'missing_proof', q: qRaw, page_size: String(pageSize) })}`,
   }
 
   const defaultLinkedSupplierOrder = supplierOrderFilter !== 'all' ? supplierOrderById.get(supplierOrderFilter) ?? null : null
@@ -501,14 +542,17 @@ export default async function StoreExpensesPage({ searchParams }: { searchParams
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="flex flex-wrap gap-2">
+              <a href={quickLinks.all} className="inline-flex items-center justify-center rounded-2xl border border-[hsl(var(--border))] bg-white px-4 py-2 text-sm font-medium shadow-soft hover:bg-[hsl(var(--bg))]/80">All expenses</a>
               <a href={quickLinks.today} className="inline-flex items-center justify-center rounded-2xl border border-[hsl(var(--border))] bg-white px-4 py-2 text-sm font-medium shadow-soft hover:bg-[hsl(var(--bg))]/80">Today</a>
               <a href={quickLinks.seven} className="inline-flex items-center justify-center rounded-2xl border border-[hsl(var(--border))] bg-white px-4 py-2 text-sm font-medium shadow-soft hover:bg-[hsl(var(--bg))]/80">Last 7 days</a>
               <a href={quickLinks.month} className="inline-flex items-center justify-center rounded-2xl border border-[hsl(var(--border))] bg-white px-4 py-2 text-sm font-medium shadow-soft hover:bg-[hsl(var(--bg))]/80">This month</a>
-              <a href={quickLinks.custom} className="inline-flex items-center justify-center rounded-2xl border border-[hsl(var(--border))] bg-white px-4 py-2 text-sm font-medium shadow-soft hover:bg-[hsl(var(--bg))]/80">Custom</a>
+              <a href={quickLinks.supplierLinked} className="inline-flex items-center justify-center rounded-2xl border border-sky-200 bg-sky-50 px-4 py-2 text-sm font-medium text-sky-700 shadow-soft hover:bg-sky-100">Supplier linked</a>
+              <a href={quickLinks.withProof} className="inline-flex items-center justify-center rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm font-medium text-emerald-700 shadow-soft hover:bg-emerald-100">With proof</a>
+              <a href={quickLinks.missingProof} className="inline-flex items-center justify-center rounded-2xl border border-amber-200 bg-amber-50 px-4 py-2 text-sm font-medium text-amber-800 shadow-soft hover:bg-amber-100">Missing proof</a>
               <a href="/admin/store/expenses" className="inline-flex items-center justify-center rounded-2xl border border-[hsl(var(--border))] bg-white px-4 py-2 text-sm font-medium shadow-soft hover:bg-[hsl(var(--bg))]/80">Reset</a>
             </div>
 
-            <form method="get" className="grid gap-3 sm:grid-cols-2 xl:grid-cols-8">
+            <form method="get" className="grid gap-3 sm:grid-cols-2 xl:grid-cols-10">
               <label className="block">
                 <span className="mb-1 block text-sm font-medium">Preset</span>
                 <select name="preset" defaultValue={preset} className="w-full rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring">
@@ -553,6 +597,24 @@ export default async function StoreExpensesPage({ searchParams }: { searchParams
                 </select>
               </label>
 
+              <label className="block">
+                <span className="mb-1 block text-sm font-medium">Supplier link</span>
+                <select name="supplier_link" defaultValue={supplierLinkFilter} disabled={supplierOrderFilter !== 'all'} className="w-full rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:bg-gray-100 disabled:text-gray-500">
+                  <option value="all">All links</option>
+                  <option value="linked">Supplier linked</option>
+                  <option value="unlinked">Not linked</option>
+                </select>
+              </label>
+
+              <label className="block">
+                <span className="mb-1 block text-sm font-medium">Proof</span>
+                <select name="proof" defaultValue={proofFilter} className="w-full rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                  <option value="all">All proof statuses</option>
+                  <option value="with_proof">With proof</option>
+                  <option value="missing_proof">Missing proof</option>
+                </select>
+              </label>
+
               <label className="block sm:col-span-2 xl:col-span-1">
                 <span className="mb-1 block text-sm font-medium">Search</span>
                 <input name="q" defaultValue={qRaw} placeholder="title / vendor / note" className="w-full rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none placeholder:text-[hsl(var(--muted))] focus-visible:ring-2 focus-visible:ring-ring" />
@@ -565,7 +627,7 @@ export default async function StoreExpensesPage({ searchParams }: { searchParams
                 </select>
               </label>
 
-              <div className="flex flex-wrap items-center gap-2 sm:col-span-2 xl:col-span-8">
+              <div className="flex flex-wrap items-center gap-2 sm:col-span-2 xl:col-span-10">
                 <button type="submit" className="inline-flex items-center justify-center rounded-2xl bg-black px-4 py-2 text-sm font-medium text-white shadow-soft hover:opacity-95">
                   Apply filters
                 </button>
@@ -585,35 +647,47 @@ export default async function StoreExpensesPage({ searchParams }: { searchParams
           </CardContent>
         </Card>
 
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
           <Card>
             <CardContent className="py-4">
-              <div className="text-xs text-[hsl(var(--muted))]">Filtered total</div>
-              <div className="mt-1 text-xl font-semibold">{formatCurrency(filteredTotalCents, 'en-EG', 'EGP')}</div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="py-4">
-              <div className="text-xs text-[hsl(var(--muted))]">Filtered expenses</div>
+              <div className="text-xs text-[hsl(var(--muted))]">Expenses tracked</div>
               <div className="mt-1 text-xl font-semibold">{filteredCount}</div>
+              <div className="mt-1 text-[11px] text-[hsl(var(--muted))]">Filtered active expenses</div>
             </CardContent>
           </Card>
           <Card>
             <CardContent className="py-4">
-              <div className="text-xs text-[hsl(var(--muted))]">Current page total</div>
-              <div className="mt-1 text-xl font-semibold">{formatCurrency(currentPageTotalCents, 'en-EG', 'EGP')}</div>
+              <div className="text-xs text-[hsl(var(--muted))]">Total expenses</div>
+              <div className="mt-1 text-xl font-semibold">{formatCurrency(filteredTotalCents, 'en-EG', 'EGP')}</div>
+              <div className="mt-1 text-[11px] text-[hsl(var(--muted))]">Current filtered period</div>
             </CardContent>
           </Card>
           <Card>
             <CardContent className="py-4">
-              <div className="text-xs text-[hsl(var(--muted))]">Average amount</div>
-              <div className="mt-1 text-xl font-semibold">{formatCurrency(averageCents, 'en-EG', 'EGP')}</div>
+              <div className="text-xs text-[hsl(var(--muted))]">Cash expenses</div>
+              <div className="mt-1 text-xl font-semibold">{formatCurrency(cashExpensesCents, 'en-EG', 'EGP')}</div>
+              <div className="mt-1 text-[11px] text-[hsl(var(--muted))]">Cash method only</div>
             </CardContent>
           </Card>
           <Card>
             <CardContent className="py-4">
-              <div className="text-xs text-[hsl(var(--muted))]">Supplier + transport</div>
-              <div className="mt-1 text-xl font-semibold">{formatCurrency(supplierAndTransportCents, 'en-EG', 'EGP')}</div>
+              <div className="text-xs text-[hsl(var(--muted))]">Supplier linked</div>
+              <div className="mt-1 text-xl font-semibold">{supplierLinkedRows.length}</div>
+              <div className="mt-1 text-[11px] text-[hsl(var(--muted))]">{formatCurrency(supplierLinkedCents, 'en-EG', 'EGP')}</div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="py-4">
+              <div className="text-xs text-[hsl(var(--muted))]">With proof</div>
+              <div className="mt-1 text-xl font-semibold">{withProofRows.length}</div>
+              <div className="mt-1 text-[11px] text-[hsl(var(--muted))]">{formatCurrency(withProofCents, 'en-EG', 'EGP')}</div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="py-4">
+              <div className="text-xs text-[hsl(var(--muted))]">Missing proof</div>
+              <div className="mt-1 text-xl font-semibold">{missingProofRows.length}</div>
+              <div className="mt-1 text-[11px] text-[hsl(var(--muted))]">{formatCurrency(missingProofCents, 'en-EG', 'EGP')}</div>
             </CardContent>
           </Card>
         </div>

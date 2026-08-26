@@ -80,6 +80,12 @@ function paymentBadgeClass(value?: string | null) {
   return 'border-[hsl(var(--border))] bg-[hsl(var(--bg))] text-[hsl(var(--muted))]'
 }
 
+function proofBadgeClass(hasAttachment: boolean) {
+  return hasAttachment
+    ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+    : 'border-amber-200 bg-amber-50 text-amber-800'
+}
+
 function isImageAttachment(mime?: string | null, path?: string | null) {
   const m = (mime || '').toLowerCase()
   if (m.startsWith('image/')) return true
@@ -311,7 +317,7 @@ export default function StoreExpensesTableClient({
       { label: 'Supplier order', value: supplierOrderOptionLabel(supplierOrders, deletingExpense.supplier_order_id) },
       { label: 'Vendor / supplier', value: emptyLabel(deletingExpense.vendor_name) },
       { label: 'Note', value: shortLabel(deletingExpense.note) },
-      { label: 'Attachment', value: deletingExpense.attachment_path ? 'Kept in audit record' : 'No attachment' },
+      { label: 'Attachment', value: deletingExpense.attachment_path ? 'Kept in audit record' : 'Missing proof' },
       { label: 'Action', value: 'Soft delete from active Store expenses view' },
     ]
   }, [categories, deletingExpense, paymentMethods, supplierOrders])
@@ -389,13 +395,23 @@ export default function StoreExpensesTableClient({
             <div
               id={`store-expense-${expense.id}`}
               key={expense.id}
-              className={`rounded-2xl border bg-white p-4 shadow-soft ${focusExpenseId === expense.id ? 'border-emerald-300 ring-2 ring-emerald-200/70 bg-emerald-50/30' : 'border-[hsl(var(--border))]'}`}
+              className={`rounded-2xl border bg-white p-4 shadow-soft ${focusExpenseId === expense.id ? 'border-emerald-300 ring-2 ring-emerald-200/70 bg-emerald-50/30' : hasAttachment ? 'border-[hsl(var(--border))]' : 'border-amber-200 bg-amber-50/30'}`}
             >
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
                   <div className="text-xs text-[hsl(var(--muted))]">{expense.expense_date}</div>
                   <div className="mt-1 truncate font-semibold">{expense.title || 'Store expense'}</div>
                   <div className="mt-1 text-xs text-[hsl(var(--muted))]">{categoryLabel(categories, expense.category)}</div>
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    <span className={`inline-flex rounded-full border px-2 py-0.5 text-[11px] font-medium ${proofBadgeClass(hasAttachment)}`}>
+                      {hasAttachment ? 'Proof attached' : 'Missing proof'}
+                    </span>
+                    {expense.supplier_order_id ? (
+                      <span className="inline-flex rounded-full border border-sky-200 bg-sky-50 px-2 py-0.5 text-[11px] font-medium text-sky-700">
+                        Supplier linked
+                      </span>
+                    ) : null}
+                  </div>
                   {linkedSupplierOrder ? (
                     <div className="mt-1 inline-flex rounded-full border border-sky-200 bg-sky-50 px-2 py-0.5 text-[11px] font-medium text-sky-700">
                       {linkedSupplierOrder}
@@ -418,14 +434,14 @@ export default function StoreExpensesTableClient({
                 {hasAttachment ? (
                   <>
                     <button type="button" onClick={() => openPreview(expense)} className="rounded-xl border border-[hsl(var(--border))] px-3 py-2 text-xs font-medium hover:bg-[hsl(var(--bg))]/80">
-                      View attachment
+                      View proof
                     </button>
                     <a href={attachmentUrl(expense.id)} target="_blank" rel="noreferrer" className="rounded-xl border border-[hsl(var(--border))] px-3 py-2 text-xs font-medium hover:bg-[hsl(var(--bg))]/80">
                       Open
                     </a>
                   </>
                 ) : (
-                  <span className="rounded-full border border-[hsl(var(--border))] bg-[hsl(var(--bg))] px-3 py-1 text-[11px] font-medium text-[hsl(var(--muted))]">No attachment</span>
+                  <span className="rounded-full border border-[hsl(var(--border))] bg-[hsl(var(--bg))] px-3 py-1 text-[11px] font-medium text-[hsl(var(--muted))]">Missing proof</span>
                 )}
 
                 {canManage ? (
@@ -454,7 +470,7 @@ export default function StoreExpensesTableClient({
               <th className="py-3 pr-3 font-medium">Supplier order</th>
               <th className="py-3 pr-3 font-medium">Payment</th>
               <th className="py-3 pr-3 text-right font-medium">Amount</th>
-              <th className="py-3 pr-3 font-medium">Attachment</th>
+              <th className="py-3 pr-3 font-medium">Proof</th>
               {canManage ? <th className="py-3 text-right font-medium">Actions</th> : null}
             </tr>
           </thead>
@@ -463,12 +479,20 @@ export default function StoreExpensesTableClient({
               const hasAttachment = Boolean(expense.attachment_path)
               const linkedSupplierOrder = supplierOrderDisplay(expense)
               return (
-                <tr id={`store-expense-${expense.id}`} key={expense.id} className={`border-b border-[hsl(var(--border))] align-top ${focusExpenseId === expense.id ? 'bg-emerald-50/50' : ''}`}>
+                <tr id={`store-expense-${expense.id}`} key={expense.id} className={`border-b border-[hsl(var(--border))] align-top ${focusExpenseId === expense.id ? 'bg-emerald-50/50' : hasAttachment ? '' : 'bg-amber-50/30'}`}>
                   <td className="py-3 pr-3 whitespace-nowrap">{expense.expense_date}</td>
                   <td className="py-3 pr-3">
                     <div className="font-medium">{expense.title || 'Store expense'}</div>
                     <div className="text-xs text-[hsl(var(--muted))]">
                       {expense.vendor_name ? `${expense.vendor_name} · ` : ''}{expense.note?.trim() ? expense.note : 'No note'}
+                    </div>
+                    <div className="mt-1 flex flex-wrap gap-1.5">
+                      <span className={`inline-flex rounded-full border px-2 py-0.5 text-[11px] font-medium ${proofBadgeClass(hasAttachment)}`}>
+                        {hasAttachment ? 'Proof attached' : 'Missing proof'}
+                      </span>
+                      {expense.supplier_order_id ? (
+                        <span className="inline-flex rounded-full border border-sky-200 bg-sky-50 px-2 py-0.5 text-[11px] font-medium text-sky-700">Supplier linked</span>
+                      ) : null}
                     </div>
                   </td>
                   <td className="py-3 pr-3 whitespace-nowrap">{categoryLabel(categories, expense.category)}</td>
@@ -490,14 +514,14 @@ export default function StoreExpensesTableClient({
                     {hasAttachment ? (
                       <div className="flex items-center gap-2">
                         <button type="button" onClick={() => openPreview(expense)} className="rounded-xl border border-[hsl(var(--border))] px-3 py-1.5 text-xs font-medium hover:bg-[hsl(var(--bg))]/80">
-                          View
+                          View proof
                         </button>
                         <a href={attachmentUrl(expense.id)} target="_blank" rel="noreferrer" className="rounded-xl border border-[hsl(var(--border))] px-3 py-1.5 text-xs font-medium hover:bg-[hsl(var(--bg))]/80">
                           Open
                         </a>
                       </div>
                     ) : (
-                      <span className="text-xs text-[hsl(var(--muted))]">—</span>
+                      <span className="inline-flex rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-[11px] font-medium text-amber-800">Missing proof</span>
                     )}
                   </td>
                   {canManage ? (
