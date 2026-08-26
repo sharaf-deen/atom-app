@@ -31,8 +31,15 @@ const PAYMENT_METHODS = [
   { value: 'bank_transfer', label: 'Bank transfer' },
 ] as const
 
+const FUNDING_PROOF_OPTIONS = [
+  { value: 'all', label: 'All proof status' },
+  { value: 'with', label: 'With proof' },
+  { value: 'missing', label: 'Missing proof' },
+] as const
+
 type SearchParams = Record<string, string | string[] | undefined>
 type RangePreset = 'today' | '7d' | 'month' | 'custom'
+type FundingProofStatus = (typeof FUNDING_PROOF_OPTIONS)[number]['value']
 
 function safeStr(value: unknown) {
   return typeof value === 'string' ? value : ''
@@ -56,6 +63,15 @@ function parsePageSize(value: unknown) {
 function parsePreset(value: unknown): RangePreset {
   const raw = strParam(value)
   return raw === 'today' || raw === '7d' || raw === 'month' || raw === 'custom' ? raw : 'month'
+}
+
+function parseProofStatus(value: unknown): FundingProofStatus {
+  const raw = strParam(value)
+  return FUNDING_PROOF_OPTIONS.some((item) => item.value === raw) ? raw as FundingProofStatus : 'all'
+}
+
+function proofStatusLabel(value: FundingProofStatus) {
+  return FUNDING_PROOF_OPTIONS.find((item) => item.value === value)?.label ?? 'All proof status'
 }
 
 function toISODate(date: Date) {
@@ -279,6 +295,7 @@ export default async function StoreFundingPage({ searchParams }: { searchParams?
   const paymentMethod = PAYMENT_METHODS.some((item) => item.value === strParam(searchParams?.payment_method))
     ? strParam(searchParams?.payment_method)
     : 'all'
+  const proofStatus = parseProofStatus(searchParams?.proof)
   const qRaw = strParam(searchParams?.q)
   const q = sanitizeSearch(qRaw)
   const pageSize = parsePageSize(searchParams?.page_size)
@@ -304,6 +321,8 @@ export default async function StoreFundingPage({ searchParams }: { searchParams?
 
   if (type !== 'all') listQuery = listQuery.eq('type', type)
   if (paymentMethod !== 'all') listQuery = listQuery.eq('payment_method', paymentMethod)
+  if (proofStatus === 'with') listQuery = listQuery.not('attachment_path', 'is', null)
+  if (proofStatus === 'missing') listQuery = listQuery.is('attachment_path', null)
   if (q) {
     const like = `%${q}%`
     listQuery = listQuery.or(`title.ilike.${like},source_name.ilike.${like},note.ilike.${like}`)
@@ -313,7 +332,7 @@ export default async function StoreFundingPage({ searchParams }: { searchParams?
 
   let summaryQuery = admin
     .from('store_external_funding')
-    .select('id,amount_cents,payment_method,type')
+    .select('id,amount_cents,payment_method,type,attachment_path')
     .is('deleted_at', null)
     .gte('funding_date', from)
     .lte('funding_date', to)
@@ -321,6 +340,8 @@ export default async function StoreFundingPage({ searchParams }: { searchParams?
 
   if (type !== 'all') summaryQuery = summaryQuery.eq('type', type)
   if (paymentMethod !== 'all') summaryQuery = summaryQuery.eq('payment_method', paymentMethod)
+  if (proofStatus === 'with') summaryQuery = summaryQuery.not('attachment_path', 'is', null)
+  if (proofStatus === 'missing') summaryQuery = summaryQuery.is('attachment_path', null)
   if (q) {
     const like = `%${q}%`
     summaryQuery = summaryQuery.or(`title.ilike.${like},source_name.ilike.${like},note.ilike.${like}`)
@@ -329,12 +350,17 @@ export default async function StoreFundingPage({ searchParams }: { searchParams?
   const { data: summaryRows, error: summaryError } = await summaryQuery
 
   const fundingRows = (rows ?? []) as StoreFundingRow[]
-  const summary = (summaryRows ?? []) as Array<{ id: string; amount_cents: number | null; payment_method: string | null; type: string | null }>
-  const receivedCents = summary.reduce((sum, row) => row.type === 'loan_received' ? sum + Math.max(0, Number(row.amount_cents ?? 0)) : sum, 0)
-  const repaymentCents = summary.reduce((sum, row) => row.type === 'loan_repayment' ? sum + Math.max(0, Number(row.amount_cents ?? 0)) : sum, 0)
+  const summary = (summaryRows ?? []) as Array<{ id: string; amount_cents: number | null; payment_method: string | null; type: string | null; attachment_path: string | null }>
+  const receivedRows = summary.filter((row) => row.type === 'loan_received')
+  const repaymentRows = summary.filter((row) => row.type === 'loan_repayment')
+  const receivedCents = receivedRows.reduce((sum, row) => sum + Math.max(0, Number(row.amount_cents ?? 0)), 0)
+  const repaymentCents = repaymentRows.reduce((sum, row) => sum + Math.max(0, Number(row.amount_cents ?? 0)), 0)
   const netFundingCents = receivedCents - repaymentCents
   const outstandingDebtCents = Math.max(0, netFundingCents)
+  const repaymentProgress = receivedCents > 0 ? Math.min(100, Math.round((repaymentCents / receivedCents) * 100)) : 0
   const filteredCount = summary.length
+  const withProofCount = summary.filter((row) => Boolean(row.attachment_path)).length
+  const missingProofCount = Math.max(0, filteredCount - withProofCount)
   const currentPageTotalCents = fundingRows.reduce((sum, row) => sum + Math.max(0, Number(row.amount_cents ?? 0)), 0)
 
   const totalCount = typeof count === 'number' ? count : undefined
@@ -343,12 +369,13 @@ export default async function StoreFundingPage({ searchParams }: { searchParams?
   const hasNext = totalPages ? page < totalPages : fundingRows.length === pageSize
   const showPagination = totalPages ? totalPages > 1 : hasPrev || hasNext
 
-  const baseQS = { preset, from, to, type, payment_method: paymentMethod, q: qRaw, page_size: String(pageSize) }
+  const baseQS = { preset, from, to, type, payment_method: paymentMethod, proof: proofStatus, q: qRaw, page_size: String(pageSize) }
   const filterReturnQS = buildQS(baseQS)
   const activeFilterChips = [
     `Period: ${from} → ${to}`,
     type !== 'all' ? `Type: ${fundingTypeLabel(type)}` : 'Type: All',
     paymentMethod !== 'all' ? `Payment: ${paymentLabel(paymentMethod)}` : 'Payment: All',
+    proofStatus !== 'all' ? `Proof: ${proofStatusLabel(proofStatus)}` : 'Proof: All',
     q ? `Search: ${q}` : '',
     `Page size: ${pageSize}`,
   ].filter(Boolean)
@@ -356,10 +383,14 @@ export default async function StoreFundingPage({ searchParams }: { searchParams?
   const nextHref = hasNext ? `/admin/store/funding?${buildQS({ ...baseQS, page: String(page + 1) })}` : ''
 
   const quickLinks = {
-    today: `/admin/store/funding?${buildQS({ preset: 'today', from: today, to: today, type, payment_method: paymentMethod, q: qRaw, page_size: String(pageSize) })}`,
-    seven: `/admin/store/funding?${buildQS({ preset: '7d', from: toISODate(addDays(now, -6)), to: today, type, payment_method: paymentMethod, q: qRaw, page_size: String(pageSize) })}`,
-    month: `/admin/store/funding?${buildQS({ preset: 'month', from: thisMonthFrom, to: thisMonthTo, type, payment_method: paymentMethod, q: qRaw, page_size: String(pageSize) })}`,
-    custom: `/admin/store/funding?${buildQS({ preset: 'custom', from, to, type, payment_method: paymentMethod, q: qRaw, page_size: String(pageSize) })}`,
+    today: `/admin/store/funding?${buildQS({ preset: 'today', from: today, to: today, type, payment_method: paymentMethod, proof: proofStatus, q: qRaw, page_size: String(pageSize), page: '1' })}`,
+    seven: `/admin/store/funding?${buildQS({ preset: '7d', from: toISODate(addDays(now, -6)), to: today, type, payment_method: paymentMethod, proof: proofStatus, q: qRaw, page_size: String(pageSize), page: '1' })}`,
+    month: `/admin/store/funding?${buildQS({ preset: 'month', from: thisMonthFrom, to: thisMonthTo, type, payment_method: paymentMethod, proof: proofStatus, q: qRaw, page_size: String(pageSize), page: '1' })}`,
+    custom: `/admin/store/funding?${buildQS({ preset: 'custom', from, to, type, payment_method: paymentMethod, proof: proofStatus, q: qRaw, page_size: String(pageSize), page: '1' })}`,
+    received: `/admin/store/funding?${buildQS({ preset, from, to, type: 'loan_received', payment_method: paymentMethod, proof: proofStatus, q: qRaw, page_size: String(pageSize), page: '1' })}`,
+    repayment: `/admin/store/funding?${buildQS({ preset, from, to, type: 'loan_repayment', payment_method: paymentMethod, proof: proofStatus, q: qRaw, page_size: String(pageSize), page: '1' })}`,
+    withProof: `/admin/store/funding?${buildQS({ preset, from, to, type, payment_method: paymentMethod, proof: 'with', q: qRaw, page_size: String(pageSize), page: '1' })}`,
+    missingProof: `/admin/store/funding?${buildQS({ preset, from, to, type, payment_method: paymentMethod, proof: 'missing', q: qRaw, page_size: String(pageSize), page: '1' })}`,
   }
 
   return (
@@ -403,10 +434,14 @@ export default async function StoreFundingPage({ searchParams }: { searchParams?
               <a href={quickLinks.seven} className="inline-flex items-center justify-center rounded-2xl border border-[hsl(var(--border))] bg-white px-4 py-2 text-sm font-medium shadow-soft hover:bg-[hsl(var(--bg))]/80">Last 7 days</a>
               <a href={quickLinks.month} className="inline-flex items-center justify-center rounded-2xl border border-[hsl(var(--border))] bg-white px-4 py-2 text-sm font-medium shadow-soft hover:bg-[hsl(var(--bg))]/80">This month</a>
               <a href={quickLinks.custom} className="inline-flex items-center justify-center rounded-2xl border border-[hsl(var(--border))] bg-white px-4 py-2 text-sm font-medium shadow-soft hover:bg-[hsl(var(--bg))]/80">Custom</a>
+              <a href={quickLinks.received} className="inline-flex items-center justify-center rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm font-medium text-emerald-800 shadow-soft hover:bg-emerald-100/70">Loan received</a>
+              <a href={quickLinks.repayment} className="inline-flex items-center justify-center rounded-2xl border border-amber-200 bg-amber-50 px-4 py-2 text-sm font-medium text-amber-900 shadow-soft hover:bg-amber-100/70">Loan repayment</a>
+              <a href={quickLinks.withProof} className="inline-flex items-center justify-center rounded-2xl border border-sky-200 bg-sky-50 px-4 py-2 text-sm font-medium text-sky-800 shadow-soft hover:bg-sky-100/70">With proof</a>
+              <a href={quickLinks.missingProof} className="inline-flex items-center justify-center rounded-2xl border border-rose-200 bg-rose-50 px-4 py-2 text-sm font-medium text-rose-800 shadow-soft hover:bg-rose-100/70">Missing proof</a>
               <a href="/admin/store/funding" className="inline-flex items-center justify-center rounded-2xl border border-[hsl(var(--border))] bg-white px-4 py-2 text-sm font-medium shadow-soft hover:bg-[hsl(var(--bg))]/80">Reset</a>
             </div>
 
-            <form method="get" className="grid gap-3 sm:grid-cols-2 xl:grid-cols-7">
+            <form method="get" className="grid gap-3 sm:grid-cols-2 xl:grid-cols-8">
               <label className="block">
                 <span className="mb-1 block text-sm font-medium">Preset</span>
                 <select name="preset" defaultValue={preset} className="w-full rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring">
@@ -443,6 +478,13 @@ export default async function StoreFundingPage({ searchParams }: { searchParams?
                 </select>
               </label>
 
+              <label className="block">
+                <span className="mb-1 block text-sm font-medium">Proof</span>
+                <select name="proof" defaultValue={proofStatus} className="w-full rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                  {FUNDING_PROOF_OPTIONS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
+                </select>
+              </label>
+
               <label className="block sm:col-span-2 xl:col-span-1">
                 <span className="mb-1 block text-sm font-medium">Search</span>
                 <input name="q" defaultValue={qRaw} placeholder="title / lender / note" className="w-full rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none placeholder:text-[hsl(var(--muted))] focus-visible:ring-2 focus-visible:ring-ring" />
@@ -455,7 +497,7 @@ export default async function StoreFundingPage({ searchParams }: { searchParams?
                 </select>
               </label>
 
-              <div className="flex flex-wrap items-center gap-2 sm:col-span-2 xl:col-span-7">
+              <div className="flex flex-wrap items-center gap-2 sm:col-span-2 xl:col-span-8">
                 <button type="submit" className="inline-flex items-center justify-center rounded-2xl bg-black px-4 py-2 text-sm font-medium text-white shadow-soft hover:opacity-95">
                   Apply filters
                 </button>
@@ -472,36 +514,84 @@ export default async function StoreFundingPage({ searchParams }: { searchParams?
           </CardContent>
         </Card>
 
+        <Card>
+          <CardHeader>
+            <CardTitle>Funding balance overview</CardTitle>
+            <div className="text-sm text-[hsl(var(--muted))]">Loan received increases Store cash and debt. Loan repayment decreases Store cash and debt.</div>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+              <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4">
+                <div className="text-xs font-medium uppercase tracking-wide text-emerald-700">Total received</div>
+                <div className="mt-1 text-xl font-semibold text-emerald-900">{formatCurrency(receivedCents, 'en-EG', 'EGP')}</div>
+                <div className="mt-1 text-xs text-emerald-800">{receivedRows.length} entr{receivedRows.length === 1 ? 'y' : 'ies'}</div>
+              </div>
+              <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4">
+                <div className="text-xs font-medium uppercase tracking-wide text-amber-800">Total repaid</div>
+                <div className="mt-1 text-xl font-semibold text-amber-950">{formatCurrency(repaymentCents, 'en-EG', 'EGP')}</div>
+                <div className="mt-1 text-xs text-amber-900">{repaymentRows.length} repayment{repaymentRows.length === 1 ? '' : 's'}</div>
+              </div>
+              <div className="rounded-2xl border border-[hsl(var(--border))] bg-white p-4">
+                <div className="text-xs font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Remaining to repay</div>
+                <div className="mt-1 text-xl font-semibold">{formatCurrency(outstandingDebtCents, 'en-EG', 'EGP')}</div>
+                <div className="mt-1 text-xs text-[hsl(var(--muted))]">Current outstanding funding debt</div>
+              </div>
+              <div className="rounded-2xl border border-[hsl(var(--border))] bg-white p-4">
+                <div className="text-xs font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Net cash impact</div>
+                <div className="mt-1 text-xl font-semibold">{formatCurrency(netFundingCents, 'en-EG', 'EGP')}</div>
+                <div className="mt-1 text-xs text-[hsl(var(--muted))]">Received minus repaid</div>
+              </div>
+            </div>
+
+            <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))]/40 p-4">
+              <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
+                <div>
+                  <div className="font-semibold">Repayment progress</div>
+                  <div className="text-xs text-[hsl(var(--muted))]">{repaymentProgress}% of received funding has been repaid in the current filter.</div>
+                </div>
+                <div className="text-sm font-semibold">{formatCurrency(repaymentCents, 'en-EG', 'EGP')} / {formatCurrency(receivedCents, 'en-EG', 'EGP')}</div>
+              </div>
+              <div className="mt-3 h-2 overflow-hidden rounded-full bg-white">
+                <div className="h-full rounded-full bg-black" style={{ width: `${repaymentProgress}%` }} />
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
           <Card>
             <CardContent className="py-4">
-              <div className="text-xs text-[hsl(var(--muted))]">Loan received</div>
-              <div className="mt-1 text-xl font-semibold">{formatCurrency(receivedCents, 'en-EG', 'EGP')}</div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="py-4">
-              <div className="text-xs text-[hsl(var(--muted))]">Loan repayment</div>
-              <div className="mt-1 text-xl font-semibold">{formatCurrency(repaymentCents, 'en-EG', 'EGP')}</div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="py-4">
-              <div className="text-xs text-[hsl(var(--muted))]">Net external funding</div>
-              <div className="mt-1 text-xl font-semibold">{formatCurrency(netFundingCents, 'en-EG', 'EGP')}</div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="py-4">
-              <div className="text-xs text-[hsl(var(--muted))]">Outstanding funding debt</div>
-              <div className="mt-1 text-xl font-semibold">{formatCurrency(outstandingDebtCents, 'en-EG', 'EGP')}</div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="py-4">
-              <div className="text-xs text-[hsl(var(--muted))]">Filtered entries</div>
+              <div className="text-xs text-[hsl(var(--muted))]">Funding entries</div>
               <div className="mt-1 text-xl font-semibold">{filteredCount}</div>
-              <div className="mt-1 text-xs text-[hsl(var(--muted))]">Page total {formatCurrency(currentPageTotalCents, 'en-EG', 'EGP')}</div>
+              <div className="mt-1 text-xs text-[hsl(var(--muted))]">Filtered active entries</div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="py-4">
+              <div className="text-xs text-[hsl(var(--muted))]">With proof</div>
+              <div className="mt-1 text-xl font-semibold">{withProofCount}</div>
+              <div className="mt-1 text-xs text-[hsl(var(--muted))]">Attachment uploaded</div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="py-4">
+              <div className="text-xs text-[hsl(var(--muted))]">Missing proof</div>
+              <div className="mt-1 text-xl font-semibold">{missingProofCount}</div>
+              <div className="mt-1 text-xs text-[hsl(var(--muted))]">Needs receipt / transfer proof</div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="py-4">
+              <div className="text-xs text-[hsl(var(--muted))]">Page total</div>
+              <div className="mt-1 text-xl font-semibold">{formatCurrency(currentPageTotalCents, 'en-EG', 'EGP')}</div>
+              <div className="mt-1 text-xs text-[hsl(var(--muted))]">Visible page only</div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="py-4">
+              <div className="text-xs text-[hsl(var(--muted))]">Proof coverage</div>
+              <div className="mt-1 text-xl font-semibold">{filteredCount > 0 ? `${Math.round((withProofCount / filteredCount) * 100)}%` : '—'}</div>
+              <div className="mt-1 text-xs text-[hsl(var(--muted))]">Based on current filters</div>
             </CardContent>
           </Card>
         </div>
