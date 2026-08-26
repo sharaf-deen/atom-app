@@ -77,6 +77,41 @@ function paymentBadgeClass(value?: string | null) {
   return 'border-[hsl(var(--border))] bg-[hsl(var(--bg))] text-[hsl(var(--muted))]'
 }
 
+function proofBadgeClass(hasAttachment: boolean) {
+  return hasAttachment
+    ? 'border-sky-200 bg-sky-50 text-sky-800'
+    : 'border-rose-200 bg-rose-50 text-rose-800'
+}
+
+function fundingImpact(row: StoreFundingRow) {
+  const amount = formatCurrency(row.amount_cents, 'en-EG', row.currency || 'EGP')
+
+  if (row.type === 'loan_received') {
+    return {
+      cash: `+${amount}`,
+      debt: `+${amount}`,
+      label: 'Cash in · debt up',
+      className: 'text-emerald-700',
+    }
+  }
+
+  if (row.type === 'loan_repayment') {
+    return {
+      cash: `-${amount}`,
+      debt: `-${amount}`,
+      label: 'Cash out · debt down',
+      className: 'text-amber-800',
+    }
+  }
+
+  return {
+    cash: amount,
+    debt: '—',
+    label: 'Funding entry',
+    className: 'text-[hsl(var(--muted))]',
+  }
+}
+
 function isImageAttachment(mime?: string | null, path?: string | null) {
   const m = (mime || '').toLowerCase()
   if (m.startsWith('image/')) return true
@@ -301,7 +336,7 @@ export default function StoreFundingTableClient({
       { label: 'Source / lender', value: emptyLabel(editing.source_name) },
       { label: 'Note', value: shortLabel(editing.note) },
       { label: 'Attachment', value: editingFile ? `Replace with ${editingFile.name || 'selected file'}` : 'Keep current attachment' },
-      { label: 'Impact', value: 'Updates Store funding cash/debt view only' },
+      { label: 'Impact', value: editing.type === 'loan_repayment' ? 'Cash decreases and funding debt decreases' : 'Cash increases and funding debt increases' },
     ]
   }, [editing, editingFile, fundingTypes, paymentMethods])
 
@@ -401,11 +436,17 @@ export default function StoreFundingTableClient({
       <div className="space-y-3 md:hidden">
         {fundingRows.map((row) => {
           const hasAttachment = Boolean(row.attachment_path)
+          const impact = fundingImpact(row)
+          const cardClass = focusFundingId === row.id
+            ? 'border-emerald-300 ring-2 ring-emerald-200/70 bg-emerald-50/30'
+            : hasAttachment
+              ? 'border-[hsl(var(--border))] bg-white'
+              : 'border-amber-200 bg-amber-50/25'
           return (
             <div
               id={`store-funding-${row.id}`}
               key={row.id}
-              className={`rounded-2xl border bg-white p-4 shadow-soft ${focusFundingId === row.id ? 'border-emerald-300 ring-2 ring-emerald-200/70 bg-emerald-50/30' : 'border-[hsl(var(--border))]'}`}
+              className={`rounded-2xl border p-4 shadow-soft ${cardClass}`}
             >
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
@@ -427,7 +468,25 @@ export default function StoreFundingTableClient({
                 {row.source_name ? `${row.source_name} · ` : ''}{row.note?.trim() ? row.note : 'No note'}
               </div>
 
+              <div className="mt-3 grid gap-2 rounded-2xl border border-[hsl(var(--border))] bg-white/70 p-3 text-xs sm:grid-cols-3">
+                <div>
+                  <div className="text-[hsl(var(--muted))]">Cash impact</div>
+                  <div className={`font-semibold ${impact.className}`}>{impact.cash}</div>
+                </div>
+                <div>
+                  <div className="text-[hsl(var(--muted))]">Debt impact</div>
+                  <div className={`font-semibold ${impact.className}`}>{impact.debt}</div>
+                </div>
+                <div>
+                  <div className="text-[hsl(var(--muted))]">Meaning</div>
+                  <div className="font-semibold text-[hsl(var(--fg))]">{impact.label}</div>
+                </div>
+              </div>
+
               <div className="mt-4 flex flex-wrap items-center gap-2">
+                <span className={`rounded-full border px-3 py-1 text-[11px] font-medium ${proofBadgeClass(hasAttachment)}`}>
+                  {hasAttachment ? 'Proof attached' : 'Missing proof'}
+                </span>
                 {hasAttachment ? (
                   <>
                     <button type="button" onClick={() => openPreview(row)} className="rounded-xl border border-[hsl(var(--border))] px-3 py-2 text-xs font-medium hover:bg-[hsl(var(--bg))]/80">
@@ -466,15 +525,18 @@ export default function StoreFundingTableClient({
               <th className="py-3 pr-3 font-medium">Type</th>
               <th className="py-3 pr-3 font-medium">Payment</th>
               <th className="py-3 pr-3 text-right font-medium">Amount</th>
-              <th className="py-3 pr-3 font-medium">Attachment</th>
+              <th className="py-3 pr-3 font-medium">Cash / debt impact</th>
+              <th className="py-3 pr-3 font-medium">Proof</th>
               {canManage ? <th className="py-3 text-right font-medium">Actions</th> : null}
             </tr>
           </thead>
           <tbody>
             {fundingRows.map((row) => {
               const hasAttachment = Boolean(row.attachment_path)
+              const impact = fundingImpact(row)
+              const rowClass = focusFundingId === row.id ? 'bg-emerald-50/50' : hasAttachment ? '' : 'bg-amber-50/25'
               return (
-                <tr id={`store-funding-${row.id}`} key={row.id} className={`border-b border-[hsl(var(--border))] align-top ${focusFundingId === row.id ? 'bg-emerald-50/50' : ''}`}>
+                <tr id={`store-funding-${row.id}`} key={row.id} className={`border-b border-[hsl(var(--border))] align-top ${rowClass}`}>
                   <td className="py-3 pr-3 whitespace-nowrap">{row.funding_date}</td>
                   <td className="py-3 pr-3">
                     <div className="font-medium">{row.title || 'Store funding'}</div>
@@ -494,18 +556,27 @@ export default function StoreFundingTableClient({
                   </td>
                   <td className="py-3 pr-3 text-right font-semibold whitespace-nowrap">{formatCurrency(row.amount_cents, 'en-EG', row.currency || 'EGP')}</td>
                   <td className="py-3 pr-3 whitespace-nowrap">
-                    {hasAttachment ? (
-                      <div className="flex items-center gap-2">
-                        <button type="button" onClick={() => openPreview(row)} className="rounded-xl border border-[hsl(var(--border))] px-3 py-1.5 text-xs font-medium hover:bg-[hsl(var(--bg))]/80">
-                          View
-                        </button>
-                        <a href={attachmentUrl(row.id)} target="_blank" rel="noreferrer" className="rounded-xl border border-[hsl(var(--border))] px-3 py-1.5 text-xs font-medium hover:bg-[hsl(var(--bg))]/80">
-                          Open
-                        </a>
-                      </div>
-                    ) : (
-                      <span className="text-xs text-[hsl(var(--muted))]">—</span>
-                    )}
+                    <div className="space-y-1 text-xs">
+                      <div className={`font-semibold ${impact.className}`}>{impact.label}</div>
+                      <div className="text-[hsl(var(--muted))]">Cash {impact.cash} · Debt {impact.debt}</div>
+                    </div>
+                  </td>
+                  <td className="py-3 pr-3 whitespace-nowrap">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className={`rounded-full border px-2.5 py-1 text-[11px] font-medium ${proofBadgeClass(hasAttachment)}`}>
+                        {hasAttachment ? 'Proof attached' : 'Missing proof'}
+                      </span>
+                      {hasAttachment ? (
+                        <>
+                          <button type="button" onClick={() => openPreview(row)} className="rounded-xl border border-[hsl(var(--border))] px-3 py-1.5 text-xs font-medium hover:bg-[hsl(var(--bg))]/80">
+                            View
+                          </button>
+                          <a href={attachmentUrl(row.id)} target="_blank" rel="noreferrer" className="rounded-xl border border-[hsl(var(--border))] px-3 py-1.5 text-xs font-medium hover:bg-[hsl(var(--bg))]/80">
+                            Open
+                          </a>
+                        </>
+                      ) : null}
+                    </div>
                   </td>
                   {canManage ? (
                     <td className="py-3 text-right whitespace-nowrap">
