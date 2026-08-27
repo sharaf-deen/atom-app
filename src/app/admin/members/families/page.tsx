@@ -19,6 +19,18 @@ type FamilyMemberRow = {
   family_id: string
 }
 
+type FamilyGuardianRow = {
+  family_id: string
+  auth_user_id: string
+  email: string
+  first_name: string | null
+  last_name: string | null
+  phone: string | null
+  is_primary: boolean
+  invited_at: string | null
+  created_at: string | null
+}
+
 type MemberProfile = {
   user_id: string
   member_id: string | null
@@ -50,13 +62,22 @@ export default async function FamilyAccountsPage() {
   }
 
   const admin = getSupabaseAdminClientCached()
-  const [{ data: familyData, error: familyError }, { data: linkData, error: linkError }] = await Promise.all([
+  const [
+    { data: familyData, error: familyError },
+    { data: linkData, error: linkError },
+    { data: guardianData, error: guardianError },
+  ] = await Promise.all([
     admin.from('families').select('id,name,created_at').order('name', { ascending: true }),
     admin.from('family_members').select('member_id,family_id'),
+    admin
+      .from('family_guardians')
+      .select('family_id,auth_user_id,email,first_name,last_name,phone,is_primary,invited_at,created_at')
+      .order('created_at', { ascending: true }),
   ])
 
   const families = (familyData ?? []) as FamilyRow[]
   const links = (linkData ?? []) as FamilyMemberRow[]
+  const guardians = (guardianData ?? []) as FamilyGuardianRow[]
   const memberIds = Array.from(new Set(links.map((link) => link.member_id).filter(Boolean)))
   let profiles: MemberProfile[] = []
   let profileError: string | null = null
@@ -73,6 +94,7 @@ export default async function FamilyAccountsPage() {
 
   const profileById = new Map(profiles.map((profile) => [profile.user_id, profile]))
   const membersByFamily = new Map<string, MemberProfile[]>()
+  const primaryParentByFamily = new Map<string, FamilyGuardianRow>()
 
   for (const link of links) {
     const profile = profileById.get(link.member_id)
@@ -82,8 +104,15 @@ export default async function FamilyAccountsPage() {
     membersByFamily.set(link.family_id, current)
   }
 
+  for (const guardian of guardians) {
+    if (guardian.is_primary && !primaryParentByFamily.has(guardian.family_id)) {
+      primaryParentByFamily.set(guardian.family_id, guardian)
+    }
+  }
+
   const hydratedFamilies = families.map((family) => ({
     ...family,
+    parent: primaryParentByFamily.get(family.id) ?? null,
     members: (membersByFamily.get(family.id) ?? []).sort((a, b) => {
       const aName = `${a.first_name ?? ''} ${a.last_name ?? ''}`.trim().toLowerCase()
       const bName = `${b.first_name ?? ''} ${b.last_name ?? ''}`.trim().toLowerCase()
@@ -91,7 +120,7 @@ export default async function FamilyAccountsPage() {
     }),
   }))
 
-  const loadError = familyError?.message || linkError?.message || profileError
+  const loadError = familyError?.message || linkError?.message || guardianError?.message || profileError
 
   return (
     <main className="mx-auto max-w-5xl space-y-5 p-4 sm:p-6">
@@ -99,7 +128,7 @@ export default async function FamilyAccountsPage() {
         <div>
           <h1 className="text-2xl font-bold">Family Accounts</h1>
           <p className="mt-1 text-sm text-[hsl(var(--muted))]">
-            Group existing ATOM members into families without changing their accounts or memberships.
+            One parent login can now represent a family while every athlete keeps an individual ATOM member profile.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -113,7 +142,7 @@ export default async function FamilyAccountsPage() {
       </div>
 
       <div className="rounded-2xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900">
-        Lot 1A only groups existing members. It does not merge Auth users, reuse emails, change Member IDs, or modify subscriptions and payments.
+        Family members created here receive their own Member ID and QR code but do not need a separate email or login. Existing member accounts remain unchanged.
       </div>
 
       {loadError ? (
