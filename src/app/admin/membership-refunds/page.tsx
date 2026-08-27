@@ -7,6 +7,7 @@ import AccessDeniedCard from '@/components/AccessDeniedCard'
 import Button from '@/components/ui/Button'
 import Badge from '@/components/ui/Badge'
 import MembershipRefundForm from '@/components/members/MembershipRefundForm'
+import MembershipRefundWorkflowActions from '@/components/members/MembershipRefundWorkflowActions'
 import { getSessionUser } from '@/lib/session'
 import { getSupabaseAdminClientCached } from '@/lib/requestCache'
 
@@ -46,6 +47,16 @@ type RefundRow = {
   refunded_at: string | null
   created_by: string | null
   created_at: string | null
+  approved_by: string | null
+  approved_at: string | null
+  rejected_by: string | null
+  rejected_at: string | null
+  rejection_reason: string | null
+  paid_by: string | null
+  paid_at: string | null
+  cancelled_by: string | null
+  cancelled_at: string | null
+  cancellation_reason: string | null
 }
 
 function getOne(value: string | string[] | undefined) {
@@ -90,6 +101,57 @@ function methodLabel(method: string | null | undefined) {
   }
 }
 
+function statusLabel(status: string | null | undefined) {
+  switch (status) {
+    case 'pending_review':
+      return 'Pending review'
+    case 'approved':
+      return 'Approved'
+    case 'paid':
+      return 'Paid refund'
+    case 'rejected':
+      return 'Rejected'
+    case 'cancelled':
+      return 'Cancelled'
+    default:
+      return status || '—'
+  }
+}
+
+function statusBadgeClass(status: string | null | undefined) {
+  switch (status) {
+    case 'pending_review':
+      return 'border-amber-200 bg-amber-50 text-amber-950'
+    case 'approved':
+      return 'border-sky-200 bg-sky-50 text-sky-950'
+    case 'paid':
+      return 'border-emerald-200 bg-emerald-50 text-emerald-900'
+    case 'rejected':
+      return 'border-rose-200 bg-rose-50 text-rose-900'
+    case 'cancelled':
+      return 'border-slate-300 bg-slate-100 text-slate-700'
+    default:
+      return 'border-[hsl(var(--border))] bg-[hsl(var(--bg))]'
+  }
+}
+
+function workflowLabel(status: string | null | undefined) {
+  switch (status) {
+    case 'pending_review':
+      return 'Needs approval or rejection'
+    case 'approved':
+      return 'Approved, waiting for real payment'
+    case 'paid':
+      return 'Paid and closed'
+    case 'rejected':
+      return 'Rejected and closed'
+    case 'cancelled':
+      return 'Cancelled and closed'
+    default:
+      return 'Workflow status unknown'
+  }
+}
+
 export default async function AdminMembershipRefundsPage({
   searchParams,
 }: {
@@ -110,7 +172,7 @@ export default async function AdminMembershipRefundsPage({
         <div className="mt-4 max-w-2xl">
           <AccessDeniedCard
             title="Forbidden"
-            message="Only Admin / Super Admin can record exceptional membership refunds."
+            message="Only Admin / Super Admin can manage exceptional membership refunds."
             nextPath="/admin/membership-refunds"
             showBackHome
             signedInAs={me.email}
@@ -155,8 +217,8 @@ export default async function AdminMembershipRefundsPage({
   try {
     let refundQuery = admin
       .from('membership_refunds')
-      .select('id, member_id, subscription_id, amount, refund_method, reason, internal_note, proof_url, status, refunded_at, created_by, created_at')
-      .order('refunded_at', { ascending: false })
+      .select('id, member_id, subscription_id, amount, refund_method, reason, internal_note, proof_url, status, refunded_at, created_by, created_at, approved_by, approved_at, rejected_by, rejected_at, rejection_reason, paid_by, paid_at, cancelled_by, cancelled_at, cancellation_reason')
+      .order('created_at', { ascending: false })
       .limit(200)
 
     if (selectedMemberId) refundQuery = refundQuery.eq('member_id', selectedMemberId)
@@ -168,7 +230,14 @@ export default async function AdminMembershipRefundsPage({
     refundsErrorMessage = e?.message ?? String(e)
   }
 
-  const profileIds = Array.from(new Set(refunds.flatMap((r) => [r.member_id, r.created_by].filter(Boolean) as string[])))
+  const profileIds = Array.from(new Set(refunds.flatMap((r) => [
+    r.member_id,
+    r.created_by,
+    r.approved_by,
+    r.rejected_by,
+    r.paid_by,
+    r.cancelled_by,
+  ].filter(Boolean) as string[])))
   const subscriptionIds = Array.from(new Set(refunds.map((r) => r.subscription_id).filter(Boolean) as string[]))
 
   let refundProfiles: MemberRow[] = []
@@ -195,6 +264,10 @@ export default async function AdminMembershipRefundsPage({
   const subscriptionMap = new Map<string, SubscriptionRow>()
   for (const subscription of [...subscriptions, ...refundSubscriptions]) subscriptionMap.set(subscription.id, subscription)
 
+  const pendingCount = refunds.filter((r) => r.status === 'pending_review').length
+  const approvedCount = refunds.filter((r) => r.status === 'approved').length
+  const rejectedCount = refunds.filter((r) => r.status === 'rejected').length
+  const paidCount = refunds.filter((r) => r.status === 'paid').length
   const totalPaid = refunds
     .filter((r) => r.status === 'paid')
     .reduce((sum, r) => sum + Number(r.amount ?? 0), 0)
@@ -207,9 +280,9 @@ export default async function AdminMembershipRefundsPage({
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[hsl(var(--muted))]">Membership refunds</p>
-          <h1 className="text-2xl font-bold">Exceptional refund records</h1>
+          <h1 className="text-2xl font-bold">Exceptional refund workflow</h1>
           <p className="mt-1 max-w-2xl text-sm text-[hsl(var(--muted))]">
-            Record exceptional subscription refunds without deleting payments, subscriptions, access, freezes, Cash, Store, or Payment Reconciliation data.
+            Create, approve, reject and mark exceptional subscription refunds as paid without deleting payments, subscriptions, access, freezes, Cash, Store, or Payment Reconciliation data.
           </p>
         </div>
         <div className="grid gap-2 sm:grid-cols-2">
@@ -229,23 +302,28 @@ export default async function AdminMembershipRefundsPage({
         </div>
       ) : null}
 
-      <section className="grid gap-3 md:grid-cols-4">
-        <div className="rounded-2xl border border-[hsl(var(--border))] bg-white p-4 shadow-soft">
-          <div className="text-xs font-semibold uppercase tracking-wide text-[hsl(var(--muted))]">Paid refunds</div>
-          <div className="mt-1 text-xl font-bold">{formatMoney(totalPaid)}</div>
+      <section className="grid gap-3 md:grid-cols-5">
+        <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 shadow-soft">
+          <div className="text-xs font-semibold uppercase tracking-wide text-amber-950/70">Pending review</div>
+          <div className="mt-1 text-xl font-bold">{pendingCount}</div>
         </div>
-        <div className="rounded-2xl border border-[hsl(var(--border))] bg-white p-4 shadow-soft">
-          <div className="text-xs font-semibold uppercase tracking-wide text-[hsl(var(--muted))]">Records</div>
-          <div className="mt-1 text-xl font-bold">{refunds.length}</div>
+        <div className="rounded-2xl border border-sky-200 bg-sky-50 p-4 shadow-soft">
+          <div className="text-xs font-semibold uppercase tracking-wide text-sky-950/70">Approved</div>
+          <div className="mt-1 text-xl font-bold">{approvedCount}</div>
+        </div>
+        <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 shadow-soft">
+          <div className="text-xs font-semibold uppercase tracking-wide text-emerald-900/70">Paid refunds</div>
+          <div className="mt-1 text-xl font-bold">{formatMoney(totalPaid)}</div>
+          <div className="mt-1 text-xs text-emerald-900/70">Paid records: {paidCount}</div>
         </div>
         <div className="rounded-2xl border border-[hsl(var(--border))] bg-white p-4 shadow-soft">
           <div className="text-xs font-semibold uppercase tracking-wide text-[hsl(var(--muted))]">Linked subscriptions</div>
           <div className="mt-1 text-xl font-bold">{linkedCount}</div>
         </div>
         <div className="rounded-2xl border border-[hsl(var(--border))] bg-white p-4 shadow-soft">
-          <div className="text-xs font-semibold uppercase tracking-wide text-[hsl(var(--muted))]">Missing proof</div>
+          <div className="text-xs font-semibold uppercase tracking-wide text-[hsl(var(--muted))]">Proof / closed</div>
           <div className="mt-1 text-xl font-bold">{missingProofCount}</div>
-          {cancelledCount ? <div className="mt-1 text-xs text-[hsl(var(--muted))]">Cancelled records: {cancelledCount}</div> : null}
+          <div className="mt-1 text-xs text-[hsl(var(--muted))]">Missing proof · rejected {rejectedCount} · cancelled {cancelledCount}</div>
         </div>
       </section>
 
@@ -254,9 +332,9 @@ export default async function AdminMembershipRefundsPage({
       <section className="rounded-3xl border border-[hsl(var(--border))] bg-white p-4 shadow-soft">
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <h2 className="text-lg font-semibold">Refund history</h2>
+            <h2 className="text-lg font-semibold">Refund workflow history</h2>
             <p className="text-sm text-[hsl(var(--muted))]">
-              Separate audit records. Original subscriptions and payments are preserved.
+              Separate audit records. Approval/payment status is tracked without modifying original subscriptions or payments.
             </p>
           </div>
           {selectedMemberId ? (
@@ -270,7 +348,7 @@ export default async function AdminMembershipRefundsPage({
           <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950">
             <p className="font-semibold">Refund history not available yet.</p>
             <p className="mt-1">{refundsErrorMessage}</p>
-            <p className="mt-1 text-xs">Apply the Membership Refunds Lot 1A migration if this is the first deployment of the feature.</p>
+            <p className="mt-1 text-xs">Apply the Membership Refunds Lot 1A and Lot 1B migrations if this is the first deployment of the workflow.</p>
           </div>
         ) : null}
 
@@ -278,34 +356,47 @@ export default async function AdminMembershipRefundsPage({
           {refunds.map((refund) => {
             const member = allProfileMap.get(refund.member_id)
             const subscription = refund.subscription_id ? subscriptionMap.get(refund.subscription_id) : null
-            const actor = refund.created_by ? allProfileMap.get(refund.created_by) : null
+            const createdBy = refund.created_by ? allProfileMap.get(refund.created_by) : null
+            const approvedBy = refund.approved_by ? allProfileMap.get(refund.approved_by) : null
+            const rejectedBy = refund.rejected_by ? allProfileMap.get(refund.rejected_by) : null
+            const paidBy = refund.paid_by ? allProfileMap.get(refund.paid_by) : null
+            const cancelledBy = refund.cancelled_by ? allProfileMap.get(refund.cancelled_by) : null
             const hasProof = Boolean(String(refund.proof_url ?? '').trim())
-            const isCancelled = refund.status === 'cancelled'
+            const isClosed = refund.status === 'paid' || refund.status === 'rejected' || refund.status === 'cancelled'
+            const needsAction = refund.status === 'pending_review' || refund.status === 'approved'
+            const displayMemberName = memberName(member)
+            const displaySubscriptionLabel = subscriptionLabel(subscription)
 
             return (
               <div
                 key={refund.id}
                 className={`rounded-2xl border p-4 shadow-soft ${
-                  isCancelled
-                    ? 'border-slate-200 bg-slate-50'
-                    : hasProof
-                      ? 'border-[hsl(var(--border))] bg-white'
-                      : 'border-amber-200 bg-amber-50/60'
+                  refund.status === 'pending_review'
+                    ? 'border-amber-200 bg-amber-50/70'
+                    : refund.status === 'approved'
+                      ? 'border-sky-200 bg-sky-50/70'
+                      : refund.status === 'rejected'
+                        ? 'border-rose-200 bg-rose-50/70'
+                        : refund.status === 'cancelled'
+                          ? 'border-slate-200 bg-slate-50'
+                          : hasProof
+                            ? 'border-[hsl(var(--border))] bg-white'
+                            : 'border-amber-200 bg-amber-50/40'
                 }`}
               >
                 <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-2">
-                      <h3 className="font-semibold">{memberName(member)}</h3>
-                      <Badge className={isCancelled ? 'border-slate-300 bg-slate-100' : 'border-emerald-200 bg-emerald-50 text-emerald-900'}>
-                        {isCancelled ? 'Cancelled' : 'Paid refund'}
-                      </Badge>
+                      <h3 className="font-semibold">{displayMemberName}</h3>
+                      <Badge className={statusBadgeClass(refund.status)}>{statusLabel(refund.status)}</Badge>
                       <Badge className={hasProof ? 'border-sky-200 bg-sky-50 text-sky-950' : 'border-amber-200 bg-amber-100 text-amber-950'}>
                         {hasProof ? 'Proof attached' : 'Missing proof'}
                       </Badge>
+                      {needsAction ? <Badge className="border-purple-200 bg-purple-50 text-purple-950">Action needed</Badge> : null}
+                      {isClosed ? <Badge className="border-slate-200 bg-slate-50 text-slate-700">Closed</Badge> : null}
                     </div>
                     <div className="mt-1 text-xs text-[hsl(var(--muted))]">
-                      Member ID: <code>{member?.member_id || '—'}</code> · Refunded at {formatDate(refund.refunded_at)}
+                      Member ID: <code>{member?.member_id || '—'}</code> · Requested date {formatDate(refund.refunded_at)}
                     </div>
                   </div>
                   <div className="text-left lg:text-right">
@@ -317,7 +408,7 @@ export default async function AdminMembershipRefundsPage({
                 <div className="mt-3 grid gap-3 text-sm lg:grid-cols-3">
                   <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))]/50 p-3">
                     <div className="text-xs font-semibold uppercase tracking-wide text-[hsl(var(--muted))]">Subscription</div>
-                    <div className="mt-1 font-medium">{subscriptionLabel(subscription)}</div>
+                    <div className="mt-1 font-medium">{displaySubscriptionLabel}</div>
                     {subscription ? (
                       <div className="mt-1 text-xs text-[hsl(var(--muted))]">
                         Original amount: {formatMoney(subscription.amount)} · Due: {formatMoney(subscription.amount_due)}
@@ -326,12 +417,16 @@ export default async function AdminMembershipRefundsPage({
                   </div>
                   <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))]/50 p-3">
                     <div className="text-xs font-semibold uppercase tracking-wide text-[hsl(var(--muted))]">Reason</div>
-                    <div className="mt-1 font-medium whitespace-pre-wrap">{refund.reason || '—'}</div>
+                    <div className="mt-1 whitespace-pre-wrap font-medium">{refund.reason || '—'}</div>
                   </div>
                   <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))]/50 p-3">
-                    <div className="text-xs font-semibold uppercase tracking-wide text-[hsl(var(--muted))]">Audit</div>
-                    <div className="mt-1 text-xs text-[hsl(var(--muted))]">Created {formatDate(refund.created_at)}</div>
-                    <div className="mt-1 text-xs text-[hsl(var(--muted))]">By {actor ? memberName(actor) : '—'}</div>
+                    <div className="text-xs font-semibold uppercase tracking-wide text-[hsl(var(--muted))]">Workflow</div>
+                    <div className="mt-1 font-medium">{workflowLabel(refund.status)}</div>
+                    <div className="mt-1 text-xs text-[hsl(var(--muted))]">Created {formatDate(refund.created_at)} by {createdBy ? memberName(createdBy) : '—'}</div>
+                    {refund.approved_at ? <div className="mt-1 text-xs text-[hsl(var(--muted))]">Approved {formatDate(refund.approved_at)} by {approvedBy ? memberName(approvedBy) : '—'}</div> : null}
+                    {refund.paid_at ? <div className="mt-1 text-xs text-[hsl(var(--muted))]">Paid {formatDate(refund.paid_at)} by {paidBy ? memberName(paidBy) : '—'}</div> : null}
+                    {refund.rejected_at ? <div className="mt-1 text-xs text-[hsl(var(--muted))]">Rejected {formatDate(refund.rejected_at)} by {rejectedBy ? memberName(rejectedBy) : '—'}</div> : null}
+                    {refund.cancelled_at ? <div className="mt-1 text-xs text-[hsl(var(--muted))]">Cancelled {formatDate(refund.cancelled_at)} by {cancelledBy ? memberName(cancelledBy) : '—'}</div> : null}
                     {hasProof ? (
                       <a href={refund.proof_url || '#'} target="_blank" rel="noreferrer" className="mt-2 inline-flex text-xs font-semibold underline">
                         Open proof
@@ -340,12 +435,27 @@ export default async function AdminMembershipRefundsPage({
                   </div>
                 </div>
 
+                {(refund.rejection_reason || refund.cancellation_reason) ? (
+                  <div className="mt-3 rounded-2xl border border-[hsl(var(--border))] bg-white/70 p-3 text-sm">
+                    <div className="text-xs font-semibold uppercase tracking-wide text-[hsl(var(--muted))]">
+                      {refund.rejection_reason ? 'Rejection reason' : 'Cancellation reason'}
+                    </div>
+                    <div className="mt-1 whitespace-pre-wrap">{refund.rejection_reason || refund.cancellation_reason}</div>
+                  </div>
+                ) : null}
+
                 {refund.internal_note ? (
-                  <div className="mt-3 rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))]/50 p-3 text-sm">
+                  <div className="mt-3 rounded-2xl border border-[hsl(var(--border))] bg-white/70 p-3 text-sm">
                     <div className="text-xs font-semibold uppercase tracking-wide text-[hsl(var(--muted))]">Internal note</div>
                     <div className="mt-1 whitespace-pre-wrap">{refund.internal_note}</div>
                   </div>
                 ) : null}
+
+                <MembershipRefundWorkflowActions
+                  refund={{ id: refund.id, status: refund.status, amount: refund.amount, refund_method: refund.refund_method }}
+                  memberLabel={displayMemberName}
+                  subscriptionLabel={displaySubscriptionLabel}
+                />
               </div>
             )
           })}
@@ -359,7 +469,7 @@ export default async function AdminMembershipRefundsPage({
       </section>
 
       <p className="text-xs text-[hsl(var(--muted))]">
-        Membership Refunds Lot 1A. This page records exceptional refund traces only. It does not reverse payments or modify subscriptions/access automatically.
+        Membership Refunds Lot 1B. This page tracks internal refund approval/payment workflow only. It does not reverse payments or modify subscriptions/access automatically.
       </p>
     </main>
   )

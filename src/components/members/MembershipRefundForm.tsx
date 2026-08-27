@@ -38,18 +38,12 @@ type Props = {
 }
 
 type RefundMethod = 'cash' | 'instapay' | 'card' | 'bank_transfer'
-type RefundStatus = 'paid' | 'cancelled'
 
 const METHOD_LABELS: Record<RefundMethod, string> = {
   cash: 'Cash',
   instapay: 'Instapay',
   card: 'Card',
   bank_transfer: 'Bank transfer',
-}
-
-const STATUS_LABELS: Record<RefundStatus, string> = {
-  paid: 'Paid refund',
-  cancelled: 'Cancelled record',
 }
 
 function todayDateOnly() {
@@ -81,7 +75,6 @@ export default function MembershipRefundForm({ members, subscriptions, initialMe
   const [subscriptionId, setSubscriptionId] = React.useState('')
   const [amount, setAmount] = React.useState('')
   const [refundMethod, setRefundMethod] = React.useState<RefundMethod>('bank_transfer')
-  const [status, setStatus] = React.useState<RefundStatus>('paid')
   const [refundedAt, setRefundedAt] = React.useState(todayDateOnly())
   const [reason, setReason] = React.useState('')
   const [internalNote, setInternalNote] = React.useState('')
@@ -127,10 +120,11 @@ export default function MembershipRefundForm({ members, subscriptions, initialMe
     { label: 'Subscription', value: subscriptionLabel(selectedSubscription) },
     { label: 'Refund amount', value: formatMoney(amountNumber) },
     { label: 'Refund method', value: METHOD_LABELS[refundMethod] },
-    { label: 'Refund date', value: refundedAt || '—' },
-    { label: 'Status', value: STATUS_LABELS[status] },
+    { label: 'Requested refund date', value: refundedAt || '—' },
+    { label: 'Initial status', value: 'Pending review' },
     { label: 'Reason', value: cleanReason || '—' },
     { label: 'Proof', value: proofUrl.trim() ? 'Proof link/path provided' : 'No proof attached' },
+    { label: 'Approval impact', value: 'Requires approve/reject action after creation' },
     { label: 'Subscription impact', value: 'No automatic change' },
     { label: 'Member access impact', value: 'No automatic change' },
   ]
@@ -149,7 +143,6 @@ export default function MembershipRefundForm({ members, subscriptions, initialMe
           subscriptionId: subscriptionId || null,
           amount: amountNumber,
           refundMethod,
-          status,
           refundedAt,
           reason: cleanReason,
           internalNote: internalNote.trim() || null,
@@ -163,16 +156,15 @@ export default function MembershipRefundForm({ members, subscriptions, initialMe
       }
 
       setConfirmOpen(false)
-      setSuccess('Exceptional refund record saved. Subscription, original payment, member access and freezes were not changed.')
+      setSuccess('Refund request saved as Pending review. Subscription, original payment, member access and freezes were not changed.')
       setAmount('')
       setReason('')
       setInternalNote('')
       setProofUrl('')
-      setStatus('paid')
       setRefundedAt(todayDateOnly())
       router.refresh()
     } catch (e: any) {
-      setError(e?.message ?? 'Failed to save refund record')
+      setError(e?.message ?? 'Failed to save refund request')
     } finally {
       setPending(false)
     }
@@ -182,9 +174,9 @@ export default function MembershipRefundForm({ members, subscriptions, initialMe
     <div className="space-y-4">
       <div className="rounded-3xl border border-[hsl(var(--border))] bg-white p-4 shadow-soft">
         <div className="flex flex-col gap-1">
-          <h2 className="text-lg font-semibold">Record exceptional membership refund</h2>
+          <h2 className="text-lg font-semibold">Create exceptional refund request</h2>
           <p className="text-sm text-[hsl(var(--muted))]">
-            This creates an audit record only. It does not delete the original payment, delete the subscription, change access, or change freeze tokens.
+            This creates a pending refund request only. It does not pay the refund, delete the original payment, delete the subscription, change access, or change freeze tokens.
           </p>
         </div>
 
@@ -222,11 +214,11 @@ export default function MembershipRefundForm({ members, subscriptions, initialMe
         {selectedSubscription ? (
           <div className="mt-3 rounded-2xl border border-sky-200 bg-sky-50 px-3 py-2 text-xs text-sky-950">
             <span className="font-semibold">Subscription snapshot:</span>{' '}
-            {subscriptionLabel(selectedSubscription)}. This snapshot is for review only; the subscription will not be changed by this refund record.
+            {subscriptionLabel(selectedSubscription)}. This snapshot is for review only; the subscription will not be changed by this refund request.
           </div>
         ) : null}
 
-        <div className="mt-4 grid gap-3 lg:grid-cols-4">
+        <div className="mt-4 grid gap-3 lg:grid-cols-3">
           <Input
             label="Refund amount"
             type="number"
@@ -246,17 +238,13 @@ export default function MembershipRefundForm({ members, subscriptions, initialMe
           </Select>
 
           <Input
-            label="Refund date"
+            label="Requested refund date"
             type="date"
             value={refundedAt}
             onChange={(event) => setRefundedAt(event.target.value)}
             required
+            hint="Used as the requested/expected refund date. Mark as paid will add the real paid timestamp later."
           />
-
-          <Select label="Status" value={status} onChange={(event) => setStatus(event.target.value as RefundStatus)}>
-            <option value="paid">Paid refund</option>
-            <option value="cancelled">Cancelled record</option>
-          </Select>
         </div>
 
         <div className="mt-4">
@@ -265,7 +253,7 @@ export default function MembershipRefundForm({ members, subscriptions, initialMe
             value={reason}
             onChange={(event) => setReason(event.target.value)}
             rows={3}
-            placeholder="Example: exceptional medical refund approved by management."
+            placeholder="Example: exceptional medical refund requested by the member and reviewed by management."
             required
             hint="Required. Keep this clear because it explains the exceptional decision later."
           />
@@ -295,7 +283,7 @@ export default function MembershipRefundForm({ members, subscriptions, initialMe
                 value={proofUrl}
                 onChange={(event) => setProofUrl(event.target.value)}
                 placeholder="https://… or storage path"
-                hint="Optional for Lot 1A. Use it to paste a bank receipt link/path when available."
+                hint="Optional at request stage. Proof can also be added before Mark as paid if your existing edit flow supports it."
               />
             </div>
           ) : null}
@@ -303,16 +291,16 @@ export default function MembershipRefundForm({ members, subscriptions, initialMe
 
         <div className="mt-4 grid gap-3 rounded-2xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-950 sm:grid-cols-3">
           <div>
-            <div className="font-semibold">Historical payment</div>
-            <div>Kept unchanged</div>
+            <div className="font-semibold">Initial workflow status</div>
+            <div>Pending review</div>
+          </div>
+          <div>
+            <div className="font-semibold">Approval/payment</div>
+            <div>Separate admin actions</div>
           </div>
           <div>
             <div className="font-semibold">Subscription/access</div>
             <div>No automatic change</div>
-          </div>
-          <div>
-            <div className="font-semibold">Reconciliation/cash</div>
-            <div>No automatic mutation</div>
           </div>
         </div>
 
@@ -327,20 +315,20 @@ export default function MembershipRefundForm({ members, subscriptions, initialMe
             loading={pending}
             loadingText="Saving…"
           >
-            Review & save refund record
+            Review & create refund request
           </Button>
         </div>
       </div>
 
       <ConfirmActionModal
         open={confirmOpen}
-        title="Confirm exceptional refund record"
-        description="This saves a separate refund record only. It does not reverse or edit the original subscription payment."
-        confirmLabel="Confirm & save refund"
-        pendingLabel="Saving refund…"
+        title="Confirm exceptional refund request"
+        description="This saves a pending refund request only. It does not approve, pay, reverse or edit the original subscription payment."
+        confirmLabel="Confirm & create request"
+        pendingLabel="Saving request…"
         pending={pending}
         summaryItems={summaryItems}
-        warning="Audit note: subscription, original payment, member access, freeze tokens, Payment Reconciliation, Cash and Store are not modified by this action."
+        warning="Audit note: subscription, original payment, member access, freeze tokens, Payment Reconciliation, Cash and Store are not modified by this action. Approval and payment require separate actions."
         onCancel={() => {
           if (!pending) setConfirmOpen(false)
         }}
