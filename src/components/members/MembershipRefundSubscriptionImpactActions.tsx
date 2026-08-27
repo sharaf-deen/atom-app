@@ -60,6 +60,51 @@ function todayDateOnly() {
   return new Date().toISOString().slice(0, 10)
 }
 
+function normalizeDateOnly(value: string | null | undefined) {
+  const raw = String(value ?? '').slice(0, 10)
+  return /^\d{4}-\d{2}-\d{2}$/.test(raw) ? raw : ''
+}
+
+function addDaysDateOnly(value: string, days: number) {
+  const normalized = normalizeDateOnly(value)
+  if (!normalized) return ''
+
+  const [year, month, day] = normalized.split('-').map(Number)
+  const date = new Date(Date.UTC(year, month - 1, day))
+  date.setUTCDate(date.getUTCDate() + days)
+  return date.toISOString().slice(0, 10)
+}
+
+function effectiveSubscriptionStatus(subscription: Props['subscription']) {
+  if (!subscription) return null
+
+  const status = subscription.status
+  const endDate = normalizeDateOnly(subscription.end_date)
+  if (endDate && endDate < todayDateOnly() && status !== 'cancelled' && status !== 'expired') {
+    return 'expired'
+  }
+
+  return status
+}
+
+function cancellationEndDate(subscription: Props['subscription']) {
+  const today = todayDateOnly()
+  const currentEndDate = normalizeDateOnly(subscription?.end_date)
+  return currentEndDate && currentEndDate < today ? currentEndDate : today
+}
+
+function shortenMaxEndDate(subscription: Props['subscription']) {
+  const currentEndDate = normalizeDateOnly(subscription?.end_date)
+  return currentEndDate ? addDaysDateOnly(currentEndDate, -1) : ''
+}
+
+function defaultShortenEndDate(subscription: Props['subscription']) {
+  const candidate = shortenMaxEndDate(subscription)
+  const startDate = normalizeDateOnly(subscription?.start_date)
+  if (!candidate || (startDate && candidate < startDate)) return ''
+  return candidate
+}
+
 function formatMoney(value: number | null | undefined) {
   const n = Number(value ?? 0)
   return `${n.toLocaleString('en-US', { maximumFractionDigits: 2 })} EGP`
@@ -113,11 +158,11 @@ function impactLabel(action: ImpactAction | null) {
 
 function expectedStatus(action: ImpactAction | null, subscription: Props['subscription'], shortenDate: string) {
   if (!subscription || !action) return '—'
-  if (action === 'keep_active') return statusLabel(subscription.status)
+  if (action === 'keep_active') return statusLabel(effectiveSubscriptionStatus(subscription))
   if (action === 'cancel_subscription') return 'Cancelled'
   if (action === 'shorten_subscription') {
     const date = shortenDate || subscription.end_date || ''
-    if (!date) return statusLabel(subscription.status)
+    if (!date) return statusLabel(effectiveSubscriptionStatus(subscription))
     return date < todayDateOnly() ? 'Expired' : statusLabel(subscription.status === 'paused' ? 'paused' : 'active')
   }
   return '—'
@@ -126,7 +171,7 @@ function expectedStatus(action: ImpactAction | null, subscription: Props['subscr
 function expectedEndDate(action: ImpactAction | null, subscription: Props['subscription'], shortenDate: string) {
   if (!subscription || !action) return '—'
   if (action === 'keep_active') return formatDate(subscription.end_date)
-  if (action === 'cancel_subscription') return todayDateOnly()
+  if (action === 'cancel_subscription') return cancellationEndDate(subscription)
   if (action === 'shorten_subscription') return shortenDate || '—'
   return '—'
 }
@@ -134,7 +179,7 @@ function expectedEndDate(action: ImpactAction | null, subscription: Props['subsc
 export default function MembershipRefundSubscriptionImpactActions({ refund, subscription, memberLabel, subscriptionLabel }: Props) {
   const router = useRouter()
   const [selectedAction, setSelectedAction] = React.useState<ImpactAction | null>(null)
-  const [shortenEndDate, setShortenEndDate] = React.useState(subscription?.end_date ?? todayDateOnly())
+  const [shortenEndDate, setShortenEndDate] = React.useState(defaultShortenEndDate(subscription))
   const [reason, setReason] = React.useState('')
   const [confirmOpen, setConfirmOpen] = React.useState(false)
   const [pending, setPending] = React.useState(false)
@@ -147,11 +192,19 @@ export default function MembershipRefundSubscriptionImpactActions({ refund, subs
   const config = selectedAction ? ACTION_CONFIG[selectedAction] : null
   const cleanReason = reason.trim()
   const reasonMissing = cleanReason.length < 3
-  const missingShortenDate = selectedAction === 'shorten_subscription' && !shortenEndDate
+  const currentEndDate = normalizeDateOnly(subscription?.end_date)
+  const currentStartDate = normalizeDateOnly(subscription?.start_date)
+  const shortenMaxDate = shortenMaxEndDate(subscription)
+  const shortenDateInvalid = selectedAction === 'shorten_subscription' && (
+    !shortenEndDate
+    || !currentEndDate
+    || shortenEndDate >= currentEndDate
+    || Boolean(currentStartDate && shortenEndDate < currentStartDate)
+  )
 
   React.useEffect(() => {
-    if (subscription?.end_date) setShortenEndDate(subscription.end_date)
-  }, [subscription?.end_date])
+    setShortenEndDate(defaultShortenEndDate(subscription))
+  }, [subscription?.end_date, subscription?.start_date])
 
   function openAction(action: ImpactAction) {
     setSelectedAction(action)
@@ -159,7 +212,7 @@ export default function MembershipRefundSubscriptionImpactActions({ refund, subs
     setConfirmOpen(false)
     setError(null)
     setSuccess(null)
-    if (action === 'shorten_subscription') setShortenEndDate(subscription?.end_date ?? todayDateOnly())
+    if (action === 'shorten_subscription') setShortenEndDate(defaultShortenEndDate(subscription))
   }
 
   async function submitAction() {
@@ -168,9 +221,23 @@ export default function MembershipRefundSubscriptionImpactActions({ refund, subs
       setError('A clear decision reason is required.')
       return
     }
-    if (selectedAction === 'shorten_subscription' && !shortenEndDate) {
-      setError('Select the new subscription end date.')
-      return
+    if (selectedAction === 'shorten_subscription') {
+      if (!currentEndDate) {
+        setError('This subscription has no current end date, so it cannot be shortened safely.')
+        return
+      }
+      if (!shortenEndDate) {
+        setError('Select the new subscription end date.')
+        return
+      }
+      if (shortenEndDate >= currentEndDate) {
+        setError('The new end date must be strictly earlier than the current subscription end date.')
+        return
+      }
+      if (currentStartDate && shortenEndDate < currentStartDate) {
+        setError('The new end date cannot be before the subscription start date.')
+        return
+      }
     }
 
     setPending(true)
@@ -178,11 +245,15 @@ export default function MembershipRefundSubscriptionImpactActions({ refund, subs
     setSuccess(null)
 
     try {
-      const res = await fetch('/api/membership-refunds/subscription-impact', {
+      const refundId = String(refund.id ?? '').trim()
+      if (!refundId) throw new Error('Missing refund ID. Refresh the page and try again.')
+
+      const res = await fetch(`/api/membership-refunds/subscription-impact?refundId=${encodeURIComponent(refundId)}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          refundId: refund.id,
+          refundId,
+          refund_id: refundId,
           action: selectedAction,
           impactEndDate: selectedAction === 'shorten_subscription' ? shortenEndDate : null,
           reason: cleanReason,
@@ -238,7 +309,7 @@ export default function MembershipRefundSubscriptionImpactActions({ refund, subs
     { label: 'Member', value: memberLabel },
     { label: 'Refund amount', value: formatMoney(refund.amount) },
     { label: 'Subscription', value: subscriptionLabel },
-    { label: 'Current status', value: statusLabel(subscription?.status) },
+    { label: 'Current status', value: statusLabel(effectiveSubscriptionStatus(subscription)) },
     { label: 'Current end date', value: formatDate(subscription?.end_date) },
     { label: 'Decision', value: impactLabel(selectedAction) },
     { label: 'New status', value: expectedStatus(selectedAction, subscription, shortenEndDate) },
@@ -262,7 +333,7 @@ export default function MembershipRefundSubscriptionImpactActions({ refund, subs
           <div>Plan</div>
         </div>
         <div>
-          <div className="font-semibold text-black">{statusLabel(subscription?.status)}</div>
+          <div className="font-semibold text-black">{statusLabel(effectiveSubscriptionStatus(subscription))}</div>
           <div>Current status</div>
         </div>
         <div>
@@ -293,15 +364,22 @@ export default function MembershipRefundSubscriptionImpactActions({ refund, subs
               label="New subscription end date"
               type="date"
               value={shortenEndDate}
-              onChange={(event) => setShortenEndDate(event.target.value)}
+              min={currentStartDate || undefined}
+              max={shortenMaxDate || undefined}
+              onChange={(event) => {
+                setShortenEndDate(event.target.value)
+                setError(null)
+              }}
               required
-              hint="The subscription end date will be changed to this date. No payment/refund record is deleted."
+              hint={currentEndDate
+                ? `Must be strictly earlier than the current end date (${currentEndDate}).`
+                : 'A current subscription end date is required before this subscription can be shortened.'}
             />
           ) : null}
 
           {selectedAction === 'cancel_subscription' ? (
             <div className="rounded-2xl border border-rose-200 bg-rose-50 p-3 text-xs text-rose-900">
-              This will set the linked subscription status to cancelled and set its end date to today.
+              This will set the linked subscription status to cancelled. Its end date becomes today only when today is earlier than the existing end date; a past end date is never moved forward.
             </div>
           ) : null}
 
@@ -329,7 +407,7 @@ export default function MembershipRefundSubscriptionImpactActions({ refund, subs
             <Button type="button" variant="outline" size="sm" onClick={() => setSelectedAction(null)} disabled={pending}>
               Back
             </Button>
-            <Button type="button" size="sm" onClick={() => setConfirmOpen(true)} disabled={pending || reasonMissing || missingShortenDate}>
+            <Button type="button" size="sm" onClick={() => setConfirmOpen(true)} disabled={pending || reasonMissing || shortenDateInvalid}>
               Review subscription impact
             </Button>
           </div>
