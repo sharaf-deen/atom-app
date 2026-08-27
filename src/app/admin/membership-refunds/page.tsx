@@ -205,6 +205,13 @@ function impactBadgeClass(status: string | null | undefined) {
   }
 }
 
+function proofHref(proofUrl: string | null | undefined) {
+  const raw = String(proofUrl ?? '').trim()
+  if (!raw) return '#'
+  if (/^https?:\/\//i.test(raw)) return raw
+  return `/api/membership-refunds/proof?path=${encodeURIComponent(raw)}`
+}
+
 export default async function AdminMembershipRefundsPage({
   searchParams,
 }: {
@@ -490,7 +497,7 @@ export default async function AdminMembershipRefundsPage({
                     {refund.rejected_at ? <div className="mt-1 text-xs text-[hsl(var(--muted))]">Rejected {formatDate(refund.rejected_at)} by {rejectedBy ? memberName(rejectedBy) : '—'}</div> : null}
                     {refund.cancelled_at ? <div className="mt-1 text-xs text-[hsl(var(--muted))]">Cancelled {formatDate(refund.cancelled_at)} by {cancelledBy ? memberName(cancelledBy) : '—'}</div> : null}
                     {hasProof ? (
-                      <a href={refund.proof_url || '#'} target="_blank" rel="noreferrer" className="mt-2 inline-flex text-xs font-semibold underline">
+                      <a href={proofHref(refund.proof_url)} target="_blank" rel="noreferrer" className="mt-2 inline-flex text-xs font-semibold underline">
                         Open proof
                       </a>
                     ) : null}
@@ -575,7 +582,7 @@ export default async function AdminMembershipRefundsPage({
       </section>
 
       <p className="text-xs text-[hsl(var(--muted))]">
-        Membership Refunds Lot 1C. This page tracks refund workflow and explicit subscription impact decisions. Original payments are never deleted and no subscription impact is applied without confirmation.
+        Membership Refunds Lot 1D. This page tracks refund workflow, proof uploads and explicit subscription impact decisions. Original payments are never deleted and no subscription impact is applied without confirmation.
       </p>
     </main>
   )
