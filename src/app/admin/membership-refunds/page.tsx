@@ -8,6 +8,7 @@ import Button from '@/components/ui/Button'
 import Badge from '@/components/ui/Badge'
 import MembershipRefundForm from '@/components/members/MembershipRefundForm'
 import MembershipRefundWorkflowActions from '@/components/members/MembershipRefundWorkflowActions'
+import MembershipRefundSubscriptionImpactActions from '@/components/members/MembershipRefundSubscriptionImpactActions'
 import { getSessionUser } from '@/lib/session'
 import { getSupabaseAdminClientCached } from '@/lib/requestCache'
 
@@ -57,6 +58,15 @@ type RefundRow = {
   cancelled_by: string | null
   cancelled_at: string | null
   cancellation_reason: string | null
+  subscription_impact_action: string | null
+  subscription_impact_status: string | null
+  subscription_impact_applied_by: string | null
+  subscription_impact_applied_at: string | null
+  subscription_impact_reason: string | null
+  subscription_impact_original_status: string | null
+  subscription_impact_original_end_date: string | null
+  subscription_impact_new_status: string | null
+  subscription_impact_new_end_date: string | null
 }
 
 function getOne(value: string | string[] | undefined) {
@@ -152,6 +162,49 @@ function workflowLabel(status: string | null | undefined) {
   }
 }
 
+
+function impactActionLabel(action: string | null | undefined) {
+  switch (action) {
+    case 'keep_active':
+      return 'Keep subscription active'
+    case 'cancel_subscription':
+      return 'Cancel subscription'
+    case 'shorten_subscription':
+      return 'Shorten subscription'
+    case 'none':
+    case null:
+    case undefined:
+    case '':
+      return 'No subscription impact recorded'
+    default:
+      return action
+  }
+}
+
+function impactStatusLabel(status: string | null | undefined) {
+  switch (status) {
+    case 'not_applied':
+      return 'Not applied'
+    case 'applied':
+      return 'Applied'
+    case 'skipped':
+      return 'Skipped'
+    default:
+      return status || 'Not applied'
+  }
+}
+
+function impactBadgeClass(status: string | null | undefined) {
+  switch (status) {
+    case 'applied':
+      return 'border-emerald-200 bg-emerald-50 text-emerald-900'
+    case 'skipped':
+      return 'border-slate-200 bg-slate-50 text-slate-700'
+    default:
+      return 'border-amber-200 bg-amber-50 text-amber-950'
+  }
+}
+
 export default async function AdminMembershipRefundsPage({
   searchParams,
 }: {
@@ -217,7 +270,7 @@ export default async function AdminMembershipRefundsPage({
   try {
     let refundQuery = admin
       .from('membership_refunds')
-      .select('id, member_id, subscription_id, amount, refund_method, reason, internal_note, proof_url, status, refunded_at, created_by, created_at, approved_by, approved_at, rejected_by, rejected_at, rejection_reason, paid_by, paid_at, cancelled_by, cancelled_at, cancellation_reason')
+      .select('id, member_id, subscription_id, amount, refund_method, reason, internal_note, proof_url, status, refunded_at, created_by, created_at, approved_by, approved_at, rejected_by, rejected_at, rejection_reason, paid_by, paid_at, cancelled_by, cancelled_at, cancellation_reason, subscription_impact_action, subscription_impact_status, subscription_impact_applied_by, subscription_impact_applied_at, subscription_impact_reason, subscription_impact_original_status, subscription_impact_original_end_date, subscription_impact_new_status, subscription_impact_new_end_date')
       .order('created_at', { ascending: false })
       .limit(200)
 
@@ -237,6 +290,7 @@ export default async function AdminMembershipRefundsPage({
     r.rejected_by,
     r.paid_by,
     r.cancelled_by,
+    r.subscription_impact_applied_by,
   ].filter(Boolean) as string[])))
   const subscriptionIds = Array.from(new Set(refunds.map((r) => r.subscription_id).filter(Boolean) as string[]))
 
@@ -274,6 +328,7 @@ export default async function AdminMembershipRefundsPage({
   const cancelledCount = refunds.filter((r) => r.status === 'cancelled').length
   const missingProofCount = refunds.filter((r) => !String(r.proof_url ?? '').trim()).length
   const linkedCount = refunds.filter((r) => r.subscription_id).length
+  const impactAppliedCount = refunds.filter((r) => r.subscription_impact_status === 'applied').length
 
   return (
     <main className="mx-auto max-w-6xl space-y-5 p-4 sm:p-6">
@@ -319,6 +374,7 @@ export default async function AdminMembershipRefundsPage({
         <div className="rounded-2xl border border-[hsl(var(--border))] bg-white p-4 shadow-soft">
           <div className="text-xs font-semibold uppercase tracking-wide text-[hsl(var(--muted))]">Linked subscriptions</div>
           <div className="mt-1 text-xl font-bold">{linkedCount}</div>
+          <div className="mt-1 text-xs text-[hsl(var(--muted))]">Impact decisions: {impactAppliedCount}</div>
         </div>
         <div className="rounded-2xl border border-[hsl(var(--border))] bg-white p-4 shadow-soft">
           <div className="text-xs font-semibold uppercase tracking-wide text-[hsl(var(--muted))]">Proof / closed</div>
@@ -348,7 +404,7 @@ export default async function AdminMembershipRefundsPage({
           <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950">
             <p className="font-semibold">Refund history not available yet.</p>
             <p className="mt-1">{refundsErrorMessage}</p>
-            <p className="mt-1 text-xs">Apply the Membership Refunds Lot 1A and Lot 1B migrations if this is the first deployment of the workflow.</p>
+            <p className="mt-1 text-xs">Apply the Membership Refunds Lot 1A, Lot 1B and Lot 1C migrations if this is the first deployment of the workflow.</p>
           </div>
         ) : null}
 
@@ -361,6 +417,7 @@ export default async function AdminMembershipRefundsPage({
             const rejectedBy = refund.rejected_by ? allProfileMap.get(refund.rejected_by) : null
             const paidBy = refund.paid_by ? allProfileMap.get(refund.paid_by) : null
             const cancelledBy = refund.cancelled_by ? allProfileMap.get(refund.cancelled_by) : null
+            const impactAppliedBy = refund.subscription_impact_applied_by ? allProfileMap.get(refund.subscription_impact_applied_by) : null
             const hasProof = Boolean(String(refund.proof_url ?? '').trim())
             const isClosed = refund.status === 'paid' || refund.status === 'rejected' || refund.status === 'cancelled'
             const needsAction = refund.status === 'pending_review' || refund.status === 'approved'
@@ -394,6 +451,11 @@ export default async function AdminMembershipRefundsPage({
                       </Badge>
                       {needsAction ? <Badge className="border-purple-200 bg-purple-50 text-purple-950">Action needed</Badge> : null}
                       {isClosed ? <Badge className="border-slate-200 bg-slate-50 text-slate-700">Closed</Badge> : null}
+                      {refund.subscription_id ? (
+                        <Badge className={impactBadgeClass(refund.subscription_impact_status)}>
+                          Subscription impact: {impactStatusLabel(refund.subscription_impact_status)}
+                        </Badge>
+                      ) : null}
                     </div>
                     <div className="mt-1 text-xs text-[hsl(var(--muted))]">
                       Member ID: <code>{member?.member_id || '—'}</code> · Requested date {formatDate(refund.refunded_at)}
@@ -405,7 +467,7 @@ export default async function AdminMembershipRefundsPage({
                   </div>
                 </div>
 
-                <div className="mt-3 grid gap-3 text-sm lg:grid-cols-3">
+                <div className="mt-3 grid gap-3 text-sm lg:grid-cols-4">
                   <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))]/50 p-3">
                     <div className="text-xs font-semibold uppercase tracking-wide text-[hsl(var(--muted))]">Subscription</div>
                     <div className="mt-1 font-medium">{displaySubscriptionLabel}</div>
@@ -433,7 +495,28 @@ export default async function AdminMembershipRefundsPage({
                       </a>
                     ) : null}
                   </div>
+                  <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))]/50 p-3">
+                    <div className="text-xs font-semibold uppercase tracking-wide text-[hsl(var(--muted))]">Subscription impact</div>
+                    <div className="mt-1 font-medium">{impactActionLabel(refund.subscription_impact_action)}</div>
+                    <div className="mt-1 text-xs text-[hsl(var(--muted))]">Status: {impactStatusLabel(refund.subscription_impact_status)}</div>
+                    {refund.subscription_impact_applied_at ? (
+                      <div className="mt-1 text-xs text-[hsl(var(--muted))]">Applied {formatDate(refund.subscription_impact_applied_at)} by {impactAppliedBy ? memberName(impactAppliedBy) : '—'}</div>
+                    ) : null}
+                    {(refund.subscription_impact_original_status || refund.subscription_impact_new_status || refund.subscription_impact_original_end_date || refund.subscription_impact_new_end_date) ? (
+                      <div className="mt-2 rounded-xl border border-[hsl(var(--border))] bg-white/70 p-2 text-xs text-[hsl(var(--muted))]">
+                        <div>Status: {refund.subscription_impact_original_status || '—'} → {refund.subscription_impact_new_status || '—'}</div>
+                        <div>End date: {formatDate(refund.subscription_impact_original_end_date)} → {formatDate(refund.subscription_impact_new_end_date)}</div>
+                      </div>
+                    ) : null}
+                  </div>
                 </div>
+
+                {refund.subscription_impact_reason ? (
+                  <div className="mt-3 rounded-2xl border border-[hsl(var(--border))] bg-white/70 p-3 text-sm">
+                    <div className="text-xs font-semibold uppercase tracking-wide text-[hsl(var(--muted))]">Subscription impact reason</div>
+                    <div className="mt-1 whitespace-pre-wrap">{refund.subscription_impact_reason}</div>
+                  </div>
+                ) : null}
 
                 {(refund.rejection_reason || refund.cancellation_reason) ? (
                   <div className="mt-3 rounded-2xl border border-[hsl(var(--border))] bg-white/70 p-3 text-sm">
@@ -456,6 +539,29 @@ export default async function AdminMembershipRefundsPage({
                   memberLabel={displayMemberName}
                   subscriptionLabel={displaySubscriptionLabel}
                 />
+
+                <MembershipRefundSubscriptionImpactActions
+                  refund={{
+                    id: refund.id,
+                    status: refund.status,
+                    amount: refund.amount,
+                    subscription_id: refund.subscription_id,
+                    subscription_impact_action: refund.subscription_impact_action,
+                    subscription_impact_status: refund.subscription_impact_status,
+                    subscription_impact_applied_at: refund.subscription_impact_applied_at,
+                  }}
+                  subscription={subscription ? {
+                    id: subscription.id,
+                    status: subscription.status,
+                    start_date: subscription.start_date,
+                    end_date: subscription.end_date,
+                    plan: subscription.plan,
+                    amount: subscription.amount,
+                    amount_due: subscription.amount_due,
+                  } : null}
+                  memberLabel={displayMemberName}
+                  subscriptionLabel={displaySubscriptionLabel}
+                />
               </div>
             )
           })}
@@ -469,7 +575,7 @@ export default async function AdminMembershipRefundsPage({
       </section>
 
       <p className="text-xs text-[hsl(var(--muted))]">
-        Membership Refunds Lot 1B. This page tracks internal refund approval/payment workflow only. It does not reverse payments or modify subscriptions/access automatically.
+        Membership Refunds Lot 1C. This page tracks refund workflow and explicit subscription impact decisions. Original payments are never deleted and no subscription impact is applied without confirmation.
       </p>
     </main>
   )
