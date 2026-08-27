@@ -319,3 +319,140 @@ export function extractActionLink(linkData: any) {
     ''
   )
 }
+export type FamilyParentInviteEmailArgs = {
+  to: string
+  actionLink: string
+  firstName?: string | null
+  lastName?: string | null
+  familyName?: string | null
+}
+
+export type FamilyParentInviteEmailResult = {
+  sent: boolean
+  provider: 'resend' | 'none'
+  reason?: string
+  email_id?: string | null
+}
+
+function familyParentGreeting(args: FamilyParentInviteEmailArgs) {
+  return fullName(args.firstName, args.lastName) || args.to || 'Parent'
+}
+
+function familyParentText(args: FamilyParentInviteEmailArgs) {
+  const familyLine = args.familyName ? `Family: ${args.familyName}` : ''
+  return [
+    `Hello ${familyParentGreeting(args)},`,
+    '',
+    'A family account has been created for you at Atom Jiu-Jitsu HQ.',
+    familyLine,
+    '',
+    'Use this link to activate the parent account and choose your password:',
+    args.actionLink,
+    '',
+    'Your children or dependent family members keep their own ATOM Member IDs and QR codes. They do not need separate login emails.',
+    '',
+    'For security reasons, this activation link will expire after a short time.',
+    '',
+    'If you did not expect this email, please contact the academy.',
+    '',
+    'Oss,',
+    'Atom Jiu-Jitsu Academy since 2021',
+  ]
+    .filter(Boolean)
+    .join('\n')
+}
+
+function familyParentHtml(args: FamilyParentInviteEmailArgs) {
+  const greeting = escapeHtml(familyParentGreeting(args))
+  const actionLink = escapeHtml(args.actionLink)
+  const familyName = args.familyName ? escapeHtml(args.familyName) : ''
+
+  return `<!doctype html>
+<html>
+  <body style="margin:0;padding:0;background-color:#f4f4f5;font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">
+    <table width="100%" cellpadding="0" cellspacing="0" role="presentation" style="background-color:#f4f4f5;padding:24px 0;">
+      <tr>
+        <td align="center">
+          <table width="100%" cellpadding="0" cellspacing="0" role="presentation" style="max-width:480px;background-color:#ffffff;border-radius:16px;overflow:hidden;border:1px solid #e4e4e7;">
+            <tr>
+              <td style="padding:20px 24px 8px 24px;text-align:center;background-color:#000000;">
+                <img src="https://atomjiujitsuhq.com/wp-content/uploads/2025/11/LogoAtomNew180px.png" alt="Atom Jiu-Jitsu HQ" style="display:block;margin:0 auto;width:140px;max-width:60%;height:auto;" />
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:20px 24px 8px 24px;">
+                <p style="margin:0 0 10px 0;font-size:14px;color:#71717a;">Hi ${greeting},</p>
+                <p style="margin:0;font-size:14px;color:#18181b;line-height:1.55;">
+                  A <strong>family account</strong> has been created for you at Atom Jiu-Jitsu HQ.${familyName ? `<br/>Family: <strong>${familyName}</strong>` : ''}
+                </p>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:12px 24px 8px 24px;text-align:center;">
+                <a href="${actionLink}" style="display:inline-block;padding:12px 24px;background-color:#000000;color:#ffffff;text-decoration:none;border-radius:999px;font-size:14px;font-weight:600;">
+                  Activate parent account
+                </a>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:12px 24px 20px 24px;">
+                <p style="margin:0;font-size:13px;color:#52525b;line-height:1.55;">
+                  Your children or dependent family members keep their own ATOM Member IDs and QR codes. They do not need separate login emails.
+                </p>
+                <p style="margin:12px 0 0 0;font-size:12px;color:#71717a;line-height:1.5;">
+                  For security reasons, this activation link will expire after a short time. If you did not expect this email, please contact the academy.
+                </p>
+                <p style="margin:12px 0 0 0;font-size:12px;color:#a1a1aa;">Oss,<br/>Atom Jiu-Jitsu Academy since 2021</p>
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>`
+}
+
+export async function sendFamilyParentInviteEmail(
+  args: FamilyParentInviteEmailArgs,
+): Promise<FamilyParentInviteEmailResult> {
+  const apiKey = process.env.RESEND_API_KEY
+  if (!apiKey) {
+    return { sent: false, provider: 'none', reason: 'RESEND_API_KEY_MISSING' }
+  }
+
+  if (!args.actionLink) {
+    return { sent: false, provider: 'resend', reason: 'ACTION_LINK_MISSING' }
+  }
+
+  const response = await fetch('https://api.resend.com/emails', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      from: mailFrom(),
+      to: [args.to],
+      subject: 'Activate your Atom Jiu-Jitsu family account',
+      html: familyParentHtml(args),
+      text: familyParentText(args),
+    }),
+  })
+
+  if (!response.ok) {
+    const errorText = await response.text().catch(() => '')
+    return {
+      sent: false,
+      provider: 'resend',
+      reason: `HTTP_${response.status}: ${errorText}`,
+    }
+  }
+
+  const data = await response.json().catch(() => ({} as any))
+  return {
+    sent: true,
+    provider: 'resend',
+    email_id: data?.id ?? null,
+  }
+}
