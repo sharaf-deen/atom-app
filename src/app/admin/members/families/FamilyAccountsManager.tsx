@@ -15,10 +15,23 @@ type FamilyMember = {
   phone: string | null
 }
 
+type FamilyParent = {
+  family_id: string
+  auth_user_id: string
+  email: string
+  first_name: string | null
+  last_name: string | null
+  phone: string | null
+  is_primary: boolean
+  invited_at: string | null
+  created_at: string | null
+}
+
 type FamilyAccount = {
   id: string
   name: string
   created_at: string | null
+  parent: FamilyParent | null
   members: FamilyMember[]
 }
 
@@ -36,6 +49,10 @@ function memberName(member: Pick<FamilyMember, 'first_name' | 'last_name'>) {
   return `${member.first_name ?? ''} ${member.last_name ?? ''}`.trim() || 'Unnamed member'
 }
 
+function parentName(parent: FamilyParent) {
+  return `${parent.first_name ?? ''} ${parent.last_name ?? ''}`.trim() || 'Parent'
+}
+
 async function readJson(response: Response) {
   const data = await response.json().catch(() => null)
   return data && typeof data === 'object' ? data : {}
@@ -45,10 +62,24 @@ export default function FamilyAccountsManager({ families }: { families: FamilyAc
   const router = useRouter()
   const [familyName, setFamilyName] = React.useState('')
   const [creating, setCreating] = React.useState(false)
+
   const [openSearchFamilyId, setOpenSearchFamilyId] = React.useState<string | null>(null)
   const [searchQuery, setSearchQuery] = React.useState('')
   const [searching, setSearching] = React.useState(false)
   const [searchResults, setSearchResults] = React.useState<SearchResult[]>([])
+
+  const [openParentFamilyId, setOpenParentFamilyId] = React.useState<string | null>(null)
+  const [parentFirstName, setParentFirstName] = React.useState('')
+  const [parentLastName, setParentLastName] = React.useState('')
+  const [parentEmail, setParentEmail] = React.useState('')
+  const [parentPhone, setParentPhone] = React.useState('')
+
+  const [openNewMemberFamilyId, setOpenNewMemberFamilyId] = React.useState<string | null>(null)
+  const [memberFirstName, setMemberFirstName] = React.useState('')
+  const [memberLastName, setMemberLastName] = React.useState('')
+  const [memberDateOfBirth, setMemberDateOfBirth] = React.useState('')
+  const [memberPhone, setMemberPhone] = React.useState('')
+
   const [actionKey, setActionKey] = React.useState<string | null>(null)
   const [unlinkTarget, setUnlinkTarget] = React.useState<UnlinkTarget | null>(null)
   const [message, setMessage] = React.useState<string | null>(null)
@@ -58,6 +89,22 @@ export default function FamilyAccountsManager({ families }: { families: FamilyAc
     setMessage(null)
     setError(null)
   }, [])
+
+  function closeParentForm() {
+    setOpenParentFamilyId(null)
+    setParentFirstName('')
+    setParentLastName('')
+    setParentEmail('')
+    setParentPhone('')
+  }
+
+  function closeNewMemberForm() {
+    setOpenNewMemberFamilyId(null)
+    setMemberFirstName('')
+    setMemberLastName('')
+    setMemberDateOfBirth('')
+    setMemberPhone('')
+  }
 
   async function createFamily(event: React.FormEvent) {
     event.preventDefault()
@@ -87,6 +134,110 @@ export default function FamilyAccountsManager({ families }: { families: FamilyAc
       setError(String(cause?.message || cause))
     } finally {
       setCreating(false)
+    }
+  }
+
+  async function createParentAccount(event: React.FormEvent, family: FamilyAccount) {
+    event.preventDefault()
+    resetFeedback()
+
+    const firstName = parentFirstName.trim()
+    const lastName = parentLastName.trim()
+    const email = parentEmail.trim().toLowerCase()
+    const phone = parentPhone.trim()
+
+    if (!firstName) {
+      setError('Parent first name is required.')
+      return
+    }
+    if (!email) {
+      setError('Parent email is required.')
+      return
+    }
+
+    const key = `parent:${family.id}`
+    setActionKey(key)
+    try {
+      const response = await fetch('/api/admin/families', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'create_parent_account',
+          familyId: family.id,
+          firstName,
+          lastName,
+          email,
+          phone,
+        }),
+      })
+      const data = await readJson(response)
+      if (!response.ok || data.ok !== true) {
+        if (data.error === 'PRIMARY_PARENT_ALREADY_EXISTS') {
+          throw new Error('This family already has a parent account.')
+        }
+        throw new Error(data.details || data.error || 'Failed to create parent account')
+      }
+
+      closeParentForm()
+      setMessage(
+        data.existing_account
+          ? `${email} was already an ATOM account and is now linked as the family parent.`
+          : `Parent account created for ${email}. Invitation sent.`,
+      )
+      router.refresh()
+    } catch (cause: any) {
+      setError(String(cause?.message || cause))
+    } finally {
+      setActionKey(null)
+    }
+  }
+
+  async function createDependentMember(event: React.FormEvent, family: FamilyAccount) {
+    event.preventDefault()
+    resetFeedback()
+
+    const firstName = memberFirstName.trim()
+    const lastName = memberLastName.trim()
+    const phone = memberPhone.trim()
+    const dateOfBirth = memberDateOfBirth.trim()
+
+    if (!firstName || !lastName) {
+      setError('First name and last name are required for the family member.')
+      return
+    }
+
+    const key = `new-member:${family.id}`
+    setActionKey(key)
+    try {
+      const response = await fetch('/api/admin/families', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'create_dependent_member',
+          familyId: family.id,
+          firstName,
+          lastName,
+          phone,
+          dateOfBirth,
+        }),
+      })
+      const data = await readJson(response)
+      if (!response.ok || data.ok !== true) {
+        throw new Error(data.details || data.error || 'Failed to create family member')
+      }
+
+      setMemberFirstName('')
+      setMemberLastName('')
+      setMemberDateOfBirth('')
+      setMemberPhone('')
+      setMessage(
+        `${firstName} ${lastName} created and added to ${family.name}. No separate email or login was created.`,
+      )
+      router.refresh()
+    } catch (cause: any) {
+      setError(String(cause?.message || cause))
+    } finally {
+      setActionKey(null)
     }
   }
 
@@ -202,7 +353,7 @@ export default function FamilyAccountsManager({ families }: { families: FamilyAc
           </Button>
         </div>
         <p className="mt-2 text-xs text-[hsl(var(--muted))]">
-          This only creates a family group. Existing member accounts and emails are not changed.
+          Create the family first, then add one parent account and as many member profiles as needed.
         </p>
       </form>
 
@@ -220,6 +371,9 @@ export default function FamilyAccountsManager({ families }: { families: FamilyAc
       <div className="space-y-4">
         {families.map((family) => {
           const searchOpen = openSearchFamilyId === family.id
+          const parentOpen = openParentFamilyId === family.id
+          const newMemberOpen = openNewMemberFamilyId === family.id
+
           return (
             <section
               key={family.id}
@@ -229,15 +383,122 @@ export default function FamilyAccountsManager({ families }: { families: FamilyAc
                 <div>
                   <h2 className="text-lg font-semibold">{family.name}</h2>
                   <p className="text-xs text-[hsl(var(--muted))]">
-                    {family.members.length} member{family.members.length === 1 ? '' : 's'}
+                    {family.members.length} member{family.members.length === 1 ? '' : 's'} · {family.parent ? 'Parent account linked' : 'No parent account'}
                   </p>
                 </div>
+              </div>
+
+              <div className="mt-4 rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] p-3">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <div className="text-xs font-semibold uppercase tracking-wide text-[hsl(var(--muted))]">Parent account</div>
+                    {family.parent ? (
+                      <div className="mt-1">
+                        <div className="font-medium">{parentName(family.parent)}</div>
+                        <div className="text-xs text-[hsl(var(--muted))]">
+                          {family.parent.email}{family.parent.phone ? ` · ${family.parent.phone}` : ''}
+                        </div>
+                      </div>
+                    ) : (
+                      <p className="mt-1 text-sm text-[hsl(var(--muted))]">
+                        One email/login for this family. Existing ATOM accounts are reused when the email already exists.
+                      </p>
+                    )}
+                  </div>
+
+                  {!family.parent ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        resetFeedback()
+                        if (parentOpen) closeParentForm()
+                        else {
+                          closeNewMemberForm()
+                          setOpenSearchFamilyId(null)
+                          setOpenParentFamilyId(family.id)
+                        }
+                      }}
+                    >
+                      {parentOpen ? 'Close' : 'Add parent account'}
+                    </Button>
+                  ) : null}
+                </div>
+
+                {parentOpen && !family.parent ? (
+                  <form onSubmit={(event) => createParentAccount(event, family)} className="mt-4 grid gap-3 rounded-2xl bg-white p-3">
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <Input
+                        label="Parent first name"
+                        value={parentFirstName}
+                        onChange={(event) => setParentFirstName(event.target.value)}
+                        maxLength={120}
+                        required
+                      />
+                      <Input
+                        label="Parent last name"
+                        value={parentLastName}
+                        onChange={(event) => setParentLastName(event.target.value)}
+                        maxLength={120}
+                      />
+                    </div>
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <Input
+                        label="Parent email"
+                        type="email"
+                        value={parentEmail}
+                        onChange={(event) => setParentEmail(event.target.value)}
+                        autoComplete="email"
+                        required
+                        hint="This is the only login email required for the family."
+                      />
+                      <Input
+                        label="Parent phone"
+                        type="tel"
+                        value={parentPhone}
+                        onChange={(event) => setParentPhone(event.target.value)}
+                        autoComplete="tel"
+                      />
+                    </div>
+                    <div className="flex justify-end">
+                      <Button
+                        type="submit"
+                        loading={actionKey === `parent:${family.id}`}
+                        loadingText="Creating…"
+                      >
+                        Create / link parent account
+                      </Button>
+                    </div>
+                  </form>
+                ) : null}
+              </div>
+
+              <div className="mt-4 flex flex-wrap gap-2">
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={() => {
+                    resetFeedback()
+                    if (newMemberOpen) closeNewMemberForm()
+                    else {
+                      closeParentForm()
+                      setOpenSearchFamilyId(null)
+                      setSearchResults([])
+                      setOpenNewMemberFamilyId(family.id)
+                    }
+                  }}
+                >
+                  {newMemberOpen ? 'Close new member' : 'Add new family member'}
+                </Button>
                 <Button
                   type="button"
                   variant="outline"
                   size="sm"
                   onClick={() => {
                     resetFeedback()
+                    closeParentForm()
+                    closeNewMemberForm()
                     if (searchOpen) {
                       setOpenSearchFamilyId(null)
                       setSearchResults([])
@@ -253,6 +514,58 @@ export default function FamilyAccountsManager({ families }: { families: FamilyAc
                 </Button>
               </div>
 
+              {newMemberOpen ? (
+                <form
+                  onSubmit={(event) => createDependentMember(event, family)}
+                  className="mt-4 rounded-2xl border border-emerald-200 bg-emerald-50 p-3"
+                >
+                  <div className="mb-3">
+                    <div className="font-semibold text-emerald-950">New family member</div>
+                    <p className="mt-1 text-xs text-emerald-800">
+                      No email is required. ATOM creates an individual Member ID and QR code, but no separate login account.
+                    </p>
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <Input
+                      label="First name"
+                      value={memberFirstName}
+                      onChange={(event) => setMemberFirstName(event.target.value)}
+                      maxLength={120}
+                      required
+                    />
+                    <Input
+                      label="Last name"
+                      value={memberLastName}
+                      onChange={(event) => setMemberLastName(event.target.value)}
+                      maxLength={120}
+                      required
+                    />
+                    <Input
+                      label="Date of birth"
+                      type="date"
+                      value={memberDateOfBirth}
+                      onChange={(event) => setMemberDateOfBirth(event.target.value)}
+                    />
+                    <Input
+                      label="Phone (optional)"
+                      type="tel"
+                      value={memberPhone}
+                      onChange={(event) => setMemberPhone(event.target.value)}
+                    />
+                  </div>
+                  <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+                    <span className="text-xs text-emerald-800">After saving, keep this form open to add the next sibling/member.</span>
+                    <Button
+                      type="submit"
+                      loading={actionKey === `new-member:${family.id}`}
+                      loadingText="Creating…"
+                    >
+                      Create member
+                    </Button>
+                  </div>
+                </form>
+              ) : null}
+
               {family.members.length > 0 ? (
                 <div className="mt-4 divide-y divide-[hsl(var(--border))] rounded-2xl border border-[hsl(var(--border))]">
                   {family.members.map((member) => (
@@ -260,7 +573,7 @@ export default function FamilyAccountsManager({ families }: { families: FamilyAc
                       <div className="min-w-0">
                         <div className="font-medium">{memberName(member)}</div>
                         <div className="mt-1 text-xs text-[hsl(var(--muted))]">
-                          ID: {member.member_id?.trim() || '—'} · {member.email || member.phone || 'No contact'}
+                          ID: {member.member_id?.trim() || '—'} · {member.email || member.phone || 'Family-managed member'}
                         </div>
                       </div>
                       <Button
