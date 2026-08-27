@@ -77,8 +77,7 @@ export async function POST(req: Request) {
     if (meErr) return json(500, { ok: false, error: 'PROFILE_LOOKUP_FAILED', details: meErr.message })
 
     const role = me?.role ?? 'member'
-    const canRecordRefund = role === 'admin' || role === 'super_admin'
-    if (!canRecordRefund) return json(403, { ok: false, error: 'FORBIDDEN' })
+    if (role !== 'super_admin') return json(403, { ok: false, error: 'FORBIDDEN' })
 
     const admin = makeAdminClient()
     if (!admin) {
