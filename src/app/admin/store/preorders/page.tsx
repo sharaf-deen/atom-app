@@ -523,15 +523,17 @@ export default async function AdminStorePreordersPage({
           </Card>
         </div>
 
-        <Card>
-          <CardHeader>
-            <CardTitle>Create preorder</CardTitle>
-            <div className="text-xs text-[hsl(var(--muted))]">Super admin only. This creates a reservation for an existing member and does not reduce stock.</div>
-          </CardHeader>
-          <CardContent>
-            <AdminPreorderForm products={productOptions} />
-          </CardContent>
-        </Card>
+        <div id="quick-preorder" className="scroll-mt-24">
+          <Card>
+            <CardHeader>
+              <CardTitle>Create preorder</CardTitle>
+              <div className="text-xs text-[hsl(var(--muted))]">Super admin only. This creates a reservation for an existing member and does not reduce stock.</div>
+            </CardHeader>
+            <CardContent>
+              <AdminPreorderForm products={productOptions} />
+            </CardContent>
+          </Card>
+        </div>
 
         <Card>
           <CardHeader><CardTitle>Filters</CardTitle></CardHeader>

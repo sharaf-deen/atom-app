@@ -479,15 +479,17 @@ export default async function AdminStoreSalesPage({ searchParams }: { searchPara
           </CardContent>
         </Card>
 
-        <Card>
-          <CardContent className="space-y-4">
-            <div>
-              <div className="text-lg font-semibold">Create sale</div>
-              <div className="text-sm text-[hsl(var(--muted))]">One product per sale for now. Keep it simple and stable.</div>
-            </div>
-            <AdminSaleForm products={productOptions} />
-          </CardContent>
-        </Card>
+        <div id="quick-sale" className="scroll-mt-24">
+          <Card>
+            <CardContent className="space-y-4">
+              <div>
+                <div className="text-lg font-semibold">Create sale</div>
+                <div className="text-sm text-[hsl(var(--muted))]">One product per sale for now. Keep it simple and stable.</div>
+              </div>
+              <AdminSaleForm products={productOptions} />
+            </CardContent>
+          </Card>
+        </div>
 
         <Card>
           <CardContent className="space-y-4">
