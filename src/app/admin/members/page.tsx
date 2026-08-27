@@ -80,6 +80,7 @@ export default async function AdminMembersPage({
   const canView = OPS.includes(me.role)
   const canEdit = me.role === 'super_admin'
   const canManageRefunds = me.role === 'admin' || me.role === 'super_admin'
+  const canManageFamilies = me.role === 'admin' || me.role === 'super_admin'
 
   if (!canView) {
     return (
@@ -164,6 +165,39 @@ export default async function AdminMembersPage({
   const total = Number(count ?? 0)
   const totalPages = Math.max(1, Math.ceil(total / pageSize))
 
+  const familyByMemberId = new Map<string, string>()
+  if (canManageFamilies && rows.length > 0) {
+    const memberIds = rows.map((member) => member.user_id).filter(Boolean)
+    const { data: familyLinks } = await admin
+      .from('family_members')
+      .select('member_id,family_id')
+      .in('member_id', memberIds)
+
+    const familyIds = Array.from(
+      new Set((familyLinks ?? []).map((link: any) => String(link.family_id ?? '')).filter(Boolean)),
+    )
+    const familyNameById = new Map<string, string>()
+
+    if (familyIds.length > 0) {
+      const { data: familyRows } = await admin
+        .from('families')
+        .select('id,name')
+        .in('id', familyIds)
+
+      for (const family of familyRows ?? []) {
+        familyNameById.set(String((family as any).id), String((family as any).name ?? 'Family'))
+      }
+    }
+
+    for (const link of familyLinks ?? []) {
+      const memberId = String((link as any).member_id ?? '')
+      const familyId = String((link as any).family_id ?? '')
+      if (memberId && familyId) {
+        familyByMemberId.set(memberId, familyNameById.get(familyId) ?? 'Family')
+      }
+    }
+  }
+
   const base = new URLSearchParams()
   if (q) base.set('q', q)
   if (role) base.set('role', role)
@@ -186,13 +220,18 @@ export default async function AdminMembersPage({
           </p>
         </div>
 
-        <div className={`grid w-full gap-2 sm:w-auto ${canManageRefunds ? 'sm:grid-cols-4' : 'sm:grid-cols-3'}`}>
+        <div className={`grid w-full gap-2 sm:w-auto ${canManageFamilies ? 'sm:grid-cols-5' : 'sm:grid-cols-3'}`}>
           <Button asChild variant="outline" className="w-full" href="/admin">
             ← Admin
           </Button>
           <Button asChild variant="outline" className="w-full" href="/admin/members/inactive">
             Inactive accounts
           </Button>
+          {canManageFamilies ? (
+            <Button asChild variant="outline" className="w-full" href="/admin/members/families">
+              Families
+            </Button>
+          ) : null}
           {canManageRefunds ? (
             <Button asChild variant="outline" className="w-full" href="/admin/membership-refunds">
               Membership refunds
@@ -245,6 +284,14 @@ export default async function AdminMembersPage({
                     <span className="text-[11px] font-medium text-[hsl(var(--muted))]">Phone</span>
                     <span className="min-w-0 text-right font-medium break-words whitespace-normal">{m.phone ?? '—'}</span>
                   </div>
+                  {canManageFamilies ? (
+                    <div className="flex items-start justify-between gap-3">
+                      <span className="text-[11px] font-medium text-[hsl(var(--muted))]">Family</span>
+                      <span className="min-w-0 text-right font-medium break-words whitespace-normal">
+                        {familyByMemberId.get(m.user_id) ?? '—'}
+                      </span>
+                    </div>
+                  ) : null}
                 </div>
 
                 <div className={`mt-3 flex flex-col gap-2 border-t border-[hsl(var(--border))] pt-3 sm:flex-row sm:items-center ${canEdit ? 'sm:justify-between' : 'sm:justify-end'}`}>
@@ -291,6 +338,9 @@ export default async function AdminMembersPage({
                 <th className="border-b border-[hsl(var(--border))] px-4 py-3 font-medium">Member&nbsp;ID</th>
                 <th className="border-b border-[hsl(var(--border))] px-4 py-3 font-medium">Email</th>
                 <th className="border-b border-[hsl(var(--border))] px-4 py-3 font-medium">Phone</th>
+                {canManageFamilies ? (
+                  <th className="border-b border-[hsl(var(--border))] px-4 py-3 font-medium">Family</th>
+                ) : null}
                 <th className="border-b border-[hsl(var(--border))] px-4 py-3 font-medium text-center">Role</th>
                 <th className="border-b border-[hsl(var(--border))] px-4 py-3 font-medium">Profile</th>
               </tr>
@@ -306,6 +356,11 @@ export default async function AdminMembersPage({
                   </td>
                   <td className="border-t border-[hsl(var(--border))] px-4 py-3">{m.email ?? '—'}</td>
                   <td className="border-t border-[hsl(var(--border))] px-4 py-3">{m.phone ?? '—'}</td>
+                  {canManageFamilies ? (
+                    <td className="border-t border-[hsl(var(--border))] px-4 py-3">
+                      {familyByMemberId.get(m.user_id) ?? '—'}
+                    </td>
+                  ) : null}
                   <td className="border-t border-[hsl(var(--border))] px-4 py-3 text-center">
                     {canEdit ? (
                       <div className="inline-flex justify-center">
@@ -344,7 +399,7 @@ export default async function AdminMembersPage({
 
               {rows.length === 0 && !error && (
                 <tr>
-                  <td className="px-4 py-8 text-center text-[hsl(var(--muted))]" colSpan={6}>
+                  <td className="px-4 py-8 text-center text-[hsl(var(--muted))]" colSpan={canManageFamilies ? 7 : 6}>
                     No members found
                   </td>
                 </tr>
