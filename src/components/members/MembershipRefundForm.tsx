@@ -79,6 +79,9 @@ export default function MembershipRefundForm({ members, subscriptions, initialMe
   const [reason, setReason] = React.useState('')
   const [internalNote, setInternalNote] = React.useState('')
   const [proofUrl, setProofUrl] = React.useState('')
+  const [proofFile, setProofFile] = React.useState<File | null>(null)
+  const [proofUploadLabel, setProofUploadLabel] = React.useState('')
+  const [proofInputKey, setProofInputKey] = React.useState(0)
   const [optionalOpen, setOptionalOpen] = React.useState(false)
   const [confirmOpen, setConfirmOpen] = React.useState(false)
   const [pending, setPending] = React.useState(false)
@@ -112,7 +115,33 @@ export default function MembershipRefundForm({ members, subscriptions, initialMe
 
   const amountNumber = Number(amount)
   const cleanReason = reason.trim()
+  const selectedProofLabel = proofFile?.name || proofUploadLabel || proofUrl.trim()
   const canReview = Boolean(memberId) && Number.isFinite(amountNumber) && amountNumber > 0 && cleanReason.length >= 3 && Boolean(refundedAt)
+
+  async function uploadProofIfNeeded() {
+    if (!proofFile) return proofUrl.trim() || null
+
+    const formData = new FormData()
+    formData.append('file', proofFile)
+    if (memberId) formData.append('memberId', memberId)
+    if (subscriptionId) formData.append('subscriptionId', subscriptionId)
+
+    const res = await fetch('/api/membership-refunds/upload-proof', {
+      method: 'POST',
+      body: formData,
+    })
+
+    const data = await res.json().catch(() => null)
+    if (!res.ok || !data?.ok) {
+      throw new Error(data?.details || data?.error || `UPLOAD_HTTP_${res.status}`)
+    }
+
+    const storedPath = String(data.proofUrl || data.proofPath || '').trim()
+    if (!storedPath) throw new Error('UPLOAD_RETURNED_EMPTY_PATH')
+    setProofUrl(storedPath)
+    setProofUploadLabel(String(data.fileName || proofFile.name || 'Uploaded proof'))
+    return storedPath
+  }
 
   const summaryItems: ConfirmActionSummaryItem[] = [
     { label: 'Member', value: selectedMember ? memberName(selectedMember) : '—' },
@@ -123,7 +152,7 @@ export default function MembershipRefundForm({ members, subscriptions, initialMe
     { label: 'Requested refund date', value: refundedAt || '—' },
     { label: 'Initial status', value: 'Pending review' },
     { label: 'Reason', value: cleanReason || '—' },
-    { label: 'Proof', value: proofUrl.trim() ? 'Proof link/path provided' : 'No proof attached' },
+    { label: 'Proof', value: selectedProofLabel ? `Proof attached: ${selectedProofLabel}` : 'No proof attached' },
     { label: 'Approval impact', value: 'Requires approve/reject action after creation' },
     { label: 'Subscription impact', value: 'No automatic change' },
     { label: 'Member access impact', value: 'No automatic change' },
@@ -135,6 +164,8 @@ export default function MembershipRefundForm({ members, subscriptions, initialMe
     setSuccess(null)
 
     try {
+      const uploadedProofUrl = await uploadProofIfNeeded()
+
       const res = await fetch('/api/membership-refunds/create', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -146,7 +177,7 @@ export default function MembershipRefundForm({ members, subscriptions, initialMe
           refundedAt,
           reason: cleanReason,
           internalNote: internalNote.trim() || null,
-          proofUrl: proofUrl.trim() || null,
+          proofUrl: uploadedProofUrl,
         }),
       })
 
@@ -161,6 +192,9 @@ export default function MembershipRefundForm({ members, subscriptions, initialMe
       setReason('')
       setInternalNote('')
       setProofUrl('')
+      setProofFile(null)
+      setProofUploadLabel('')
+      setProofInputKey((v) => v + 1)
       setRefundedAt(todayDateOnly())
       router.refresh()
     } catch (e: any) {
@@ -278,13 +312,46 @@ export default function MembershipRefundForm({ members, subscriptions, initialMe
                 rows={3}
                 placeholder="Private admin note."
               />
-              <Input
-                label="Proof / transfer receipt URL or path"
-                value={proofUrl}
-                onChange={(event) => setProofUrl(event.target.value)}
-                placeholder="https://… or storage path"
-                hint="Optional at request stage. Proof can also be added before Mark as paid if your existing edit flow supports it."
-              />
+              <div className="space-y-2">
+                <label className="block">
+                  <span className="mb-1.5 block text-sm font-semibold text-black">Upload proof / transfer receipt</span>
+                  <input
+                    key={proofInputKey}
+                    type="file"
+                    accept="image/png,image/jpeg,image/webp,application/pdf"
+                    onChange={(event) => {
+                      const file = event.target.files?.[0] ?? null
+                      setProofFile(file)
+                      if (file) {
+                        setProofUploadLabel(file.name)
+                        setProofUrl('')
+                      }
+                    }}
+                    className="min-h-[44px] w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3.5 py-2.5 text-sm text-black file:mr-3 file:rounded-xl file:border-0 file:bg-black file:px-3 file:py-1.5 file:text-xs file:font-semibold file:text-white placeholder:text-[hsl(var(--muted))] shadow-soft outline-none transition focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-[hsl(var(--bg))]"
+                  />
+                  <span className="mt-1.5 block text-xs text-[hsl(var(--muted))]">
+                    Optional. Upload a bank transfer receipt, screenshot, image or PDF. The file path is stored automatically.
+                  </span>
+                </label>
+                {selectedProofLabel ? (
+                  <div className="rounded-xl border border-sky-200 bg-sky-50 px-3 py-2 text-xs text-sky-950">
+                    Selected proof: <span className="font-semibold">{selectedProofLabel}</span>
+                  </div>
+                ) : null}
+                <Input
+                  label="Fallback proof URL or existing storage path"
+                  value={proofUrl}
+                  onChange={(event) => {
+                    setProofUrl(event.target.value)
+                    if (event.target.value.trim()) {
+                      setProofFile(null)
+                      setProofUploadLabel('')
+                    }
+                  }}
+                  placeholder="Optional fallback only"
+                  hint="Use this only for an existing external link/path. Normal use: upload the file above."
+                />
+              </div>
             </div>
           ) : null}
         </div>
@@ -313,7 +380,7 @@ export default function MembershipRefundForm({ members, subscriptions, initialMe
             onClick={() => setConfirmOpen(true)}
             disabled={!canReview || pending}
             loading={pending}
-            loadingText="Saving…"
+            loadingText={proofFile ? 'Uploading proof…' : 'Saving…'}
           >
             Review & create refund request
           </Button>
