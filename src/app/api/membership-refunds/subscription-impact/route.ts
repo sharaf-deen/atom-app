@@ -53,7 +53,7 @@ function cleanString(v: unknown, max = 2000) {
 
 function normalizeUuid(v: unknown) {
   const s = cleanString(v, 80)
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{12}$/i.test(s) ? s : ''
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s) ? s : ''
 }
 
 function isISODateOnly(value: string | null | undefined) {
@@ -86,13 +86,16 @@ function buildSubscriptionPatch(action: ImpactAction, subscription: Subscription
 
   if (action === 'cancel_subscription') {
     const today = todayDateOnly()
+    const currentEndDate = isISODateOnly(originalEndDate) ? originalEndDate : null
+    const cancellationEndDate = currentEndDate && currentEndDate < today ? currentEndDate : today
+
     return {
       subscriptionPatch: {
         status: 'cancelled',
-        end_date: today,
+        end_date: cancellationEndDate,
       },
       newStatus: 'cancelled',
-      newEndDate: today,
+      newEndDate: cancellationEndDate,
     }
   }
 
@@ -140,7 +143,14 @@ export async function POST(req: Request) {
     }
 
     const body = await req.json().catch(() => ({} as any))
-    const refundId = normalizeUuid(body?.refundId ?? body?.refund_id)
+    const requestUrl = new URL(req.url)
+    const refundId = normalizeUuid(
+      body?.refundId
+      ?? body?.refund_id
+      ?? body?.id
+      ?? requestUrl.searchParams.get('refundId')
+      ?? requestUrl.searchParams.get('refund_id'),
+    )
     const actionRaw = cleanString(body?.action, 80) as ImpactAction
     const action = IMPACT_ACTIONS.has(actionRaw) ? actionRaw : null
     const reason = cleanString(body?.reason, 2000)
@@ -207,6 +217,14 @@ export async function POST(req: Request) {
     }
 
     if (action === 'shorten_subscription') {
+      const currentSubscriptionEndDate = cleanString(subscription.end_date, 20)
+      if (!isISODateOnly(currentSubscriptionEndDate)) {
+        return json(400, {
+          ok: false,
+          error: 'CURRENT_END_DATE_REQUIRED',
+          details: 'The linked subscription needs a current end date before it can be shortened.',
+        })
+      }
       if (subscription.start_date && impactEndDate < subscription.start_date) {
         return json(400, {
           ok: false,
@@ -214,11 +232,11 @@ export async function POST(req: Request) {
           details: 'New end date cannot be before the subscription start date.',
         })
       }
-      if (subscription.end_date && impactEndDate > subscription.end_date) {
+      if (impactEndDate >= currentSubscriptionEndDate) {
         return json(400, {
           ok: false,
           error: 'INVALID_IMPACT_END_DATE',
-          details: 'New end date cannot be after the current subscription end date for a shorten action.',
+          details: 'New end date must be strictly earlier than the current subscription end date for a shorten action.',
         })
       }
     }
