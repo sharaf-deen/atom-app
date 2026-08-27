@@ -223,16 +223,17 @@ export default async function AdminMembershipRefundsPage({
   const me = await getSessionUser()
   if (!me) redirect(`/login?next=${encodeURIComponent(currentPath)}`)
 
-  const canManage = me.role === 'admin' || me.role === 'super_admin'
+  const canView = me.role === 'admin' || me.role === 'super_admin'
+  const canWrite = me.role === 'super_admin'
 
-  if (!canManage) {
+  if (!canView) {
     return (
       <main className="p-6">
         <h1 className="text-2xl font-bold">Admin · Membership refunds</h1>
         <div className="mt-4 max-w-2xl">
           <AccessDeniedCard
             title="Forbidden"
-            message="Only Admin / Super Admin can manage exceptional membership refunds."
+            message="Only Admin / Super Admin can view exceptional membership refunds."
             nextPath="/admin/membership-refunds"
             showBackHome
             signedInAs={me.email}
@@ -344,7 +345,7 @@ export default async function AdminMembershipRefundsPage({
           <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[hsl(var(--muted))]">Membership refunds</p>
           <h1 className="text-2xl font-bold">Exceptional refund workflow</h1>
           <p className="mt-1 max-w-2xl text-sm text-[hsl(var(--muted))]">
-            Create, approve, reject and mark exceptional subscription refunds as paid without deleting payments, subscriptions, access, freezes, Cash, Store, or Payment Reconciliation data.
+            Track exceptional subscription refunds without deleting payments, subscriptions, access, freezes, Cash, Store, or Payment Reconciliation data. Write actions are restricted to Super Admin.
           </p>
         </div>
         <div className="grid gap-2 sm:grid-cols-2">
@@ -361,6 +362,15 @@ export default async function AdminMembershipRefundsPage({
         <div className="rounded-2xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950">
           {membersError ? <p>Members load warning: {membersError.message}</p> : null}
           {subscriptionsError ? <p>Subscriptions load warning: {subscriptionsError.message}</p> : null}
+        </div>
+      ) : null}
+
+      {!canWrite ? (
+        <div className="rounded-2xl border border-sky-200 bg-sky-50 p-3 text-sm text-sky-950">
+          <p className="font-semibold">Read-only access</p>
+          <p className="mt-1 text-xs">
+            Only Super Admin can create refund requests, upload refund proof, approve/reject, mark refunds as paid, cancel records, or apply subscription impact decisions.
+          </p>
         </div>
       ) : null}
 
@@ -390,7 +400,7 @@ export default async function AdminMembershipRefundsPage({
         </div>
       </section>
 
-      <MembershipRefundForm members={members} subscriptions={subscriptions} initialMemberId={selectedMemberId} />
+      {canWrite ? <MembershipRefundForm members={members} subscriptions={subscriptions} initialMemberId={selectedMemberId} /> : null}
 
       <section className="rounded-3xl border border-[hsl(var(--border))] bg-white p-4 shadow-soft">
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
@@ -541,34 +551,38 @@ export default async function AdminMembershipRefundsPage({
                   </div>
                 ) : null}
 
-                <MembershipRefundWorkflowActions
-                  refund={{ id: refund.id, status: refund.status, amount: refund.amount, refund_method: refund.refund_method }}
-                  memberLabel={displayMemberName}
-                  subscriptionLabel={displaySubscriptionLabel}
-                />
+                {canWrite ? (
+                  <>
+                    <MembershipRefundWorkflowActions
+                      refund={{ id: refund.id, status: refund.status, amount: refund.amount, refund_method: refund.refund_method }}
+                      memberLabel={displayMemberName}
+                      subscriptionLabel={displaySubscriptionLabel}
+                    />
 
-                <MembershipRefundSubscriptionImpactActions
-                  refund={{
-                    id: refund.id,
-                    status: refund.status,
-                    amount: refund.amount,
-                    subscription_id: refund.subscription_id,
-                    subscription_impact_action: refund.subscription_impact_action,
-                    subscription_impact_status: refund.subscription_impact_status,
-                    subscription_impact_applied_at: refund.subscription_impact_applied_at,
-                  }}
-                  subscription={subscription ? {
-                    id: subscription.id,
-                    status: subscription.status,
-                    start_date: subscription.start_date,
-                    end_date: subscription.end_date,
-                    plan: subscription.plan,
-                    amount: subscription.amount,
-                    amount_due: subscription.amount_due,
-                  } : null}
-                  memberLabel={displayMemberName}
-                  subscriptionLabel={displaySubscriptionLabel}
-                />
+                    <MembershipRefundSubscriptionImpactActions
+                      refund={{
+                        id: refund.id,
+                        status: refund.status,
+                        amount: refund.amount,
+                        subscription_id: refund.subscription_id,
+                        subscription_impact_action: refund.subscription_impact_action,
+                        subscription_impact_status: refund.subscription_impact_status,
+                        subscription_impact_applied_at: refund.subscription_impact_applied_at,
+                      }}
+                      subscription={subscription ? {
+                        id: subscription.id,
+                        status: subscription.status,
+                        start_date: subscription.start_date,
+                        end_date: subscription.end_date,
+                        plan: subscription.plan,
+                        amount: subscription.amount,
+                        amount_due: subscription.amount_due,
+                      } : null}
+                      memberLabel={displayMemberName}
+                      subscriptionLabel={displaySubscriptionLabel}
+                    />
+                  </>
+                ) : null}
               </div>
             )
           })}
@@ -582,7 +596,7 @@ export default async function AdminMembershipRefundsPage({
       </section>
 
       <p className="text-xs text-[hsl(var(--muted))]">
-        Membership Refunds Lot 1D. This page tracks refund workflow, proof uploads and explicit subscription impact decisions. Original payments are never deleted and no subscription impact is applied without confirmation.
+        Membership Refunds Lot 1D. This page tracks refund workflow, proof uploads and explicit subscription impact decisions. Write actions are restricted to Super Admin. Original payments are never deleted and no subscription impact is applied without confirmation.
       </p>
     </main>
   )
