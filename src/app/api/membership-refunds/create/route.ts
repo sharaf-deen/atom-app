@@ -9,10 +9,9 @@ import { createClient } from '@supabase/supabase-js'
 import { createSupabaseServerActionClient } from '@/lib/supabaseServer'
 
 type RefundMethod = 'cash' | 'instapay' | 'card' | 'bank_transfer'
-type RefundStatus = 'paid' | 'cancelled'
+type RefundStatus = 'pending_review'
 
 const REFUND_METHODS = new Set<RefundMethod>(['cash', 'instapay', 'card', 'bank_transfer'])
-const REFUND_STATUSES = new Set<RefundStatus>(['paid', 'cancelled'])
 
 function json(status: number, body: any) {
   const res = NextResponse.json(body, { status })
@@ -97,8 +96,7 @@ export async function POST(req: Request) {
     const amount = Number(body?.amount)
     const refundMethodRaw = cleanString(body?.refundMethod ?? body?.refund_method, 40) as RefundMethod
     const refundMethod = REFUND_METHODS.has(refundMethodRaw) ? refundMethodRaw : null
-    const statusRaw = cleanString(body?.status, 40) as RefundStatus
-    const status: RefundStatus = REFUND_STATUSES.has(statusRaw) ? statusRaw : 'paid'
+    const status: RefundStatus = 'pending_review'
     const reason = cleanString(body?.reason, 2000)
     const internalNote = cleanString(body?.internalNote ?? body?.internal_note, 4000) || null
     const proofUrl = cleanString(body?.proofUrl ?? body?.proof_url, 1000) || null
@@ -154,11 +152,11 @@ export async function POST(req: Request) {
 
     if (insertErr) {
       const message = insertErr.message ?? String(insertErr)
-      if (message.includes('membership_refunds') && message.toLowerCase().includes('does not exist')) {
+      if ((message.includes('membership_refunds') && message.toLowerCase().includes('does not exist')) || message.includes('membership_refunds_status_chk')) {
         return json(500, {
           ok: false,
           error: 'MIGRATION_REQUIRED',
-          details: 'Apply the Membership Refunds Lot 1A migration, then try again.',
+          details: 'Apply the Membership Refunds migrations, then try again.',
         })
       }
 
@@ -168,7 +166,7 @@ export async function POST(req: Request) {
     await safeAudit(admin, {
       actor_user_id: actorId,
       target_user_id: memberId,
-      action: 'membership_refund_record',
+      action: 'membership_refund_request_created',
       action_details: {
         refund_id: refund?.id ?? null,
         member_id: memberId,
@@ -179,7 +177,7 @@ export async function POST(req: Request) {
         member_email: member?.email ?? null,
         member_display_id: member?.member_id ?? null,
         subscription_snapshot: subscription,
-        note: 'Exceptional membership refund record only. No subscription/payment/access mutation was performed.',
+        note: 'Exceptional membership refund request created as pending_review only. No subscription/payment/access mutation was performed.',
       },
     })
 
