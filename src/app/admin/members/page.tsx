@@ -79,6 +79,7 @@ export default async function AdminMembersPage({
 
   const canView = OPS.includes(me.role)
   const canEdit = me.role === 'super_admin'
+  const canManageRefunds = me.role === 'admin' || me.role === 'super_admin'
 
   if (!canView) {
     return (
@@ -185,13 +186,18 @@ export default async function AdminMembersPage({
           </p>
         </div>
 
-        <div className="grid w-full gap-2 sm:w-auto sm:grid-cols-3">
+        <div className={`grid w-full gap-2 sm:w-auto ${canManageRefunds ? 'sm:grid-cols-4' : 'sm:grid-cols-3'}`}>
           <Button asChild variant="outline" className="w-full" href="/admin">
             ← Admin
           </Button>
           <Button asChild variant="outline" className="w-full" href="/admin/members/inactive">
             Inactive accounts
           </Button>
+          {canManageRefunds ? (
+            <Button asChild variant="outline" className="w-full" href="/admin/membership-refunds">
+              Membership refunds
+            </Button>
+          ) : null}
           <Button asChild variant="outline" className="w-full" href="/members">
             Members (public)
           </Button>
@@ -254,9 +260,16 @@ export default async function AdminMembersPage({
                       compact
                     />
                   ) : null}
-                  <Button asChild variant="outline" size="sm" className="w-full sm:w-auto" href={`/members/${m.user_id}`}>
-                    Open
-                  </Button>
+                  <div className="grid w-full gap-2 sm:w-auto sm:grid-cols-2">
+                    {canManageRefunds ? (
+                      <Button asChild variant="outline" size="sm" className="w-full" href={`/admin/membership-refunds?memberId=${m.user_id}`}>
+                        Refund
+                      </Button>
+                    ) : null}
+                    <Button asChild variant="outline" size="sm" className="w-full" href={`/members/${m.user_id}`}>
+                      Open
+                    </Button>
+                  </div>
                 </div>
               </div>
             )
@@ -314,9 +327,16 @@ export default async function AdminMembersPage({
                     )}
                   </td>
                   <td className="border-t border-[hsl(var(--border))] px-4 py-3">
-                    <Button asChild variant="outline" size="sm" href={`/members/${m.user_id}`}>
-                      Open
-                    </Button>
+                    <div className="flex flex-wrap gap-2">
+                      {canManageRefunds ? (
+                        <Button asChild variant="outline" size="sm" href={`/admin/membership-refunds?memberId=${m.user_id}`}>
+                          Refund
+                        </Button>
+                      ) : null}
+                      <Button asChild variant="outline" size="sm" href={`/members/${m.user_id}`}>
+                        Open
+                      </Button>
+                    </div>
                   </td>
                   </tr>
                 )
