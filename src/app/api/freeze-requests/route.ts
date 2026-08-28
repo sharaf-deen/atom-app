@@ -176,11 +176,12 @@ export async function GET(req: Request) {
   const supabase = createSupabaseServerActionClient()
   const me = await supabase.auth.getUser()
   if (!me.data.user) return json(401, { ok: false, error: 'Not authenticated' })
+  const authUserId = me.data.user.id
   const admin = makeAdminClient()
   if (!admin) return json(500, { ok: false, error: 'Missing service role key' })
   const url = new URL(req.url)
-  const memberUserId = String(url.searchParams.get('member_id') || me.data.user.id)
-  const result = await loadEligibility(admin, me.data.user.id, memberUserId)
+  const memberUserId = String(url.searchParams.get('member_id') || authUserId)
+  const result = await loadEligibility(admin, authUserId, memberUserId)
   return json(result.status, result.body)
 }
 
@@ -188,6 +189,7 @@ export async function POST(req: Request) {
   const supabase = createSupabaseServerActionClient()
   const me = await supabase.auth.getUser()
   if (!me.data.user) return json(401, { ok: false, error: 'Not authenticated' })
+  const authUserId = me.data.user.id
   const admin = makeAdminClient()
   if (!admin) return json(500, { ok: false, error: 'Missing service role key' })
 
@@ -202,7 +204,7 @@ export async function POST(req: Request) {
   if (!isISODateOnly(from) || !isISODateOnly(to) || from > to) return json(400, { ok: false, error: 'Provide a valid freeze date range.' })
   if (reason.length < 3 || reason.length > 1000) return json(400, { ok: false, error: 'Reason must contain between 3 and 1000 characters.' })
 
-  const eligibility = await loadEligibility(admin, me.data.user.id, memberUserId)
+  const eligibility = await loadEligibility(admin, authUserId, memberUserId)
   if (eligibility.status !== 200 || !eligibility.body?.ok) return json(eligibility.status, eligibility.body)
   if (!eligibility.body.can_request) return json(400, { ok: false, error: eligibility.body.blocked_reason || 'Freeze request is not available.' })
   if (!eligibility.body.subscription || eligibility.body.subscription.id !== subscriptionId) {
@@ -258,7 +260,7 @@ export async function POST(req: Request) {
       requested_end_date: to,
       reason,
       status: 'pending',
-      requested_by_auth_user_id: me.data.user.id,
+      requested_by_auth_user_id: authUserId,
       request_source: requester,
     })
     .select('id')
@@ -266,6 +268,37 @@ export async function POST(req: Request) {
   if (insertErr) {
     if (String(insertErr.code) === '23505') return json(409, { ok: false, error: 'A freeze request is already pending review for this member.' })
     return json(500, { ok: false, error: insertErr.message })
+  }
+
+  // Notify every Super Admin about the newly created pending request.
+  // Delivery is best-effort: a notification issue must never roll back a valid freeze request.
+  if (inserted?.id) {
+    const { data: superAdmins, error: superAdminsErr } = await admin
+      .from('profiles')
+      .select('user_id')
+      .eq('role', 'super_admin')
+      .not('user_id', 'is', null)
+
+    if (!superAdminsErr) {
+      const superAdminIds = Array.from(
+        new Set((superAdmins ?? []).map((row: any) => String(row.user_id || '')).filter(Boolean)),
+      )
+
+      if (superAdminIds.length > 0) {
+        const memberName = String(eligibility.body?.member?.name || 'Member')
+        const sourceLabel = requester === 'guardian' ? 'Parent/guardian' : 'Member'
+        const notificationRows = superAdminIds.map((userId) => ({
+          user_id: userId,
+          member_id: memberUserId,
+          created_by: authUserId,
+          kind: 'system',
+          title: 'New freeze request',
+          body: `${memberName} requested a membership freeze from ${from} to ${to}. Source: ${sourceLabel}.`,
+        }))
+
+        await admin.from('notifications').insert(notificationRows)
+      }
+    }
   }
 
   return json(201, { ok: true, id: inserted?.id ?? null, status: 'pending' })
