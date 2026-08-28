@@ -8,6 +8,34 @@ import { collectHealthMonitorSummary, sendHealthMonitorEmail } from '@/lib/healt
 import { canAccessHealthMonitor, normalizeRole } from '@/lib/rbac'
 import { jsonWithApiRuntime, logApiError, logApiWarn, startApiRuntime } from '@/lib/apiRuntime'
 
+function getCairoClock(value: Date = new Date()) {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Africa/Cairo',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(value)
+
+  const pick = (type: string) => parts.find((part) => part.type === type)?.value ?? ''
+  const year = pick('year')
+  const month = pick('month')
+  const day = pick('day')
+  const hour = Number(pick('hour'))
+
+  return {
+    dateKey: `${year}-${month}-${day}`,
+    hour,
+  }
+}
+
+function isSameCairoDate(isoTimestamp: string, dateKey: string) {
+  const value = new Date(isoTimestamp)
+  if (Number.isNaN(value.getTime())) return false
+  return getCairoClock(value).dateKey === dateKey
+}
+
 async function getActorFromSession() {
   const supa = createSupabaseServerActionClient()
   const { data: auth, error: authErr } = await supa.auth.getUser()
@@ -54,10 +82,56 @@ export async function GET(req: Request) {
     }
 
     const url = new URL(req.url)
-    const sendEmail = cronOk ? true : (url.searchParams.get('send_email') ?? '').trim() === '1'
     const persist = (url.searchParams.get('persist') ?? '1').trim() !== '0'
-
     const admin = createSupabaseAdminClient()
+
+    // Vercel cron schedules are UTC. We intentionally keep both 19:00 and 20:00 UTC
+    // triggers in vercel.json so Egypt daylight-saving changes are covered. Only the
+    // invocation that lands at 22:00 in Africa/Cairo is allowed to run/send.
+    const cairoNow = getCairoClock()
+    if (cronOk && cairoNow.hour !== 22) {
+      return jsonWithApiRuntime(meta, 200, {
+        ok: true,
+        mode: 'cron',
+        skipped: true,
+        skip_reason: 'OUTSIDE_CAIRO_22H',
+        cairo_date: cairoNow.dateKey,
+        cairo_hour: cairoNow.hour,
+      })
+    }
+
+    // Best-effort duplicate protection for retries/repeated scheduler invocations:
+    // if today's Cairo report already sent an email, do not send it again.
+    if (cronOk) {
+      const { data: recentSentReports, error: recentSentErr } = await admin
+        .from('system_health_reports')
+        .select('created_at')
+        .eq('mode', 'cron')
+        .eq('email_sent', true)
+        .order('created_at', { ascending: false })
+        .limit(10)
+
+      if (recentSentErr) {
+        logApiWarn(meta, 'duplicate_guard_lookup', { error: recentSentErr.message })
+      } else {
+        const alreadySentToday = (recentSentReports ?? []).some((report: { created_at: string }) =>
+          isSameCairoDate(report.created_at, cairoNow.dateKey),
+        )
+
+        if (alreadySentToday) {
+          return jsonWithApiRuntime(meta, 200, {
+            ok: true,
+            mode: 'cron',
+            skipped: true,
+            skip_reason: 'ALREADY_SENT_TODAY',
+            cairo_date: cairoNow.dateKey,
+            cairo_hour: cairoNow.hour,
+          })
+        }
+      }
+    }
+
+    const sendEmail = cronOk ? true : (url.searchParams.get('send_email') ?? '').trim() === '1'
     const summary = await collectHealthMonitorSummary(admin)
 
     let emailSent = false
