@@ -15,7 +15,7 @@ type FamilyMember = {
   phone: string | null
 }
 
-type FamilyParent = {
+type FamilyGuardian = {
   family_id: string
   auth_user_id: string
   email: string
@@ -31,7 +31,7 @@ type FamilyAccount = {
   id: string
   name: string
   created_at: string | null
-  parent: FamilyParent | null
+  guardians: FamilyGuardian[]
   members: FamilyMember[]
 }
 
@@ -45,12 +45,18 @@ type UnlinkTarget = {
   member: FamilyMember
 }
 
+type GuardianTarget = {
+  familyId: string
+  familyName: string
+  guardian: FamilyGuardian
+}
+
 function memberName(member: Pick<FamilyMember, 'first_name' | 'last_name'>) {
   return `${member.first_name ?? ''} ${member.last_name ?? ''}`.trim() || 'Unnamed member'
 }
 
-function parentName(parent: FamilyParent) {
-  return `${parent.first_name ?? ''} ${parent.last_name ?? ''}`.trim() || 'Parent'
+function guardianName(guardian: FamilyGuardian) {
+  return `${guardian.first_name ?? ''} ${guardian.last_name ?? ''}`.trim() || 'Guardian'
 }
 
 async function readJson(response: Response) {
@@ -82,6 +88,8 @@ export default function FamilyAccountsManager({ families }: { families: FamilyAc
 
   const [actionKey, setActionKey] = React.useState<string | null>(null)
   const [unlinkTarget, setUnlinkTarget] = React.useState<UnlinkTarget | null>(null)
+  const [primaryGuardianTarget, setPrimaryGuardianTarget] = React.useState<GuardianTarget | null>(null)
+  const [removeGuardianTarget, setRemoveGuardianTarget] = React.useState<GuardianTarget | null>(null)
   const [message, setMessage] = React.useState<string | null>(null)
   const [error, setError] = React.useState<string | null>(null)
 
@@ -137,7 +145,7 @@ export default function FamilyAccountsManager({ families }: { families: FamilyAc
     }
   }
 
-  async function createParentAccount(event: React.FormEvent, family: FamilyAccount) {
+  async function createGuardianAccount(event: React.FormEvent, family: FamilyAccount) {
     event.preventDefault()
     resetFeedback()
 
@@ -147,22 +155,22 @@ export default function FamilyAccountsManager({ families }: { families: FamilyAc
     const phone = parentPhone.trim()
 
     if (!firstName) {
-      setError('Parent first name is required.')
+      setError('Guardian first name is required.')
       return
     }
     if (!email) {
-      setError('Parent email is required.')
+      setError('Guardian email is required.')
       return
     }
 
-    const key = `parent:${family.id}`
+    const key = `guardian:${family.id}`
     setActionKey(key)
     try {
       const response = await fetch('/api/admin/families', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          action: 'create_parent_account',
+          action: 'create_guardian_account',
           familyId: family.id,
           firstName,
           lastName,
@@ -172,18 +180,84 @@ export default function FamilyAccountsManager({ families }: { families: FamilyAc
       })
       const data = await readJson(response)
       if (!response.ok || data.ok !== true) {
-        if (data.error === 'PRIMARY_PARENT_ALREADY_EXISTS') {
-          throw new Error('This family already has a parent account.')
+        if (data.error === 'GUARDIAN_ALREADY_LINKED') {
+          throw new Error('This account is already linked to the family.')
         }
-        throw new Error(data.details || data.error || 'Failed to create parent account')
+        throw new Error(data.details || data.error || 'Failed to create guardian account')
       }
 
       closeParentForm()
+      const roleLabel = data.is_primary ? 'primary guardian' : 'guardian'
       setMessage(
         data.existing_account
-          ? `${email} was already an ATOM account and is now linked as the family parent.`
-          : `Parent account created for ${email}. Invitation sent.`,
+          ? `${email} was already an ATOM account and is now linked as ${roleLabel}.`
+          : `Family ${roleLabel} account created for ${email}. Invitation sent.`,
       )
+      router.refresh()
+    } catch (cause: any) {
+      setError(String(cause?.message || cause))
+    } finally {
+      setActionKey(null)
+    }
+  }
+
+  async function setPrimaryGuardian() {
+    if (!primaryGuardianTarget) return
+    resetFeedback()
+
+    const key = `primary:${primaryGuardianTarget.familyId}:${primaryGuardianTarget.guardian.auth_user_id}`
+    setActionKey(key)
+    try {
+      const response = await fetch('/api/admin/families', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'set_primary_guardian',
+          familyId: primaryGuardianTarget.familyId,
+          authUserId: primaryGuardianTarget.guardian.auth_user_id,
+        }),
+      })
+      const data = await readJson(response)
+      if (!response.ok || data.ok !== true) {
+        throw new Error(data.details || data.error || 'Failed to change primary guardian')
+      }
+
+      setMessage(`${guardianName(primaryGuardianTarget.guardian)} is now the primary guardian for ${primaryGuardianTarget.familyName}.`)
+      setPrimaryGuardianTarget(null)
+      router.refresh()
+    } catch (cause: any) {
+      setError(String(cause?.message || cause))
+    } finally {
+      setActionKey(null)
+    }
+  }
+
+  async function removeGuardian() {
+    if (!removeGuardianTarget) return
+    resetFeedback()
+
+    const key = `remove-guardian:${removeGuardianTarget.familyId}:${removeGuardianTarget.guardian.auth_user_id}`
+    setActionKey(key)
+    try {
+      const response = await fetch('/api/admin/families', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'remove_guardian',
+          familyId: removeGuardianTarget.familyId,
+          authUserId: removeGuardianTarget.guardian.auth_user_id,
+        }),
+      })
+      const data = await readJson(response)
+      if (!response.ok || data.ok !== true) {
+        if (data.error === 'PRIMARY_GUARDIAN_CANNOT_BE_REMOVED') {
+          throw new Error('Choose another primary guardian before removing this account.')
+        }
+        throw new Error(data.details || data.error || 'Failed to remove guardian')
+      }
+
+      setMessage(`${guardianName(removeGuardianTarget.guardian)} removed as guardian for ${removeGuardianTarget.familyName}.`)
+      setRemoveGuardianTarget(null)
       router.refresh()
     } catch (cause: any) {
       setError(String(cause?.message || cause))
@@ -353,7 +427,7 @@ export default function FamilyAccountsManager({ families }: { families: FamilyAc
           </Button>
         </div>
         <p className="mt-2 text-xs text-[hsl(var(--muted))]">
-          Create the family first, then add one parent account and as many member profiles as needed.
+          Create the family first, then add one or more parent/guardian accounts and as many member profiles as needed.
         </p>
       </form>
 
@@ -383,7 +457,7 @@ export default function FamilyAccountsManager({ families }: { families: FamilyAc
                 <div>
                   <h2 className="text-lg font-semibold">{family.name}</h2>
                   <p className="text-xs text-[hsl(var(--muted))]">
-                    {family.members.length} member{family.members.length === 1 ? '' : 's'} · {family.parent ? 'Parent account linked' : 'No parent account'}
+                    {family.members.length} member{family.members.length === 1 ? '' : 's'} · {family.guardians.length} guardian{family.guardians.length === 1 ? '' : 's'}
                   </p>
                 </div>
               </div>
@@ -391,53 +465,113 @@ export default function FamilyAccountsManager({ families }: { families: FamilyAc
               <div className="mt-4 rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] p-3">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
-                    <div className="text-xs font-semibold uppercase tracking-wide text-[hsl(var(--muted))]">Parent account</div>
-                    {family.parent ? (
-                      <div className="mt-1">
-                        <div className="font-medium">{parentName(family.parent)}</div>
-                        <div className="text-xs text-[hsl(var(--muted))]">
-                          {family.parent.email}{family.parent.phone ? ` · ${family.parent.phone}` : ''}
-                        </div>
-                      </div>
-                    ) : (
-                      <p className="mt-1 text-sm text-[hsl(var(--muted))]">
-                        One email/login for this family. Existing ATOM accounts are reused when the email already exists.
-                      </p>
-                    )}
+                    <div className="text-xs font-semibold uppercase tracking-wide text-[hsl(var(--muted))]">Parent / guardian accounts</div>
+                    <p className="mt-1 text-sm text-[hsl(var(--muted))]">
+                      Each guardian uses their own email/login and can access the same read-only Family Dashboard.
+                    </p>
                   </div>
-
-                  {!family.parent ? (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      onClick={() => {
-                        resetFeedback()
-                        if (parentOpen) closeParentForm()
-                        else {
-                          closeNewMemberForm()
-                          setOpenSearchFamilyId(null)
-                          setOpenParentFamilyId(family.id)
-                        }
-                      }}
-                    >
-                      {parentOpen ? 'Close' : 'Add parent account'}
-                    </Button>
-                  ) : null}
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      resetFeedback()
+                      if (parentOpen) closeParentForm()
+                      else {
+                        closeNewMemberForm()
+                        setOpenSearchFamilyId(null)
+                        setOpenParentFamilyId(family.id)
+                      }
+                    }}
+                  >
+                    {parentOpen ? 'Close' : family.guardians.length === 0 ? 'Add parent / guardian' : 'Add guardian'}
+                  </Button>
                 </div>
 
-                {parentOpen && !family.parent ? (
-                  <form onSubmit={(event) => createParentAccount(event, family)} className="mt-4 grid gap-3 rounded-2xl bg-white p-3">
+                {family.guardians.length > 0 ? (
+                  <div className="mt-3 divide-y divide-[hsl(var(--border))] rounded-2xl border border-[hsl(var(--border))] bg-white">
+                    {family.guardians.map((guardian) => (
+                      <div
+                        key={guardian.auth_user_id}
+                        className="flex flex-col gap-3 p-3 sm:flex-row sm:items-center sm:justify-between"
+                      >
+                        <div className="min-w-0">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="font-medium">{guardianName(guardian)}</span>
+                            {guardian.is_primary ? (
+                              <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-800">
+                                Primary guardian
+                              </span>
+                            ) : (
+                              <span className="rounded-full border bg-gray-50 px-2 py-0.5 text-[11px] font-medium text-gray-700">
+                                Guardian
+                              </span>
+                            )}
+                          </div>
+                          <div className="mt-1 text-xs text-[hsl(var(--muted))]">
+                            {guardian.email}{guardian.phone ? ` · ${guardian.phone}` : ''}
+                          </div>
+                        </div>
+
+                        {!guardian.is_primary ? (
+                          <div className="flex flex-wrap gap-2">
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              disabled={Boolean(actionKey)}
+                              onClick={() =>
+                                setPrimaryGuardianTarget({
+                                  familyId: family.id,
+                                  familyName: family.name,
+                                  guardian,
+                                })
+                              }
+                            >
+                              Make primary
+                            </Button>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              disabled={Boolean(actionKey)}
+                              onClick={() =>
+                                setRemoveGuardianTarget({
+                                  familyId: family.id,
+                                  familyName: family.name,
+                                  guardian,
+                                })
+                              }
+                            >
+                              Remove guardian
+                            </Button>
+                          </div>
+                        ) : (
+                          <span className="text-xs text-[hsl(var(--muted))]">
+                            To remove this account, make another guardian primary first.
+                          </span>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="mt-3 rounded-2xl border border-dashed border-[hsl(var(--border))] bg-white px-4 py-4 text-sm text-[hsl(var(--muted))]">
+                    No guardian account linked yet. The first account added becomes the primary guardian.
+                  </div>
+                )}
+
+                {parentOpen ? (
+                  <form onSubmit={(event) => createGuardianAccount(event, family)} className="mt-4 grid gap-3 rounded-2xl bg-white p-3">
                     <div className="grid gap-3 sm:grid-cols-2">
                       <Input
-                        label="Parent first name"
+                        label="Guardian first name"
                         value={parentFirstName}
                         onChange={(event) => setParentFirstName(event.target.value)}
                         maxLength={120}
                         required
                       />
                       <Input
-                        label="Parent last name"
+                        label="Guardian last name"
                         value={parentLastName}
                         onChange={(event) => setParentLastName(event.target.value)}
                         maxLength={120}
@@ -445,16 +579,16 @@ export default function FamilyAccountsManager({ families }: { families: FamilyAc
                     </div>
                     <div className="grid gap-3 sm:grid-cols-2">
                       <Input
-                        label="Parent email"
+                        label="Guardian email"
                         type="email"
                         value={parentEmail}
                         onChange={(event) => setParentEmail(event.target.value)}
                         autoComplete="email"
                         required
-                        hint="This is the only login email required for the family."
+                        hint="Existing ATOM accounts are reused; otherwise an invitation is sent."
                       />
                       <Input
-                        label="Parent phone"
+                        label="Guardian phone"
                         type="tel"
                         value={parentPhone}
                         onChange={(event) => setParentPhone(event.target.value)}
@@ -464,10 +598,10 @@ export default function FamilyAccountsManager({ families }: { families: FamilyAc
                     <div className="flex justify-end">
                       <Button
                         type="submit"
-                        loading={actionKey === `parent:${family.id}`}
+                        loading={actionKey === `guardian:${family.id}`}
                         loadingText="Creating…"
                       >
-                        Create / link parent account
+                        Create / link guardian
                       </Button>
                     </div>
                   </form>
@@ -666,6 +800,58 @@ export default function FamilyAccountsManager({ families }: { families: FamilyAc
           </div>
         ) : null}
       </div>
+
+      <ConfirmActionModal
+        open={Boolean(primaryGuardianTarget)}
+        title="Change primary guardian?"
+        description="The selected account will become the family's primary guardian. All guardians keep access to the same Family Dashboard."
+        confirmLabel="Make primary"
+        pendingLabel="Updating…"
+        pending={Boolean(
+          primaryGuardianTarget &&
+            actionKey === `primary:${primaryGuardianTarget.familyId}:${primaryGuardianTarget.guardian.auth_user_id}`,
+        )}
+        summaryItems={
+          primaryGuardianTarget
+            ? [
+                { label: 'Family', value: primaryGuardianTarget.familyName },
+                { label: 'New primary guardian', value: guardianName(primaryGuardianTarget.guardian) },
+                { label: 'Email', value: primaryGuardianTarget.guardian.email },
+              ]
+            : []
+        }
+        onCancel={() => {
+          if (!actionKey) setPrimaryGuardianTarget(null)
+        }}
+        onConfirm={setPrimaryGuardian}
+      />
+
+      <ConfirmActionModal
+        open={Boolean(removeGuardianTarget)}
+        title="Remove guardian access?"
+        description="This removes only the guardian-to-family link. It does not delete the Auth account, member profile, subscriptions, payments or family members."
+        confirmLabel="Remove guardian"
+        pendingLabel="Removing…"
+        tone="destructive"
+        pending={Boolean(
+          removeGuardianTarget &&
+            actionKey === `remove-guardian:${removeGuardianTarget.familyId}:${removeGuardianTarget.guardian.auth_user_id}`,
+        )}
+        summaryItems={
+          removeGuardianTarget
+            ? [
+                { label: 'Family', value: removeGuardianTarget.familyName },
+                { label: 'Guardian', value: guardianName(removeGuardianTarget.guardian) },
+                { label: 'Email', value: removeGuardianTarget.guardian.email },
+              ]
+            : []
+        }
+        warning="Primary guardians must be replaced before they can be removed."
+        onCancel={() => {
+          if (!actionKey) setRemoveGuardianTarget(null)
+        }}
+        onConfirm={removeGuardian}
+      />
 
       <ConfirmActionModal
         open={Boolean(unlinkTarget)}
