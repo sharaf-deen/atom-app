@@ -31,6 +31,13 @@ function fmtDate(value?: string | null) {
   return date.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
 }
 
+function statusLabel(status: RequestRow['status']) {
+  if (status === 'approved') return 'Approved'
+  if (status === 'denied') return 'Rejected'
+  if (status === 'canceled') return 'Cancelled'
+  return 'Pending'
+}
+
 export default async function FreezeRequestsPage() {
   const me = await getSessionUser()
   if (!me) redirect('/login?next=/admin/freeze-requests')
@@ -65,7 +72,7 @@ export default async function FreezeRequestsPage() {
             <div className="font-semibold">{name}</div>
             <div className="mt-0.5 text-sm text-[hsl(var(--muted))]">{member?.member_id ?? row.member_user_id} · {row.request_source === 'guardian' ? 'Parent/guardian request' : 'Member request'}</div>
           </div>
-          <span className="rounded-full border bg-gray-50 px-2.5 py-1 text-xs font-medium">{row.status}</span>
+          <span className="rounded-full border bg-gray-50 px-2.5 py-1 text-xs font-medium">{statusLabel(row.status)}</span>
         </div>
         <div className="mt-3 grid gap-2 text-sm sm:grid-cols-3">
           <div><div className="text-xs text-[hsl(var(--muted))]">Requested range</div><div className="font-medium">{fmtDate(row.requested_start_date)} → {fmtDate(row.requested_end_date)}</div></div>
