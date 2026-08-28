@@ -264,7 +264,7 @@ export default async function FamilyDashboardPage({ searchParams }: PageProps) {
   const rawSelected = Array.isArray(searchParams?.member) ? searchParams?.member[0] : searchParams?.member
   const selected = members.find((member) => member.user_id === rawSelected) ?? members[0] ?? null
   const today = cairoToday()
-  const primaryGuardian = guardians.find((guardian) => guardian.is_primary) ?? guardians[0]
+  const currentGuardian = guardians.find((guardian) => guardian.is_primary) ?? guardians[0]
   const selectedSubscriptions = selected ? subscriptionsByMember.get(selected.user_id) ?? [] : []
   const selectedMembership = selected ? membershipView(selectedSubscriptions, today) : null
 
@@ -276,13 +276,18 @@ export default async function FamilyDashboardPage({ searchParams }: PageProps) {
         <section className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-5 shadow-soft">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
-              <div className="text-xs font-medium uppercase tracking-[0.16em] text-[hsl(var(--muted))]">Parent account</div>
+              <div className="text-xs font-medium uppercase tracking-[0.16em] text-[hsl(var(--muted))]">Family account</div>
               <h2 className="mt-1 text-lg font-semibold">
-                {displayName(primaryGuardian.first_name, primaryGuardian.last_name, me.full_name ?? 'Parent')}
+                {displayName(currentGuardian.first_name, currentGuardian.last_name, me.full_name ?? 'Guardian')}
               </h2>
-              <p className="text-sm text-[hsl(var(--muted))]">{primaryGuardian.email}</p>
+              <p className="text-sm text-[hsl(var(--muted))]">{currentGuardian.email}</p>
             </div>
-            <span className="rounded-full border bg-gray-50 px-3 py-1 text-xs font-medium">Read only</span>
+            <div className="flex flex-wrap gap-2">
+              <span className="rounded-full border bg-gray-50 px-3 py-1 text-xs font-medium">
+                {currentGuardian.is_primary ? 'Primary guardian' : 'Guardian'}
+              </span>
+              <span className="rounded-full border bg-gray-50 px-3 py-1 text-xs font-medium">Read only</span>
+            </div>
           </div>
           <div className="mt-4 flex flex-wrap gap-2">
             {families.map((family) => (

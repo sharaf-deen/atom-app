@@ -23,6 +23,16 @@ type ActionBody =
       phone?: string
     }
   | {
+      action?: 'create_guardian_account'
+      familyId?: string
+      email?: string
+      firstName?: string
+      lastName?: string
+      phone?: string
+    }
+  | { action?: 'set_primary_guardian'; familyId?: string; authUserId?: string }
+  | { action?: 'remove_guardian'; familyId?: string; authUserId?: string }
+  | {
       action?: 'create_dependent_member'
       familyId?: string
       firstName?: string
@@ -288,21 +298,22 @@ export async function POST(req: Request) {
     return noStore({ ok: true })
   }
 
-  if (action === 'create_parent_account') {
+  if (action === 'create_parent_account' || action === 'create_guardian_account') {
     const familyId = String((body as any)?.familyId ?? '').trim()
     const email = normalizeEmail((body as any)?.email)
     const firstName = normalizeText((body as any)?.firstName)
     const lastName = normalizeText((body as any)?.lastName)
     const phone = normalizeText((body as any)?.phone) || null
+    const legacyPrimaryOnly = action === 'create_parent_account'
 
     if (!UUID_RE.test(familyId)) {
       return noStore({ ok: false, error: 'INVALID_FAMILY_ID' }, { status: 400 })
     }
     if (!EMAIL_RE.test(email) || email.length > 320) {
-      return noStore({ ok: false, error: 'INVALID_PARENT_EMAIL' }, { status: 400 })
+      return noStore({ ok: false, error: 'INVALID_GUARDIAN_EMAIL' }, { status: 400 })
     }
     if (!firstName || firstName.length > 120 || lastName.length > 120) {
-      return noStore({ ok: false, error: 'INVALID_PARENT_NAME' }, { status: 400 })
+      return noStore({ ok: false, error: 'INVALID_GUARDIAN_NAME' }, { status: 400 })
     }
 
     const [{ data: family, error: familyError }, { data: existingPrimary, error: primaryError }] = await Promise.all([
@@ -323,11 +334,11 @@ export async function POST(req: Request) {
     }
     if (primaryError) {
       return noStore(
-        { ok: false, error: 'PARENT_LOOKUP_FAILED', details: primaryError.message },
+        { ok: false, error: 'GUARDIAN_LOOKUP_FAILED', details: primaryError.message },
         { status: 500 },
       )
     }
-    if (existingPrimary?.auth_user_id) {
+    if (legacyPrimaryOnly && existingPrimary?.auth_user_id) {
       return noStore(
         {
           ok: false,
@@ -346,6 +357,28 @@ export async function POST(req: Request) {
       )
     }
 
+    if (existingAuthUser?.id) {
+      const { data: existingGuardian, error: guardianLookupError } = await admin
+        .from('family_guardians')
+        .select('auth_user_id,is_primary')
+        .eq('family_id', familyId)
+        .eq('auth_user_id', existingAuthUser.id)
+        .maybeSingle()
+
+      if (guardianLookupError) {
+        return noStore(
+          { ok: false, error: 'GUARDIAN_LINK_LOOKUP_FAILED', details: guardianLookupError.message },
+          { status: 500 },
+        )
+      }
+      if (existingGuardian?.auth_user_id) {
+        return noStore(
+          { ok: false, error: 'GUARDIAN_ALREADY_LINKED', guardian: existingGuardian },
+          { status: 409 },
+        )
+      }
+    }
+
     let authUserId = existingAuthUser?.id ?? null
     let existingAccount = Boolean(existingAuthUser?.id)
     let inviteSent = false
@@ -354,6 +387,7 @@ export async function POST(req: Request) {
       : 'none'
     let inviteWarning: string | null = null
     let createdNewAuthUser = false
+    const isPrimary = !existingPrimary?.auth_user_id
 
     const appUrl = (
       process.env.NEXT_PUBLIC_APP_URL ||
@@ -362,7 +396,7 @@ export async function POST(req: Request) {
     ).replace(/\/$/, '')
     const redirectTo = `${appUrl}/auth/complete-invite?next=%2Ffamily`
     const authMetadata = {
-      account_type: 'family_parent',
+      account_type: isPrimary ? 'family_parent' : 'family_guardian',
       family_id: familyId,
       first_name: firstName,
       last_name: lastName || null,
@@ -395,10 +429,8 @@ export async function POST(req: Request) {
             inviteSent = true
             inviteMode = 'custom_email'
           } else {
-            inviteWarning = customEmail.reason ?? 'CUSTOM_PARENT_INVITE_FAILED'
+            inviteWarning = customEmail.reason ?? 'CUSTOM_GUARDIAN_INVITE_FAILED'
 
-            // Remove the generated-but-unsent account so the normal Supabase
-            // invite can safely recreate it and send its standard email.
             await admin.auth.admin.deleteUser(authUserId).catch(() => null)
             authUserId = null
             createdNewAuthUser = false
@@ -421,8 +453,8 @@ export async function POST(req: Request) {
         return noStore(
           {
             ok: false,
-            error: 'CREATE_PARENT_AUTH_FAILED',
-            details: inviteError?.message ?? inviteWarning ?? 'Could not create parent Auth account.',
+            error: 'CREATE_GUARDIAN_AUTH_FAILED',
+            details: inviteError?.message ?? inviteWarning ?? 'Could not create guardian Auth account.',
           },
           { status: 500 },
         )
@@ -443,7 +475,7 @@ export async function POST(req: Request) {
       last_name: lastName || null,
       phone,
       relationship: 'parent',
-      is_primary: true,
+      is_primary: isPrimary,
       invited_at: inviteSent ? new Date().toISOString() : null,
       created_by: actor.actorId,
     })
@@ -453,7 +485,7 @@ export async function POST(req: Request) {
         await admin.auth.admin.deleteUser(authUserId).catch(() => null)
       }
       return noStore(
-        { ok: false, error: 'CREATE_PARENT_LINK_FAILED', details: guardianInsertError.message },
+        { ok: false, error: 'CREATE_GUARDIAN_LINK_FAILED', details: guardianInsertError.message },
         { status: guardianInsertError.code === '23505' ? 409 : 500 },
       )
     }
@@ -461,20 +493,131 @@ export async function POST(req: Request) {
     revalidateFamilyViews()
     return noStore({
       ok: true,
-      parent: {
+      guardian: {
         auth_user_id: authUserId,
         email,
         first_name: firstName,
         last_name: lastName || null,
         phone,
+        is_primary: isPrimary,
       },
+      parent: legacyPrimaryOnly
+        ? {
+            auth_user_id: authUserId,
+            email,
+            first_name: firstName,
+            last_name: lastName || null,
+            phone,
+          }
+        : undefined,
+      is_primary: isPrimary,
       existing_account: existingAccount,
       invite_sent: inviteSent,
       invite_mode: inviteMode,
       invite_warning: inviteWarning,
       message: existingAccount
-        ? 'Existing ATOM account linked as the family parent. No duplicate account was created.'
-        : 'Parent account created and invitation sent.',
+        ? `Existing ATOM account linked as ${isPrimary ? 'primary guardian' : 'guardian'}. No duplicate account was created.`
+        : `${isPrimary ? 'Primary guardian' : 'Guardian'} account created and invitation sent.`,
+    })
+  }
+
+  if (action === 'set_primary_guardian') {
+    const familyId = String((body as any)?.familyId ?? '').trim()
+    const authUserId = String((body as any)?.authUserId ?? '').trim()
+
+    if (!UUID_RE.test(familyId) || !UUID_RE.test(authUserId)) {
+      return noStore({ ok: false, error: 'INVALID_ID' }, { status: 400 })
+    }
+
+    const { data: target, error: targetError } = await admin
+      .from('family_guardians')
+      .select('auth_user_id,is_primary')
+      .eq('family_id', familyId)
+      .eq('auth_user_id', authUserId)
+      .maybeSingle()
+
+    if (targetError) {
+      return noStore(
+        { ok: false, error: 'GUARDIAN_LOOKUP_FAILED', details: targetError.message },
+        { status: 500 },
+      )
+    }
+    if (!target) {
+      return noStore({ ok: false, error: 'GUARDIAN_NOT_FOUND' }, { status: 404 })
+    }
+    if (target.is_primary) {
+      return noStore({ ok: true, already_primary: true })
+    }
+
+    const { error: primaryError } = await admin.rpc('set_family_primary_guardian', {
+      p_family_id: familyId,
+      p_auth_user_id: authUserId,
+    })
+
+    if (primaryError) {
+      return noStore(
+        { ok: false, error: 'SET_PRIMARY_GUARDIAN_FAILED', details: primaryError.message },
+        { status: 500 },
+      )
+    }
+
+    revalidateFamilyViews()
+    return noStore({ ok: true })
+  }
+
+  if (action === 'remove_guardian') {
+    const familyId = String((body as any)?.familyId ?? '').trim()
+    const authUserId = String((body as any)?.authUserId ?? '').trim()
+
+    if (!UUID_RE.test(familyId) || !UUID_RE.test(authUserId)) {
+      return noStore({ ok: false, error: 'INVALID_ID' }, { status: 400 })
+    }
+
+    const { data: target, error: targetError } = await admin
+      .from('family_guardians')
+      .select('auth_user_id,email,is_primary')
+      .eq('family_id', familyId)
+      .eq('auth_user_id', authUserId)
+      .maybeSingle()
+
+    if (targetError) {
+      return noStore(
+        { ok: false, error: 'GUARDIAN_LOOKUP_FAILED', details: targetError.message },
+        { status: 500 },
+      )
+    }
+    if (!target) {
+      return noStore({ ok: false, error: 'GUARDIAN_NOT_FOUND' }, { status: 404 })
+    }
+    if (target.is_primary) {
+      return noStore(
+        {
+          ok: false,
+          error: 'PRIMARY_GUARDIAN_CANNOT_BE_REMOVED',
+          details: 'Set another guardian as primary before removing this account.',
+        },
+        { status: 409 },
+      )
+    }
+
+    const { error: deleteError } = await admin
+      .from('family_guardians')
+      .delete()
+      .eq('family_id', familyId)
+      .eq('auth_user_id', authUserId)
+
+    if (deleteError) {
+      return noStore(
+        { ok: false, error: 'REMOVE_GUARDIAN_FAILED', details: deleteError.message },
+        { status: 500 },
+      )
+    }
+
+    revalidateFamilyViews()
+    return noStore({
+      ok: true,
+      auth_account_deleted: false,
+      message: 'Guardian link removed. The Auth account and all member data remain unchanged.',
     })
   }
 
