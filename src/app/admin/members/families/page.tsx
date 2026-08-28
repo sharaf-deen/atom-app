@@ -94,7 +94,7 @@ export default async function FamilyAccountsPage() {
 
   const profileById = new Map(profiles.map((profile) => [profile.user_id, profile]))
   const membersByFamily = new Map<string, MemberProfile[]>()
-  const primaryParentByFamily = new Map<string, FamilyGuardianRow>()
+  const guardiansByFamily = new Map<string, FamilyGuardianRow[]>()
 
   for (const link of links) {
     const profile = profileById.get(link.member_id)
@@ -105,14 +105,17 @@ export default async function FamilyAccountsPage() {
   }
 
   for (const guardian of guardians) {
-    if (guardian.is_primary && !primaryParentByFamily.has(guardian.family_id)) {
-      primaryParentByFamily.set(guardian.family_id, guardian)
-    }
+    const current = guardiansByFamily.get(guardian.family_id) ?? []
+    current.push(guardian)
+    guardiansByFamily.set(guardian.family_id, current)
   }
 
   const hydratedFamilies = families.map((family) => ({
     ...family,
-    parent: primaryParentByFamily.get(family.id) ?? null,
+    guardians: (guardiansByFamily.get(family.id) ?? []).sort((a, b) => {
+      if (a.is_primary !== b.is_primary) return a.is_primary ? -1 : 1
+      return String(a.created_at ?? '').localeCompare(String(b.created_at ?? ''))
+    }),
     members: (membersByFamily.get(family.id) ?? []).sort((a, b) => {
       const aName = `${a.first_name ?? ''} ${a.last_name ?? ''}`.trim().toLowerCase()
       const bName = `${b.first_name ?? ''} ${b.last_name ?? ''}`.trim().toLowerCase()
@@ -128,7 +131,7 @@ export default async function FamilyAccountsPage() {
         <div>
           <h1 className="text-2xl font-bold">Family Accounts</h1>
           <p className="mt-1 text-sm text-[hsl(var(--muted))]">
-            One parent login can now represent a family while every athlete keeps an individual ATOM member profile.
+            One family can now have multiple parent/guardian logins while every athlete keeps an individual ATOM member profile.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
