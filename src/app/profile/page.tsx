@@ -2,6 +2,7 @@
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
+import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import PageHeader from '@/components/layout/PageHeader'
 import Section from '@/components/layout/Section'
@@ -227,11 +228,22 @@ export default async function ProfilePage() {
 
   const supa = createSupabaseRSC()
 
-  const { data: profile } = await supa
-    .from('profiles')
-    .select('user_id, email, first_name, last_name, phone, role, member_id, qr_code, id_photo_path, date_of_birth, created_at')
-    .eq('user_id', me.id)
-    .maybeSingle()
+  const [{ data: profile }, { data: guardianLink }] = await Promise.all([
+    supa
+      .from('profiles')
+      .select('user_id, email, first_name, last_name, phone, role, member_id, qr_code, id_photo_path, date_of_birth, created_at')
+      .eq('user_id', me.id)
+      .maybeSingle(),
+    supa
+      .from('family_guardians')
+      .select('family_id')
+      .eq('auth_user_id', me.id)
+      .limit(1)
+      .maybeSingle(),
+  ])
+
+  if (!profile && guardianLink?.family_id) redirect('/family')
+  const hasFamilyAccount = Boolean(guardianLink?.family_id)
 
   const p: ProfileRow = {
     user_id: me.id,
@@ -264,6 +276,19 @@ export default async function ProfilePage() {
       <PageHeader title="Profile" subtitle="Identity, access and QR." />
 
       <Section className="space-y-5">
+        {hasFamilyAccount ? (
+          <Link
+            href="/family"
+            className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-blue-200 bg-blue-50 p-4 text-blue-950 shadow-soft transition hover:bg-blue-100"
+          >
+            <div>
+              <div className="font-semibold">My Family</div>
+              <div className="mt-0.5 text-sm text-blue-800">View all family members, QR codes and membership status.</div>
+            </div>
+            <span className="rounded-full border border-blue-300 bg-white px-3 py-1 text-sm font-medium">Open →</span>
+          </Link>
+        ) : null}
+
         <section className="grid gap-4 lg:grid-cols-[1fr_320px]">
           <div className="space-y-4">
             {canManagePhoto ? (

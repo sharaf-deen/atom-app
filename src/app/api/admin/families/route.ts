@@ -133,6 +133,9 @@ function revalidateFamilyViews() {
   try {
     revalidatePath('/members')
   } catch {}
+  try {
+    revalidatePath('/family')
+  } catch {}
 }
 
 export async function POST(req: Request) {
@@ -357,7 +360,7 @@ export async function POST(req: Request) {
       process.env.NEXT_PUBLIC_SITE_URL ||
       'http://localhost:3000'
     ).replace(/\/$/, '')
-    const redirectTo = `${appUrl}/auth/complete-invite?next=%2F`
+    const redirectTo = `${appUrl}/auth/complete-invite?next=%2Ffamily`
     const authMetadata = {
       account_type: 'family_parent',
       family_id: familyId,
