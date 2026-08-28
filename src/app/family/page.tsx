@@ -9,6 +9,7 @@ import Section from '@/components/layout/Section'
 import { cairoToday, diffDays } from '@/lib/cairoDate'
 import { getSessionUser } from '@/lib/session'
 import { createSupabaseRSC } from '@/lib/supabaseServer'
+import FreezeRequestForm from '@/components/freeze/FreezeRequestForm'
 
 type PageProps = {
   searchParams?: {
@@ -286,7 +287,7 @@ export default async function FamilyDashboardPage({ searchParams }: PageProps) {
               <span className="rounded-full border bg-gray-50 px-3 py-1 text-xs font-medium">
                 {currentGuardian.is_primary ? 'Primary guardian' : 'Guardian'}
               </span>
-              <span className="rounded-full border bg-gray-50 px-3 py-1 text-xs font-medium">Read only</span>
+              <span className="rounded-full border bg-gray-50 px-3 py-1 text-xs font-medium">Freeze requests enabled</span>
             </div>
           </div>
           <div className="mt-4 flex flex-wrap gap-2">
@@ -374,6 +375,12 @@ export default async function FamilyDashboardPage({ searchParams }: PageProps) {
                 <p className="mt-1 text-sm opacity-90">{selectedMembership.meta}</p>
                 <p className="mt-3 text-xs opacity-70">Membership management remains handled by the academy.</p>
               </section>
+
+              <FreezeRequestForm
+                memberUserId={selected.user_id}
+                memberName={displayName(selected.first_name, selected.last_name)}
+                mode="guardian"
+              />
             </div>
 
             <section className="flex min-h-[280px] items-center justify-center rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-5 shadow-soft">

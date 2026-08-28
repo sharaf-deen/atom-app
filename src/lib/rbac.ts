@@ -173,6 +173,7 @@ const APP_NAV_BY_ROLE: MenuByRole = {
     { label: 'Invoices', href: '/invoices', icon: 'file-text' },
     { label: 'Payments', href: '/admin/payments', icon: 'file-text' },
     { label: 'Membership Refunds', href: '/admin/membership-refunds', icon: 'wallet' },
+    { label: 'Freeze Requests', href: '/admin/freeze-requests', icon: 'calendar' },
     { label: 'Cash Report', href: '/admin/cash-report', icon: 'wallet' },
     { label: 'Outstanding Dues', href: '/admin/outstanding-dues', icon: 'wallet' },
     { label: 'Membership Activity', href: '/admin/membership-activity', icon: 'file-text' },
