@@ -268,5 +268,36 @@ export async function POST(req: Request) {
     return json(500, { ok: false, error: insertErr.message })
   }
 
+  // Notify every Super Admin about the newly created pending request.
+  // Delivery is best-effort: a notification issue must never roll back a valid freeze request.
+  if (inserted?.id) {
+    const { data: superAdmins, error: superAdminsErr } = await admin
+      .from('profiles')
+      .select('user_id')
+      .eq('role', 'super_admin')
+      .not('user_id', 'is', null)
+
+    if (!superAdminsErr) {
+      const superAdminIds = Array.from(
+        new Set((superAdmins ?? []).map((row: any) => String(row.user_id || '')).filter(Boolean)),
+      )
+
+      if (superAdminIds.length > 0) {
+        const memberName = String(eligibility.body?.member?.name || 'Member')
+        const sourceLabel = requester === 'guardian' ? 'Parent/guardian' : 'Member'
+        const notificationRows = superAdminIds.map((userId) => ({
+          user_id: userId,
+          member_id: memberUserId,
+          created_by: me.data.user.id,
+          kind: 'system',
+          title: 'New freeze request',
+          body: `${memberName} requested a membership freeze from ${from} to ${to}. Source: ${sourceLabel}.`,
+        }))
+
+        await admin.from('notifications').insert(notificationRows)
+      }
+    }
+  }
+
   return json(201, { ok: true, id: inserted?.id ?? null, status: 'pending' })
 }
