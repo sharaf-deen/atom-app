@@ -19,6 +19,36 @@ function sanitizeNext(next: string | null) {
   return n || '/'
 }
 
+async function resolveSignedInDestination(
+  supabase: ReturnType<typeof createSupabaseBrowserClient>,
+  userId: string,
+  nextUrl: string,
+) {
+  if (nextUrl !== '/') return nextUrl
+
+  try {
+    const [{ data: guardian }, { data: profile }] = await Promise.all([
+      supabase
+        .from('family_guardians')
+        .select('family_id')
+        .eq('auth_user_id', userId)
+        .limit(1)
+        .maybeSingle(),
+      supabase
+        .from('profiles')
+        .select('member_id')
+        .eq('user_id', userId)
+        .maybeSingle(),
+    ])
+
+    // Preserve the normal member login flow when the parent is also an ATOM
+    // member. Parent-only accounts have no member profile and land on My Family.
+    if (guardian?.family_id && !profile?.member_id) return '/family'
+  } catch {}
+
+  return nextUrl
+}
+
 function LoginInner() {
   const searchParams = useSearchParams()
   const nextUrl = useMemo(() => sanitizeNext(searchParams.get('next')), [searchParams])
@@ -40,7 +70,8 @@ function LoginInner() {
       if (!mounted) return
       if (data.session) {
         setStatus('You are already signed in. Redirecting…')
-        window.location.replace(nextUrl)
+        const destination = await resolveSignedInDestination(supabase, data.session.user.id, nextUrl)
+        window.location.replace(destination)
       }
     })()
     return () => {
@@ -81,7 +112,11 @@ function LoginInner() {
       }
 
       setStatus('Signed in. Redirecting…')
-      window.location.replace(nextUrl)
+      const signedInUserId = data.user?.id ?? data.session?.user?.id ?? null
+      const destination = signedInUserId
+        ? await resolveSignedInDestination(supabase, signedInUserId, nextUrl)
+        : nextUrl
+      window.location.replace(destination)
     } catch {
       setErr('Network error')
       setStatus('')
