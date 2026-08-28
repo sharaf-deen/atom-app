@@ -40,7 +40,7 @@ export async function POST(req: Request) {
 
   const { data: requestRow, error: readErr } = await admin
     .from('freeze_requests')
-    .select('id,subscription_id,requested_start_date,requested_end_date,status')
+    .select('id,member_user_id,subscription_id,requested_start_date,requested_end_date,status,requested_by_auth_user_id,request_source')
     .eq('id', id)
     .maybeSingle()
   if (readErr) return json(500, { ok: false, error: readErr.message })
@@ -62,16 +62,40 @@ export async function POST(req: Request) {
     if ((applied ?? []).length === 0) return json(409, { ok: false, error: 'FREEZE_NOT_APPLIED' })
   }
 
-  const { error: updateErr } = await admin
+  const nextStatus = action === 'approve' ? 'approved' : 'denied'
+  const { data: updated, error: updateErr } = await admin
     .from('freeze_requests')
     .update({
-      status: action === 'approve' ? 'approved' : 'denied',
+      status: nextStatus,
       processed_by: me.data.user.id,
       processed_at: new Date().toISOString(),
       admin_note: note || null,
     })
     .eq('id', id)
     .eq('status', 'pending')
+    .select('id')
+    .maybeSingle()
   if (updateErr) return json(500, { ok: false, error: updateErr.message })
-  return json(200, { ok: true, status: action === 'approve' ? 'approved' : 'denied' })
+  if (!updated) return json(409, { ok: false, error: 'This freeze request has already been processed.' })
+
+  const notificationUserId = requestRow.requested_by_auth_user_id || requestRow.member_user_id
+  const title = nextStatus === 'approved' ? 'Freeze request approved' : 'Freeze request rejected'
+  const range = `${requestRow.requested_start_date} → ${requestRow.requested_end_date || '—'}`
+  const body = nextStatus === 'approved'
+    ? `Your freeze request for ${range} was approved and applied.`
+    : `Your freeze request for ${range} was rejected.${note ? ` Reason: ${note}` : ''}`
+
+  // Notification delivery is best-effort and must never undo a valid review.
+  if (notificationUserId) {
+    await admin.from('notifications').insert({
+      user_id: notificationUserId,
+      member_id: requestRow.member_user_id,
+      created_by: me.data.user.id,
+      kind: 'system',
+      title,
+      body,
+    })
+  }
+
+  return json(200, { ok: true, status: nextStatus })
 }

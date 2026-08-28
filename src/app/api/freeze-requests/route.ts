@@ -110,7 +110,7 @@ async function loadEligibility(admin: any, authUserId: string, memberUserId: str
 
   const { data: requests, error: reqErr } = await admin
     .from('freeze_requests')
-    .select('id,subscription_id,requested_start_date,requested_end_date,reason,status,created_at,admin_note')
+    .select('id,subscription_id,requested_start_date,requested_end_date,reason,status,created_at,admin_note,requested_by_auth_user_id,request_source,canceled_at')
     .eq('member_user_id', memberUserId)
     .order('created_at', { ascending: false })
     .limit(20)
@@ -124,6 +124,9 @@ async function loadEligibility(admin: any, authUserId: string, memberUserId: str
     status: r.status,
     created_at: r.created_at,
     admin_note: r.admin_note ?? null,
+    request_source: r.request_source ?? null,
+    canceled_at: r.canceled_at ?? null,
+    can_cancel: r.status === 'pending' && r.requested_by_auth_user_id === authUserId,
   }))
   const pendingRequest = normalizedRequests.find((r: any) => r.status === 'pending') ?? null
 

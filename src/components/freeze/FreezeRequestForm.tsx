@@ -13,6 +13,9 @@ type RequestRow = {
   status: 'pending' | 'approved' | 'denied' | 'canceled'
   created_at: string
   admin_note: string | null
+  request_source: 'self' | 'guardian' | null
+  canceled_at: string | null
+  can_cancel: boolean
 }
 
 type Eligibility = {
@@ -49,6 +52,13 @@ function statusClasses(status: RequestRow['status']) {
   return 'border-amber-200 bg-amber-50 text-amber-800'
 }
 
+function statusLabel(status: RequestRow['status']) {
+  if (status === 'approved') return 'Approved'
+  if (status === 'denied') return 'Rejected'
+  if (status === 'canceled') return 'Cancelled'
+  return 'Pending'
+}
+
 export default function FreezeRequestForm({
   memberUserId,
   memberName,
@@ -61,6 +71,7 @@ export default function FreezeRequestForm({
   const [data, setData] = useState<Eligibility | null>(null)
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
+  const [canceling, setCanceling] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
   const [from, setFrom] = useState('')
@@ -126,6 +137,31 @@ export default function FreezeRequestForm({
     }
   }
 
+  async function cancelPendingRequest() {
+    const request = data?.pending_request
+    if (!request?.can_cancel) return
+    if (!window.confirm('Cancel this pending freeze request?')) return
+
+    setCanceling(true)
+    setError(null)
+    setSuccess(null)
+    try {
+      const res = await fetch('/api/freeze-requests/cancel', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: request.id }),
+      })
+      const json = await res.json().catch(() => null)
+      if (!res.ok || !json?.ok) throw new Error(json?.error || 'Could not cancel freeze request.')
+      setSuccess('Freeze request cancelled. No subscription change was made.')
+      await load()
+    } catch (e: any) {
+      setError(e?.message || 'Could not cancel freeze request.')
+    } finally {
+      setCanceling(false)
+    }
+  }
+
   return (
     <section className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-5 shadow-soft">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -155,6 +191,18 @@ export default function FreezeRequestForm({
               <div className="font-semibold">Request pending review</div>
               <div className="mt-1">{fmtDate(data.pending_request.requested_start_date)} → {fmtDate(data.pending_request.requested_end_date)}</div>
               <div className="mt-1 text-amber-800">{data.pending_request.reason}</div>
+              {data.pending_request.can_cancel ? (
+                <button
+                  type="button"
+                  onClick={cancelPendingRequest}
+                  disabled={canceling}
+                  className="mt-3 rounded-xl border border-amber-300 bg-white px-3 py-2 text-sm font-semibold text-amber-900 disabled:opacity-50"
+                >
+                  {canceling ? 'Cancelling…' : 'Cancel request'}
+                </button>
+              ) : (
+                <div className="mt-2 text-xs text-amber-800">This pending request can only be cancelled by the account that submitted it.</div>
+              )}
             </div>
           ) : data.can_request && data.subscription ? (
             <form onSubmit={submit} className="space-y-4">
@@ -226,7 +274,7 @@ export default function FreezeRequestForm({
                   <div key={request.id} className="rounded-xl border bg-white p-3 text-sm">
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <span>{fmtDate(request.requested_start_date)} → {fmtDate(request.requested_end_date)}</span>
-                      <span className={`rounded-full border px-2 py-0.5 text-xs font-medium ${statusClasses(request.status)}`}>{request.status}</span>
+                      <span className={`rounded-full border px-2 py-0.5 text-xs font-medium ${statusClasses(request.status)}`}>{statusLabel(request.status)}</span>
                     </div>
                     <div className="mt-1 text-[hsl(var(--muted))]">{request.reason}</div>
                     {request.admin_note ? <div className="mt-1 text-xs text-[hsl(var(--muted))]">Academy note: {request.admin_note}</div> : null}
