@@ -14,6 +14,7 @@ import { hasLifetimeGymAccess } from '@/lib/rbac'
 import { createSupabaseRSC } from '@/lib/supabaseServer'
 import { getSessionUser, type Role } from '@/lib/session'
 import { cairoToday, diffDays } from '@/lib/cairoDate'
+import FreezeRequestForm from '@/components/freeze/FreezeRequestForm'
 
 type ProfileRow = {
   user_id: string
@@ -366,6 +367,14 @@ export default async function ProfilePage() {
                 {summary.extra ? <p className="text-sm font-medium">{summary.extra}</p> : null}
               </div>
             </section>
+
+            {p.member_id ? (
+              <FreezeRequestForm
+                memberUserId={p.user_id}
+                memberName={(p.first_name || p.last_name) ? `${p.first_name ?? ''} ${p.last_name ?? ''}`.trim() : 'Member'}
+                mode="self"
+              />
+            ) : null}
           </div>
 
           <section className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-5 shadow-soft flex items-center justify-center">
