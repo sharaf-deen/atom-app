@@ -799,8 +799,31 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
 
   if (!profile) return notFound()
 
+  const { data: familyLink } = await adminDb
+    .from('family_members')
+    .select('family_id')
+    .eq('member_id', profile.user_id)
+    .maybeSingle()
+
+  let hasFamilyGuardian = false
+  if (familyLink?.family_id) {
+    const { data: guardianLink } = await adminDb
+      .from('family_guardians')
+      .select('auth_user_id')
+      .eq('family_id', familyLink.family_id)
+      .limit(1)
+      .maybeSingle()
+
+    hasFamilyGuardian = !!guardianLink?.auth_user_id
+  }
+
+  // Family-managed dependants intentionally have no personal Auth/email.
+  // They are valid member profiles managed through a linked family guardian,
+  // not orphan profiles requiring an Auth repair.
+  const isFamilyManagedMember = !profile.email && !!familyLink?.family_id && hasFamilyGuardian
+
   const isSelf = me.id === profile.user_id
-  const canDeleteUser = me.role === 'super_admin' && !isSelf
+  const canDeleteUser = me.role === 'super_admin' && !isSelf && !isFamilyManagedMember
   const isCoachViewingOtherMember = (me.role === 'coach' || me.role === 'head_coach') && !isSelf
   const receptionDeskView = me.role === 'reception' && !isSelf
 
@@ -1015,6 +1038,7 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
   const fullName = `${profile.first_name ?? ''} ${profile.last_name ?? ''}`.trim() || '—'
   const age = ageYears(profile.date_of_birth)
   const showSubscriptionActions = canCreateSubscription && viewedRole === 'member' && !coachSafeView
+  const showResendInvite = canResendInvite && !isFamilyManagedMember
   const whatsappHref = !coachSafeView && !isSelf ? toWhatsAppHref(profile.phone) : null
   const showContactActions = !coachSafeView && !isSelf && !!(profile.phone || profile.email)
   const canSendDirectNotification = !coachSafeView && !isSelf && canManageMemberNotifications(me.role) && canReceiveDirectNotification(profile.role)
@@ -1068,6 +1092,7 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
               {typeof age === 'number' ? <TinyBadge>{age < 17 ? `Kid · ${age}y` : `Adult · ${age}y`}</TinyBadge> : null}
               {coachSafeView ? <TinyBadge tone="success">Coach read-only view</TinyBadge> : null}
               {receptionDeskView ? <TinyBadge tone="success">Reception desk view</TinyBadge> : null}
+              {isFamilyManagedMember ? <TinyBadge tone="success">Family managed</TinyBadge> : null}
             </div>
 
             <div>
@@ -1222,7 +1247,7 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
           </Surface>
         ) : null}
 
-        {(showSubscriptionActions || canResendInvite || receptionDeskView || showContactActions || canSendDirectNotification) ? (
+        {(showSubscriptionActions || showResendInvite || receptionDeskView || showContactActions || canSendDirectNotification || canDeleteUser) ? (
           <Surface className="p-4 sm:p-5">
             <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
               <div className="min-w-0 flex-1">
@@ -1298,7 +1323,7 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
                   </>
                 ) : null}
 
-                {canResendInvite ? <ResendInviteButton userId={profile.user_id} email={profile.email} /> : null}
+                {showResendInvite ? <ResendInviteButton userId={profile.user_id} email={profile.email} /> : null}
                 {canDeleteUser ? (
                   <DeleteUserButton userId={profile.user_id} email={profile.email} memberId={profile.member_id} />
                 ) : null}
