@@ -1114,6 +1114,7 @@ function HomeLogoutShortcut() {
 
 function memberActions(): QuickAction[] {
   return [
+    { href: '/profile#freeze-request', label: 'Request freeze', desc: 'Submit or review a membership freeze request.', icon: Clock3 },
     { href: '/profile', label: 'My profile', desc: 'Identity, subscription details and QR code.', icon: IdCard },
     { href: '/private-coaching', label: 'Private coaching', desc: 'Request and book private coaching sessions.', icon: UserCog },
     { href: '/store', label: 'Store', desc: 'Browse available products and equipment.', icon: ShoppingBag },
