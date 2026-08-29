@@ -369,11 +369,13 @@ export default async function ProfilePage() {
             </section>
 
             {p.member_id ? (
-              <FreezeRequestForm
-                memberUserId={p.user_id}
-                memberName={(p.first_name || p.last_name) ? `${p.first_name ?? ''} ${p.last_name ?? ''}`.trim() : 'Member'}
-                mode="self"
-              />
+              <div id="freeze-request" className="scroll-mt-24">
+                <FreezeRequestForm
+                  memberUserId={p.user_id}
+                  memberName={(p.first_name || p.last_name) ? `${p.first_name ?? ''} ${p.last_name ?? ''}`.trim() : 'Member'}
+                  mode="self"
+                />
+              </div>
             ) : null}
           </div>
 
