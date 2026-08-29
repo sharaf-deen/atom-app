@@ -58,6 +58,12 @@ function minutes(value: string) {
   return hours * 60 + mins
 }
 
+function normalizeTimeInput(value: string) {
+  const trimmed = value.trim()
+  const match = /^(\d{2}):(\d{2})(?::\d{2}(?:\.\d+)?)?$/.exec(trimmed)
+  return match ? `${match[1]}:${match[2]}` : trimmed
+}
+
 function formatSlotDate(value?: string | null) {
   if (!value) return '—'
   const date = new Date(`${value}T00:00:00`)
@@ -175,8 +181,8 @@ export async function POST(req: Request, { params }: { params: { id: string } })
       }
 
       const slotDate = String(body?.slot_date ?? '').trim()
-      const startTime = String(body?.start_time ?? '').trim()
-      const endTime = String(body?.end_time ?? '').trim()
+      const startTime = normalizeTimeInput(String(body?.start_time ?? ''))
+      const endTime = normalizeTimeInput(String(body?.end_time ?? ''))
       const note = String(body?.note ?? '').trim()
 
       if (!isValidPrivateCoachingSlotDate(slotDate) || slotDate < todayInputValue()) {

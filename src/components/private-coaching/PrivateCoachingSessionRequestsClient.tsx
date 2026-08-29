@@ -70,6 +70,12 @@ function addMinutesToTime(value: string, minutesToAdd: number) {
   return `${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`
 }
 
+function normalizeTimeInput(value?: string | null) {
+  const trimmed = String(value ?? '').trim()
+  const match = /^(\d{2}):(\d{2})(?::\d{2}(?:\.\d+)?)?$/.exec(trimmed)
+  return match ? `${match[1]}:${match[2]}` : trimmed
+}
+
 function formatSlotDate(value?: string | null) {
   if (!value) return '—'
   const date = new Date(`${value}T00:00:00`)
@@ -229,8 +235,8 @@ export default function PrivateCoachingSessionRequestsClient({ mode }: Props) {
     setActionRequestId(request.id)
     setActionMode('propose')
     setProposalDate(request.proposed_date || request.requested_date)
-    setProposalStart(request.proposed_start_time || request.requested_start_time)
-    setProposalEnd(request.proposed_end_time || request.requested_end_time)
+    setProposalStart(normalizeTimeInput(request.proposed_start_time || request.requested_start_time))
+    setProposalEnd(normalizeTimeInput(request.proposed_end_time || request.requested_end_time))
     setProposalNote(request.coach_note || '')
     setDeclineReason('')
   }
