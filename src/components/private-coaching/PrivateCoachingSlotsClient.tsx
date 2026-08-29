@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import Button from '@/components/ui/Button'
 import InlineAlert from '@/components/ui/InlineAlert'
 import ConfirmActionModal, { type ConfirmActionSummaryItem } from '@/components/ui/ConfirmActionModal'
+import PrivateCoachingSessionRequestsClient from '@/components/private-coaching/PrivateCoachingSessionRequestsClient'
 import {
   formatPrivateCoachingSlotTime,
   privateCoachingSlotStatusLabel,
@@ -320,6 +321,8 @@ export default function PrivateCoachingSlotsClient({ rows, coaches, members, can
   return (
     <div className="space-y-5">
       {status.message ? <InlineAlert variant={status.kind === 'error' ? 'error' : 'success'}>{status.message}</InlineAlert> : null}
+
+      <PrivateCoachingSessionRequestsClient mode="manager" />
 
       <form onSubmit={handleQuickBookSubmit} className="rounded-3xl border border-emerald-200 bg-emerald-50/40 p-4 shadow-soft">
         <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">

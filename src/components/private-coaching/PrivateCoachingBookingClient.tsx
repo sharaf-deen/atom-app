@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import Button from '@/components/ui/Button'
 import InlineAlert from '@/components/ui/InlineAlert'
 import ConfirmActionModal, { type ConfirmActionSummaryItem } from '@/components/ui/ConfirmActionModal'
+import PrivateCoachingSessionRequestsClient from '@/components/private-coaching/PrivateCoachingSessionRequestsClient'
 import {
   formatPrivateCoachingSlotTime,
   privateCoachingBookingStatusLabel,
@@ -201,6 +202,8 @@ export default function PrivateCoachingBookingClient({ totalRemaining, available
           Choose an available coach slot. Booking one slot uses one private coaching token.
         </p>
       </div>
+
+      <PrivateCoachingSessionRequestsClient mode="member" />
 
       {backdatedSlots.length > 0 ? (
         <div>
