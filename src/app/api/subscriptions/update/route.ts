@@ -16,6 +16,13 @@ function isISODateOnly(s?: string | null) {
   return !!s && /^\d{4}-\d{2}-\d{2}$/.test(s)
 }
 
+function addDays(dateOnly: string, days: number) {
+  const [y, m, d] = dateOnly.split('-').map(Number)
+  const dt = new Date(Date.UTC(y, m - 1, d))
+  dt.setUTCDate(dt.getUTCDate() + days)
+  return dt.toISOString().slice(0, 10)
+}
+
 function addMonthsSafe(dateOnly: string, months: number) {
   const [y, m, d] = dateOnly.split('-').map(Number)
   const base = new Date(Date.UTC(y, m - 1, d))
@@ -32,19 +39,10 @@ function addMonthsSafe(dateOnly: string, months: number) {
   return out.toISOString().slice(0, 10)
 }
 
-function planToMonths(plan: string) {
-  switch (plan) {
-    case '1m':
-      return 1
-    case '3m':
-      return 3
-    case '6m':
-      return 6
-    case '12m':
-      return 12
-    default:
-      return 0
-  }
+function computeTimePlanEnd(startDate: string, plan: string) {
+  if (plan === '1w') return addDays(startDate, 6)
+  const months = plan === '1m' ? 1 : plan === '3m' ? 3 : plan === '6m' ? 6 : plan === '12m' ? 12 : 0
+  return months > 0 ? addMonthsSafe(startDate, months) : null
 }
 
 function makeAdminClient() {
@@ -206,7 +204,7 @@ export async function POST(req: Request) {
   // Plan (time subscriptions)
   if (patch.plan !== undefined) {
     const p = String(patch.plan)
-    if (!['1m', '3m', '6m', '12m', 'sessions'].includes(p)) {
+    if (!['1w', '1m', '3m', '6m', '12m', 'sessions'].includes(p)) {
       return json(400, { ok: false, error: 'Invalid plan' })
     }
     update.plan = p
@@ -234,12 +232,12 @@ export async function POST(req: Request) {
       return json(400, { ok: false, error: 'Invalid plan for time subscription' })
     }
 
-    const months = planToMonths(finalPlan)
-    if (months <= 0) return json(400, { ok: false, error: 'Invalid plan' })
+    const computedEnd = computeTimePlanEnd(finalStart, finalPlan)
+    if (!computedEnd) return json(400, { ok: false, error: 'Invalid plan' })
 
     update.plan = finalPlan
     update.start_date = finalStart
-    update.end_date = addMonthsSafe(finalStart, months)
+    update.end_date = computedEnd
   }
 
   // For session subscriptions, ignore plan changes silently (UI won’t send it)

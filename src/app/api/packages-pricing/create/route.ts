@@ -69,7 +69,7 @@ export async function POST(req: Request) {
 
   if (!name) return json(400, { ok: false, error: 'Name is required' })
   if (!['membership', 'private'].includes(type)) return json(400, { ok: false, error: 'Invalid type' })
-  if (!['month', 'session'].includes(unit)) return json(400, { ok: false, error: 'Invalid unit' })
+  if (!['week', 'month', 'session'].includes(unit)) return json(400, { ok: false, error: 'Invalid unit' })
   if (qty < 1) return json(400, { ok: false, error: 'Invalid qty' })
   if (price_egp < 0) return json(400, { ok: false, error: 'Invalid price' })
 
