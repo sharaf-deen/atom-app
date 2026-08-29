@@ -89,6 +89,18 @@ function slotTimeLabel(startTime: string, endTime: string) {
   return `${formatPrivateCoachingSlotTime(startTime)} - ${formatPrivateCoachingSlotTime(endTime)}`
 }
 
+function addMinutesToTime(value: string, minutesToAdd: number) {
+  const [hours, minutes] = value.split(':').map((part) => Number(part))
+  if (!Number.isFinite(hours) || !Number.isFinite(minutes)) return value
+
+  const total = hours * 60 + minutes + minutesToAdd
+  if (total >= 24 * 60) return '23:59'
+
+  const nextHours = Math.floor(total / 60)
+  const nextMinutes = total % 60
+  return `${String(nextHours).padStart(2, '0')}:${String(nextMinutes).padStart(2, '0')}`
+}
+
 function cancelSlotSummaryItems(row: SlotRow | null): ConfirmActionSummaryItem[] {
   if (!row) return []
 
@@ -111,6 +123,14 @@ function cancelSlotSummaryItems(row: SlotRow | null): ConfirmActionSummaryItem[]
 
 export default function PrivateCoachingSlotsClient({ rows, coaches, members, canChooseCoach, defaultCoachId }: Props) {
   const router = useRouter()
+  const [quickMemberId, setQuickMemberId] = React.useState('')
+  const [quickCoachId, setQuickCoachId] = React.useState(defaultCoachId || coaches[0]?.user_id || '')
+  const [quickDate, setQuickDate] = React.useState(todayInputValue())
+  const [quickStartTime, setQuickStartTime] = React.useState('13:00')
+  const [quickEndTime, setQuickEndTime] = React.useState('14:00')
+  const [quickNote, setQuickNote] = React.useState('')
+  const [quickBusy, setQuickBusy] = React.useState(false)
+  const [quickConfirmOpen, setQuickConfirmOpen] = React.useState(false)
   const [coachId, setCoachId] = React.useState(defaultCoachId || coaches[0]?.user_id || '')
   const [slotDate, setSlotDate] = React.useState(todayInputValue())
   const [startTime, setStartTime] = React.useState('11:00')
@@ -125,6 +145,8 @@ export default function PrivateCoachingSlotsClient({ rows, coaches, members, can
   const [confirmCancelRow, setConfirmCancelRow] = React.useState<SlotRow | null>(null)
   const [status, setStatus] = React.useState<{ kind: 'success' | 'error' | ''; message: string }>({ kind: '', message: '' })
 
+  const quickSelectedCoach = coaches.find((coach) => coach.user_id === quickCoachId)
+  const quickSelectedMember = members.find((member) => member.user_id === quickMemberId)
   const selectedCoach = coaches.find((coach) => coach.user_id === coachId)
   const selectedMember = members.find((member) => member.user_id === assignedMemberId)
   const isBackdatedDraft = isPastDate(slotDate)
@@ -134,6 +156,16 @@ export default function PrivateCoachingSlotsClient({ rows, coaches, members, can
     if (slotView === 'past') return rows.filter((row) => isPastDate(row.slotDate))
     return rows.filter((row) => !isPastDate(row.slotDate))
   }, [rows, slotView])
+
+  const quickBookingSummaryItems: ConfirmActionSummaryItem[] = [
+    { label: 'Member', value: quickSelectedMember ? `${quickSelectedMember.full_name} · ${quickSelectedMember.meta}` : '—' },
+    { label: 'Coach', value: quickSelectedCoach?.full_name || '—' },
+    { label: 'Date', value: formatSlotDate(quickDate) },
+    { label: 'Time', value: slotTimeLabel(quickStartTime, quickEndTime) },
+    { label: 'Note', value: quickNote.trim() || '—' },
+    { label: 'Booking impact', value: 'Booking is created immediately without a manual availability-slot step' },
+    { label: 'Token impact', value: '1 active private coaching token is consumed immediately' },
+  ]
 
   const createSlotSummaryItems: ConfirmActionSummaryItem[] = [
     { label: 'Coach', value: selectedCoach?.full_name || '—' },
@@ -149,6 +181,64 @@ export default function PrivateCoachingSlotsClient({ rows, coaches, members, can
     { label: 'Status impact', value: isBackdatedDraft ? 'Past correction slot will be available only to the assigned member' : 'Slot will be available for members with active private coaching tokens' },
     { label: 'Token impact', value: 'No token is consumed until the member books this slot' },
   ]
+
+  function handleQuickBookSubmit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (quickBusy) return
+
+    if (!quickMemberId) {
+      setStatus({ kind: 'error', message: 'Choose a member.' })
+      return
+    }
+    if (!quickCoachId) {
+      setStatus({ kind: 'error', message: 'Choose a coach.' })
+      return
+    }
+    if (isPastDate(quickDate)) {
+      setStatus({ kind: 'error', message: 'Quick booking is for today or a future date. Use the existing correction-slot flow for past sessions.' })
+      return
+    }
+
+    setStatus({ kind: '', message: '' })
+    setQuickConfirmOpen(true)
+  }
+
+  async function quickBookSession() {
+    if (quickBusy || !quickMemberId || !quickCoachId) return
+
+    setQuickBusy(true)
+    setStatus({ kind: '', message: '' })
+
+    try {
+      const res = await fetch('/api/private-coaching/bookings/quick', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          member_id: quickMemberId,
+          coach_id: quickCoachId,
+          slot_date: quickDate,
+          start_time: quickStartTime,
+          end_time: quickEndTime,
+          note: quickNote,
+        }),
+      })
+      const json = await res.json().catch(() => ({}))
+      if (!res.ok || !json?.ok) {
+        setStatus({ kind: 'error', message: json?.details || json?.error || 'Could not create the direct booking.' })
+        return
+      }
+
+      setQuickConfirmOpen(false)
+      setQuickMemberId('')
+      setQuickNote('')
+      setStatus({ kind: 'success', message: 'Private session booked directly. 1 member token was consumed.' })
+      router.refresh()
+    } catch (error: any) {
+      setStatus({ kind: 'error', message: error?.message || 'Could not create the direct booking.' })
+    } finally {
+      setQuickBusy(false)
+    }
+  }
 
   function handleCreateSlotSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -230,6 +320,112 @@ export default function PrivateCoachingSlotsClient({ rows, coaches, members, can
   return (
     <div className="space-y-5">
       {status.message ? <InlineAlert variant={status.kind === 'error' ? 'error' : 'success'}>{status.message}</InlineAlert> : null}
+
+      <form onSubmit={handleQuickBookSubmit} className="rounded-3xl border border-emerald-200 bg-emerald-50/40 p-4 shadow-soft">
+        <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <h4 className="text-lg font-semibold tracking-tight">Quick book session</h4>
+            <p className="text-sm text-[hsl(var(--muted))]">
+              Already agreed with the member? Create the booking directly. No availability slot needs to be prepared first.
+            </p>
+          </div>
+          <span className="rounded-full border border-emerald-200 bg-white px-3 py-1 text-xs font-semibold text-emerald-800">
+            1 token on confirm
+          </span>
+        </div>
+
+        <div className="mt-4 grid gap-3 md:grid-cols-2 lg:grid-cols-6">
+          <label className="grid gap-1 lg:col-span-2">
+            <span className="text-sm font-semibold">Member</span>
+            <select
+              value={quickMemberId}
+              onChange={(event) => setQuickMemberId(event.target.value)}
+              className="min-h-11 rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm shadow-soft outline-none focus:border-black"
+              required
+            >
+              <option value="">Choose member</option>
+              {members.map((member) => (
+                <option key={member.user_id} value={member.user_id}>
+                  {member.full_name} · {member.meta}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          {canChooseCoach ? (
+            <label className="grid gap-1">
+              <span className="text-sm font-semibold">Coach</span>
+              <select
+                value={quickCoachId}
+                onChange={(event) => setQuickCoachId(event.target.value)}
+                className="min-h-11 rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm shadow-soft outline-none focus:border-black"
+                required
+              >
+                {coaches.map((coach) => (
+                  <option key={coach.user_id} value={coach.user_id}>
+                    {coach.full_name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : null}
+
+          <label className="grid gap-1">
+            <span className="text-sm font-semibold">Date</span>
+            <input
+              type="date"
+              min={todayInputValue()}
+              value={quickDate}
+              onChange={(event) => setQuickDate(event.target.value)}
+              className="min-h-11 rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm shadow-soft outline-none focus:border-black"
+              required
+            />
+          </label>
+
+          <label className="grid gap-1">
+            <span className="text-sm font-semibold">Start</span>
+            <input
+              type="time"
+              value={quickStartTime}
+              onChange={(event) => {
+                const value = event.target.value
+                setQuickStartTime(value)
+                setQuickEndTime(addMinutesToTime(value, 60))
+              }}
+              className="min-h-11 rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm shadow-soft outline-none focus:border-black"
+              required
+            />
+          </label>
+
+          <label className="grid gap-1">
+            <span className="text-sm font-semibold">End</span>
+            <input
+              type="time"
+              value={quickEndTime}
+              onChange={(event) => setQuickEndTime(event.target.value)}
+              className="min-h-11 rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm shadow-soft outline-none focus:border-black"
+              required
+            />
+          </label>
+
+          <label className="grid gap-1 md:col-span-2 lg:col-span-6">
+            <span className="text-sm font-semibold">Note</span>
+            <input
+              value={quickNote}
+              onChange={(event) => setQuickNote(event.target.value)}
+              maxLength={500}
+              placeholder="Optional note"
+              className="min-h-11 rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm shadow-soft outline-none focus:border-black"
+            />
+          </label>
+        </div>
+
+        <div className="mt-4 flex justify-end">
+          <Button type="submit" loading={quickBusy} loadingText="Booking…" disabled={quickBusy || !quickMemberId || !quickCoachId}>
+            Quick book
+          </Button>
+        </div>
+      </form>
 
       <form onSubmit={handleCreateSlotSubmit} className="rounded-3xl border border-[hsl(var(--border))] bg-white p-4 shadow-soft">
         <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
@@ -434,6 +630,21 @@ export default function PrivateCoachingSlotsClient({ rows, coaches, members, can
           )
         })}
       </div>
+
+      <ConfirmActionModal
+        open={quickConfirmOpen}
+        title="Confirm direct private coaching booking"
+        description="Please review the session before creating the booking."
+        confirmLabel="Confirm & book"
+        pendingLabel="Booking…"
+        pending={quickBusy}
+        summaryItems={quickBookingSummaryItems}
+        warning="This creates the booking immediately and consumes 1 active private coaching token. The existing coach-cancellation flow will return the token if the booking is later cancelled."
+        onCancel={() => {
+          if (!quickBusy) setQuickConfirmOpen(false)
+        }}
+        onConfirm={quickBookSession}
+      />
 
       <ConfirmActionModal
         open={confirmCreateOpen}
