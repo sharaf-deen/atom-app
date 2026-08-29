@@ -134,6 +134,8 @@ function statusLabel(status: string | null | undefined) {
 
 function planLabel(plan: string | null | undefined) {
   switch (plan) {
+    case '1w':
+      return '1 week'
     case '1m':
       return '1 month'
     case '3m':

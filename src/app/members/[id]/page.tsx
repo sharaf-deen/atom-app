@@ -135,6 +135,8 @@ function fmtMoneyEGP(value?: number | null) {
 
 function humanPlan(p?: Plan | null) {
   switch (p) {
+    case '1w':
+      return '1 week'
     case '1m':
       return '1 month'
     case '3m':

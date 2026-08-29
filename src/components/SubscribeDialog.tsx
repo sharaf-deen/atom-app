@@ -13,7 +13,7 @@ import InlineAlert from '@/components/ui/InlineAlert'
 import SaveButton from '@/components/forms/SaveButton'
 import ConfirmActionModal from '@/components/ui/ConfirmActionModal'
 
-export type Plan = '1m' | '3m' | '6m' | '12m' | 'sessions'
+export type Plan = '1w' | '1m' | '3m' | '6m' | '12m' | 'sessions'
 export type SubscriptionPaymentMethod = 'cash' | 'instapay' | 'card' | 'bank_transfer'
 
 function humanPaymentMethod(m: SubscriptionPaymentMethod) {
@@ -63,6 +63,8 @@ function addMonthsSafe(dateOnly: string, months: number) {
 
 function humanPlan(p: Plan) {
   switch (p) {
+    case '1w':
+      return '1 week'
     case '1m':
       return '1 month'
     case '3m':
@@ -184,6 +186,7 @@ export default function SubscribeDialog({
       return addDays(sd, 45)
     }
     if (!dateOk) return null
+    if (plan === '1w') return addDays(startDate, 6)
     const months = plan === '1m' ? 1 : plan === '3m' ? 3 : plan === '6m' ? 6 : 12
     return addMonthsSafe(startDate, months)
   }, [dateOk, plan, startDate])
@@ -341,11 +344,11 @@ export default function SubscribeDialog({
                     disabled={busy || status.kind === 'success'}
                     aria-label="Plan"
                   >
+                    <option value="1w">1 week — 1,000 EGP</option>
                     <option value="1m">1 month</option>
                     <option value="3m">3 months</option>
                     <option value="6m">6 months</option>
                     <option value="12m">12 months</option>
-                    <option value="sessions">Per sessions (45 days)</option>
                   </Select>
 
                   {plan !== 'sessions' ? (

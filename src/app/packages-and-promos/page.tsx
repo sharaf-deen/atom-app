@@ -47,12 +47,16 @@ export default async function PackagesAndPromosPage() {
   let packages: PackageItem[] = []
   let packagesError: string | null = null
   try {
-    const { data, error } = await admin
+    let query = admin
       .from('packages_pricing')
       .select('id,name,type,unit,qty,price_egp,is_active,benefits')
       .order('type', { ascending: true })
       .order('unit', { ascending: true })
       .order('qty', { ascending: true })
+
+    if (!canEdit) query = query.eq('is_active', true)
+
+    const { data, error } = await query
 
     if (error) packagesError = error.message
     packages = (data ?? []) as PackageItem[]

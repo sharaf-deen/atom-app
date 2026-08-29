@@ -50,7 +50,7 @@ function sanitizeBenefits(v: any) {
 type PackageLookup = {
   name: string
   type: 'membership' | 'private'
-  unit: 'month' | 'session'
+  unit: 'week' | 'month' | 'session'
   qty: number
   price_egp: number | null
 }
@@ -67,7 +67,7 @@ function normalizeLookup(raw: any): PackageLookup | null {
 
   if (!name) return null
   if (!['membership', 'private'].includes(type)) return null
-  if (!['month', 'session'].includes(unit)) return null
+  if (!['week', 'month', 'session'].includes(unit)) return null
   if (qty < 1) return null
   if (price !== null && price < 0) return null
 
@@ -160,7 +160,7 @@ export async function POST(req: Request) {
 
     if (patch.unit !== undefined) {
       const unit = String(patch.unit || '')
-      if (!['month', 'session'].includes(unit)) return json(400, { ok: false, error: 'INVALID_UNIT' })
+      if (!['week', 'month', 'session'].includes(unit)) return json(400, { ok: false, error: 'INVALID_UNIT' })
       update.unit = unit
     }
 
