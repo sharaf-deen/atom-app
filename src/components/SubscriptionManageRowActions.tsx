@@ -15,7 +15,7 @@ import { cairoTodayDateOnly } from '@/lib/cairoTime'
 // Note: we intentionally avoid depending on a specific Alert component API here.
 // We'll render a lightweight inline message box to prevent TS prop mismatches.
 
-type Plan = '1m' | '3m' | '6m' | '12m' | 'sessions'
+type Plan = '1w' | '1m' | '3m' | '6m' | '12m' | 'sessions'
 type SubscriptionType = 'time' | 'sessions'
 type PaymentMethod = 'cash' | 'instapay' | 'card' | 'bank_transfer'
 
@@ -51,6 +51,7 @@ function humanPaymentMethod(v?: string | null) {
 
 function humanPlan(value?: string | null, stype?: SubscriptionType) {
   if (stype === 'sessions' || value === 'sessions') return 'Per sessions'
+  if (value === '1w') return '1 week'
   if (value === '1m') return '1 month'
   if (value === '3m') return '3 months'
   if (value === '6m') return '6 months'
@@ -157,7 +158,7 @@ export default function SubscriptionManageRowActions({
   const [startDate, setStartDate] = useState<string>(sub.start_date ?? '')
   const [plan, setPlan] = useState<Plan>(() => {
     const p = String(sub.plan ?? '') as Plan
-    const allowed: Plan[] = ['1m', '3m', '6m', '12m', 'sessions']
+    const allowed: Plan[] = ['1w', '1m', '3m', '6m', '12m', 'sessions']
     return allowed.includes(p) ? p : isTime ? '1m' : 'sessions'
   })
 
@@ -227,6 +228,7 @@ export default function SubscriptionManageRowActions({
   const previewEnd = useMemo(() => {
     if (!isTime) return sub.end_date ?? null
     if (!isISODateOnly(startDate)) return null
+    if (plan === '1w') return addDays(startDate, 6)
     const months = planToMonths(plan)
     if (months <= 0) return null
     return addMonthsSafe(startDate, months)
@@ -674,6 +676,7 @@ export default function SubscriptionManageRowActions({
   }
 
   const planOptions = [
+    { label: '1 week', value: '1w' },
     { label: '1 month', value: '1m' },
     { label: '3 months', value: '3m' },
     { label: '6 months', value: '6m' },

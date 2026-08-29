@@ -13,8 +13,15 @@ import InlineAlert from '@/components/ui/InlineAlert'
 import SaveButton from '@/components/forms/SaveButton'
 import ConfirmActionModal from '@/components/ui/ConfirmActionModal'
 
-export type Plan = '1m' | '3m' | '6m' | '12m' | 'sessions'
+export type Plan = '1w' | '1m' | '3m' | '6m' | '12m' | 'sessions'
 export type SubscriptionPaymentMethod = 'cash' | 'instapay' | 'card' | 'bank_transfer'
+
+// Session memberships are legacy-only. This dialog is used for new sales and renewals,
+// so never allow an old/default `sessions` value to reactivate that sales path.
+function normalizeSellablePlan(plan?: Plan | null): Plan {
+  if (plan === 'sessions') return '1w'
+  return plan ?? '1m'
+}
 
 function humanPaymentMethod(m: SubscriptionPaymentMethod) {
   switch (m) {
@@ -63,6 +70,8 @@ function addMonthsSafe(dateOnly: string, months: number) {
 
 function humanPlan(p: Plan) {
   switch (p) {
+    case '1w':
+      return '1 week'
     case '1m':
       return '1 month'
     case '3m':
@@ -119,7 +128,7 @@ export default function SubscribeDialog({
   const router = useRouter()
 
   const [open, setOpen] = useState(false)
-  const [plan, setPlan] = useState<Plan>(defaultPlan ?? '1m')
+  const [plan, setPlan] = useState<Plan>(() => normalizeSellablePlan(defaultPlan))
   const [sessions, setSessions] = useState<number>(Math.min(Math.max(defaultSessions ?? 10, 1), 10))
   const [amount, setAmount] = useState<string>('0')
   const [paymentMethod, setPaymentMethod] = useState<SubscriptionPaymentMethod>('cash')
@@ -132,7 +141,7 @@ export default function SubscribeDialog({
 
   useEffect(() => {
     if (!open) return
-    setPlan(defaultPlan ?? '1m')
+    setPlan(normalizeSellablePlan(defaultPlan))
     setSessions(Math.min(Math.max(defaultSessions ?? 10, 1), 10))
     setStartDate(defaultStartDate ?? todayLocalDateStr())
     setAmount('0')
@@ -184,6 +193,7 @@ export default function SubscribeDialog({
       return addDays(sd, 45)
     }
     if (!dateOk) return null
+    if (plan === '1w') return addDays(startDate, 6)
     const months = plan === '1m' ? 1 : plan === '3m' ? 3 : plan === '6m' ? 6 : 12
     return addMonthsSafe(startDate, months)
   }, [dateOk, plan, startDate])
@@ -337,15 +347,15 @@ export default function SubscribeDialog({
                   <Select
                     label="Plan"
                     value={plan}
-                    onChange={(e) => setPlan(e.target.value as Plan)}
+                    onChange={(e) => setPlan(normalizeSellablePlan(e.target.value as Plan))}
                     disabled={busy || status.kind === 'success'}
                     aria-label="Plan"
                   >
+                    <option value="1w">1 week — 1,000 EGP</option>
                     <option value="1m">1 month</option>
                     <option value="3m">3 months</option>
                     <option value="6m">6 months</option>
                     <option value="12m">12 months</option>
-                    <option value="sessions">Per sessions (45 days)</option>
                   </Select>
 
                   {plan !== 'sessions' ? (

@@ -14,7 +14,7 @@ export type PackageItem = {
   id: PackageId
   name: string
   type: 'membership' | 'private'
-  unit: 'month' | 'session'
+  unit: 'week' | 'month' | 'session'
   qty: number
   price_egp: number
   is_active: boolean
@@ -144,6 +144,7 @@ function packageTypeLabel(value: any) {
 }
 
 function packageUnitLabel(value: any) {
+  if (value === 'week') return 'week(s)'
   if (value === 'session') return 'session(s)'
   return 'month(s)'
 }
@@ -466,6 +467,7 @@ export default function PricesList({ items, canEdit }: Props) {
         <div>
           <div className="text-xs text-[hsl(var(--muted))]">Unit</div>
           <Select value={newItem.unit} onChange={(e) => setNewItem((p) => ({ ...p, unit: e.target.value as any }))}>
+            <option value="week">week</option>
             <option value="month">month</option>
             <option value="session">session</option>
           </Select>
@@ -612,6 +614,7 @@ export default function PricesList({ items, canEdit }: Props) {
                     <td className="border-t border-[hsl(var(--border))] p-3">
                       {isEditing ? (
                         <Select value={String(row.unit ?? 'month')} onChange={(e) => setDraft((p) => ({ ...p, unit: e.target.value as any }))}>
+                          <option value="week">week</option>
                           <option value="month">month</option>
                           <option value="session">session</option>
                         </Select>

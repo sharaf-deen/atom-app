@@ -31,7 +31,7 @@ function toInt(v: any, def: number) {
 type PackageLookup = {
   name: string
   type: 'membership' | 'private'
-  unit: 'month' | 'session'
+  unit: 'week' | 'month' | 'session'
   qty: number
   price_egp: number | null
 }
@@ -48,7 +48,7 @@ function normalizeLookup(raw: any): PackageLookup | null {
 
   if (!name) return null
   if (!['membership', 'private'].includes(type)) return null
-  if (!['month', 'session'].includes(unit)) return null
+  if (!['week', 'month', 'session'].includes(unit)) return null
   if (qty < 1) return null
   if (price !== null && price < 0) return null
 

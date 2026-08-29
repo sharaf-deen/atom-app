@@ -9,7 +9,7 @@ import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 import { createSupabaseServerActionClient } from '@/lib/supabaseServer'
 import { generateInvoicePdfBytes, makeInvoiceNumber, type InvoiceSnapshot } from '@/lib/invoices'
 
-type Plan = '1m' | '3m' | '6m' | '12m' | 'sessions'
+type Plan = '1w' | '1m' | '3m' | '6m' | '12m' | 'sessions'
 type SubscriptionPaymentMethod = 'cash' | 'instapay' | 'card' | 'bank_transfer'
 
 const ALLOWED_PAYMENT_METHODS = new Set<SubscriptionPaymentMethod>([
@@ -26,7 +26,7 @@ function json(status: number, body: any) {
 }
 
 function isPlan(v: unknown): v is Plan {
-  return v === '1m' || v === '3m' || v === '6m' || v === '12m' || v === 'sessions'
+  return v === '1w' || v === '1m' || v === '3m' || v === '6m' || v === '12m' || v === 'sessions'
 }
 
 function parsePaymentMethod(v: unknown): SubscriptionPaymentMethod {
@@ -147,6 +147,8 @@ function normQR(v: unknown): string | null {
 
 function humanPlan(p: Plan, sessionsTotal?: number | null) {
   switch (p) {
+    case '1w':
+      return '1 week'
     case '1m':
       return '1 month'
     case '3m':
@@ -303,6 +305,13 @@ export async function POST(req: Request) {
     const body = await req.json().catch(() => ({} as any))
 
     const planRaw = body?.plan
+    if (String(planRaw ?? '') === 'sessions') {
+      return json(400, {
+        ok: false,
+        error: 'SESSION_PACKAGES_LEGACY_ONLY',
+        details: 'Session-based memberships are no longer available for renewal. Use the 1 Week membership instead.',
+      })
+    }
     if (!isPlan(planRaw)) {
       return json(400, { ok: false, error: 'INVALID_PLAN' })
     }
@@ -433,9 +442,8 @@ try {
 const startBase = isISODateOnly(body?.start_date) ? String(body.start_date) : todayCairo
 const start = maxActiveTimeEnd ? addDays(maxActiveTimeEnd, 1) : startBase
 
-const months = plan === '1m' ? 1 : plan === '3m' ? 3 : plan === '6m' ? 6 : 12
 payload.start_date = start
-payload.end_date = addMonthsSafe(start, months)
+payload.end_date = plan === '1w' ? addDays(start, 6) : addMonthsSafe(start, plan === '1m' ? 1 : plan === '3m' ? 3 : plan === '6m' ? 6 : 12)
 payload.sessions_total = null
 payload.sessions_used = null
 
