@@ -82,6 +82,7 @@ const APP_NAV_BY_ROLE: MenuByRole = {
     { label: 'Training Curriculum', href: '/coach-operations/curriculum', icon: 'file-text' },
     { label: 'Training Programs', href: '/coach-operations/programs', icon: 'calendar' },
     { label: 'Training Logs', href: '/coach-operations/training-logs', icon: 'file-text' },
+    { label: 'Staff Attendance', href: '/coach-operations/staff-attendance', icon: 'scan' },
     { label: 'Notifications', href: '/notifications', icon: 'bell' },
     { label: 'Schedule', href: '/schedule', icon: 'calendar' },
     { label: 'My Profile', href: '/profile', icon: 'id' },
@@ -93,6 +94,7 @@ const APP_NAV_BY_ROLE: MenuByRole = {
     { label: 'Training Curriculum', href: '/coach-operations/curriculum', icon: 'file-text' },
     { label: 'Training Programs', href: '/coach-operations/programs', icon: 'calendar' },
     { label: 'Training Logs', href: '/coach-operations/training-logs', icon: 'file-text' },
+    { label: 'Staff Attendance', href: '/coach-operations/staff-attendance', icon: 'scan' },
     { label: 'Notifications', href: '/notifications', icon: 'bell' },
     { label: 'Schedule', href: '/schedule', icon: 'calendar' },
     { label: 'My Profile', href: '/profile', icon: 'id' },
@@ -104,6 +106,7 @@ const APP_NAV_BY_ROLE: MenuByRole = {
     { label: 'Training Curriculum', href: '/coach-operations/curriculum', icon: 'file-text' },
     { label: 'Training Programs', href: '/coach-operations/programs', icon: 'calendar' },
     { label: 'Training Logs', href: '/coach-operations/training-logs', icon: 'file-text' },
+    { label: 'Staff Attendance', href: '/coach-operations/staff-attendance', icon: 'scan' },
     { label: 'Athletes', href: '/head-coach/athletes', icon: 'users' },
     { label: 'Private Coaching', href: '/head-coach/private-coaching', icon: 'user-cog' },
     { label: 'Notifications', href: '/notifications', icon: 'bell' },
@@ -179,6 +182,7 @@ const APP_NAV_BY_ROLE: MenuByRole = {
     { label: 'Training Curriculum', href: '/coach-operations/curriculum', icon: 'file-text' },
     { label: 'Training Programs', href: '/coach-operations/programs', icon: 'calendar' },
     { label: 'Training Logs', href: '/coach-operations/training-logs', icon: 'file-text' },
+    { label: 'Staff Attendance', href: '/coach-operations/staff-attendance', icon: 'scan' },
     { label: 'Private Coaching', href: '/admin/private-coaching', icon: 'user-cog' },
     { label: 'Store', href: '/store', icon: 'bag' },
     { label: 'Store Admin', href: '/admin/store', icon: 'bag' },
@@ -376,6 +380,14 @@ export function canCreateCoachTrainingLogs(role: Role | null | undefined) {
 }
 
 export function canManageCoachTrainingLogs(role: Role | null | undefined) {
+  return hasAnyRole(role, ['head_coach', 'super_admin'])
+}
+
+export function canAccessCoachStaffAttendance(role: Role | null | undefined) {
+  return hasAnyRole(role, ['assistant_coach', 'coach', 'head_coach', 'super_admin'])
+}
+
+export function canManageCoachStaffAttendance(role: Role | null | undefined) {
   return hasAnyRole(role, ['head_coach', 'super_admin'])
 }
 

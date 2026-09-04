@@ -24,6 +24,10 @@ type ScanResponse = {
   frozen?: boolean
   frozen_until?: string | null
   freeze_days_remaining?: number | null
+  staff_checkin?: boolean
+  staff_role?: string
+  staff_checked_in_at?: string
+  staff_already_checked_in?: boolean
 }
 
 type AttendanceWrite = {
@@ -150,6 +154,103 @@ export async function POST(req: Request) {
   const deviceTag = sanitizeDeviceTag(req.headers.get('x-device-tag'))
 
   try {
+    const { data: memberProfile, error: memberProfileErr } = await admin
+      .from('profiles')
+      .select('role, first_name, last_name, member_id')
+      .eq('user_id', memberId)
+      .maybeSingle<{
+        role: string | null
+        first_name: string | null
+        last_name: string | null
+        member_id: string | null
+      }>()
+
+    if (memberProfileErr) {
+      logApiError(meta, 'member_profile_lookup', memberProfileErr, { actor_id: actorId, member_id: memberId })
+      return json(meta, 500, { ok: false, message: memberProfileErr.message })
+    }
+
+    if (!memberProfile) {
+      return json(meta, 404, { ok: false, message: 'Member not found' })
+    }
+
+    const memberRole = normalizeRole(memberProfile.role ?? 'member')
+    const isCoachingStaff =
+      memberRole === 'assistant_coach' ||
+      memberRole === 'coach' ||
+      memberRole === 'head_coach' ||
+      memberRole === 'super_admin'
+
+    if (isCoachingStaff) {
+      const nowIso = new Date().toISOString()
+      const staffName =
+        [memberProfile.first_name ?? '', memberProfile.last_name ?? ''].join(' ').trim() ||
+        memberProfile.member_id ||
+        'ATOM coaching staff'
+
+      const { data: lastStaffCheckin, error: lastStaffErr } = await admin
+        .from('coach_staff_attendance')
+        .select('id, checked_in_at')
+        .eq('staff_user_id', memberId)
+        .eq('attendance_date', today)
+        .order('checked_in_at', { ascending: false })
+        .limit(1)
+        .maybeSingle<{ id: string; checked_in_at: string }>()
+
+      if (lastStaffErr) {
+        logApiError(meta, 'staff_attendance_lookup', lastStaffErr, { actor_id: actorId, staff_user_id: memberId })
+        return json(meta, 500, { ok: false, message: lastStaffErr.message })
+      }
+
+      const duplicateWindowMs = 2 * 60 * 60 * 1000
+      const lastCheckinMs = lastStaffCheckin?.checked_in_at ? new Date(lastStaffCheckin.checked_in_at).getTime() : Number.NaN
+      const isRecentCheckin =
+        Number.isFinite(lastCheckinMs) &&
+        Date.now() - lastCheckinMs >= 0 &&
+        Date.now() - lastCheckinMs < duplicateWindowMs
+
+      if (isRecentCheckin && lastStaffCheckin) {
+        return json(meta, 200, {
+          ok: true,
+          valid: true,
+          member_id: memberId,
+          staff_checkin: true,
+          staff_role: memberRole,
+          staff_checked_in_at: lastStaffCheckin.checked_in_at,
+          staff_already_checked_in: true,
+          message: 'Staff check-in already recorded recently',
+        })
+      }
+
+      const { error: staffInsertErr } = await admin.from('coach_staff_attendance').insert({
+        staff_user_id: memberId,
+        staff_name_snapshot: staffName,
+        staff_member_id_snapshot: memberProfile.member_id,
+        staff_role_snapshot: memberRole,
+        attendance_date: today,
+        checked_in_at: nowIso,
+        scanned_by: actorId,
+        device_tag: deviceTag,
+        source: 'kiosk_qr',
+      })
+
+      if (staffInsertErr) {
+        logApiError(meta, 'staff_attendance_insert', staffInsertErr, { actor_id: actorId, staff_user_id: memberId })
+        return json(meta, 500, { ok: false, message: staffInsertErr.message })
+      }
+
+      return json(meta, 200, {
+        ok: true,
+        valid: true,
+        member_id: memberId,
+        staff_checkin: true,
+        staff_role: memberRole,
+        staff_checked_in_at: nowIso,
+        staff_already_checked_in: false,
+        message: 'Staff check-in recorded',
+      })
+    }
+
     const { data: existingAttendance, error: existingErr } = await admin
       .from('attendance')
       .select('id, valid, source')
@@ -166,23 +267,6 @@ export async function POST(req: Request) {
 
     const existingId = existingAttendance?.id ?? null
     const alreadyValidToday = !!existingAttendance?.valid
-
-    const { data: memberProfile, error: memberProfileErr } = await admin
-      .from('profiles')
-      .select('role')
-      .eq('user_id', memberId)
-      .maybeSingle<{ role: string | null }>()
-
-    if (memberProfileErr) {
-      logApiError(meta, 'member_profile_lookup', memberProfileErr, { actor_id: actorId, member_id: memberId })
-      return json(meta, 500, { ok: false, message: memberProfileErr.message })
-    }
-
-    if (!memberProfile) {
-      return json(meta, 404, { ok: false, message: 'Member not found' })
-    }
-
-    const memberRole = normalizeRole(memberProfile.role ?? 'member')
     if (hasLifetimeGymAccess(memberRole)) {
       await persistAttendance(admin, existingId, {
         member_id: memberId,
