@@ -79,6 +79,7 @@ const APP_NAV_BY_ROLE: MenuByRole = {
   ],
   assistant_coach: [
     { label: 'Training Useful', href: '/training-useful', icon: 'dashboard' },
+    { label: 'Training Curriculum', href: '/coach-operations/curriculum', icon: 'file-text' },
     { label: 'Notifications', href: '/notifications', icon: 'bell' },
     { label: 'Schedule', href: '/schedule', icon: 'calendar' },
     { label: 'My Profile', href: '/profile', icon: 'id' },
@@ -87,6 +88,7 @@ const APP_NAV_BY_ROLE: MenuByRole = {
   ],
   coach: [
     { label: 'Training Useful', href: '/training-useful', icon: 'dashboard' },
+    { label: 'Training Curriculum', href: '/coach-operations/curriculum', icon: 'file-text' },
     { label: 'Notifications', href: '/notifications', icon: 'bell' },
     { label: 'Schedule', href: '/schedule', icon: 'calendar' },
     { label: 'My Profile', href: '/profile', icon: 'id' },
@@ -95,6 +97,7 @@ const APP_NAV_BY_ROLE: MenuByRole = {
   ],
   head_coach: [
     { label: 'Training Useful', href: '/training-useful', icon: 'dashboard' },
+    { label: 'Training Curriculum', href: '/coach-operations/curriculum', icon: 'file-text' },
     { label: 'Athletes', href: '/head-coach/athletes', icon: 'users' },
     { label: 'Private Coaching', href: '/head-coach/private-coaching', icon: 'user-cog' },
     { label: 'Notifications', href: '/notifications', icon: 'bell' },
@@ -167,6 +170,7 @@ const APP_NAV_BY_ROLE: MenuByRole = {
     { label: 'CRM', href: '/admin/crm', icon: 'users' },
     { label: 'Visitors', href: '/admin/visitors', icon: 'users' },
     { label: 'Coaches', href: '/coaches', icon: 'user-cog' },
+    { label: 'Training Curriculum', href: '/coach-operations/curriculum', icon: 'file-text' },
     { label: 'Private Coaching', href: '/admin/private-coaching', icon: 'user-cog' },
     { label: 'Store', href: '/store', icon: 'bag' },
     { label: 'Store Admin', href: '/admin/store', icon: 'bag' },
@@ -337,6 +341,14 @@ export function canAccessCoaches(role: Role | null | undefined) {
 
 export function canAccessTrainingUseful(role: Role | null | undefined) {
   return hasAnyRole(role, ['coach', 'assistant_coach', 'head_coach', 'admin', 'super_admin'])
+}
+
+export function canAccessCoachCurriculum(role: Role | null | undefined) {
+  return hasAnyRole(role, ['assistant_coach', 'coach', 'head_coach', 'super_admin'])
+}
+
+export function canManageCoachCurriculum(role: Role | null | undefined) {
+  return hasAnyRole(role, ['head_coach', 'super_admin'])
 }
 
 export function canAccessHeadCoachAthletes(role: Role | null | undefined) {
@@ -599,6 +611,22 @@ const CAPABILITY_BLUEPRINTS: CapabilityBlueprint[] = [
     description: 'Open the coach-facing hub with QR, schedule, staff updates and member lookup shortcuts.',
     href: '/training-useful',
     check: (role) => canAccessTrainingUseful(role),
+  },
+  {
+    key: 'coach_curriculum',
+    category: 'Core',
+    label: 'Training curriculum',
+    description: 'Read the shared technical curriculum used by the ATOM coaching team.',
+    href: '/coach-operations/curriculum',
+    check: (role) => canAccessCoachCurriculum(role),
+  },
+  {
+    key: 'coach_curriculum_manage',
+    category: 'Core',
+    label: 'Manage training curriculum',
+    description: 'Create, edit, archive and restore curriculum items.',
+    href: '/coach-operations/curriculum',
+    check: (role) => canManageCoachCurriculum(role),
   },
   {
     key: 'head_coach_athletes',
