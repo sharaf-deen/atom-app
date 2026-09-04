@@ -15,6 +15,16 @@ type FamilyMember = {
   phone: string | null
 }
 
+type GuardianMemberProfile = {
+  user_id: string
+  member_id: string | null
+  first_name: string | null
+  last_name: string | null
+  email: string | null
+  phone: string | null
+  role: string | null
+}
+
 type FamilyGuardian = {
   family_id: string
   auth_user_id: string
@@ -25,6 +35,7 @@ type FamilyGuardian = {
   is_primary: boolean
   invited_at: string | null
   created_at: string | null
+  member_profile?: GuardianMemberProfile | null
 }
 
 type FamilyAccount = {
@@ -51,6 +62,30 @@ type GuardianTarget = {
   guardian: FamilyGuardian
 }
 
+type FamilyTarget = {
+  familyId: string
+  familyName: string
+  memberCount: number
+  guardianCount: number
+}
+
+type CleanupDependency = {
+  table?: string
+  column?: string
+}
+
+type CleanupPreview = {
+  has_profile?: boolean
+  can_remove?: boolean
+  reason?: string | null
+  role?: string | null
+  member_id?: string | null
+  email?: string | null
+  has_family_member_link?: boolean
+  dependency_count?: number
+  dependencies?: CleanupDependency[]
+}
+
 function memberName(member: Pick<FamilyMember, 'first_name' | 'last_name'>) {
   return `${member.first_name ?? ''} ${member.last_name ?? ''}`.trim() || 'Unnamed member'
 }
@@ -64,10 +99,19 @@ async function readJson(response: Response) {
   return data && typeof data === 'object' ? data : {}
 }
 
-export default function FamilyAccountsManager({ families }: { families: FamilyAccount[] }) {
+export default function FamilyAccountsManager({
+  families,
+  canCleanupMemberProfiles = false,
+}: {
+  families: FamilyAccount[]
+  canCleanupMemberProfiles?: boolean
+}) {
   const router = useRouter()
   const [familyName, setFamilyName] = React.useState('')
   const [creating, setCreating] = React.useState(false)
+  const [editingFamilyId, setEditingFamilyId] = React.useState<string | null>(null)
+  const [editingFamilyName, setEditingFamilyName] = React.useState('')
+  const [deleteFamilyTarget, setDeleteFamilyTarget] = React.useState<FamilyTarget | null>(null)
 
   const [openSearchFamilyId, setOpenSearchFamilyId] = React.useState<string | null>(null)
   const [searchQuery, setSearchQuery] = React.useState('')
@@ -79,6 +123,12 @@ export default function FamilyAccountsManager({ families }: { families: FamilyAc
   const [parentLastName, setParentLastName] = React.useState('')
   const [parentEmail, setParentEmail] = React.useState('')
   const [parentPhone, setParentPhone] = React.useState('')
+  const [editGuardianTarget, setEditGuardianTarget] = React.useState<GuardianTarget | null>(null)
+  const [editGuardianFirstName, setEditGuardianFirstName] = React.useState('')
+  const [editGuardianLastName, setEditGuardianLastName] = React.useState('')
+  const [editGuardianPhone, setEditGuardianPhone] = React.useState('')
+  const [cleanupTarget, setCleanupTarget] = React.useState<GuardianTarget | null>(null)
+  const [cleanupPreview, setCleanupPreview] = React.useState<CleanupPreview | null>(null)
 
   const [openNewMemberFamilyId, setOpenNewMemberFamilyId] = React.useState<string | null>(null)
   const [memberFirstName, setMemberFirstName] = React.useState('')
@@ -104,6 +154,13 @@ export default function FamilyAccountsManager({ families }: { families: FamilyAc
     setParentLastName('')
     setParentEmail('')
     setParentPhone('')
+  }
+
+  function closeGuardianEdit() {
+    setEditGuardianTarget(null)
+    setEditGuardianFirstName('')
+    setEditGuardianLastName('')
+    setEditGuardianPhone('')
   }
 
   function closeNewMemberForm() {
@@ -142,6 +199,204 @@ export default function FamilyAccountsManager({ families }: { families: FamilyAc
       setError(String(cause?.message || cause))
     } finally {
       setCreating(false)
+    }
+  }
+
+  async function renameFamily(event: React.FormEvent, family: FamilyAccount) {
+    event.preventDefault()
+    resetFeedback()
+    const name = editingFamilyName.replace(/\s+/g, ' ').trim()
+    if (name.length < 2) {
+      setError('Enter a valid family name.')
+      return
+    }
+
+    const key = `rename-family:${family.id}`
+    setActionKey(key)
+    try {
+      const response = await fetch('/api/admin/families', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'rename_family', familyId: family.id, familyName: name }),
+      })
+      const data = await readJson(response)
+      if (!response.ok || data.ok !== true) {
+        throw new Error(data.details || data.error || 'Failed to rename family')
+      }
+
+      setEditingFamilyId(null)
+      setEditingFamilyName('')
+      setMessage(`Family renamed to ${name}.`)
+      router.refresh()
+    } catch (cause: any) {
+      setError(String(cause?.message || cause))
+    } finally {
+      setActionKey(null)
+    }
+  }
+
+  async function deleteFamily() {
+    if (!deleteFamilyTarget) return
+    resetFeedback()
+    const key = `delete-family:${deleteFamilyTarget.familyId}`
+    setActionKey(key)
+
+    try {
+      const response = await fetch('/api/admin/families', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'delete_family', familyId: deleteFamilyTarget.familyId }),
+      })
+      const data = await readJson(response)
+      if (!response.ok || data.ok !== true) {
+        if (data.error === 'FAMILY_HAS_MEMBERS') {
+          throw new Error('Remove all member links from this family before deleting it.')
+        }
+        throw new Error(data.details || data.error || 'Failed to delete family')
+      }
+
+      setMessage(`${deleteFamilyTarget.familyName} deleted. Member profiles and guardian Auth accounts were preserved.`)
+      setDeleteFamilyTarget(null)
+      router.refresh()
+    } catch (cause: any) {
+      setError(String(cause?.message || cause))
+    } finally {
+      setActionKey(null)
+    }
+  }
+
+  function openGuardianEdit(target: GuardianTarget) {
+    resetFeedback()
+    setEditGuardianTarget(target)
+    setEditGuardianFirstName(target.guardian.first_name ?? '')
+    setEditGuardianLastName(target.guardian.last_name ?? '')
+    setEditGuardianPhone(target.guardian.phone ?? '')
+  }
+
+  async function updateGuardian(event: React.FormEvent) {
+    event.preventDefault()
+    if (!editGuardianTarget) return
+    resetFeedback()
+
+    const firstName = editGuardianFirstName.trim()
+    const lastName = editGuardianLastName.trim()
+    const phone = editGuardianPhone.trim()
+    if (!firstName) {
+      setError('Guardian first name is required.')
+      return
+    }
+
+    const key = `edit-guardian:${editGuardianTarget.familyId}:${editGuardianTarget.guardian.auth_user_id}`
+    setActionKey(key)
+    try {
+      const response = await fetch('/api/admin/families', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'update_guardian',
+          familyId: editGuardianTarget.familyId,
+          authUserId: editGuardianTarget.guardian.auth_user_id,
+          firstName,
+          lastName,
+          phone,
+        }),
+      })
+      const data = await readJson(response)
+      if (!response.ok || data.ok !== true) {
+        throw new Error(data.details || data.error || 'Failed to update guardian')
+      }
+
+      setMessage(`Guardian details updated for ${editGuardianTarget.guardian.email}.`)
+      closeGuardianEdit()
+      router.refresh()
+    } catch (cause: any) {
+      setError(String(cause?.message || cause))
+    } finally {
+      setActionKey(null)
+    }
+  }
+
+  async function reviewGuardianMemberCleanup(target: GuardianTarget) {
+    resetFeedback()
+    setCleanupPreview(null)
+    const key = `cleanup-preview:${target.familyId}:${target.guardian.auth_user_id}`
+    setActionKey(key)
+
+    try {
+      const response = await fetch('/api/admin/families', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'preview_guardian_member_cleanup',
+          familyId: target.familyId,
+          authUserId: target.guardian.auth_user_id,
+        }),
+      })
+      const data = await readJson(response)
+      if (!response.ok || data.ok !== true) {
+        throw new Error(data.details || data.error || 'Failed to review member profile')
+      }
+
+      const preview = (data.preview ?? {}) as CleanupPreview
+      setCleanupPreview(preview)
+
+      if (!preview.has_profile) {
+        setMessage('This guardian no longer has a member profile to clean up.')
+        return
+      }
+
+      if (!preview.can_remove) {
+        const dependencies = Array.isArray(preview.dependencies) ? preview.dependencies : []
+        const labels = dependencies
+          .slice(0, 8)
+          .map((dependency) => `${dependency.table ?? 'unknown'}.${dependency.column ?? 'unknown'}`)
+        const suffix = dependencies.length > labels.length ? ` +${dependencies.length - labels.length} more` : ''
+        throw new Error(
+          preview.reason === 'PROFILE_ROLE_NOT_MEMBER'
+            ? `Cleanup blocked: this profile role is ${preview.role ?? 'not member'}.`
+            : `Cleanup blocked because member-linked data exists: ${labels.join(', ') || 'dependency detected'}${suffix}.`,
+        )
+      }
+
+      setCleanupTarget(target)
+    } catch (cause: any) {
+      setError(String(cause?.message || cause))
+    } finally {
+      setActionKey(null)
+    }
+  }
+
+  async function removeGuardianMemberProfile() {
+    if (!cleanupTarget) return
+    resetFeedback()
+    const key = `cleanup-remove:${cleanupTarget.familyId}:${cleanupTarget.guardian.auth_user_id}`
+    setActionKey(key)
+
+    try {
+      const response = await fetch('/api/admin/families', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'remove_guardian_member_profile',
+          familyId: cleanupTarget.familyId,
+          authUserId: cleanupTarget.guardian.auth_user_id,
+        }),
+      })
+      const data = await readJson(response)
+      if (!response.ok || data.ok !== true) {
+        throw new Error(data.details || data.error || 'Member profile cleanup was blocked')
+      }
+
+      setMessage(
+        `${guardianName(cleanupTarget.guardian)} keeps the guardian login, but the unnecessary member profile has been removed.`,
+      )
+      setCleanupTarget(null)
+      setCleanupPreview(null)
+      router.refresh()
+    } catch (cause: any) {
+      setError(String(cause?.message || cause))
+    } finally {
+      setActionKey(null)
     }
   }
 
@@ -460,7 +715,69 @@ export default function FamilyAccountsManager({ families }: { families: FamilyAc
                     {family.members.length} member{family.members.length === 1 ? '' : 's'} · {family.guardians.length} guardian{family.guardians.length === 1 ? '' : 's'}
                   </p>
                 </div>
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={Boolean(actionKey)}
+                    onClick={() => {
+                      resetFeedback()
+                      setEditingFamilyId(editingFamilyId === family.id ? null : family.id)
+                      setEditingFamilyName(family.name)
+                    }}
+                  >
+                    {editingFamilyId === family.id ? 'Close edit' : 'Edit family'}
+                  </Button>
+                  {canCleanupMemberProfiles ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      disabled={Boolean(actionKey) || family.members.length > 0}
+                      onClick={() =>
+                        setDeleteFamilyTarget({
+                          familyId: family.id,
+                          familyName: family.name,
+                          memberCount: family.members.length,
+                          guardianCount: family.guardians.length,
+                        })
+                      }
+                    >
+                      Delete family
+                    </Button>
+                  ) : null}
+                </div>
               </div>
+
+              {editingFamilyId === family.id ? (
+                <form
+                  onSubmit={(event) => renameFamily(event, family)}
+                  className="mt-3 grid gap-2 rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] p-3 sm:grid-cols-[1fr_auto] sm:items-end"
+                >
+                  <Input
+                    label="Family name"
+                    value={editingFamilyName}
+                    onChange={(event) => setEditingFamilyName(event.target.value)}
+                    maxLength={120}
+                    required
+                  />
+                  <Button
+                    type="submit"
+                    size="sm"
+                    loading={actionKey === `rename-family:${family.id}`}
+                    loadingText="Saving…"
+                  >
+                    Save family name
+                  </Button>
+                </form>
+              ) : null}
+
+              {canCleanupMemberProfiles && family.members.length > 0 ? (
+                <p className="mt-2 text-xs text-[hsl(var(--muted))]">
+                  To delete this family, remove its member links first. Member profiles are never deleted with the family.
+                </p>
+              ) : null}
 
               <div className="mt-4 rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] p-3">
                 <div className="flex flex-wrap items-start justify-between gap-3">
@@ -513,7 +830,7 @@ export default function FamilyAccountsManager({ families }: { families: FamilyAc
                           </div>
                         </div>
 
-                        {!guardian.is_primary ? (
+                        <div className="flex flex-col items-start gap-2 sm:items-end">
                           <div className="flex flex-wrap gap-2">
                             <Button
                               type="button"
@@ -521,36 +838,90 @@ export default function FamilyAccountsManager({ families }: { families: FamilyAc
                               size="sm"
                               disabled={Boolean(actionKey)}
                               onClick={() =>
-                                setPrimaryGuardianTarget({
+                                openGuardianEdit({
                                   familyId: family.id,
                                   familyName: family.name,
                                   guardian,
                                 })
                               }
                             >
-                              Make primary
+                              Edit guardian
                             </Button>
-                            <Button
-                              type="button"
-                              variant="outline"
-                              size="sm"
-                              disabled={Boolean(actionKey)}
-                              onClick={() =>
-                                setRemoveGuardianTarget({
-                                  familyId: family.id,
-                                  familyName: family.name,
-                                  guardian,
-                                })
-                              }
-                            >
-                              Remove guardian
-                            </Button>
+
+                            {!guardian.is_primary ? (
+                              <>
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  size="sm"
+                                  disabled={Boolean(actionKey)}
+                                  onClick={() =>
+                                    setPrimaryGuardianTarget({
+                                      familyId: family.id,
+                                      familyName: family.name,
+                                      guardian,
+                                    })
+                                  }
+                                >
+                                  Make primary
+                                </Button>
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  size="sm"
+                                  disabled={Boolean(actionKey)}
+                                  onClick={() =>
+                                    setRemoveGuardianTarget({
+                                      familyId: family.id,
+                                      familyName: family.name,
+                                      guardian,
+                                    })
+                                  }
+                                >
+                                  Remove guardian
+                                </Button>
+                              </>
+                            ) : null}
+
+                            {canCleanupMemberProfiles && guardian.member_profile ? (
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                loading={
+                                  actionKey ===
+                                  `cleanup-preview:${family.id}:${guardian.auth_user_id}`
+                                }
+                                loadingText="Checking…"
+                                disabled={Boolean(actionKey)}
+                                onClick={() =>
+                                  reviewGuardianMemberCleanup({
+                                    familyId: family.id,
+                                    familyName: family.name,
+                                    guardian,
+                                  })
+                                }
+                              >
+                                Review member cleanup
+                              </Button>
+                            ) : null}
                           </div>
-                        ) : (
-                          <span className="text-xs text-[hsl(var(--muted))]">
-                            To remove this account, make another guardian primary first.
-                          </span>
-                        )}
+
+                          {guardian.is_primary ? (
+                            <span className="text-xs text-[hsl(var(--muted))]">
+                              To remove this guardian, make another guardian primary first.
+                            </span>
+                          ) : null}
+
+                          {guardian.member_profile ? (
+                            <span className="text-xs font-medium text-amber-700">
+                              Member profile also exists
+                              {guardian.member_profile.member_id
+                                ? ` · ${guardian.member_profile.member_id}`
+                                : ''}
+                            </span>
+                          ) : null}
+                        </div>
                       </div>
                     ))}
                   </div>
@@ -559,6 +930,70 @@ export default function FamilyAccountsManager({ families }: { families: FamilyAc
                     No guardian account linked yet. The first account added becomes the primary guardian.
                   </div>
                 )}
+
+                {editGuardianTarget?.familyId === family.id ? (
+                  <form
+                    onSubmit={updateGuardian}
+                    className="mt-4 grid gap-3 rounded-2xl border border-amber-200 bg-amber-50 p-3"
+                  >
+                    <div>
+                      <div className="font-semibold text-amber-950">Edit guardian</div>
+                      <p className="mt-1 text-xs text-amber-800">
+                        Name and phone can be updated here. To change the login email, add the replacement guardian account first, then remove the old guardian link.
+                      </p>
+                    </div>
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <Input
+                        label="Guardian first name"
+                        value={editGuardianFirstName}
+                        onChange={(event) => setEditGuardianFirstName(event.target.value)}
+                        maxLength={120}
+                        required
+                      />
+                      <Input
+                        label="Guardian last name"
+                        value={editGuardianLastName}
+                        onChange={(event) => setEditGuardianLastName(event.target.value)}
+                        maxLength={120}
+                      />
+                      <Input
+                        label="Login email"
+                        type="email"
+                        value={editGuardianTarget.guardian.email}
+                        disabled
+                        hint="Email changes use the safe replace-guardian flow."
+                      />
+                      <Input
+                        label="Guardian phone"
+                        type="tel"
+                        value={editGuardianPhone}
+                        onChange={(event) => setEditGuardianPhone(event.target.value)}
+                      />
+                    </div>
+                    <div className="flex flex-wrap justify-end gap-2">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        disabled={Boolean(actionKey)}
+                        onClick={closeGuardianEdit}
+                      >
+                        Cancel
+                      </Button>
+                      <Button
+                        type="submit"
+                        size="sm"
+                        loading={
+                          actionKey ===
+                          `edit-guardian:${editGuardianTarget.familyId}:${editGuardianTarget.guardian.auth_user_id}`
+                        }
+                        loadingText="Saving…"
+                      >
+                        Save guardian
+                      </Button>
+                    </div>
+                  </form>
+                ) : null}
 
                 {parentOpen ? (
                   <form onSubmit={(event) => createGuardianAccount(event, family)} className="mt-4 grid gap-3 rounded-2xl bg-white p-3">
@@ -800,6 +1235,74 @@ export default function FamilyAccountsManager({ families }: { families: FamilyAc
           </div>
         ) : null}
       </div>
+
+      <ConfirmActionModal
+        open={Boolean(deleteFamilyTarget)}
+        title="Delete family?"
+        description="This deletes only the family container and its guardian links. Auth accounts and member profiles are never deleted."
+        confirmLabel="Delete family"
+        pendingLabel="Deleting…"
+        tone="destructive"
+        pending={Boolean(
+          deleteFamilyTarget &&
+            actionKey === `delete-family:${deleteFamilyTarget.familyId}`,
+        )}
+        summaryItems={
+          deleteFamilyTarget
+            ? [
+                { label: 'Family', value: deleteFamilyTarget.familyName },
+                { label: 'Members', value: String(deleteFamilyTarget.memberCount) },
+                { label: 'Guardian links', value: String(deleteFamilyTarget.guardianCount) },
+              ]
+            : []
+        }
+        warning="A family with linked members cannot be deleted. Remove member links first. Guardian Auth accounts are preserved."
+        onCancel={() => {
+          if (!actionKey) setDeleteFamilyTarget(null)
+        }}
+        onConfirm={deleteFamily}
+      />
+
+      <ConfirmActionModal
+        open={Boolean(cleanupTarget)}
+        title="Remove unnecessary member profile?"
+        description="Use this only when this parent/guardian does not train at ATOM. The guardian login and Family Dashboard access will remain active."
+        confirmLabel="Remove member profile"
+        pendingLabel="Removing…"
+        tone="destructive"
+        pending={Boolean(
+          cleanupTarget &&
+            actionKey ===
+              `cleanup-remove:${cleanupTarget.familyId}:${cleanupTarget.guardian.auth_user_id}`,
+        )}
+        summaryItems={
+          cleanupTarget
+            ? [
+                { label: 'Guardian', value: guardianName(cleanupTarget.guardian) },
+                { label: 'Email', value: cleanupTarget.guardian.email },
+                {
+                  label: 'Member ID',
+                  value:
+                    cleanupPreview?.member_id ||
+                    cleanupTarget.guardian.member_profile?.member_id ||
+                    '—',
+                },
+                {
+                  label: 'Dependency check',
+                  value: cleanupPreview?.can_remove ? 'No member-linked data found' : 'Not cleared',
+                },
+              ]
+            : []
+        }
+        warning="The member profile and its Family member link will be removed. The Supabase Auth account and guardian link are preserved. This action is blocked if any member-linked data exists."
+        onCancel={() => {
+          if (!actionKey) {
+            setCleanupTarget(null)
+            setCleanupPreview(null)
+          }
+        }}
+        onConfirm={removeGuardianMemberProfile}
+      />
 
       <ConfirmActionModal
         open={Boolean(primaryGuardianTarget)}

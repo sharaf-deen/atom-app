@@ -38,6 +38,7 @@ type MemberProfile = {
   last_name: string | null
   email: string | null
   phone: string | null
+  role: string | null
 }
 
 export default async function FamilyAccountsPage() {
@@ -78,15 +79,17 @@ export default async function FamilyAccountsPage() {
   const families = (familyData ?? []) as FamilyRow[]
   const links = (linkData ?? []) as FamilyMemberRow[]
   const guardians = (guardianData ?? []) as FamilyGuardianRow[]
-  const memberIds = Array.from(new Set(links.map((link) => link.member_id).filter(Boolean)))
+  const memberIds = links.map((link) => link.member_id).filter(Boolean)
+  const guardianAuthUserIds = guardians.map((guardian) => guardian.auth_user_id).filter(Boolean)
+  const profileIds = Array.from(new Set([...memberIds, ...guardianAuthUserIds]))
   let profiles: MemberProfile[] = []
   let profileError: string | null = null
 
-  if (memberIds.length > 0) {
+  if (profileIds.length > 0) {
     const { data, error } = await admin
       .from('profiles')
-      .select('user_id,member_id,first_name,last_name,email,phone')
-      .in('user_id', memberIds)
+      .select('user_id,member_id,first_name,last_name,email,phone,role')
+      .in('user_id', profileIds)
 
     profiles = (data ?? []) as MemberProfile[]
     profileError = error?.message ?? null
@@ -112,10 +115,15 @@ export default async function FamilyAccountsPage() {
 
   const hydratedFamilies = families.map((family) => ({
     ...family,
-    guardians: (guardiansByFamily.get(family.id) ?? []).sort((a, b) => {
-      if (a.is_primary !== b.is_primary) return a.is_primary ? -1 : 1
-      return String(a.created_at ?? '').localeCompare(String(b.created_at ?? ''))
-    }),
+    guardians: (guardiansByFamily.get(family.id) ?? [])
+      .map((guardian) => ({
+        ...guardian,
+        member_profile: profileById.get(guardian.auth_user_id) ?? null,
+      }))
+      .sort((a, b) => {
+        if (a.is_primary !== b.is_primary) return a.is_primary ? -1 : 1
+        return String(a.created_at ?? '').localeCompare(String(b.created_at ?? ''))
+      }),
     members: (membersByFamily.get(family.id) ?? []).sort((a, b) => {
       const aName = `${a.first_name ?? ''} ${a.last_name ?? ''}`.trim().toLowerCase()
       const bName = `${b.first_name ?? ''} ${b.last_name ?? ''}`.trim().toLowerCase()
@@ -153,7 +161,7 @@ export default async function FamilyAccountsPage() {
           Failed to load family accounts: {loadError}
         </div>
       ) : (
-        <FamilyAccountsManager families={hydratedFamilies} />
+        <FamilyAccountsManager families={hydratedFamilies} canCleanupMemberProfiles={me.role === 'super_admin'} />
       )}
     </main>
   )
