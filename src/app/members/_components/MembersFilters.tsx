@@ -7,7 +7,8 @@ import Input from '@/components/ui/Input'
 import Select from '@/components/ui/Select'
 import Button from '@/components/ui/Button'
 
-type Status = 'all' | 'active' | 'inactive'
+type Status = 'all' | 'active' | 'frozen' | 'inactive'
+type InactiveReason = 'all' | 'expired' | 'cancelled' | 'no_membership' | 'depleted_legacy' | 'other_inactive'
 
 function clampInt(n: number, min: number, max: number) {
   if (!Number.isFinite(n)) return min
@@ -16,17 +17,26 @@ function clampInt(n: number, min: number, max: number) {
 
 function normalizeStatus(v: string): Status {
   const s = (v || 'all').toLowerCase()
-  return (['all', 'active', 'inactive'] as const).includes(s as any) ? (s as Status) : 'all'
+  return (['all', 'active', 'frozen', 'inactive'] as const).includes(s as any) ? (s as Status) : 'all'
+}
+
+function normalizeInactiveReason(v: string): InactiveReason {
+  const s = (v || 'all').toLowerCase()
+  return (['all', 'expired', 'cancelled', 'no_membership', 'depleted_legacy', 'other_inactive'] as const).includes(s as any)
+    ? (s as InactiveReason)
+    : 'all'
 }
 
 export default function MembersFilters({
   initialQ,
   initialStatus,
+  initialInactiveReason,
   initialPageSize,
   className,
 }: {
   initialQ: string
   initialStatus: Status
+  initialInactiveReason: InactiveReason
   initialPageSize: number
   className?: string
 }) {
@@ -36,30 +46,39 @@ export default function MembersFilters({
 
   const [q, setQ] = useState(initialQ)
   const [status, setStatus] = useState<Status>(initialStatus)
+  const [inactiveReason, setInactiveReason] = useState<InactiveReason>(initialInactiveReason)
   const [pageSize, setPageSize] = useState(clampInt(initialPageSize, 5, 200))
 
-  // Keep base params in case other things add params later.
   const base = useMemo(() => {
     const p = new URLSearchParams(sp?.toString() || '')
     p.delete('q')
     p.delete('status')
+    p.delete('reason')
     p.delete('page')
     p.delete('pageSize')
     return p
   }, [sp])
 
-  function apply(next: { q?: string; status?: Status; page?: number; pageSize?: number }) {
+  function apply(next: {
+    q?: string
+    status?: Status
+    inactiveReason?: InactiveReason
+    page?: number
+    pageSize?: number
+  }) {
     const p = new URLSearchParams(base)
     const nextQ = (next.q ?? q).trim()
     const nextStatus = normalizeStatus(String(next.status ?? status))
+    const nextReason = normalizeInactiveReason(String(next.inactiveReason ?? inactiveReason))
     const nextPageSize = clampInt(Number(next.pageSize ?? pageSize), 5, 200)
     const nextPage = clampInt(Number(next.page ?? 1), 1, 1_000_000)
 
-    // If q is set, the page runs in SEARCH mode (status ignored).
+    // Search remains global, matching the existing Members behaviour.
     if (nextQ) {
       p.set('q', nextQ)
     } else {
       if (nextStatus !== 'all') p.set('status', nextStatus)
+      if (nextStatus === 'inactive' && nextReason !== 'all') p.set('reason', nextReason)
     }
 
     if (nextPage > 1) p.set('page', String(nextPage))
@@ -78,14 +97,15 @@ export default function MembersFilters({
   function onReset() {
     setQ('')
     setStatus('all')
+    setInactiveReason('all')
     setPageSize(20)
     startTransition(() => router.push('/members'))
   }
 
   return (
     <form onSubmit={onSubmit} className={className ?? ''}>
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
-        <div className="flex-1">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:flex-wrap">
+        <div className="min-w-0 flex-1 sm:min-w-[260px]">
           <Input
             value={q}
             onChange={(e) => setQ(e.target.value)}
@@ -94,25 +114,49 @@ export default function MembersFilters({
           />
         </div>
 
-        <div className="w-full sm:w-48">
+        <div className="w-full sm:w-44">
           <Select
             label="Status"
             value={status}
             onChange={(e) => {
               const v = normalizeStatus(e.target.value)
+              const nextReason = v === 'inactive' ? inactiveReason : 'all'
               setStatus(v)
-              // Switching list type should exit search mode
+              if (v !== 'inactive') setInactiveReason('all')
               setQ('')
-              apply({ q: '', status: v, page: 1 })
+              apply({ q: '', status: v, inactiveReason: nextReason, page: 1 })
             }}
           >
             <option value="all">All</option>
             <option value="active">Active</option>
+            <option value="frozen">Frozen</option>
             <option value="inactive">Inactive</option>
           </Select>
         </div>
 
-        <div className="w-full sm:w-40">
+        {status === 'inactive' ? (
+          <div className="w-full sm:w-52">
+            <Select
+              label="Inactive reason"
+              value={inactiveReason}
+              onChange={(e) => {
+                const v = normalizeInactiveReason(e.target.value)
+                setInactiveReason(v)
+                setQ('')
+                apply({ q: '', status: 'inactive', inactiveReason: v, page: 1 })
+              }}
+            >
+              <option value="all">All inactive</option>
+              <option value="expired">Expired</option>
+              <option value="cancelled">Cancelled</option>
+              <option value="no_membership">No membership yet</option>
+              <option value="depleted_legacy">Depleted legacy</option>
+              <option value="other_inactive">Other inactive</option>
+            </Select>
+          </div>
+        ) : null}
+
+        <div className="w-full sm:w-32">
           <Select
             label="Rows"
             value={String(pageSize)}
@@ -141,7 +185,7 @@ export default function MembersFilters({
       </div>
 
       <p className="mt-2 text-[11px] text-[hsl(var(--muted))]">
-        Search ignores status.
+        Activity is based on membership access, not on whether the member has a personal email or login. Search remains global.
       </p>
     </form>
   )
