@@ -41,6 +41,10 @@ type SearchParams = {
   repeat?: string
   repeatSeconds?: string
   fullscreen?: string
+  staffCheckin?: string
+  staffRole?: string
+  staffCheckedInAt?: string
+  staffAlreadyCheckedIn?: string
 }
 
 type SubRow = {
@@ -100,6 +104,12 @@ function fmtDateTimeNice(v?: string | null) {
 
 function safeMessage(v?: string) {
   return (v || '').trim().slice(0, 180)
+}
+
+function roleLabel(value?: string | null) {
+  return String(value || 'coach')
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, (char) => char.toUpperCase())
 }
 
 const CAIRO_TZ = 'Africa/Cairo'
@@ -348,6 +358,10 @@ export default async function ScanResultPage({ searchParams }: { searchParams: S
   const freezeDaysRemaining = parseIntSafe(searchParams.freezeDaysRemaining)
   const repeatScan = searchParams.repeat === '1'
   const repeatSeconds = parseIntSafe(searchParams.repeatSeconds)
+  const staffCheckin = searchParams.staffCheckin === '1'
+  const staffRole = safeMessage(searchParams.staffRole)
+  const staffCheckedInAt = safeMessage(searchParams.staffCheckedInAt)
+  const staffAlreadyCheckedIn = searchParams.staffAlreadyCheckedIn === '1'
 
   let memberName = ''
   let memberCode = ''
@@ -360,9 +374,15 @@ export default async function ScanResultPage({ searchParams }: { searchParams: S
       const admin = getSupabaseAdminClientCached()
       const { data: p } = await admin
         .from('profiles')
-        .select('first_name,last_name,member_id,id_photo_path')
+        .select('first_name,last_name,member_id,id_photo_path,role')
         .eq('user_id', memberId)
-        .maybeSingle<{ first_name: string | null; last_name: string | null; member_id: string | null; id_photo_path: string | null }>()
+        .maybeSingle<{
+          first_name: string | null
+          last_name: string | null
+          member_id: string | null
+          id_photo_path: string | null
+          role: string | null
+        }>()
 
       memberName = [p?.first_name ?? '', p?.last_name ?? ''].join(' ').trim() || ''
       memberCode = p?.member_id ?? ''
@@ -372,33 +392,126 @@ export default async function ScanResultPage({ searchParams }: { searchParams: S
         signedPhoto = data?.signedUrl || ''
       }
 
-      const today = todayDateOnlyCairo()
-      const since7 = dateDaysAgoCairo(7)
+      if (!staffCheckin) {
+        const today = todayDateOnlyCairo()
+        const since7 = dateDaysAgoCairo(7)
 
-      const [{ data: subRows }, { data: attendanceRows }] = await Promise.all([
-        admin
-          .from('subscriptions')
-          .select('id, plan, subscription_type, status, start_date, end_date, sessions_total, sessions_used, paid_at, frozen_from, frozen_until')
-          .eq('member_id', memberId)
-          .order('paid_at', { ascending: false, nullsFirst: false })
-          .order('end_date', { ascending: false, nullsFirst: false })
-          .limit(10),
-        admin
-          .from('attendance')
-          .select('date, scanned_at')
-          .eq('member_id', memberId)
-          .gte('date', since7)
-          .order('date', { ascending: false })
-          .order('scanned_at', { ascending: false })
-          .limit(10),
-      ])
+        const [{ data: subRows }, { data: attendanceRows }] = await Promise.all([
+          admin
+            .from('subscriptions')
+            .select('id, plan, subscription_type, status, start_date, end_date, sessions_total, sessions_used, paid_at, frozen_from, frozen_until')
+            .eq('member_id', memberId)
+            .order('paid_at', { ascending: false, nullsFirst: false })
+            .order('end_date', { ascending: false, nullsFirst: false })
+            .limit(10),
+          admin
+            .from('attendance')
+            .select('date, scanned_at')
+            .eq('member_id', memberId)
+            .gte('date', since7)
+            .order('date', { ascending: false })
+            .order('scanned_at', { ascending: false })
+            .limit(10),
+        ])
 
-      subscriptions = (subRows ?? []) as SubRow[]
-      const todayRow = ((attendanceRows ?? []) as Array<{ date: string; scanned_at: string | null }>).find((row) => row.date === today) ?? null
-      attendanceTodayScannedAt = todayRow?.scanned_at ?? null
+        subscriptions = (subRows ?? []) as SubRow[]
+        const todayRow = ((attendanceRows ?? []) as Array<{ date: string; scanned_at: string | null }>).find((row) => row.date === today) ?? null
+        attendanceTodayScannedAt = todayRow?.scanned_at ?? null
+      }
     } catch {
       // ignore
     }
+  }
+
+  if (staffCheckin) {
+    const checkedInLabel = staffCheckedInAt ? fmtDateTimeNice(staffCheckedInAt) : 'Recorded now'
+    const staffStatus = staffAlreadyCheckedIn ? 'ALREADY CHECKED IN' : 'CHECKED IN'
+    const staffInfoTitle = repeatScan ? 'Repeated scan' : staffAlreadyCheckedIn ? 'Recent check-in already exists' : 'Staff attendance recorded'
+    const staffInfoBody = repeatScan
+      ? `Same QR scanned again${typeof repeatSeconds === 'number' ? ` after ${repeatSeconds}s` : ''}.`
+      : apiMessage || (staffAlreadyCheckedIn ? 'A recent staff check-in was already recorded.' : 'Staff QR attendance has been recorded.')
+
+    return (
+      <main className={terminalFullScreen ? 'fixed inset-0 z-40 overflow-auto bg-black p-4 sm:p-6' : 'min-h-[calc(100vh-3rem)] bg-[hsl(var(--bg))] p-4 sm:p-6'}>
+        <ResultSound kind="ok" />
+
+        <div className={terminalFullScreen ? 'mx-auto max-w-6xl space-y-4' : 'mx-auto max-w-5xl space-y-4'}>
+          <Card className="rounded-3xl border border-[hsl(var(--border))]">
+            <CardContent>
+              <div className="flex flex-col gap-5">
+                <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                  <div className="flex min-w-0 items-center gap-4">
+                    {signedPhoto ? (
+                      <div className="relative h-20 w-20 overflow-hidden rounded-full border bg-white sm:h-24 sm:w-24">
+                        <Image src={signedPhoto} alt="Staff photo" fill className="object-cover" />
+                      </div>
+                    ) : (
+                      <div className="flex h-20 w-20 items-center justify-center rounded-full border bg-white text-[hsl(var(--muted))] sm:h-24 sm:w-24">
+                        <UserRound size={28} />
+                      </div>
+                    )}
+
+                    <div className="min-w-0">
+                      <div className="inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700">
+                        <ShieldCheck size={16} strokeWidth={2.1} />
+                        Staff QR check-in
+                      </div>
+                      <h1 className="mt-3 text-2xl font-black tracking-tight sm:text-3xl">{memberName || 'Coaching staff'}</h1>
+                      <div className="mt-2 flex flex-wrap gap-2 text-sm text-[hsl(var(--muted))]">
+                        {memberCode ? <span>ID: {memberCode}</span> : null}
+                        {memberCode ? <span>•</span> : null}
+                        <span>{roleLabel(staffRole)}</span>
+                      </div>
+                      <p className="mt-3 max-w-2xl text-sm text-[hsl(var(--muted))] sm:text-base">
+                        Staff attendance is recorded separately from member attendance.
+                      </p>
+                    </div>
+                  </div>
+
+                  <StatusHero label={staffStatus} tone="success" />
+                </div>
+
+                <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                  <KeyFact label="Role" value={roleLabel(staffRole)} icon={<UserRound size={18} strokeWidth={2.1} />} />
+                  <KeyFact label="Check-in time" value={checkedInLabel} icon={<Clock3 size={18} strokeWidth={2.1} />} emphasize />
+                  <KeyFact label="Attendance" value="Staff QR" icon={<CircleCheckBig size={18} strokeWidth={2.1} />} />
+                </div>
+
+                <InlineInfo tone="success" title={staffInfoTitle} body={staffInfoBody} />
+
+                {isTerminal ? (
+                  <div className="rounded-2xl border border-sky-200 bg-sky-50 p-4 text-sm text-sky-900">
+                    <div className="font-semibold">Door terminal mode</div>
+                    <div className="mt-1">This screen returns automatically to scan after 5 seconds.</div>
+                    <div className="mt-2 text-xs text-sky-700">Device label: scan-terminal-front</div>
+                  </div>
+                ) : null}
+
+                <div className="flex flex-col gap-3 sm:flex-row">
+                  <Link href={returnHref} className="sm:flex-1">
+                    <Button className="w-full">
+                      <ScanLine size={16} className="mr-2" />
+                      Scan next
+                    </Button>
+                  </Link>
+
+                  {!isTerminal && memberId ? (
+                    <Link href={`/members/${memberId}`} className="sm:flex-1">
+                      <Button variant="outline" className="w-full">
+                        <QrCode size={16} className="mr-2" />
+                        Open profile
+                      </Button>
+                    </Link>
+                  ) : null}
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+
+        {kioskMode ? <AutoReturn href={returnHref} seconds={isTerminal ? 5 : 7} terminalLocked={isTerminal} terminalFullScreen={terminalFullScreen} /> : null}
+      </main>
+    )
   }
 
   const today = todayDateOnlyCairo()

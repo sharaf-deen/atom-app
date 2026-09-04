@@ -83,6 +83,10 @@ type ScanResponse = {
   frozen?: boolean
   frozen_until?: string | null
   freeze_days_remaining?: number | null
+  staff_checkin?: boolean
+  staff_role?: string
+  staff_checked_in_at?: string
+  staff_already_checked_in?: boolean
 }
 
 type Detected = { rawValue: string }
@@ -169,6 +173,10 @@ function buildResultParams(j: ScanResponse, kioskMode: boolean, fullScreenEnable
   if (j.freeze_days_remaining !== undefined && j.freeze_days_remaining !== null) {
     sp.set('freezeDaysRemaining', String(j.freeze_days_remaining))
   }
+  if (j.staff_checkin) sp.set('staffCheckin', '1')
+  if (j.staff_role) sp.set('staffRole', String(j.staff_role).slice(0, 40))
+  if (j.staff_checked_in_at) sp.set('staffCheckedInAt', String(j.staff_checked_in_at).slice(0, 80))
+  if (j.staff_already_checked_in) sp.set('staffAlreadyCheckedIn', '1')
   if (j.message) sp.set('message', String(j.message).slice(0, 180))
   return sp
 }
