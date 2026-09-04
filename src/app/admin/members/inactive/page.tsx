@@ -21,12 +21,11 @@ import { cairoTodayDateOnly } from '@/lib/cairoTime'
 
 type InactiveReason =
   | 'all'
-  | 'expired_subscription'
-  | 'never_subscribed'
-  | 'remaining_due'
-  | 'freeze_ended'
-  | 'incomplete_profile'
-  | 'no_active_subscription'
+  | 'expired'
+  | 'cancelled'
+  | 'no_membership'
+  | 'depleted_legacy'
+  | 'other_inactive'
 
 type MemberRow = {
   user_id: string
@@ -91,6 +90,8 @@ type InactiveMember = {
   inactiveSinceLabel: string
   inactiveDays: number | null
   profileIssues: string[]
+  accountLabel: string
+  familyName: string | null
 }
 
 const PAGE_SIZE_OPTIONS = [10, 20, 50] as const
@@ -111,13 +112,12 @@ const REVIEW_STATE_OPTIONS: { value: ReviewState; label: string }[] = [
 ]
 const DEFAULT_PAGE_SIZE = 20
 const REASON_OPTIONS: { value: InactiveReason; label: string }[] = [
-  { value: 'all', label: 'All reasons' },
-  { value: 'expired_subscription', label: 'Expired subscription' },
-  { value: 'never_subscribed', label: 'Never subscribed' },
-  { value: 'remaining_due', label: 'Remaining due' },
-  { value: 'freeze_ended', label: 'Freeze ended' },
-  { value: 'incomplete_profile', label: 'Incomplete profile' },
-  { value: 'no_active_subscription', label: 'No active subscription' },
+  { value: 'all', label: 'All inactive' },
+  { value: 'expired', label: 'Expired' },
+  { value: 'cancelled', label: 'Cancelled' },
+  { value: 'no_membership', label: 'No membership yet' },
+  { value: 'depleted_legacy', label: 'Depleted legacy' },
+  { value: 'other_inactive', label: 'Other inactive' },
 ]
 const MEMBER_ROLE_OPTIONS: { value: '' | Role; label: string }[] = [
   { value: '', label: 'All member roles' },
@@ -213,10 +213,6 @@ function isSubscriptionActive(sub: SubscriptionRow, today: string) {
   return isISODateOnly(sub.end_date) && (sub.end_date as string) >= today
 }
 
-function hasEndedFreeze(sub: SubscriptionRow | null, today: string) {
-  if (!sub?.frozen_until || !isISODateOnly(sub.frozen_until)) return false
-  return sub.frozen_until < today
-}
 
 function formatEGP(value: number | null | undefined) {
   const n = Number(value ?? 0)
@@ -236,9 +232,9 @@ function memberName(member: MemberRow) {
   return `${member.first_name ?? ''} ${member.last_name ?? ''}`.trim() || 'Unnamed member'
 }
 
-function profileIssues(member: MemberRow) {
+function profileIssues(member: MemberRow, isFamilyManaged: boolean) {
   const issues: string[] = []
-  if (!String(member.email ?? '').trim()) issues.push('Missing email')
+  if (!isFamilyManaged && !String(member.email ?? '').trim()) issues.push('Missing email')
   if (!String(member.phone ?? '').trim()) issues.push('Missing phone')
   if (!String(member.date_of_birth ?? '').trim()) issues.push('Missing date of birth')
   return issues
@@ -254,70 +250,78 @@ function latestSubscriptionFor(memberId: string, byMember: Map<string, Subscript
   })[0]
 }
 
-function buildInactiveMember(member: MemberRow, latestSub: SubscriptionRow | null, today: string, followup: FollowupRow | null): InactiveMember {
-  const issues = profileIssues(member)
-  const due = Number(latestSub?.amount_due ?? 0)
-  const hasDue = Number.isFinite(due) && due > 0
-  const freezeEnded = hasEndedFreeze(latestSub, today)
+function buildInactiveMember(
+  member: MemberRow,
+  latestSub: SubscriptionRow | null,
+  today: string,
+  followup: FollowupRow | null,
+  account: { isFamilyManaged: boolean; isGuardianMember: boolean; familyName: string | null },
+): InactiveMember {
+  const issues = profileIssues(member, account.isFamilyManaged)
   const endDate = latestSub?.end_date ?? null
   const createdAt = member.created_at ? String(member.created_at).slice(0, 10) : null
 
-  let primaryReason: InactiveMember['primaryReason'] = 'no_active_subscription'
-  let reasonLabel = 'No active subscription'
-  let reasonDetail = 'No valid active access was found for this account.'
-  let suggestedAction = 'Review the member profile and subscription status.'
-  let inactiveSinceLabel = 'Inactive since unknown'
+  let primaryReason: InactiveMember['primaryReason'] = 'other_inactive'
+  let reasonLabel = 'Other inactive'
+  let reasonDetail = 'No current active or frozen membership access was found.'
+  let suggestedAction = 'Review the latest subscription status before follow-up.'
+  let inactiveSinceLabel = 'Inactive date unknown'
   let inactiveDays: number | null = null
 
-  if (issues.length > 0) {
-    primaryReason = 'incomplete_profile'
-    reasonLabel = 'Incomplete profile'
-    reasonDetail = issues.join(' · ')
-    suggestedAction = 'Complete or correct the profile details before follow-up.'
-    inactiveDays = diffDays(createdAt, today)
-    inactiveSinceLabel = inactiveDays === null ? 'Created date unknown' : `Created ${inactiveDays} day(s) ago`
-  }
-
-  if (!latestSub && issues.length === 0) {
-    primaryReason = 'never_subscribed'
-    reasonLabel = 'Never subscribed'
+  if (!latestSub) {
+    primaryReason = 'no_membership'
+    reasonLabel = 'No membership yet'
     reasonDetail = 'No subscription history was found for this member.'
-    suggestedAction = 'Check if the account was created by mistake or add the first subscription.'
+    suggestedAction = 'Add the first subscription if this member is ready to start.'
     inactiveDays = diffDays(createdAt, today)
     inactiveSinceLabel = inactiveDays === null ? 'Created date unknown' : `Created ${inactiveDays} day(s) ago`
-  }
-
-  if (latestSub && issues.length === 0) {
+  } else {
     const status = String(latestSub.status ?? '').toLowerCase() || 'unknown'
-    inactiveDays = diffDays(endDate, today)
-    inactiveSinceLabel = inactiveDays === null ? 'Inactive date unknown' : `Inactive for ${inactiveDays} day(s)`
+    const type = String(latestSub.subscription_type ?? (latestSub.end_date ? 'time' : 'sessions')).toLowerCase()
+    const plan = String(latestSub.plan ?? '').toLowerCase()
+    const isLegacySessions = type === 'sessions' || plan === 'sessions'
+    const total = Number(latestSub.sessions_total ?? 0)
+    const used = Number(latestSub.sessions_used ?? 0)
+    const isDepletedLegacy = isLegacySessions && total > 0 && used >= total
 
-    if (hasDue) {
-      primaryReason = 'remaining_due'
-      reasonLabel = 'Remaining due'
-      reasonDetail = `Latest subscription has ${formatEGP(due)} remaining due.`
-      suggestedAction = 'Open the member profile and settle or follow up on the remaining due.'
-    } else if (freezeEnded) {
-      primaryReason = 'freeze_ended'
-      reasonLabel = 'Freeze ended'
-      reasonDetail = `Freeze ended on ${formatDate(latestSub.frozen_until)} and no active access is currently available.`
-      suggestedAction = 'Contact the member after freeze and renew or reactivate if needed.'
-      inactiveDays = diffDays(latestSub.frozen_until, today)
-      inactiveSinceLabel = inactiveDays === null ? 'Freeze end unknown' : `Freeze ended ${inactiveDays} day(s) ago`
-    } else if (isISODateOnly(endDate) && (endDate as string) < today) {
-      primaryReason = 'expired_subscription'
-      reasonLabel = 'Expired subscription'
-      reasonDetail = `Latest subscription ended on ${formatDate(endDate)}.`
-      suggestedAction = 'Send a renewal reminder or create a new subscription.'
-    } else if (status !== 'active') {
-      primaryReason = 'no_active_subscription'
-      reasonLabel = 'No active subscription'
-      reasonDetail = `Latest subscription status is ${status}.`
-      suggestedAction = 'Review the status and create or reactivate a subscription if needed.'
+    if (status === 'cancelled') {
+      primaryReason = 'cancelled'
+      reasonLabel = 'Cancelled'
+      reasonDetail = 'The latest subscription was cancelled.'
+      suggestedAction = 'Review the cancellation context before creating a new subscription.'
       inactiveDays = diffDays(latestSub.created_at ?? createdAt, today)
+      inactiveSinceLabel = inactiveDays === null ? 'Cancellation date unknown' : `Latest record ${inactiveDays} day(s) ago`
+    } else if (isDepletedLegacy) {
+      primaryReason = 'depleted_legacy'
+      reasonLabel = 'Depleted legacy'
+      reasonDetail = `Legacy session package fully used (${used}/${total} sessions).`
+      suggestedAction = 'Offer a current time-based membership if the member wants to continue.'
+      inactiveDays = diffDays(latestSub.created_at ?? createdAt, today)
+      inactiveSinceLabel = inactiveDays === null ? 'Usage date unknown' : `Latest record ${inactiveDays} day(s) ago`
+    } else if (status === 'expired' || (isISODateOnly(endDate) && (endDate as string) < today)) {
+      primaryReason = 'expired'
+      reasonLabel = 'Expired'
+      reasonDetail = endDate ? `Latest subscription ended on ${formatDate(endDate)}.` : 'The latest subscription is marked expired.'
+      suggestedAction = 'Send a renewal reminder or create a new subscription.'
+      inactiveDays = diffDays(endDate ?? latestSub.created_at ?? createdAt, today)
+      inactiveSinceLabel = inactiveDays === null ? 'Expiry date unknown' : `Inactive for ${inactiveDays} day(s)`
+    } else {
+      primaryReason = 'other_inactive'
+      reasonLabel = 'Other inactive'
+      reasonDetail = `Latest subscription status is ${status}.`
+      suggestedAction = 'Review the member profile and latest subscription before follow-up.'
+      inactiveDays = diffDays(endDate ?? latestSub.created_at ?? createdAt, today)
       inactiveSinceLabel = inactiveDays === null ? 'Inactive date unknown' : `Latest record ${inactiveDays} day(s) ago`
     }
   }
+
+  const accountLabel = account.isGuardianMember
+    ? 'Guardian + Member'
+    : account.isFamilyManaged
+      ? 'Family managed'
+      : String(member.email ?? '').trim()
+        ? 'Personal account'
+        : 'Orphan profile'
 
   return {
     member,
@@ -330,6 +334,8 @@ function buildInactiveMember(member: MemberRow, latestSub: SubscriptionRow | nul
     inactiveSinceLabel,
     inactiveDays,
     profileIssues: issues,
+    accountLabel,
+    familyName: account.familyName,
   }
 }
 
@@ -421,6 +427,19 @@ export default async function AdminInactiveMembersPage({
     .from('member_inactive_followups')
     .select('member_id,status,note,reviewed_at,reviewed_by,next_follow_up_at,updated_at')
 
+
+  const { data: familyMemberLinks } = await admin
+    .from('family_members')
+    .select('member_id,family_id')
+
+  const { data: guardianLinks } = await admin
+    .from('family_guardians')
+    .select('family_id,auth_user_id')
+
+  const { data: familiesData } = await admin
+    .from('families')
+    .select('id,name')
+
   const profiles = ((profilesData ?? []) as MemberRow[]).filter((member) => !hasLifetimeGymAccess(member.role))
   const subscriptions = (subscriptionsData ?? []) as SubscriptionRow[]
   const followups = followupsError ? [] : ((followupsData ?? []) as FollowupRow[])
@@ -438,7 +457,30 @@ export default async function AdminInactiveMembersPage({
     subsByMember.set(sub.member_id, existing)
   }
 
+  const familyIdByMember = new Map<string, string>()
+  for (const link of familyMemberLinks ?? []) {
+    const memberId = String((link as any)?.member_id ?? '')
+    const familyId = String((link as any)?.family_id ?? '')
+    if (memberId && familyId) familyIdByMember.set(memberId, familyId)
+  }
+
+  const familyNameById = new Map<string, string>()
+  for (const family of familiesData ?? []) {
+    const familyId = String((family as any)?.id ?? '')
+    if (familyId) familyNameById.set(familyId, String((family as any)?.name ?? '').trim() || 'Family')
+  }
+
+  const guardianFamilyIds = new Set<string>()
+  const guardianMemberIds = new Set<string>()
+  for (const guardian of guardianLinks ?? []) {
+    const familyId = String((guardian as any)?.family_id ?? '')
+    const authUserId = String((guardian as any)?.auth_user_id ?? '')
+    if (familyId) guardianFamilyIds.add(familyId)
+    if (authUserId) guardianMemberIds.add(authUserId)
+  }
+
   const activeIds = new Set<string>()
+  const frozenIds = new Set<string>()
   for (const member of profiles) {
     if ((MEMBER_LIFETIME_ACCESS_ROLES as readonly Role[]).includes(member.role as Role)) {
       activeIds.add(member.user_id)
@@ -446,12 +488,27 @@ export default async function AdminInactiveMembersPage({
   }
   for (const sub of subscriptions) {
     if (!sub.member_id) continue
+    if (isFrozenNow(sub, today)) frozenIds.add(sub.member_id)
     if (isSubscriptionActive(sub, today)) activeIds.add(sub.member_id)
   }
 
   const inactiveAll = profiles
-    .filter((member) => !activeIds.has(member.user_id))
-    .map((member) => buildInactiveMember(member, latestSubscriptionFor(member.user_id, subsByMember), today, followupByMember.get(member.user_id) ?? null))
+    .filter((member) => !activeIds.has(member.user_id) && !frozenIds.has(member.user_id))
+    .map((member) => {
+      const familyId = familyIdByMember.get(member.user_id) ?? null
+      const isFamilyManaged = !String(member.email ?? '').trim() && !!familyId && guardianFamilyIds.has(familyId)
+      return buildInactiveMember(
+        member,
+        latestSubscriptionFor(member.user_id, subsByMember),
+        today,
+        followupByMember.get(member.user_id) ?? null,
+        {
+          isFamilyManaged,
+          isGuardianMember: guardianMemberIds.has(member.user_id),
+          familyName: familyId ? familyNameById.get(familyId) ?? null : null,
+        },
+      )
+    })
 
   const counts = inactiveAll.reduce(
     (acc, item) => {
@@ -461,12 +518,11 @@ export default async function AdminInactiveMembersPage({
     },
     {
       total: 0,
-      expired_subscription: 0,
-      never_subscribed: 0,
-      remaining_due: 0,
-      freeze_ended: 0,
-      incomplete_profile: 0,
-      no_active_subscription: 0,
+      expired: 0,
+      cancelled: 0,
+      no_membership: 0,
+      depleted_legacy: 0,
+      other_inactive: 0,
     } as Record<Exclude<InactiveReason, 'all'> | 'total', number>,
   )
 
@@ -487,6 +543,8 @@ export default async function AdminInactiveMembersPage({
       item.member.phone,
       item.reasonLabel,
       item.reasonDetail,
+      item.accountLabel,
+      item.familyName,
     ]
       .filter(Boolean)
       .join(' ')
@@ -522,7 +580,7 @@ export default async function AdminInactiveMembersPage({
         <div>
           <h1 className="text-2xl font-bold">Inactive accounts</h1>
           <p className="mt-1 max-w-3xl text-sm text-[hsl(var(--muted))]">
-            Read-only view of member-like accounts without active access. Staff roles and lifetime-access roles are excluded from the inactive count.
+            Read-only view of members without active or currently frozen access. Inactive reason is based on membership lifecycle; email/Auth state is shown separately.
           </p>
         </div>
         <div className="grid w-full gap-2 sm:w-auto sm:grid-cols-2">
@@ -543,22 +601,26 @@ export default async function AdminInactiveMembersPage({
         </div>
       ) : null}
 
-      <section className="grid gap-3 md:grid-cols-4 xl:grid-cols-7">
+      <section className="grid gap-3 md:grid-cols-4 xl:grid-cols-8">
         <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4 shadow-soft">
           <p className="text-xs font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Inactive total</p>
           <p className="mt-2 text-3xl font-bold">{counts.total}</p>
         </div>
         <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4 shadow-soft">
           <p className="text-xs font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Expired</p>
-          <p className="mt-2 text-3xl font-bold">{counts.expired_subscription}</p>
+          <p className="mt-2 text-3xl font-bold">{counts.expired}</p>
         </div>
         <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4 shadow-soft">
-          <p className="text-xs font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Never subscribed</p>
-          <p className="mt-2 text-3xl font-bold">{counts.never_subscribed}</p>
+          <p className="text-xs font-medium uppercase tracking-wide text-[hsl(var(--muted))]">No membership yet</p>
+          <p className="mt-2 text-3xl font-bold">{counts.no_membership}</p>
         </div>
         <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4 shadow-soft">
-          <p className="text-xs font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Remaining due</p>
-          <p className="mt-2 text-3xl font-bold">{counts.remaining_due}</p>
+          <p className="text-xs font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Cancelled</p>
+          <p className="mt-2 text-3xl font-bold">{counts.cancelled}</p>
+        </div>
+        <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4 shadow-soft">
+          <p className="text-xs font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Depleted legacy</p>
+          <p className="mt-2 text-3xl font-bold">{counts.depleted_legacy}</p>
         </div>
         <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4 shadow-soft">
           <p className="text-xs font-medium uppercase tracking-wide text-[hsl(var(--muted))]">To contact</p>
@@ -676,6 +738,8 @@ export default async function AdminInactiveMembersPage({
                     <h2 className="text-lg font-bold leading-6">{memberName(member)}</h2>
                     <span className="rounded-full border border-[hsl(var(--border))] bg-[hsl(var(--bg))] px-2 py-0.5 text-xs font-semibold">{roleLabel(member.role)}</span>
                     <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-xs font-semibold text-amber-800">{item.reasonLabel}</span>
+                    <span className="rounded-full border border-sky-200 bg-sky-50 px-2 py-0.5 text-xs font-semibold text-sky-800">{item.accountLabel}</span>
+                    {item.familyName ? <span className="rounded-full border border-[hsl(var(--border))] bg-[hsl(var(--bg))] px-2 py-0.5 text-xs font-semibold">{item.familyName}</span> : null}
                   </div>
                   <p className="mt-1 text-sm text-[hsl(var(--muted))] break-words">
                     ID {member.member_id || '—'} · {member.email || 'No email'} · {member.phone || 'No phone'}

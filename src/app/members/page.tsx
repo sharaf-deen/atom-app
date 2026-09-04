@@ -13,7 +13,8 @@ import MembersFilters from './_components/MembersFilters'
 import MembersStatsCards from './_components/MembersStatsCards'
 import MembersResults from './_components/MembersResults'
 
-type Status = 'all' | 'active' | 'inactive'
+type Status = 'all' | 'active' | 'frozen' | 'inactive'
+type InactiveReason = 'all' | 'expired' | 'cancelled' | 'no_membership' | 'depleted_legacy' | 'other_inactive'
 
 type SearchParams = { [key: string]: string | string[] | undefined }
 
@@ -24,8 +25,8 @@ function clampInt(n: number, min: number, max: number) {
 
 function StatsCardsFallback() {
   return (
-    <div className="grid gap-3 text-sm sm:grid-cols-3">
-      {Array.from({ length: 3 }).map((_, i) => (
+    <div className="grid gap-3 text-sm sm:grid-cols-4">
+      {Array.from({ length: 4 }).map((_, i) => (
         <div
           key={i}
           className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] px-4 py-3 shadow-soft"
@@ -79,15 +80,22 @@ export default async function MembersPage({
 
   const q = typeof searchParams?.q === 'string' ? searchParams.q.trim() : ''
   const statusRaw = typeof searchParams?.status === 'string' ? searchParams.status.toLowerCase() : 'all'
-  const status: Status = (['all', 'active', 'inactive'] as const).includes(statusRaw as any)
+  const status: Status = (['all', 'active', 'frozen', 'inactive'] as const).includes(statusRaw as any)
     ? (statusRaw as Status)
     : 'all'
+  const inactiveReasonRaw = typeof searchParams?.reason === 'string' ? searchParams.reason.toLowerCase() : 'all'
+  const inactiveReason: InactiveReason =
+    status === 'inactive' &&
+    (['all', 'expired', 'cancelled', 'no_membership', 'depleted_legacy', 'other_inactive'] as const).includes(inactiveReasonRaw as any)
+      ? (inactiveReasonRaw as InactiveReason)
+      : 'all'
   const page = clampInt(Number(typeof searchParams?.page === 'string' ? searchParams.page : 1), 1, 1_000_000)
   const pageSize = clampInt(Number(typeof searchParams?.pageSize === 'string' ? searchParams.pageSize : 20), 5, 200)
 
   const current = new URLSearchParams()
   if (q) current.set('q', q)
   if (!q && status !== 'all') current.set('status', status)
+  if (!q && status === 'inactive' && inactiveReason !== 'all') current.set('reason', inactiveReason)
   if (page > 1) current.set('page', String(page))
   if (pageSize !== 20) current.set('pageSize', String(pageSize))
   const currentPath = `/members${current.toString() ? `?${current.toString()}` : ''}`
@@ -116,14 +124,14 @@ export default async function MembersPage({
       <PageHeader title="Members" subtitle="Search and manage members" />
 
       <Section className="space-y-4">
-        <MembersFilters initialQ={q} initialStatus={q ? 'all' : status} initialPageSize={pageSize} />
+        <MembersFilters initialQ={q} initialStatus={q ? 'all' : status} initialInactiveReason={q ? 'all' : inactiveReason} initialPageSize={pageSize} />
 
         <Suspense fallback={<StatsCardsFallback />}>
           <MembersStatsCards pageSize={pageSize} />
         </Suspense>
 
         <Suspense fallback={<ResultsFallback />}>
-          <MembersResults q={q} status={status} page={page} pageSize={pageSize} />
+          <MembersResults q={q} status={status} inactiveReason={inactiveReason} page={page} pageSize={pageSize} />
         </Suspense>
       </Section>
     </main>
