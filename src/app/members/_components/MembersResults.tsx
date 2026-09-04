@@ -5,7 +5,8 @@ import { getSupabaseAdminClientCached } from '@/lib/requestCache'
 import { type Role } from '@/lib/session'
 import { cairoToday } from '@/lib/cairoDate'
 
-type Status = 'all' | 'active' | 'inactive'
+type Status = 'all' | 'active' | 'frozen' | 'inactive'
+type InactiveReason = 'all' | 'expired' | 'cancelled' | 'no_membership' | 'depleted_legacy' | 'other_inactive'
 
 type MemberRow = {
   user_id: string
@@ -18,6 +19,8 @@ type MemberRow = {
   member_id: string | null
   date_of_birth: string | null
   is_active?: boolean | null
+  is_frozen?: boolean | null
+  inactive_reason?: InactiveReason | null
 }
 
 type MemberRowWithTotal = MemberRow & { total_count?: number | string | null }
@@ -25,6 +28,7 @@ type MemberRowWithTotal = MemberRow & { total_count?: number | string | null }
 type Props = {
   q: string
   status: Status
+  inactiveReason: InactiveReason
   page: number
   pageSize: number
 }
@@ -53,19 +57,16 @@ function ageYears(dob?: string | null) {
   return age
 }
 
-function StatusBadge({ active }: { active?: boolean | null }) {
-  const isTrue = active === true
-  const isFalse = active === false
-
-  if (!isTrue && !isFalse) {
+function StatusBadge({ active, frozen }: { active?: boolean | null; frozen?: boolean | null }) {
+  if (frozen === true) {
     return (
-      <span className="inline-flex items-center rounded-full border border-[hsl(var(--border))] bg-[hsl(var(--bg))] px-2 py-0.5 text-[11px] font-medium text-[hsl(var(--muted))]">
-        Unknown
+      <span className="inline-flex items-center rounded-full border border-sky-200 bg-sky-50 px-2 py-0.5 text-[11px] font-semibold text-sky-700">
+        Frozen
       </span>
     )
   }
 
-  if (isTrue) {
+  if (active === true) {
     return (
       <span className="inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700">
         Active
@@ -73,9 +74,45 @@ function StatusBadge({ active }: { active?: boolean | null }) {
     )
   }
 
+  if (active === false) {
+    return (
+      <span className="inline-flex items-center rounded-full border border-rose-200 bg-rose-50 px-2 py-0.5 text-[11px] font-semibold text-rose-700">
+        Inactive
+      </span>
+    )
+  }
+
   return (
-    <span className="inline-flex items-center rounded-full border border-rose-200 bg-rose-50 px-2 py-0.5 text-[11px] font-semibold text-rose-700">
-      Inactive
+    <span className="inline-flex items-center rounded-full border border-[hsl(var(--border))] bg-[hsl(var(--bg))] px-2 py-0.5 text-[11px] font-medium text-[hsl(var(--muted))]">
+      Unknown
+    </span>
+  )
+}
+
+function inactiveReasonLabel(reason?: InactiveReason | null) {
+  switch (reason) {
+    case 'expired':
+      return 'Expired'
+    case 'cancelled':
+      return 'Cancelled'
+    case 'no_membership':
+      return 'No membership yet'
+    case 'depleted_legacy':
+      return 'Depleted legacy'
+    case 'other_inactive':
+      return 'Other inactive'
+    default:
+      return null
+  }
+}
+
+function InactiveReasonBadge({ reason }: { reason?: InactiveReason | null }) {
+  const label = inactiveReasonLabel(reason)
+  if (!label) return null
+
+  return (
+    <span className="inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-800">
+      {label}
     </span>
   )
 }
@@ -96,7 +133,7 @@ function AgeBadge({ dob }: { dob?: string | null }) {
   )
 }
 
-export default async function MembersResults({ q, status, page, pageSize }: Props) {
+export default async function MembersResults({ q, status, inactiveReason, page, pageSize }: Props) {
   const admin = getSupabaseAdminClientCached()
 
   let rows: MemberRow[] = []
@@ -105,11 +142,12 @@ export default async function MembersResults({ q, status, page, pageSize }: Prop
   const mode: 'search' | 'list' = q ? 'search' : 'list'
 
   try {
-    const { data, error } = await admin.rpc('search_members_v3', {
-      q: q || null,
-      status: q ? 'all' : status,
-      page,
-      page_size: pageSize,
+    const { data, error } = await admin.rpc('search_members_v4', {
+      p_q: q || null,
+      p_status: q ? 'all' : status,
+      p_inactive_reason: q || status !== 'inactive' ? 'all' : inactiveReason,
+      p_page: page,
+      p_page_size: pageSize,
     })
 
     if (error) throw new Error(error.message)
@@ -128,6 +166,7 @@ export default async function MembersResults({ q, status, page, pageSize }: Prop
   const base = new URLSearchParams()
   if (q) base.set('q', q)
   if (!q && status !== 'all') base.set('status', status)
+  if (!q && status === 'inactive' && inactiveReason !== 'all') base.set('reason', inactiveReason)
   if (pageSize !== 20) base.set('pageSize', String(pageSize))
 
   const hrefForPage = (p: number) => {
@@ -161,7 +200,8 @@ export default async function MembersResults({ q, status, page, pageSize }: Prop
                   </div>
 
                   <div className="flex shrink-0 flex-col items-end gap-1">
-                    <StatusBadge active={m.is_active} />
+                    <StatusBadge active={m.is_active} frozen={m.is_frozen} />
+                    {m.is_active === false && m.is_frozen !== true ? <InactiveReasonBadge reason={m.inactive_reason} /> : null}
                     <AgeBadge dob={m.date_of_birth} />
                   </div>
                 </div>
@@ -226,7 +266,8 @@ export default async function MembersResults({ q, status, page, pageSize }: Prop
                       <div className="flex items-center justify-between gap-2">
                         <div className="font-medium">{name}</div>
                         <div className="flex items-center gap-2">
-                          <StatusBadge active={m.is_active} />
+                          <StatusBadge active={m.is_active} frozen={m.is_frozen} />
+                    {m.is_active === false && m.is_frozen !== true ? <InactiveReasonBadge reason={m.inactive_reason} /> : null}
                           <AgeBadge dob={m.date_of_birth} />
                         </div>
                       </div>

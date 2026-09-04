@@ -2,7 +2,7 @@
 import Link from 'next/link'
 import { getSupabaseAdminClientCached } from '@/lib/requestCache'
 
-type Status = 'all' | 'active' | 'inactive'
+type Status = 'all' | 'active' | 'frozen' | 'inactive'
 
 type Props = {
   pageSize: number
@@ -23,7 +23,7 @@ export default async function MembersStatsCards({ pageSize }: Props) {
   let statsError: string | null = null
 
   try {
-    const { data, error } = await admin.rpc('members_activity_stats_v3')
+    const { data, error } = await admin.rpc('members_activity_stats_v4')
     if (error) throw new Error(error.message)
     statsData = data
   } catch (e: any) {
@@ -31,16 +31,17 @@ export default async function MembersStatsCards({ pageSize }: Props) {
   }
 
   const stats = (Array.isArray(statsData) ? statsData[0] : statsData) as
-    | { total?: number | string | null; active?: number | string | null; inactive?: number | string | null }
+    | { total?: number | string | null; active?: number | string | null; frozen?: number | string | null; inactive?: number | string | null }
     | null
 
   const total = Number(stats?.total ?? 0)
   const active = Number(stats?.active ?? 0)
-  const inactive = Number(stats?.inactive ?? Math.max(total - active, 0))
+  const frozen = Number(stats?.frozen ?? 0)
+  const inactive = Number(stats?.inactive ?? Math.max(total - active - frozen, 0))
 
   return (
     <>
-      <div className="grid gap-3 text-sm sm:grid-cols-3">
+      <div className="grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-4">
         <Link
           prefetch={false}
           href={hrefForStatus('all', pageSize)}
@@ -59,6 +60,16 @@ export default async function MembersStatsCards({ pageSize }: Props) {
           <div className="text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Active</div>
           <div className="mt-1 text-xl font-semibold text-emerald-600 group-hover:underline">{active}</div>
           <div className="mt-1 text-[11px] text-[hsl(var(--muted))]">Open active members</div>
+        </Link>
+
+        <Link
+          prefetch={false}
+          href={hrefForStatus('frozen', pageSize)}
+          className="group flex flex-col justify-between rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] px-4 py-3 text-left shadow-soft transition hover:-translate-y-0.5 hover:shadow-lg"
+        >
+          <div className="text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Frozen</div>
+          <div className="mt-1 text-xl font-semibold text-sky-600 group-hover:underline">{frozen}</div>
+          <div className="mt-1 text-[11px] text-[hsl(var(--muted))]">Open frozen members</div>
         </Link>
 
         <Link
