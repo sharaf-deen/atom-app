@@ -42,6 +42,7 @@ type ActionBody =
       phone?: string
     }
   | { action?: 'remove_guardian'; familyId?: string; authUserId?: string }
+  | { action?: 'promote_guardian_to_member'; familyId?: string; authUserId?: string }
   | { action?: 'preview_guardian_member_cleanup'; familyId?: string; authUserId?: string }
   | { action?: 'remove_guardian_member_profile'; familyId?: string; authUserId?: string }
   | {
@@ -668,6 +669,54 @@ export async function POST(req: Request) {
       ok: true,
       guardian: data,
       message: 'Guardian details updated. Login email and Auth account were not changed.',
+    })
+  }
+
+
+  if (action === 'promote_guardian_to_member') {
+    const familyId = String((body as any)?.familyId ?? '').trim()
+    const authUserId = String((body as any)?.authUserId ?? '').trim()
+
+    if (!UUID_RE.test(familyId) || !UUID_RE.test(authUserId)) {
+      return noStore({ ok: false, error: 'INVALID_ID' }, { status: 400 })
+    }
+
+    const { data, error } = await admin.rpc('family_guardian_promote_to_member', {
+      p_family_id: familyId,
+      p_auth_user_id: authUserId,
+      p_added_by: actor.actorId,
+    })
+
+    if (error) {
+      const message = String(error.message ?? '')
+      const status =
+        message.includes('GUARDIAN_NOT_FOUND') ? 404 :
+        message.includes('GUARDIAN_ALREADY_HAS_PROFILE') ||
+        message.includes('GUARDIAN_EMAIL_ALREADY_USED_BY_MEMBER_PROFILE') ? 409 :
+        500
+
+      return noStore(
+        {
+          ok: false,
+          error:
+            message.includes('GUARDIAN_NOT_FOUND') ? 'GUARDIAN_NOT_FOUND' :
+            message.includes('GUARDIAN_ALREADY_HAS_PROFILE') ? 'GUARDIAN_ALREADY_HAS_PROFILE' :
+            message.includes('GUARDIAN_EMAIL_ALREADY_USED_BY_MEMBER_PROFILE') ? 'GUARDIAN_EMAIL_ALREADY_USED_BY_MEMBER_PROFILE' :
+            'PROMOTE_GUARDIAN_TO_MEMBER_FAILED',
+          details: error.message,
+        },
+        { status },
+      )
+    }
+
+    revalidateFamilyViews()
+    return noStore({
+      ok: true,
+      member: data,
+      auth_account_created: false,
+      auth_account_preserved: true,
+      guardian_link_preserved: true,
+      message: 'Guardian promoted to ATOM member using the existing login and email.',
     })
   }
 

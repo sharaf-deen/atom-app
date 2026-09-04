@@ -140,6 +140,7 @@ export default function FamilyAccountsManager({
   const [unlinkTarget, setUnlinkTarget] = React.useState<UnlinkTarget | null>(null)
   const [primaryGuardianTarget, setPrimaryGuardianTarget] = React.useState<GuardianTarget | null>(null)
   const [removeGuardianTarget, setRemoveGuardianTarget] = React.useState<GuardianTarget | null>(null)
+  const [promoteGuardianTarget, setPromoteGuardianTarget] = React.useState<GuardianTarget | null>(null)
   const [message, setMessage] = React.useState<string | null>(null)
   const [error, setError] = React.useState<string | null>(null)
 
@@ -392,6 +393,49 @@ export default function FamilyAccountsManager({
       )
       setCleanupTarget(null)
       setCleanupPreview(null)
+      router.refresh()
+    } catch (cause: any) {
+      setError(String(cause?.message || cause))
+    } finally {
+      setActionKey(null)
+    }
+  }
+
+
+  async function promoteGuardianToMember() {
+    if (!promoteGuardianTarget) return
+    resetFeedback()
+
+    const key = `promote-member:${promoteGuardianTarget.familyId}:${promoteGuardianTarget.guardian.auth_user_id}`
+    setActionKey(key)
+
+    try {
+      const response = await fetch('/api/admin/families', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'promote_guardian_to_member',
+          familyId: promoteGuardianTarget.familyId,
+          authUserId: promoteGuardianTarget.guardian.auth_user_id,
+        }),
+      })
+      const data = await readJson(response)
+
+      if (!response.ok || data.ok !== true) {
+        if (data.error === 'GUARDIAN_ALREADY_HAS_PROFILE') {
+          throw new Error('This guardian already has an ATOM profile.')
+        }
+        if (data.error === 'GUARDIAN_EMAIL_ALREADY_USED_BY_MEMBER_PROFILE') {
+          throw new Error('This guardian email is already used by another member profile. Review the duplicate before converting this guardian.')
+        }
+        throw new Error(data.details || data.error || 'Failed to make guardian a member')
+      }
+
+      const memberId = data.member?.member_id ? ` · ${data.member.member_id}` : ''
+      setMessage(
+        `${guardianName(promoteGuardianTarget.guardian)} is now Guardian + Member${memberId}. The existing login and family access were preserved.`,
+      )
+      setPromoteGuardianTarget(null)
       router.refresh()
     } catch (cause: any) {
       setError(String(cause?.message || cause))
@@ -848,6 +892,23 @@ export default function FamilyAccountsManager({
                               Edit guardian
                             </Button>
 
+                            {!guardian.member_profile ? (
+                              <Button
+                                type="button"
+                                size="sm"
+                                disabled={Boolean(actionKey)}
+                                onClick={() =>
+                                  setPromoteGuardianTarget({
+                                    familyId: family.id,
+                                    familyName: family.name,
+                                    guardian,
+                                  })
+                                }
+                              >
+                                Make member
+                              </Button>
+                            ) : null}
+
                             {!guardian.is_primary ? (
                               <>
                                 <Button
@@ -914,13 +975,17 @@ export default function FamilyAccountsManager({
                           ) : null}
 
                           {guardian.member_profile ? (
-                            <span className="text-xs font-medium text-amber-700">
-                              Member profile also exists
+                            <span className="text-xs font-medium text-emerald-700">
+                              Guardian + Member
                               {guardian.member_profile.member_id
                                 ? ` · ${guardian.member_profile.member_id}`
                                 : ''}
                             </span>
-                          ) : null}
+                          ) : (
+                            <span className="text-xs font-medium text-[hsl(var(--muted))]">
+                              Guardian only · no member profile
+                            </span>
+                          )}
                         </div>
                       </div>
                     ))}
@@ -1261,6 +1326,33 @@ export default function FamilyAccountsManager({
           if (!actionKey) setDeleteFamilyTarget(null)
         }}
         onConfirm={deleteFamily}
+      />
+
+      <ConfirmActionModal
+        open={Boolean(promoteGuardianTarget)}
+        title="Make this guardian an ATOM member?"
+        description="This creates a member profile on the guardian's existing login. No second Auth account or email is created."
+        confirmLabel="Make member"
+        pendingLabel="Creating member…"
+        pending={Boolean(
+          promoteGuardianTarget &&
+            actionKey ===
+              `promote-member:${promoteGuardianTarget.familyId}:${promoteGuardianTarget.guardian.auth_user_id}`,
+        )}
+        summaryItems={
+          promoteGuardianTarget
+            ? [
+                { label: 'Family', value: promoteGuardianTarget.familyName },
+                { label: 'Guardian', value: guardianName(promoteGuardianTarget.guardian) },
+                { label: 'Existing login', value: promoteGuardianTarget.guardian.email },
+              ]
+            : []
+        }
+        warning="The guardian keeps the same login and Family Dashboard access. ATOM creates only the member profile, Member ID, QR code and family-member link. No subscription is created automatically."
+        onCancel={() => {
+          if (!actionKey) setPromoteGuardianTarget(null)
+        }}
+        onConfirm={promoteGuardianToMember}
       />
 
       <ConfirmActionModal
