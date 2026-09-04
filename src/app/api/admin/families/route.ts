@@ -12,6 +12,8 @@ import { extractActionLink, sendFamilyParentInviteEmail } from '@/lib/memberInvi
 
 type ActionBody =
   | { action?: 'create'; familyName?: string }
+  | { action?: 'rename_family'; familyId?: string; familyName?: string }
+  | { action?: 'delete_family'; familyId?: string }
   | { action?: 'link_member'; familyId?: string; memberId?: string }
   | { action?: 'unlink_member'; familyId?: string; memberId?: string }
   | {
@@ -31,7 +33,17 @@ type ActionBody =
       phone?: string
     }
   | { action?: 'set_primary_guardian'; familyId?: string; authUserId?: string }
+  | {
+      action?: 'update_guardian'
+      familyId?: string
+      authUserId?: string
+      firstName?: string
+      lastName?: string
+      phone?: string
+    }
   | { action?: 'remove_guardian'; familyId?: string; authUserId?: string }
+  | { action?: 'preview_guardian_member_cleanup'; familyId?: string; authUserId?: string }
+  | { action?: 'remove_guardian_member_profile'; familyId?: string; authUserId?: string }
   | {
       action?: 'create_dependent_member'
       familyId?: string
@@ -184,6 +196,100 @@ export async function POST(req: Request) {
 
     revalidateFamilyViews()
     return noStore({ ok: true, family: data })
+  }
+
+  if (action === 'rename_family') {
+    const familyId = String((body as any)?.familyId ?? '').trim()
+    const familyName = normalizeFamilyName((body as any)?.familyName)
+
+    if (!UUID_RE.test(familyId)) {
+      return noStore({ ok: false, error: 'INVALID_FAMILY_ID' }, { status: 400 })
+    }
+    if (familyName.length < 2 || familyName.length > 120) {
+      return noStore({ ok: false, error: 'INVALID_FAMILY_NAME' }, { status: 400 })
+    }
+
+    const { data, error } = await admin
+      .from('families')
+      .update({ name: familyName })
+      .eq('id', familyId)
+      .select('id,name,created_at')
+      .maybeSingle()
+
+    if (error) {
+      return noStore(
+        { ok: false, error: 'RENAME_FAMILY_FAILED', details: error.message },
+        { status: 500 },
+      )
+    }
+    if (!data) {
+      return noStore({ ok: false, error: 'FAMILY_NOT_FOUND' }, { status: 404 })
+    }
+
+    revalidateFamilyViews()
+    return noStore({ ok: true, family: data })
+  }
+
+  if (action === 'delete_family') {
+    if (actor.role !== 'super_admin') {
+      return noStore({ ok: false, error: 'SUPER_ADMIN_REQUIRED' }, { status: 403 })
+    }
+
+    const familyId = String((body as any)?.familyId ?? '').trim()
+    if (!UUID_RE.test(familyId)) {
+      return noStore({ ok: false, error: 'INVALID_FAMILY_ID' }, { status: 400 })
+    }
+
+    const [{ data: family, error: familyError }, { count: memberCount, error: memberCountError }, { count: guardianCount, error: guardianCountError }] = await Promise.all([
+      admin.from('families').select('id,name').eq('id', familyId).maybeSingle(),
+      admin.from('family_members').select('member_id', { count: 'exact', head: true }).eq('family_id', familyId),
+      admin.from('family_guardians').select('auth_user_id', { count: 'exact', head: true }).eq('family_id', familyId),
+    ])
+
+    if (familyError || !family) {
+      return noStore(
+        { ok: false, error: 'FAMILY_NOT_FOUND', details: familyError?.message ?? null },
+        { status: 404 },
+      )
+    }
+    if (memberCountError || guardianCountError) {
+      return noStore(
+        {
+          ok: false,
+          error: 'FAMILY_DELETE_CHECK_FAILED',
+          details: memberCountError?.message ?? guardianCountError?.message ?? null,
+        },
+        { status: 500 },
+      )
+    }
+
+    if (Number(memberCount ?? 0) > 0) {
+      return noStore(
+        {
+          ok: false,
+          error: 'FAMILY_HAS_MEMBERS',
+          details: 'Remove all member links before deleting the family. Member profiles are never deleted with a family.',
+          member_count: Number(memberCount ?? 0),
+        },
+        { status: 409 },
+      )
+    }
+
+    const { error: deleteError } = await admin.from('families').delete().eq('id', familyId)
+    if (deleteError) {
+      return noStore(
+        { ok: false, error: 'DELETE_FAMILY_FAILED', details: deleteError.message },
+        { status: 500 },
+      )
+    }
+
+    revalidateFamilyViews()
+    return noStore({
+      ok: true,
+      guardian_links_removed: Number(guardianCount ?? 0),
+      auth_accounts_deleted: false,
+      message: 'Family deleted. Guardian links were removed, while Auth accounts and member profiles were preserved.',
+    })
   }
 
   if (action === 'link_member') {
@@ -518,6 +624,109 @@ export async function POST(req: Request) {
       message: existingAccount
         ? `Existing ATOM account linked as ${isPrimary ? 'primary guardian' : 'guardian'}. No duplicate account was created.`
         : `${isPrimary ? 'Primary guardian' : 'Guardian'} account created and invitation sent.`,
+    })
+  }
+
+  if (action === 'update_guardian') {
+    const familyId = String((body as any)?.familyId ?? '').trim()
+    const authUserId = String((body as any)?.authUserId ?? '').trim()
+    const firstName = normalizeText((body as any)?.firstName)
+    const lastName = normalizeText((body as any)?.lastName)
+    const phone = normalizeText((body as any)?.phone) || null
+
+    if (!UUID_RE.test(familyId) || !UUID_RE.test(authUserId)) {
+      return noStore({ ok: false, error: 'INVALID_ID' }, { status: 400 })
+    }
+    if (!firstName || firstName.length > 120 || lastName.length > 120 || (phone && phone.length > 80)) {
+      return noStore({ ok: false, error: 'INVALID_GUARDIAN_DETAILS' }, { status: 400 })
+    }
+
+    const { data, error } = await admin
+      .from('family_guardians')
+      .update({
+        first_name: firstName,
+        last_name: lastName || null,
+        phone,
+      })
+      .eq('family_id', familyId)
+      .eq('auth_user_id', authUserId)
+      .select('family_id,auth_user_id,email,first_name,last_name,phone,is_primary,invited_at,created_at')
+      .maybeSingle()
+
+    if (error) {
+      return noStore(
+        { ok: false, error: 'UPDATE_GUARDIAN_FAILED', details: error.message },
+        { status: 500 },
+      )
+    }
+    if (!data) {
+      return noStore({ ok: false, error: 'GUARDIAN_NOT_FOUND' }, { status: 404 })
+    }
+
+    revalidateFamilyViews()
+    return noStore({
+      ok: true,
+      guardian: data,
+      message: 'Guardian details updated. Login email and Auth account were not changed.',
+    })
+  }
+
+  if (action === 'preview_guardian_member_cleanup' || action === 'remove_guardian_member_profile') {
+    if (actor.role !== 'super_admin') {
+      return noStore({ ok: false, error: 'SUPER_ADMIN_REQUIRED' }, { status: 403 })
+    }
+
+    const familyId = String((body as any)?.familyId ?? '').trim()
+    const authUserId = String((body as any)?.authUserId ?? '').trim()
+    if (!UUID_RE.test(familyId) || !UUID_RE.test(authUserId)) {
+      return noStore({ ok: false, error: 'INVALID_ID' }, { status: 400 })
+    }
+
+    const { data: guardian, error: guardianError } = await admin
+      .from('family_guardians')
+      .select('family_id,auth_user_id,email,first_name,last_name,is_primary')
+      .eq('family_id', familyId)
+      .eq('auth_user_id', authUserId)
+      .maybeSingle()
+
+    if (guardianError) {
+      return noStore(
+        { ok: false, error: 'GUARDIAN_LOOKUP_FAILED', details: guardianError.message },
+        { status: 500 },
+      )
+    }
+    if (!guardian) {
+      return noStore({ ok: false, error: 'GUARDIAN_NOT_FOUND' }, { status: 404 })
+    }
+
+    if (action === 'preview_guardian_member_cleanup') {
+      const { data, error } = await admin.rpc('family_guardian_member_cleanup_preview', {
+        p_auth_user_id: authUserId,
+      })
+      if (error) {
+        return noStore(
+          { ok: false, error: 'MEMBER_CLEANUP_PREVIEW_FAILED', details: error.message },
+          { status: 500 },
+        )
+      }
+      return noStore({ ok: true, preview: data })
+    }
+
+    const { data, error } = await admin.rpc('family_guardian_remove_unused_member_profile', {
+      p_auth_user_id: authUserId,
+    })
+    if (error) {
+      return noStore(
+        { ok: false, error: 'MEMBER_PROFILE_CLEANUP_BLOCKED', details: error.message },
+        { status: 409 },
+      )
+    }
+
+    revalidateFamilyViews()
+    return noStore({
+      ok: true,
+      result: data,
+      message: 'Unnecessary member profile removed. Guardian login and family access were preserved.',
     })
   }
 
