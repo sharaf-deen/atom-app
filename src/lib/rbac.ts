@@ -111,6 +111,7 @@ const APP_NAV_BY_ROLE: MenuByRole = {
     { label: 'Staff Attendance', href: '/coach-operations/staff-attendance', icon: 'scan' },
     { label: 'Member Incidents', href: '/coach-operations/incidents', icon: 'file-text' },
     { label: 'Coach Oversight', href: '/coach-operations/oversight', icon: 'dashboard' },
+    { label: 'Class Templates', href: '/schedule/templates', icon: 'calendar' },
     { label: 'Athletes', href: '/head-coach/athletes', icon: 'users' },
     { label: 'Private Coaching', href: '/head-coach/private-coaching', icon: 'user-cog' },
     { label: 'Notifications', href: '/notifications', icon: 'bell' },
@@ -189,6 +190,7 @@ const APP_NAV_BY_ROLE: MenuByRole = {
     { label: 'Staff Attendance', href: '/coach-operations/staff-attendance', icon: 'scan' },
     { label: 'Member Incidents', href: '/coach-operations/incidents', icon: 'file-text' },
     { label: 'Coach Oversight', href: '/coach-operations/oversight', icon: 'dashboard' },
+    { label: 'Class Templates', href: '/schedule/templates', icon: 'calendar' },
     { label: 'Private Coaching', href: '/admin/private-coaching', icon: 'user-cog' },
     { label: 'Store', href: '/store', icon: 'bag' },
     { label: 'Store Admin', href: '/admin/store', icon: 'bag' },
@@ -410,6 +412,14 @@ export function canManageCoachMemberIncidents(role: Role | null | undefined) {
 }
 
 export function canAccessCoachOversight(role: Role | null | undefined) {
+  return hasAnyRole(role, ['head_coach', 'super_admin'])
+}
+
+export function canAccessScheduleClassTemplates(role: Role | null | undefined) {
+  return hasAnyRole(role, ['head_coach', 'super_admin'])
+}
+
+export function canManageScheduleClassTemplates(role: Role | null | undefined) {
   return hasAnyRole(role, ['head_coach', 'super_admin'])
 }
 
@@ -673,6 +683,14 @@ const CAPABILITY_BLUEPRINTS: CapabilityBlueprint[] = [
     description: 'Open the coach-facing hub with QR, schedule, staff updates and member lookup shortcuts.',
     href: '/training-useful',
     check: (role) => canAccessTrainingUseful(role),
+  },
+  {
+    key: 'schedule_class_templates',
+    category: 'Core',
+    label: 'Class templates',
+    description: 'Manage the structured recurring academy class timetable used as the foundation for future dated training sessions.',
+    href: '/schedule/templates',
+    check: (role) => canAccessScheduleClassTemplates(role),
   },
   {
     key: 'coach_curriculum',
