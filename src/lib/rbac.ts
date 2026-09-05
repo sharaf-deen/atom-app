@@ -110,6 +110,7 @@ const APP_NAV_BY_ROLE: MenuByRole = {
     { label: 'Training Logs', href: '/coach-operations/training-logs', icon: 'file-text' },
     { label: 'Staff Attendance', href: '/coach-operations/staff-attendance', icon: 'scan' },
     { label: 'Member Incidents', href: '/coach-operations/incidents', icon: 'file-text' },
+    { label: 'Coach Oversight', href: '/coach-operations/oversight', icon: 'dashboard' },
     { label: 'Athletes', href: '/head-coach/athletes', icon: 'users' },
     { label: 'Private Coaching', href: '/head-coach/private-coaching', icon: 'user-cog' },
     { label: 'Notifications', href: '/notifications', icon: 'bell' },
@@ -187,6 +188,7 @@ const APP_NAV_BY_ROLE: MenuByRole = {
     { label: 'Training Logs', href: '/coach-operations/training-logs', icon: 'file-text' },
     { label: 'Staff Attendance', href: '/coach-operations/staff-attendance', icon: 'scan' },
     { label: 'Member Incidents', href: '/coach-operations/incidents', icon: 'file-text' },
+    { label: 'Coach Oversight', href: '/coach-operations/oversight', icon: 'dashboard' },
     { label: 'Private Coaching', href: '/admin/private-coaching', icon: 'user-cog' },
     { label: 'Store', href: '/store', icon: 'bag' },
     { label: 'Store Admin', href: '/admin/store', icon: 'bag' },
@@ -404,6 +406,10 @@ export function canCreateCoachMemberIncidents(role: Role | null | undefined) {
 }
 
 export function canManageCoachMemberIncidents(role: Role | null | undefined) {
+  return hasAnyRole(role, ['head_coach', 'super_admin'])
+}
+
+export function canAccessCoachOversight(role: Role | null | undefined) {
   return hasAnyRole(role, ['head_coach', 'super_admin'])
 }
 
