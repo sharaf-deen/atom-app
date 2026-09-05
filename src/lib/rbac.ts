@@ -112,6 +112,7 @@ const APP_NAV_BY_ROLE: MenuByRole = {
     { label: 'Member Incidents', href: '/coach-operations/incidents', icon: 'file-text' },
     { label: 'Coach Oversight', href: '/coach-operations/oversight', icon: 'dashboard' },
     { label: 'Class Templates', href: '/schedule/templates', icon: 'calendar' },
+    { label: 'Scheduled Sessions', href: '/schedule/sessions', icon: 'calendar' },
     { label: 'Athletes', href: '/head-coach/athletes', icon: 'users' },
     { label: 'Private Coaching', href: '/head-coach/private-coaching', icon: 'user-cog' },
     { label: 'Notifications', href: '/notifications', icon: 'bell' },
@@ -191,6 +192,7 @@ const APP_NAV_BY_ROLE: MenuByRole = {
     { label: 'Member Incidents', href: '/coach-operations/incidents', icon: 'file-text' },
     { label: 'Coach Oversight', href: '/coach-operations/oversight', icon: 'dashboard' },
     { label: 'Class Templates', href: '/schedule/templates', icon: 'calendar' },
+    { label: 'Scheduled Sessions', href: '/schedule/sessions', icon: 'calendar' },
     { label: 'Private Coaching', href: '/admin/private-coaching', icon: 'user-cog' },
     { label: 'Store', href: '/store', icon: 'bag' },
     { label: 'Store Admin', href: '/admin/store', icon: 'bag' },
@@ -420,6 +422,14 @@ export function canAccessScheduleClassTemplates(role: Role | null | undefined) {
 }
 
 export function canManageScheduleClassTemplates(role: Role | null | undefined) {
+  return hasAnyRole(role, ['head_coach', 'super_admin'])
+}
+
+export function canAccessScheduleTrainingSessions(role: Role | null | undefined) {
+  return hasAnyRole(role, ['head_coach', 'super_admin'])
+}
+
+export function canManageScheduleTrainingSessions(role: Role | null | undefined) {
   return hasAnyRole(role, ['head_coach', 'super_admin'])
 }
 
@@ -691,6 +701,14 @@ const CAPABILITY_BLUEPRINTS: CapabilityBlueprint[] = [
     description: 'Manage the structured recurring academy class timetable used as the foundation for future dated training sessions.',
     href: '/schedule/templates',
     check: (role) => canAccessScheduleClassTemplates(role),
+  },
+  {
+    key: 'schedule_training_sessions',
+    category: 'Core',
+    label: 'Scheduled sessions',
+    description: 'Generate and review dated academy sessions materialized from active Class Templates.',
+    href: '/schedule/sessions',
+    check: (role) => canAccessScheduleTrainingSessions(role),
   },
   {
     key: 'coach_curriculum',
