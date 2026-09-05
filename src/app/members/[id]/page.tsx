@@ -76,6 +76,20 @@ type AttendanceRow = {
   subscription_id: string | null
 }
 
+type CoachMemberIncidentRow = {
+  id: string
+  category: 'behaviour' | 'safety' | 'injury' | 'repeated_lateness' | 'disrespect' | 'other'
+  severity: 'low' | 'medium' | 'high'
+  description: string
+  status: 'open' | 'resolved'
+  training_group_snapshot: string | null
+  training_date_snapshot: string | null
+  reporter_name_snapshot: string
+  reported_at: string
+  resolved_at: string | null
+  resolution_note: string | null
+}
+
 type SummaryTone = 'success' | 'warning' | 'danger' | 'neutral'
 
 type MembershipSummary = {
@@ -871,6 +885,19 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
 
   const coachSafeView = isCoachViewingOtherMember
   const canReadFreezeFoundation = !coachSafeView && me.role === 'super_admin' && profile.role === 'member'
+  const canViewCoachingIncidents = ['coach', 'head_coach', 'admin', 'super_admin'].includes(me.role)
+  let coachingIncidents: CoachMemberIncidentRow[] = []
+
+  if (canViewCoachingIncidents) {
+    const { data: incidentData } = await adminDb
+      .from('coach_member_incidents')
+      .select('id,category,severity,description,status,training_group_snapshot,training_date_snapshot,reporter_name_snapshot,reported_at,resolved_at,resolution_note')
+      .eq('member_id', profile.user_id)
+      .order('reported_at', { ascending: false })
+      .limit(100)
+
+    coachingIncidents = (incidentData ?? []) as CoachMemberIncidentRow[]
+  }
 
   const { data: subsData } = await db
     .from('subscriptions')
@@ -1661,6 +1688,70 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
             </div>
           )}
         </Surface>
+
+        {canViewCoachingIncidents ? (
+          <Surface className="p-4 sm:p-5">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <h2 className="text-base font-semibold tracking-tight">Coaching incidents · internal</h2>
+                <p className="mt-1 text-sm text-[hsl(var(--muted))]">
+                  Internal coaching history. This information is not shown to the member or family guardians.
+                </p>
+              </div>
+              <TinyBadge tone={coachingIncidents.some((incident) => incident.status === 'open') ? 'warning' : 'neutral'}>
+                {coachingIncidents.length} record(s)
+              </TinyBadge>
+            </div>
+
+            {coachingIncidents.length === 0 ? (
+              <div className="mt-4 rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] px-4 py-3 text-sm text-[hsl(var(--muted))]">
+                No coaching incidents recorded.
+              </div>
+            ) : (
+              <div className="mt-4 grid gap-3">
+                {coachingIncidents.map((incident) => {
+                  const categoryLabel =
+                    incident.category === 'repeated_lateness'
+                      ? 'Repeated lateness'
+                      : incident.category.charAt(0).toUpperCase() + incident.category.slice(1)
+                  const severityTone: SummaryTone =
+                    incident.severity === 'high' ? 'danger' : incident.severity === 'medium' ? 'warning' : 'neutral'
+
+                  return (
+                    <div key={incident.id} className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4 shadow-soft">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <TinyBadge tone={incident.status === 'resolved' ? 'success' : 'warning'}>
+                          {incident.status === 'resolved' ? 'Resolved' : 'Open'}
+                        </TinyBadge>
+                        <TinyBadge tone={severityTone}>
+                          {incident.severity.charAt(0).toUpperCase() + incident.severity.slice(1)}
+                        </TinyBadge>
+                        <TinyBadge>{categoryLabel}</TinyBadge>
+                      </div>
+
+                      <div className="mt-3 whitespace-pre-wrap text-sm">{incident.description}</div>
+
+                      <div className="mt-3 grid gap-2 text-xs text-[hsl(var(--muted))] sm:grid-cols-2">
+                        <div>Reported: {fmtDate(incident.reported_at)} · {incident.reporter_name_snapshot}</div>
+                        <div>
+                          Training: {incident.training_group_snapshot || 'Not linked'}
+                          {incident.training_date_snapshot ? ` · ${fmtDate(incident.training_date_snapshot)}` : ''}
+                        </div>
+                      </div>
+
+                      {incident.status === 'resolved' ? (
+                        <div className="mt-3 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-900">
+                          Resolved {fmtDate(incident.resolved_at)}
+                          {incident.resolution_note ? <div className="mt-1 whitespace-pre-wrap">{incident.resolution_note}</div> : null}
+                        </div>
+                      ) : null}
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+          </Surface>
+        ) : null}
 
         {canViewAttendance ? (
           <Surface className="p-4 sm:p-5">
