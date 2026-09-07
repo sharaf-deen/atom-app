@@ -7,6 +7,7 @@ import Button from '@/components/ui/Button'
 import ConfirmActionModal from '@/components/ui/ConfirmActionModal'
 import Input from '@/components/ui/Input'
 import Textarea from '@/components/ui/Textarea'
+import type { LinkedScheduleSession } from '@/app/coach-operations/training-logs/page'
 
 type Program = {
   id: string
@@ -45,6 +46,8 @@ type CurriculumSituation = {
 type SessionLog = {
   id: string
   program_id: string
+  training_session_id: string | null
+  session_assignment_role_snapshot: 'primary_coach' | 'assistant_coach' | null
   program_title_snapshot: string
   target_group_snapshot: string
   training_date: string
@@ -109,6 +112,7 @@ export default function TrainingSessionLogsManager({
   canCreate,
   canManage,
   programs,
+  linkedSessions,
   programItems,
   types,
   blocks,
@@ -121,6 +125,7 @@ export default function TrainingSessionLogsManager({
   canCreate: boolean
   canManage: boolean
   programs: Program[]
+  linkedSessions: LinkedScheduleSession[]
   programItems: ProgramItem[]
   types: CurriculumType[]
   blocks: CurriculumBlock[]
@@ -132,6 +137,7 @@ export default function TrainingSessionLogsManager({
   const router = useRouter()
   const [formOpen, setFormOpen] = React.useState(false)
   const [editingId, setEditingId] = React.useState<string | null>(null)
+  const [trainingSessionId, setTrainingSessionId] = React.useState('')
   const [programId, setProgramId] = React.useState('')
   const [trainingDate, setTrainingDate] = React.useState(todayIso())
   const [sessionTime, setSessionTime] = React.useState('18:00')
@@ -147,6 +153,11 @@ export default function TrainingSessionLogsManager({
   const [reopenTarget, setReopenTarget] = React.useState<SessionLog | null>(null)
 
   const currentProgram = programs.find((program) => program.id === programId) ?? null
+  const currentLinkedSession = linkedSessions.find((session) => session.id === trainingSessionId) ?? null
+  const linkedSessionIdsInUse = React.useMemo(
+    () => new Set(logs.filter((log) => log.training_session_id && log.id !== editingId).map((log) => log.training_session_id!)),
+    [logs, editingId],
+  )
   const typeMap = React.useMemo(() => new Map(types.map((row) => [row.id, row])), [types])
 
   function programBlockIds(id: string) {
@@ -198,6 +209,7 @@ export default function TrainingSessionLogsManager({
     resetFeedback()
     const program = chooseInitialProgram()
     setEditingId(null)
+    setTrainingSessionId('')
     setProgramId(program?.id ?? '')
     setTrainingDate(program && todayIso() >= program.start_date && todayIso() <= program.end_date ? todayIso() : program?.start_date ?? todayIso())
     setSessionTime('18:00')
@@ -209,6 +221,7 @@ export default function TrainingSessionLogsManager({
   function openEdit(log: SessionLog) {
     resetFeedback()
     setEditingId(log.id)
+    setTrainingSessionId(log.training_session_id ?? '')
     setProgramId(log.program_id)
     setTrainingDate(log.training_date)
     setSessionTime(normalizeTime(log.session_time) || '18:00')
@@ -228,6 +241,25 @@ export default function TrainingSessionLogsManager({
       const today = todayIso()
       setTrainingDate(today >= program.start_date && today <= program.end_date ? today : program.start_date)
     }
+  }
+
+  function changeLinkedSession(nextSessionId: string) {
+    setTrainingSessionId(nextSessionId)
+    resetSelections()
+
+    if (!nextSessionId) {
+      const program = chooseInitialProgram()
+      setProgramId(program?.id ?? '')
+      setTrainingDate(program && todayIso() >= program.start_date && todayIso() <= program.end_date ? todayIso() : program?.start_date ?? todayIso())
+      setSessionTime('18:00')
+      return
+    }
+
+    const session = linkedSessions.find((row) => row.id === nextSessionId)
+    if (!session) return
+    setProgramId(session.program_id)
+    setTrainingDate(session.session_date)
+    setSessionTime(normalizeTime(session.start_time) || '18:00')
   }
 
   function toggleBlock(blockId: string, checked: boolean) {
@@ -289,6 +321,7 @@ export default function TrainingSessionLogsManager({
         body: JSON.stringify({
           operation: 'save',
           id: editingId,
+          trainingSessionId: trainingSessionId || null,
           programId,
           trainingDate,
           sessionTime,
@@ -307,6 +340,7 @@ export default function TrainingSessionLogsManager({
       setMessage(complete ? 'Training log completed.' : 'Training log saved as draft.')
       setFormOpen(false)
       setEditingId(null)
+      setTrainingSessionId('')
       setCompleteConfirm(false)
       router.refresh()
     } catch (err: any) {
@@ -430,13 +464,57 @@ export default function TrainingSessionLogsManager({
             <Button type="button" variant="ghost" size="sm" onClick={() => setFormOpen(false)} disabled={pending}>Close</Button>
           </div>
 
+          <div className="mt-4 space-y-3">
+            <label className="block">
+              <span className="mb-1.5 block text-sm font-semibold text-black">Scheduled session (recommended)</span>
+              <select
+                value={trainingSessionId}
+                onChange={(event) => changeLinkedSession(event.target.value)}
+                disabled={pending || Boolean(editingId && trainingSessionId)}
+                className="min-h-[44px] w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3.5 py-2.5 text-sm text-black shadow-soft outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                <option value="">Manual / legacy log (no dated-session link)</option>
+                {trainingSessionId && !currentLinkedSession ? (
+                  <option value={trainingSessionId}>Linked Scheduled Session (historical / outside current window)</option>
+                ) : null}
+                {linkedSessions
+                  .filter((session) => !linkedSessionIdsInUse.has(session.id) || session.id === trainingSessionId)
+                  .map((session) => (
+                    <option key={session.id} value={session.id}>
+                      {formatDate(session.session_date)} · {normalizeTime(session.start_time)} · {session.name_snapshot} · {session.assignment_role === 'primary_coach' ? 'Primary' : 'Assistant'}
+                    </option>
+                  ))}
+              </select>
+            </label>
+
+            {currentLinkedSession ? (
+              <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-950">
+                <div className="font-semibold">{currentLinkedSession.name_snapshot}</div>
+                <div className="mt-0.5 text-xs">
+                  {formatDate(currentLinkedSession.session_date)} · {normalizeTime(currentLinkedSession.start_time)}
+                  {currentLinkedSession.mat_snapshot ? ` · ${currentLinkedSession.mat_snapshot}` : ''}
+                  {' · '}{currentLinkedSession.assignment_role === 'primary_coach' ? 'Primary Coach' : 'Assistant Coach'}
+                </div>
+                <div className="mt-1 text-xs">Planned program: {currentLinkedSession.program_title_snapshot}</div>
+              </div>
+            ) : trainingSessionId ? (
+              <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-900">
+                This draft already has a Scheduled Session link. The link is preserved even if that session is outside the current assignment window; it cannot be detached or switched.
+              </div>
+            ) : (
+              <div className="text-xs text-[hsl(var(--muted))]">
+                Choose one of your assigned dated sessions when possible. Manual mode remains available for historical or exceptional logs.
+              </div>
+            )}
+          </div>
+
           <div className="mt-4 grid gap-4 md:grid-cols-3">
             <label className="block md:col-span-1">
               <span className="mb-1.5 block text-sm font-semibold text-black">Published program</span>
               <select
                 value={programId}
                 onChange={(event) => changeProgram(event.target.value)}
-                disabled={pending}
+                disabled={pending || Boolean(trainingSessionId)}
                 className="min-h-[44px] w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3.5 py-2.5 text-sm text-black shadow-soft outline-none focus-visible:ring-2 focus-visible:ring-ring"
               >
                 <option value="">Choose program</option>
@@ -452,9 +530,9 @@ export default function TrainingSessionLogsManager({
               min={currentProgram?.start_date}
               max={currentProgram?.end_date}
               onChange={(event) => setTrainingDate(event.target.value)}
-              disabled={pending || !currentProgram}
+              disabled={pending || !currentProgram || Boolean(trainingSessionId)}
             />
-            <Input label="Session time" type="time" value={sessionTime} onChange={(event) => setSessionTime(event.target.value)} disabled={pending} />
+            <Input label="Session time" type="time" value={sessionTime} onChange={(event) => setSessionTime(event.target.value)} disabled={pending || Boolean(trainingSessionId)} />
           </div>
 
           {currentProgram ? (
@@ -570,6 +648,13 @@ export default function TrainingSessionLogsManager({
                     </div>
                     <div className="mt-1 text-sm text-[hsl(var(--muted))]">{formatDate(log.training_date)} · {normalizeTime(log.session_time)} · {log.coach_name_snapshot}</div>
                     <div className="mt-1 text-xs text-[hsl(var(--muted))]">Program: {log.program_title_snapshot} · {roleLabel(log.coach_role_snapshot)}</div>
+                    {log.training_session_id ? (
+                      <div className="mt-1 text-xs font-medium text-emerald-700">
+                        Scheduled session linked · {log.session_assignment_role_snapshot === 'primary_coach' ? 'Primary Coach' : 'Assistant Coach'}
+                      </div>
+                    ) : (
+                      <div className="mt-1 text-xs text-[hsl(var(--muted))]">Legacy/manual log · no dated-session link</div>
+                    )}
                     {!programAvailable && log.status === 'draft' ? <div className="mt-1 text-xs font-medium text-amber-700">Program is no longer published. Republish it before editing or completing this draft.</div> : null}
                     {log.notes ? <p className="mt-2 whitespace-pre-wrap text-sm text-black">{log.notes}</p> : null}
                   </div>
@@ -602,6 +687,7 @@ export default function TrainingSessionLogsManager({
           { label: 'Program', value: currentProgram.title },
           { label: 'Group', value: currentProgram.target_group },
           { label: 'Session', value: `${formatDate(trainingDate)} · ${sessionTime}` },
+          { label: 'Dated link', value: currentLinkedSession ? 'Linked to Scheduled Session' : 'Manual / legacy' },
           { label: 'Blocks worked', value: selectedBlocks.size },
         ] : []}
         onCancel={() => !pending && setCompleteConfirm(false)}

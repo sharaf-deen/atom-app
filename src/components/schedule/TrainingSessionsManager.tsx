@@ -2,9 +2,11 @@
 
 import * as React from 'react'
 import { useRouter } from 'next/navigation'
-import { CalendarDays, Clock3, Layers3, MapPin, RefreshCw, UserCheck, Users } from 'lucide-react'
+import { BookOpen, CalendarDays, Clock3, Layers3, MapPin, RefreshCw, UserCheck, Users } from 'lucide-react'
 import type {
+  PublishedTrainingProgram,
   ScheduleSessionCoachAssignment,
+  ScheduleSessionTrainingProgramAssignment,
   ScheduleTrainingSession,
 } from '@/app/schedule/sessions/page'
 import Button from '@/components/ui/Button'
@@ -103,6 +105,8 @@ export default function TrainingSessionsManager({
   viewerUserId,
   sessions,
   assignments,
+  programs,
+  programAssignments,
   today,
   previewUntil,
   defaultSyncUntil,
@@ -113,6 +117,8 @@ export default function TrainingSessionsManager({
   viewerUserId: string
   sessions: ScheduleTrainingSession[]
   assignments: ScheduleSessionCoachAssignment[]
+  programs: PublishedTrainingProgram[]
+  programAssignments: ScheduleSessionTrainingProgramAssignment[]
   today: string
   previewUntil: string
   defaultSyncUntil: string
@@ -134,6 +140,11 @@ export default function TrainingSessionsManager({
   const [assignmentPending, setAssignmentPending] = React.useState(false)
   const [assignmentError, setAssignmentError] = React.useState<string | null>(null)
 
+  const [programSession, setProgramSession] = React.useState<ScheduleTrainingSession | null>(null)
+  const [programId, setProgramId] = React.useState('')
+  const [programPending, setProgramPending] = React.useState(false)
+  const [programError, setProgramError] = React.useState<string | null>(null)
+
   const assignmentsBySession = React.useMemo(() => {
     const map = new Map<string, ScheduleSessionCoachAssignment[]>()
     for (const row of assignments) {
@@ -143,6 +154,65 @@ export default function TrainingSessionsManager({
     }
     return map
   }, [assignments])
+
+  const programAssignmentBySession = React.useMemo(() => {
+    return new Map(programAssignments.map((row) => [row.training_session_id, row]))
+  }, [programAssignments])
+
+  function openProgramAssignment(row: ScheduleTrainingSession) {
+    const current = programAssignmentBySession.get(row.id)
+    setProgramSession(row)
+    setProgramId(current?.program_id ?? '')
+    setProgramError(null)
+  }
+
+  function closeProgramAssignment() {
+    if (programPending) return
+    setProgramSession(null)
+    setProgramId('')
+    setProgramError(null)
+  }
+
+  async function saveProgramAssignment() {
+    if (!programSession) return
+    setProgramPending(true)
+    setProgramError(null)
+    setMessage(null)
+    setError(null)
+
+    try {
+      const response = await fetch('/api/schedule/session-program', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionId: programSession.id, programId: programId || null }),
+      })
+      const data = await readJson(response)
+      if (!response.ok || data.ok !== true) {
+        throw new Error(data.details || data.error || 'Failed to update the Training Program assignment.')
+      }
+      setMessage(programId ? 'Training Program assigned to the scheduled session.' : 'Training Program cleared from the scheduled session.')
+      setProgramSession(null)
+      setProgramId('')
+      router.refresh()
+    } catch (err: any) {
+      setProgramError(err?.message || 'Failed to update the Training Program assignment.')
+    } finally {
+      setProgramPending(false)
+    }
+  }
+
+  const eligibleProgramsForSession = React.useMemo(() => {
+    if (!programSession) return [] as PublishedTrainingProgram[]
+    const normalizedName = programSession.name_snapshot.trim().toLowerCase()
+    return programs
+      .filter((program) => programSession.session_date >= program.start_date && programSession.session_date <= program.end_date)
+      .sort((a, b) => {
+        const aMatch = a.target_group.trim().toLowerCase() === normalizedName ? 0 : 1
+        const bMatch = b.target_group.trim().toLowerCase() === normalizedName ? 0 : 1
+        if (aMatch !== bMatch) return aMatch - bMatch
+        return a.title.localeCompare(b.title)
+      })
+  }, [programSession, programs])
 
   const grouped = React.useMemo(() => {
     const map = new Map<string, ScheduleTrainingSession[]>()
@@ -323,7 +393,7 @@ export default function TrainingSessionsManager({
           <div>
             <h2 className="font-semibold">Generate / sync dated sessions</h2>
             <p className="mt-1 text-sm text-[hsl(var(--muted))]">
-              Default range is the next 90 days. Sessions with active staff assignments are protected from automatic refresh/removal.
+              Default range is the next 90 days. Sessions with active staff, QR attendance, a planned Training Program or a linked Training Log are protected from automatic refresh/removal.
             </p>
           </div>
 
@@ -403,6 +473,7 @@ export default function TrainingSessionsManager({
                   const sessionAssignments = assignmentsBySession.get(row.id) ?? []
                   const primary = sessionAssignments.find((assignment) => assignment.assignment_role === 'primary_coach')
                   const assistants = sessionAssignments.filter((assignment) => assignment.assignment_role === 'assistant_coach')
+                  const programAssignment = programAssignmentBySession.get(row.id)
 
                   return (
                     <article key={row.id} className="space-y-3 px-4 py-3">
@@ -468,9 +539,36 @@ export default function TrainingSessionsManager({
                         ) : null}
                       </div>
 
+                      <div className="rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--muted)/0.04)] px-3 py-2.5">
+                        <div className="flex flex-wrap items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <div className="inline-flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-[hsl(var(--muted))]">
+                              <BookOpen className="h-3.5 w-3.5" /> Planned Training Program
+                            </div>
+                            <div className="mt-1 font-medium">
+                              {programAssignment ? programAssignment.program_title_snapshot : 'Not assigned'}
+                            </div>
+                            {programAssignment ? (
+                              <div className="mt-0.5 text-xs text-[hsl(var(--muted))]">
+                                {programAssignment.target_group_snapshot} · {formatDate(programAssignment.program_start_date_snapshot)} → {formatDate(programAssignment.program_end_date_snapshot)}
+                              </div>
+                            ) : (
+                              <div className="mt-0.5 text-xs text-[hsl(var(--muted))]">Head Coach has not linked a published Training Program yet.</div>
+                            )}
+                          </div>
+
+                          {canManageAssignments && row.status === 'scheduled' ? (
+                            <Button type="button" size="sm" variant="outline" onClick={() => openProgramAssignment(row)}>
+                              <BookOpen className="h-4 w-4" />
+                              Manage program
+                            </Button>
+                          ) : null}
+                        </div>
+                      </div>
+
                       <div className="text-xs text-[hsl(var(--muted))]">
-                        {sessionAssignments.length > 0
-                          ? `Staff assigned · protected from automatic template sync`
+                        {sessionAssignments.length > 0 || programAssignment
+                          ? `Operationally linked · protected from automatic template sync`
                           : `${row.template_managed ? 'Template-managed' : 'Exception-locked'} · last sync ${formatCairoDateTime(row.synced_at)}`}
                       </div>
                     </article>
@@ -496,8 +594,71 @@ export default function TrainingSessionsManager({
           { label: 'To', value: toDate || '—' },
           { label: 'Source', value: 'Active Class Templates' },
         ]}
-        warning="Past, completed, cancelled, exception-locked and actively staffed sessions are not rewritten by this synchronization."
+        warning="Past, completed, cancelled, exception-locked and operationally linked sessions are not rewritten by this synchronization."
       />
+
+      <Modal
+        open={Boolean(programSession)}
+        onClose={closeProgramAssignment}
+        title={programSession ? `Training Program · ${programSession.name_snapshot}` : 'Training Program'}
+        className="max-h-[86vh] overflow-y-auto"
+      >
+        {programSession ? (
+          <div className="space-y-4">
+            <div className="rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--muted)/0.04)] px-3 py-2 text-sm">
+              <div className="font-semibold">{formatDate(programSession.session_date)}</div>
+              <div className="text-[hsl(var(--muted))]">
+                {formatTime(programSession.start_time)}
+                {programSession.end_time ? ` – ${formatTime(programSession.end_time)}` : ''}
+                {programSession.mat_snapshot ? ` · ${programSession.mat_snapshot}` : ''}
+              </div>
+            </div>
+
+            <Select
+              label="Published Training Program"
+              value={programId}
+              onChange={(event) => setProgramId(event.target.value)}
+              disabled={programPending}
+            >
+              <option value="">No program assigned</option>
+              {eligibleProgramsForSession.map((program) => (
+                <option key={program.id} value={program.id}>
+                  {program.title} · {program.target_group}
+                </option>
+              ))}
+            </Select>
+
+            {!eligibleProgramsForSession.length ? (
+              <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                No published Training Program covers this session date. Create/publish the program first, or extend its date range.
+              </div>
+            ) : (
+              <div className="text-xs text-[hsl(var(--muted))]">
+                Programs whose target group exactly matches this session are listed first. The server still validates the program period before saving.
+              </div>
+            )}
+
+            {programError ? (
+              <div className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-800">
+                {programError}
+              </div>
+            ) : null}
+
+            <div className="flex flex-wrap justify-end gap-2">
+              <Button type="button" variant="ghost" onClick={closeProgramAssignment} disabled={programPending}>
+                Cancel
+              </Button>
+              <Button type="button" onClick={saveProgramAssignment} loading={programPending} loadingText="Saving…">
+                Save program
+              </Button>
+            </div>
+
+            <div className="text-xs text-[hsl(var(--muted))]">
+              Program assignment history is preserved. Once a Training Log is linked to this dated session, its planned program can no longer be changed or cleared.
+            </div>
+          </div>
+        ) : null}
+      </Modal>
 
       <Modal
         open={Boolean(assignmentSession)}

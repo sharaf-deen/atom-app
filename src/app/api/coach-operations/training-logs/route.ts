@@ -13,6 +13,7 @@ type Operation = 'save' | 'reopen'
 type Body = {
   operation?: Operation
   id?: string
+  trainingSessionId?: string | null
   programId?: string
   trainingDate?: string
   sessionTime?: string
@@ -104,11 +105,54 @@ export async function POST(request: Request) {
   const id = String(body.id ?? '').trim()
   if (id && !UUID_RE.test(id)) return json({ ok: false, error: 'INVALID_ID' }, 400)
 
-  const programId = String(body.programId ?? '').trim()
-  const trainingDate = String(body.trainingDate ?? '').trim()
-  const sessionTime = normalizeTime(body.sessionTime)
+  const trainingSessionId = String(body.trainingSessionId ?? '').trim()
+  let programId = String(body.programId ?? '').trim()
+  let trainingDate = String(body.trainingDate ?? '').trim()
+  let sessionTime = normalizeTime(body.sessionTime)
   const notes = cleanLongText(body.notes, 3000)
   const complete = body.complete === true
+  let linkedSessionName: string | null = null
+  let linkedAssignmentRole: 'primary_coach' | 'assistant_coach' | null = null
+
+  if (trainingSessionId && !UUID_RE.test(trainingSessionId)) return json({ ok: false, error: 'INVALID_TRAINING_SESSION' }, 400)
+
+  if (trainingSessionId) {
+    const [sessionResult, assignmentResult, programAssignmentResult] = await Promise.all([
+      supabase
+        .from('schedule_training_sessions')
+        .select('id,session_date,start_time,status,name_snapshot')
+        .eq('id', trainingSessionId)
+        .maybeSingle(),
+      supabase
+        .from('schedule_session_coach_assignments')
+        .select('assignment_role')
+        .eq('training_session_id', trainingSessionId)
+        .eq('staff_user_id', me.id)
+        .eq('is_active', true)
+        .maybeSingle(),
+      supabase
+        .from('schedule_session_training_program_assignments')
+        .select('program_id')
+        .eq('training_session_id', trainingSessionId)
+        .eq('is_active', true)
+        .maybeSingle(),
+    ])
+
+    const linkedLookupError = sessionResult.error || assignmentResult.error || programAssignmentResult.error
+    if (linkedLookupError) return json({ ok: false, error: 'SCHEDULED_SESSION_LOOKUP_FAILED', details: linkedLookupError.message }, 500)
+    if (!sessionResult.data) return json({ ok: false, error: 'SCHEDULED_SESSION_NOT_FOUND' }, 404)
+    if (sessionResult.data.status === 'cancelled') return json({ ok: false, error: 'SCHEDULED_SESSION_CANCELLED' }, 409)
+    if (!assignmentResult.data) return json({ ok: false, error: 'NOT_ASSIGNED_TO_SESSION' }, 403)
+    if (!programAssignmentResult.data) {
+      return json({ ok: false, error: 'SESSION_PROGRAM_REQUIRED', details: 'Head Coach must assign a published Training Program to this Scheduled Session first.' }, 409)
+    }
+
+    programId = String(programAssignmentResult.data.program_id)
+    trainingDate = String(sessionResult.data.session_date)
+    sessionTime = normalizeTime(sessionResult.data.start_time)
+    linkedSessionName = String(sessionResult.data.name_snapshot)
+    linkedAssignmentRole = assignmentResult.data.assignment_role as 'primary_coach' | 'assistant_coach'
+  }
 
   if (!UUID_RE.test(programId)) return json({ ok: false, error: 'INVALID_PROGRAM' }, 400)
   if (!DATE_RE.test(trainingDate)) return json({ ok: false, error: 'INVALID_DATE' }, 400)
@@ -236,7 +280,7 @@ export async function POST(request: Request) {
   if (sessionLogId) {
     const { data: existing, error: existingError } = await supabase
       .from('coach_training_session_logs')
-      .select('id,coach_user_id,status')
+      .select('id,coach_user_id,status,training_session_id')
       .eq('id', sessionLogId)
       .maybeSingle()
 
@@ -244,13 +288,32 @@ export async function POST(request: Request) {
     if (!existing) return json({ ok: false, error: 'NOT_FOUND' }, 404)
     if (existing.status !== 'draft') return json({ ok: false, error: 'LOG_COMPLETED_REOPEN_FIRST' }, 409)
     if (!canManage && existing.coach_user_id !== me.id) return json({ ok: false, error: 'FORBIDDEN' }, 403)
+    if (existing.training_session_id && existing.training_session_id !== (trainingSessionId || null)) {
+      return json({ ok: false, error: 'SESSION_LINK_IMMUTABLE', details: 'A linked Scheduled Session cannot be changed or removed from an existing Training Log.' }, 409)
+    }
+    if (!existing.training_session_id && trainingSessionId && existing.coach_user_id !== me.id) {
+      return json({ ok: false, error: 'SESSION_LINK_REQUIRES_REPORTING_COACH' }, 403)
+    }
+
+    if (trainingSessionId) {
+      const { data: duplicate, error: duplicateError } = await supabase
+        .from('coach_training_session_logs')
+        .select('id')
+        .eq('training_session_id', trainingSessionId)
+        .neq('id', sessionLogId)
+        .maybeSingle()
+      if (duplicateError) return json({ ok: false, error: 'SESSION_LOG_DUPLICATE_LOOKUP_FAILED', details: duplicateError.message }, 500)
+      if (duplicate) return json({ ok: false, error: 'SESSION_ALREADY_LOGGED', details: 'This Scheduled Session already has a linked Training Log.' }, 409)
+    }
 
     const { error: updateError } = await supabase
       .from('coach_training_session_logs')
       .update({
         program_id: programId,
+        training_session_id: trainingSessionId || null,
+        session_assignment_role_snapshot: linkedAssignmentRole,
         program_title_snapshot: program.title,
-        target_group_snapshot: program.target_group,
+        target_group_snapshot: linkedSessionName ?? program.target_group,
         training_date: trainingDate,
         session_time: sessionTime,
         notes,
@@ -260,13 +323,25 @@ export async function POST(request: Request) {
 
     if (updateError) return json({ ok: false, error: 'LOG_UPDATE_FAILED', details: updateError.message }, 500)
   } else {
+    if (trainingSessionId) {
+      const { data: duplicate, error: duplicateError } = await supabase
+        .from('coach_training_session_logs')
+        .select('id')
+        .eq('training_session_id', trainingSessionId)
+        .maybeSingle()
+      if (duplicateError) return json({ ok: false, error: 'SESSION_LOG_DUPLICATE_LOOKUP_FAILED', details: duplicateError.message }, 500)
+      if (duplicate) return json({ ok: false, error: 'SESSION_ALREADY_LOGGED', details: 'This Scheduled Session already has a linked Training Log.' }, 409)
+    }
+
     const coachName = String(me.full_name || me.email || 'ATOM Coach').trim().slice(0, 180)
     const { data: created, error: createError } = await supabase
       .from('coach_training_session_logs')
       .insert({
         program_id: programId,
+        training_session_id: trainingSessionId || null,
+        session_assignment_role_snapshot: linkedAssignmentRole,
         program_title_snapshot: program.title,
-        target_group_snapshot: program.target_group,
+        target_group_snapshot: linkedSessionName ?? program.target_group,
         training_date: trainingDate,
         session_time: sessionTime,
         coach_user_id: me.id,
@@ -367,5 +442,6 @@ export async function POST(request: Request) {
   }
 
   revalidatePath('/coach-operations/training-logs')
+  revalidatePath('/schedule/sessions')
   return json({ ok: true, id: sessionLogId, status: complete ? 'completed' : 'draft' })
 }
