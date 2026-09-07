@@ -1,12 +1,12 @@
-// src/app/schedule/page.tsx
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
-import { getSessionUser } from '@/lib/session'
-import { createSupabaseRSC } from '@/lib/supabaseServer'
 import PageHeader from '@/components/layout/PageHeader'
 import Section from '@/components/layout/Section'
 import ScheduleEditor from '@/components/ScheduleEditor'
+import MemberScheduleView, { type MemberScheduleSession } from '@/components/schedule/MemberScheduleView'
+import { getSessionUser } from '@/lib/session'
+import { createSupabaseRSC } from '@/lib/supabaseServer'
 
 const DEFAULT_SCHEDULE = `Kids & Teens
 Baby 3-5 years
@@ -170,10 +170,28 @@ Adults
 
 Competition Team (Kids, Teens & Adults) · Contact the head coach for specific training times.`
 
-type Row = {
+type LegacyRow = {
   key: string
   content: string
   updated_at: string | null
+}
+
+function cairoDateIso() {
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Africa/Cairo',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(new Date())
+
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]))
+  return `${values.year}-${values.month}-${values.day}`
+}
+
+function addDaysIso(value: string, days: number) {
+  const [year, month, day] = value.split('-').map(Number)
+  const date = new Date(Date.UTC(year, month - 1, day + days))
+  return date.toISOString().slice(0, 10)
 }
 
 export default async function SchedulePage() {
@@ -181,13 +199,11 @@ export default async function SchedulePage() {
   if (!me) {
     return (
       <main>
-        <PageHeader title="Schedule" subtitle="Today first, then the full weekly timetable" />
+        <PageHeader title="Schedule" subtitle="Today first, then upcoming classes and the next 7 days" />
         <Section>
           <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-5 shadow-soft">
             <h2 className="text-base font-semibold">Please sign in</h2>
-            <p className="mt-1 text-sm text-[hsl(var(--muted))]">
-              You need to be authenticated to view the training timetable.
-            </p>
+            <p className="mt-1 text-sm text-[hsl(var(--muted))]">You need to be authenticated to view the training timetable.</p>
           </div>
         </Section>
       </main>
@@ -195,33 +211,77 @@ export default async function SchedulePage() {
   }
 
   const supabase = createSupabaseRSC()
+  const today = cairoDateIso()
+  const structuredUntil = addDaysIso(today, 13)
 
-  let content = DEFAULT_SCHEDULE
-  let updatedAt: string | null = null
+  let sessions: MemberScheduleSession[] = []
+  let structuredError: string | null = null
 
   try {
-    const { data, error } = await supabase
-      .from('app_schedule')
-      .select('key, content, updated_at')
-      .eq('key', 'main')
-      .maybeSingle()
+    const { data, error } = await supabase.rpc('get_member_schedule_sessions', {
+      p_from_date: today,
+      p_to_date: structuredUntil,
+    })
 
-    if (!error && data) {
-      const r = data as any as Row
-      content = r.content || DEFAULT_SCHEDULE
-      updatedAt = r.updated_at ?? null
-    }
-  } catch {
-    // fallback to default schedule
+    if (error) structuredError = error.message
+    else sessions = (data ?? []) as MemberScheduleSession[]
+  } catch (cause: any) {
+    structuredError = String(cause?.message || cause || 'Structured schedule unavailable')
   }
 
-  const canEdit = me.role === 'super_admin'
+  let legacyContent = DEFAULT_SCHEDULE
+  let legacyUpdatedAt: string | null = null
+  const needLegacy = sessions.length === 0 || me.role === 'super_admin'
+
+  if (needLegacy) {
+    try {
+      const { data, error } = await supabase
+        .from('app_schedule')
+        .select('key, content, updated_at')
+        .eq('key', 'main')
+        .maybeSingle()
+
+      if (!error && data) {
+        const row = data as any as LegacyRow
+        legacyContent = row.content || DEFAULT_SCHEDULE
+        legacyUpdatedAt = row.updated_at ?? null
+      }
+    } catch {
+      // Keep the static legacy fallback if the stored legacy timetable cannot be loaded.
+    }
+  }
+
+  const structuredReady = sessions.length > 0
 
   return (
     <main>
-      <PageHeader title="Schedule" subtitle="Today first, then the full weekly timetable" />
-      <Section className="space-y-6">
-        <ScheduleEditor initialContent={content} updatedAt={updatedAt} canEdit={canEdit} />
+      <PageHeader title="Schedule" subtitle="Today first, then upcoming classes and the next 7 days" />
+      <Section className="max-w-5xl space-y-6">
+        {structuredReady ? (
+          <MemberScheduleView sessions={sessions} today={today} />
+        ) : (
+          <div className="space-y-4">
+            <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950">
+              The structured dated timetable is not available for the upcoming period yet. ATOM is showing the legacy timetable as a safe fallback.
+              {structuredError && me.role === 'super_admin' ? (
+                <div className="mt-1 text-xs text-amber-800">Structured schedule detail: {structuredError}</div>
+              ) : null}
+            </div>
+            <ScheduleEditor initialContent={legacyContent} updatedAt={legacyUpdatedAt} canEdit={me.role === 'super_admin'} />
+          </div>
+        )}
+
+        {structuredReady && me.role === 'super_admin' ? (
+          <details className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4 shadow-soft">
+            <summary className="cursor-pointer text-sm font-semibold">Legacy schedule editor · transition fallback</summary>
+            <p className="mt-2 text-xs text-[hsl(var(--muted))]">
+              The member Schedule now reads dated structured sessions. Keep the legacy timetable available during the transition only; editing it does not change structured sessions.
+            </p>
+            <div className="mt-4">
+              <ScheduleEditor initialContent={legacyContent} updatedAt={legacyUpdatedAt} canEdit />
+            </div>
+          </details>
+        ) : null}
       </Section>
     </main>
   )
