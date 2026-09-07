@@ -14,7 +14,7 @@ import { Table } from '@/components/ui/Table'
 import { getSessionUserCached, getSupabaseAdminClientCached } from '@/lib/requestCache'
 import { addDays, cairoToday, diffDays, CAIRO_TZ } from '@/lib/cairoDate'
 import { canAccessReceptionDesk, canManageNotifications } from '@/lib/rbac'
-import { CalendarDays, IdCard, MessageSquare, Phone, ScanLine, Wallet } from 'lucide-react'
+import { CalendarDays, IdCard, MessageSquare, Phone, ScanLine, UserPlus, Wallet } from 'lucide-react'
 
 type SearchParams = Record<string, string | string[] | undefined>
 
@@ -540,6 +540,7 @@ export default async function ReceptionPage({ searchParams }: { searchParams?: S
           <ActionTile href="/admin/outstanding-dues" title="Outstanding dues" desc="Payment collection and due follow-up." icon={Wallet} />
           <ActionTile href="/admin/crm" title="CRM queue" desc="Open the live contact queue." icon={MessageSquare} />
           <ActionTile href="/kiosk" title="Create member" desc="Start a new member flow." icon={IdCard} />
+          <ActionTile href="/admin/members/family-intake" title="Family intake" desc="Register a guardian and several children in one flow." icon={UserPlus} />
           <ActionTile href="/schedule" title="Schedule" desc="Keep today’s class times close." icon={CalendarDays} />
         </div>
       </Section>
