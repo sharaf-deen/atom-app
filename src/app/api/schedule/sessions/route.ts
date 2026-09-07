@@ -219,20 +219,30 @@ export async function POST(request: Request) {
   const existing = (existingData ?? []) as ExistingSession[]
   const existingByKey = new Map(existing.map((row) => [sessionKey(row.class_template_id, row.session_date), row]))
 
-  const assignedSessionIds = new Set<string>()
+  const operationallyProtectedSessionIds = new Set<string>()
   for (const batch of chunks(existing.map((row) => row.id), 150)) {
     if (!batch.length) continue
 
-    const { data: assignmentData, error: assignmentError } = await supabase
-      .from('schedule_session_coach_assignments')
-      .select('training_session_id')
-      .eq('is_active', true)
-      .in('training_session_id', batch)
+    const [assignmentResult, attendanceResult] = await Promise.all([
+      supabase
+        .from('schedule_session_coach_assignments')
+        .select('training_session_id')
+        .eq('is_active', true)
+        .in('training_session_id', batch),
+      supabase
+        .from('coach_staff_attendance')
+        .select('training_session_id')
+        .in('training_session_id', batch),
+    ])
 
-    if (assignmentError) return dbFailure(assignmentError, 'LOAD_SESSION_ASSIGNMENTS_FAILED')
+    if (assignmentResult.error) return dbFailure(assignmentResult.error, 'LOAD_SESSION_ASSIGNMENTS_FAILED')
+    if (attendanceResult.error) return dbFailure(attendanceResult.error, 'LOAD_SESSION_ATTENDANCE_LINKS_FAILED')
 
-    for (const assignment of assignmentData ?? []) {
-      assignedSessionIds.add(String(assignment.training_session_id))
+    for (const assignment of assignmentResult.data ?? []) {
+      operationallyProtectedSessionIds.add(String(assignment.training_session_id))
+    }
+    for (const attendance of attendanceResult.data ?? []) {
+      if (attendance.training_session_id) operationallyProtectedSessionIds.add(String(attendance.training_session_id))
     }
   }
 
@@ -255,7 +265,7 @@ export async function POST(request: Request) {
     if (
       current.status === 'scheduled'
       && current.template_managed
-      && !assignedSessionIds.has(current.id)
+      && !operationallyProtectedSessionIds.has(current.id)
     ) {
       refreshRows.push(row)
     } else {
@@ -270,10 +280,10 @@ export async function POST(request: Request) {
       && !desired.has(sessionKey(row.class_template_id, row.session_date)),
   )
 
-  protectedCount += staleCandidates.filter((row) => assignedSessionIds.has(row.id)).length
+  protectedCount += staleCandidates.filter((row) => operationallyProtectedSessionIds.has(row.id)).length
 
   const staleIds = staleCandidates
-    .filter((row) => !assignedSessionIds.has(row.id))
+    .filter((row) => !operationallyProtectedSessionIds.has(row.id))
     .map((row) => row.id)
 
   let createdCount = 0
