@@ -175,7 +175,7 @@ export default function FamilyIntakeManager({ actorRole }: { actorRole: string }
     }
   }
 
-  function useGuardian(result: GuardianResult) {
+  function selectGuardian(result: GuardianResult) {
     setGuardianMode('existing')
     setExistingGuardianAuthUserId(result.auth_user_id)
     setExistingGuardianFamily({ id: result.family_id, name: result.family_name })
@@ -225,7 +225,7 @@ export default function FamilyIntakeManager({ actorRole }: { actorRole: string }
     }
   }
 
-  function useChildResult(child: ChildDraft, result: ChildSearchResult) {
+  function selectChildResult(child: ChildDraft, result: ChildSearchResult) {
     if (result.kind === 'visitor') {
       updateChild(child.key, {
         visitorTrialId: result.id,
@@ -401,7 +401,7 @@ export default function FamilyIntakeManager({ actorRole }: { actorRole: string }
                       <button
                         type="button"
                         key={`${result.family_id}:${result.auth_user_id}`}
-                        onClick={() => useGuardian(result)}
+                        onClick={() => selectGuardian(result)}
                         className="w-full rounded-xl border border-[hsl(var(--border))] bg-white p-3 text-left hover:bg-slate-50"
                       >
                         <div className="font-semibold">{fullName(result.first_name, result.last_name)}</div>
@@ -485,7 +485,7 @@ export default function FamilyIntakeManager({ actorRole }: { actorRole: string }
                           {child.searchResults.length ? (
                             <div className="mt-2 space-y-2">
                               {child.searchResults.map((result) => (
-                                <button type="button" key={`${result.kind}:${result.id}`} onClick={() => useChildResult(child, result)} className="w-full rounded-xl border border-[hsl(var(--border))] bg-white p-3 text-left hover:bg-slate-50">
+                                <button type="button" key={`${result.kind}:${result.id}`} onClick={() => selectChildResult(child, result)} className="w-full rounded-xl border border-[hsl(var(--border))] bg-white p-3 text-left hover:bg-slate-50">
                                   <div className="font-semibold">{fullName(result.first_name, result.last_name)}</div>
                                   <div className="mt-1 text-xs text-[hsl(var(--muted))]">
                                     {result.kind === 'member' ? (result.member_id || 'Member') : `Visitor · ${result.trial_date || 'trial'}`}
