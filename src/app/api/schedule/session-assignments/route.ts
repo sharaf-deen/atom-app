@@ -87,11 +87,11 @@ export async function POST(request: Request) {
       : String(body.primaryUserId).trim()
 
   const rawAssistants = Array.isArray(body?.assistantUserIds) ? body.assistantUserIds : []
-  const assistantUserIds = Array.from(
-    new Set(
+  const assistantUserIds: string[] = Array.from(
+    new Set<string>(
       rawAssistants
         .map((value: unknown) => String(value ?? '').trim())
-        .filter(Boolean),
+        .filter((value: string) => value.length > 0),
     ),
   )
 
