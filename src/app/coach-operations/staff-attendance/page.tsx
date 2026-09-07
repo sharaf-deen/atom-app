@@ -21,6 +21,15 @@ type StaffAttendanceRow = {
   device_tag: string | null
   source: string
   created_at: string
+  training_session_id: string | null
+  session_match_status: 'matched' | 'unlinked' | 'ambiguous'
+  session_match_candidate_count: number
+  assignment_role_snapshot: 'primary_coach' | 'assistant_coach' | null
+  session_name_snapshot: string | null
+  session_start_time_snapshot: string | null
+  session_end_time_snapshot: string | null
+  session_mat_snapshot: string | null
+  arrival_delta_minutes: number | null
 }
 
 type TrainingLogRow = {
@@ -69,6 +78,24 @@ function roleLabel(value: string) {
   return value.replace(/_/g, ' ').replace(/\b\w/g, (char) => char.toUpperCase())
 }
 
+function formatScheduleTime(value: string | null) {
+  if (!value) return '—'
+  const match = String(value).match(/^(\d{2}):(\d{2})/)
+  if (!match) return value
+  const hour = Number(match[1])
+  const minute = Number(match[2])
+  const suffix = hour >= 12 ? 'PM' : 'AM'
+  const displayHour = hour % 12 || 12
+  return `${displayHour}:${String(minute).padStart(2, '0')} ${suffix}`
+}
+
+function timingDeltaLabel(value: number | null) {
+  if (value === null) return '—'
+  if (value === 0) return '0 min from start'
+  if (value < 0) return `${Math.abs(value)} min before start`
+  return `${value} min after start`
+}
+
 export default async function CoachStaffAttendancePage() {
   const me = await getSessionUser()
   if (!me) redirect('/login?next=/coach-operations/staff-attendance')
@@ -93,7 +120,7 @@ export default async function CoachStaffAttendancePage() {
 
   let attendanceQuery = supabase
     .from('coach_staff_attendance')
-    .select('id,staff_user_id,staff_name_snapshot,staff_member_id_snapshot,staff_role_snapshot,attendance_date,checked_in_at,device_tag,source,created_at')
+    .select('id,staff_user_id,staff_name_snapshot,staff_member_id_snapshot,staff_role_snapshot,attendance_date,checked_in_at,device_tag,source,created_at,training_session_id,session_match_status,session_match_candidate_count,assignment_role_snapshot,session_name_snapshot,session_start_time_snapshot,session_end_time_snapshot,session_mat_snapshot,arrival_delta_minutes')
     .order('attendance_date', { ascending: false })
     .order('checked_in_at', { ascending: false })
     .limit(150)
@@ -134,7 +161,7 @@ export default async function CoachStaffAttendancePage() {
 
       <Section className="max-w-6xl space-y-5">
         <div className="rounded-2xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-950">
-          Coaching staff must scan their existing ATOM QR at the academy scanner. A repeated scan within two hours reuses the recent check-in instead of creating another attendance row.
+          Coaching staff scan their existing ATOM QR at the academy scanner. When one assigned dated session is safely identifiable near the scan time, ATOM links the check-in to that session. The two-hour duplicate rule now applies only to check-ins that remain unlinked.
         </div>
 
         {loadError ? (
@@ -173,7 +200,7 @@ export default async function CoachStaffAttendancePage() {
               <div className="border-b border-[hsl(var(--border))] px-4 py-4">
                 <h2 className="text-lg font-semibold tracking-tight">{canManage ? 'Coaching team check-ins' : 'My QR check-ins'}</h2>
                 <p className="mt-1 text-sm text-[hsl(var(--muted))]">
-                  Completed Training Logs on the same date are shown for factual continuity only; this lot does not calculate a performance score.
+                  Assigned-session links and timing deltas are factual only. Completed Training Logs on the same date remain shown for continuity; no on-time/late label or performance score is calculated.
                 </p>
               </div>
 
@@ -184,41 +211,63 @@ export default async function CoachStaffAttendancePage() {
                   {attendance.map((row) => {
                     const logCount = completedLogsByStaffDay.get(`${row.staff_user_id}:${row.attendance_date}`) ?? 0
                     return (
-                      <div key={row.id} className="grid gap-3 px-4 py-4 md:grid-cols-[minmax(0,1.4fr)_0.8fr_0.8fr_0.8fr] md:items-center">
-                        <div className="min-w-0">
-                          <div className="font-semibold tracking-tight">{row.staff_name_snapshot}</div>
-                          <div className="mt-1 flex flex-wrap gap-x-2 gap-y-1 text-xs text-[hsl(var(--muted))]">
-                            <span>{roleLabel(row.staff_role_snapshot)}</span>
-                            {row.staff_member_id_snapshot ? <span>• {row.staff_member_id_snapshot}</span> : null}
+                      <div key={row.id} className="px-4 py-4">
+                        <div className="grid gap-3 md:grid-cols-[minmax(0,1.3fr)_0.75fr_0.75fr_0.75fr] md:items-center">
+                          <div className="min-w-0">
+                            <div className="font-semibold tracking-tight">{row.staff_name_snapshot}</div>
+                            <div className="mt-1 flex flex-wrap gap-x-2 gap-y-1 text-xs text-[hsl(var(--muted))]">
+                              <span>{roleLabel(row.staff_role_snapshot)}</span>
+                              {row.staff_member_id_snapshot ? <span>• {row.staff_member_id_snapshot}</span> : null}
+                            </div>
+                          </div>
+
+                          <div>
+                            <div className="text-xs font-semibold uppercase tracking-wide text-[hsl(var(--muted))]">Date</div>
+                            <div className="mt-1 flex items-center gap-2 text-sm font-medium">
+                              <CalendarDays size={15} />
+                              {formatDate(row.attendance_date)}
+                            </div>
+                          </div>
+
+                          <div>
+                            <div className="text-xs font-semibold uppercase tracking-wide text-[hsl(var(--muted))]">QR check-in</div>
+                            <div className="mt-1 flex items-center gap-2 text-sm font-medium">
+                              <Clock3 size={15} />
+                              {formatCairoTime(row.checked_in_at)}
+                            </div>
+                          </div>
+
+                          <div>
+                            <div className="text-xs font-semibold uppercase tracking-wide text-[hsl(var(--muted))]">Training logs</div>
+                            <div className="mt-1 flex items-center gap-2 text-sm font-medium">
+                              <CheckCircle2 size={15} />
+                              {logCount} completed
+                            </div>
+                            {canManage && row.device_tag ? (
+                              <div className="mt-1 truncate text-[11px] text-[hsl(var(--muted))]">Device: {row.device_tag}</div>
+                            ) : null}
                           </div>
                         </div>
 
-                        <div>
-                          <div className="text-xs font-semibold uppercase tracking-wide text-[hsl(var(--muted))]">Date</div>
-                          <div className="mt-1 flex items-center gap-2 text-sm font-medium">
-                            <CalendarDays size={15} />
-                            {formatDate(row.attendance_date)}
+                        {row.session_match_status === 'matched' ? (
+                          <div className="mt-3 rounded-2xl border border-emerald-200 bg-emerald-50 px-3 py-3 text-sm text-emerald-950">
+                            <div className="font-semibold">{row.session_name_snapshot || 'Assigned scheduled session'}</div>
+                            <div className="mt-1 flex flex-wrap gap-x-2 gap-y-1 text-xs">
+                              <span>{formatScheduleTime(row.session_start_time_snapshot)}</span>
+                              {row.session_mat_snapshot ? <span>• {row.session_mat_snapshot}</span> : null}
+                              {row.assignment_role_snapshot ? <span>• {roleLabel(row.assignment_role_snapshot)}</span> : null}
+                              <span>• Timing delta: {timingDeltaLabel(row.arrival_delta_minutes)}</span>
+                            </div>
                           </div>
-                        </div>
-
-                        <div>
-                          <div className="text-xs font-semibold uppercase tracking-wide text-[hsl(var(--muted))]">QR check-in</div>
-                          <div className="mt-1 flex items-center gap-2 text-sm font-medium">
-                            <Clock3 size={15} />
-                            {formatCairoTime(row.checked_in_at)}
+                        ) : row.session_match_status === 'ambiguous' ? (
+                          <div className="mt-3 rounded-2xl border border-sky-200 bg-sky-50 px-3 py-3 text-sm text-sky-950">
+                            Session link needs review — {row.session_match_candidate_count} assigned sessions were close to this QR time, so ATOM did not guess.
                           </div>
-                        </div>
-
-                        <div>
-                          <div className="text-xs font-semibold uppercase tracking-wide text-[hsl(var(--muted))]">Training logs</div>
-                          <div className="mt-1 flex items-center gap-2 text-sm font-medium">
-                            <CheckCircle2 size={15} />
-                            {logCount} completed
+                        ) : (
+                          <div className="mt-3 rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] px-3 py-3 text-xs text-[hsl(var(--muted))]">
+                            No assigned scheduled session matched this QR check-in.
                           </div>
-                          {canManage && row.device_tag ? (
-                            <div className="mt-1 truncate text-[11px] text-[hsl(var(--muted))]">Device: {row.device_tag}</div>
-                          ) : null}
-                        </div>
+                        )}
                       </div>
                     )
                   })}

@@ -45,6 +45,14 @@ type SearchParams = {
   staffRole?: string
   staffCheckedInAt?: string
   staffAlreadyCheckedIn?: string
+  staffSessionMatch?: string
+  staffTrainingSessionId?: string
+  staffSessionName?: string
+  staffSessionStartTime?: string
+  staffSessionMat?: string
+  staffAssignmentRole?: string
+  staffArrivalDeltaMinutes?: string
+  staffMatchCandidateCount?: string
 }
 
 type SubRow = {
@@ -110,6 +118,25 @@ function roleLabel(value?: string | null) {
   return String(value || 'coach')
     .replace(/_/g, ' ')
     .replace(/\b\w/g, (char) => char.toUpperCase())
+}
+
+function formatScheduleTime(value?: string | null) {
+  if (!value) return '—'
+  const match = String(value).match(/^(\d{2}):(\d{2})/)
+  if (!match) return value
+  const hour = Number(match[1])
+  const minute = Number(match[2])
+  if (!Number.isFinite(hour) || !Number.isFinite(minute)) return value
+  const suffix = hour >= 12 ? 'PM' : 'AM'
+  const displayHour = hour % 12 || 12
+  return `${displayHour}:${String(minute).padStart(2, '0')} ${suffix}`
+}
+
+function timingDeltaLabel(value: number | null) {
+  if (value === null) return '—'
+  if (value === 0) return '0 min from scheduled start'
+  if (value < 0) return `${Math.abs(value)} min before scheduled start`
+  return `${value} min after scheduled start`
 }
 
 const CAIRO_TZ = 'Africa/Cairo'
@@ -362,6 +389,15 @@ export default async function ScanResultPage({ searchParams }: { searchParams: S
   const staffRole = safeMessage(searchParams.staffRole)
   const staffCheckedInAt = safeMessage(searchParams.staffCheckedInAt)
   const staffAlreadyCheckedIn = searchParams.staffAlreadyCheckedIn === '1'
+  const staffSessionMatchRaw = safeMessage(searchParams.staffSessionMatch)
+  const staffSessionMatch =
+    staffSessionMatchRaw === 'matched' || staffSessionMatchRaw === 'ambiguous' ? staffSessionMatchRaw : 'unlinked'
+  const staffSessionName = safeMessage(searchParams.staffSessionName)
+  const staffSessionStartTime = safeMessage(searchParams.staffSessionStartTime)
+  const staffSessionMat = safeMessage(searchParams.staffSessionMat)
+  const staffAssignmentRole = safeMessage(searchParams.staffAssignmentRole)
+  const staffArrivalDeltaMinutes = parseIntSafe(searchParams.staffArrivalDeltaMinutes)
+  const staffMatchCandidateCount = parseIntSafe(searchParams.staffMatchCandidateCount) ?? 0
 
   let memberName = ''
   let memberCode = ''
@@ -426,10 +462,25 @@ export default async function ScanResultPage({ searchParams }: { searchParams: S
   if (staffCheckin) {
     const checkedInLabel = staffCheckedInAt ? fmtDateTimeNice(staffCheckedInAt) : 'Recorded now'
     const staffStatus = staffAlreadyCheckedIn ? 'ALREADY CHECKED IN' : 'CHECKED IN'
-    const staffInfoTitle = repeatScan ? 'Repeated scan' : staffAlreadyCheckedIn ? 'Recent check-in already exists' : 'Staff attendance recorded'
+    const staffInfoTitle = repeatScan
+      ? 'Repeated scan'
+      : staffSessionMatch === 'matched'
+        ? staffAlreadyCheckedIn
+          ? 'Session check-in already exists'
+          : 'Assigned session linked'
+        : staffSessionMatch === 'ambiguous'
+          ? 'Session link needs review'
+          : staffAlreadyCheckedIn
+            ? 'Recent unlinked check-in already exists'
+            : 'Staff attendance recorded'
     const staffInfoBody = repeatScan
       ? `Same QR scanned again${typeof repeatSeconds === 'number' ? ` after ${repeatSeconds}s` : ''}.`
-      : apiMessage || (staffAlreadyCheckedIn ? 'A recent staff check-in was already recorded.' : 'Staff QR attendance has been recorded.')
+      : apiMessage ||
+        (staffSessionMatch === 'matched'
+          ? 'Staff QR attendance has been linked to the assigned scheduled session.'
+          : staffSessionMatch === 'ambiguous'
+            ? 'Staff attendance was recorded, but no automatic session link was made because multiple assigned sessions were close to the scan time.'
+            : 'Staff attendance was recorded without an assigned scheduled-session match.')
 
     return (
       <main className={terminalFullScreen ? 'fixed inset-0 z-40 overflow-auto bg-black p-4 sm:p-6' : 'min-h-[calc(100vh-3rem)] bg-[hsl(var(--bg))] p-4 sm:p-6'}>
@@ -474,10 +525,33 @@ export default async function ScanResultPage({ searchParams }: { searchParams: S
                 <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
                   <KeyFact label="Role" value={roleLabel(staffRole)} icon={<UserRound size={18} strokeWidth={2.1} />} />
                   <KeyFact label="Check-in time" value={checkedInLabel} icon={<Clock3 size={18} strokeWidth={2.1} />} emphasize />
-                  <KeyFact label="Attendance" value="Staff QR" icon={<CircleCheckBig size={18} strokeWidth={2.1} />} />
+                  <KeyFact
+                    label="Session link"
+                    value={staffSessionMatch === 'matched' ? 'Matched' : staffSessionMatch === 'ambiguous' ? 'Needs review' : 'Unlinked'}
+                    icon={staffSessionMatch === 'matched' ? <CircleCheckBig size={18} strokeWidth={2.1} /> : <CircleAlert size={18} strokeWidth={2.1} />}
+                  />
                 </div>
 
-                <InlineInfo tone="success" title={staffInfoTitle} body={staffInfoBody} />
+                {staffSessionMatch === 'matched' ? (
+                  <div className="rounded-3xl border border-[hsl(var(--border))] bg-white p-4 shadow-soft">
+                    <div className="text-[11px] font-semibold uppercase tracking-wide text-[hsl(var(--muted))]">Assigned scheduled session</div>
+                    <div className="mt-2 text-lg font-bold tracking-tight">{staffSessionName || 'Scheduled session'}</div>
+                    <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-sm text-[hsl(var(--muted))]">
+                      <span>{formatScheduleTime(staffSessionStartTime)}</span>
+                      {staffSessionMat ? <span>• {staffSessionMat}</span> : null}
+                      {staffAssignmentRole ? <span>• {roleLabel(staffAssignmentRole)}</span> : null}
+                    </div>
+                    <div className="mt-3 text-sm font-semibold">Timing delta: {timingDeltaLabel(staffArrivalDeltaMinutes)}</div>
+                    <div className="mt-1 text-xs text-[hsl(var(--muted))]">Factual difference only — no on-time/late judgment is calculated in this lot.</div>
+                  </div>
+                ) : staffSessionMatch === 'ambiguous' ? (
+                  <div className="rounded-3xl border border-sky-200 bg-sky-50 p-4 text-sm text-sky-900">
+                    <div className="font-semibold">Automatic session link withheld</div>
+                    <div className="mt-1">{staffMatchCandidateCount} assigned sessions were close enough to the scan time that ATOM did not guess which one this QR belongs to.</div>
+                  </div>
+                ) : null}
+
+                <InlineInfo tone={staffSessionMatch === 'ambiguous' ? 'warning' : 'success'} title={staffInfoTitle} body={staffInfoBody} />
 
                 {isTerminal ? (
                   <div className="rounded-2xl border border-sky-200 bg-sky-50 p-4 text-sm text-sky-900">

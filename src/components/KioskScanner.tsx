@@ -87,6 +87,14 @@ type ScanResponse = {
   staff_role?: string
   staff_checked_in_at?: string
   staff_already_checked_in?: boolean
+  staff_session_match?: 'matched' | 'unlinked' | 'ambiguous'
+  staff_training_session_id?: string
+  staff_session_name?: string
+  staff_session_start_time?: string
+  staff_session_mat?: string | null
+  staff_assignment_role?: 'primary_coach' | 'assistant_coach'
+  staff_arrival_delta_minutes?: number
+  staff_match_candidate_count?: number
 }
 
 type Detected = { rawValue: string }
@@ -177,6 +185,18 @@ function buildResultParams(j: ScanResponse, kioskMode: boolean, fullScreenEnable
   if (j.staff_role) sp.set('staffRole', String(j.staff_role).slice(0, 40))
   if (j.staff_checked_in_at) sp.set('staffCheckedInAt', String(j.staff_checked_in_at).slice(0, 80))
   if (j.staff_already_checked_in) sp.set('staffAlreadyCheckedIn', '1')
+  if (j.staff_session_match) sp.set('staffSessionMatch', String(j.staff_session_match).slice(0, 20))
+  if (j.staff_training_session_id) sp.set('staffTrainingSessionId', String(j.staff_training_session_id).slice(0, 80))
+  if (j.staff_session_name) sp.set('staffSessionName', String(j.staff_session_name).slice(0, 180))
+  if (j.staff_session_start_time) sp.set('staffSessionStartTime', String(j.staff_session_start_time).slice(0, 20))
+  if (j.staff_session_mat) sp.set('staffSessionMat', String(j.staff_session_mat).slice(0, 80))
+  if (j.staff_assignment_role) sp.set('staffAssignmentRole', String(j.staff_assignment_role).slice(0, 40))
+  if (j.staff_arrival_delta_minutes !== undefined && j.staff_arrival_delta_minutes !== null) {
+    sp.set('staffArrivalDeltaMinutes', String(j.staff_arrival_delta_minutes))
+  }
+  if (j.staff_match_candidate_count !== undefined && j.staff_match_candidate_count !== null) {
+    sp.set('staffMatchCandidateCount', String(j.staff_match_candidate_count))
+  }
   if (j.message) sp.set('message', String(j.message).slice(0, 180))
   return sp
 }
