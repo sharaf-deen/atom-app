@@ -2,11 +2,12 @@
 
 import * as React from 'react'
 import { useRouter } from 'next/navigation'
-import { BookOpen, CalendarDays, Clock3, Layers3, MapPin, RefreshCw, UserCheck, Users } from 'lucide-react'
+import { AlertTriangle, BookOpen, CalendarDays, Clock3, History, Layers3, MapPin, RefreshCw, UserCheck, Users } from 'lucide-react'
 import type {
   PublishedTrainingProgram,
   ScheduleSessionCoachAssignment,
   ScheduleSessionTrainingProgramAssignment,
+  ScheduleSessionExceptionEvent,
   ScheduleTrainingSession,
 } from '@/app/schedule/sessions/page'
 import Button from '@/components/ui/Button'
@@ -14,6 +15,7 @@ import ConfirmActionModal from '@/components/ui/ConfirmActionModal'
 import Input from '@/components/ui/Input'
 import Modal from '@/components/ui/Modal'
 import Select from '@/components/ui/Select'
+import Textarea from '@/components/ui/Textarea'
 
 type StaffOption = {
   user_id: string
@@ -107,6 +109,7 @@ export default function TrainingSessionsManager({
   assignments,
   programs,
   programAssignments,
+  exceptionEvents,
   today,
   previewUntil,
   defaultSyncUntil,
@@ -119,6 +122,7 @@ export default function TrainingSessionsManager({
   assignments: ScheduleSessionCoachAssignment[]
   programs: PublishedTrainingProgram[]
   programAssignments: ScheduleSessionTrainingProgramAssignment[]
+  exceptionEvents: ScheduleSessionExceptionEvent[]
   today: string
   previewUntil: string
   defaultSyncUntil: string
@@ -145,6 +149,17 @@ export default function TrainingSessionsManager({
   const [programPending, setProgramPending] = React.useState(false)
   const [programError, setProgramError] = React.useState<string | null>(null)
 
+  const [exceptionSession, setExceptionSession] = React.useState<ScheduleTrainingSession | null>(null)
+  const [exceptionOperation, setExceptionOperation] = React.useState<'details' | 'cancel' | 'restore' | 'replace_staff'>('details')
+  const [exceptionReason, setExceptionReason] = React.useState('')
+  const [exceptionStartTime, setExceptionStartTime] = React.useState('')
+  const [exceptionEndTime, setExceptionEndTime] = React.useState('')
+  const [exceptionMat, setExceptionMat] = React.useState('')
+  const [exceptionPrimaryUserId, setExceptionPrimaryUserId] = React.useState('')
+  const [exceptionAssistantUserIds, setExceptionAssistantUserIds] = React.useState<string[]>([])
+  const [exceptionPending, setExceptionPending] = React.useState(false)
+  const [exceptionError, setExceptionError] = React.useState<string | null>(null)
+
   const assignmentsBySession = React.useMemo(() => {
     const map = new Map<string, ScheduleSessionCoachAssignment[]>()
     for (const row of assignments) {
@@ -158,6 +173,16 @@ export default function TrainingSessionsManager({
   const programAssignmentBySession = React.useMemo(() => {
     return new Map(programAssignments.map((row) => [row.training_session_id, row]))
   }, [programAssignments])
+
+  const exceptionEventsBySession = React.useMemo(() => {
+    const map = new Map<string, ScheduleSessionExceptionEvent[]>()
+    for (const row of exceptionEvents) {
+      const current = map.get(row.training_session_id) ?? []
+      current.push(row)
+      map.set(row.training_session_id, current)
+    }
+    return map
+  }, [exceptionEvents])
 
   function openProgramAssignment(row: ScheduleTrainingSession) {
     const current = programAssignmentBySession.get(row.id)
@@ -213,6 +238,132 @@ export default function TrainingSessionsManager({
         return a.title.localeCompare(b.title)
       })
   }, [programSession, programs])
+
+  function exceptionEventLabel(value: ScheduleSessionExceptionEvent['event_type']) {
+    const labels: Record<ScheduleSessionExceptionEvent['event_type'], string> = {
+      details_changed: 'Time / mat changed',
+      cancelled: 'Session cancelled',
+      restored: 'Session restored',
+      staff_replaced: 'Coach replacement',
+    }
+    return labels[value]
+  }
+
+  async function loadStaffForException() {
+    if (staffLoaded || staffLoading) return
+    setStaffLoading(true)
+    setExceptionError(null)
+    try {
+      const response = await fetch('/api/schedule/session-assignments', { method: 'GET', cache: 'no-store' })
+      const data = await readJson(response)
+      if (!response.ok || data.ok !== true) {
+        throw new Error(data.details || data.error || 'Failed to load coaching staff.')
+      }
+      setStaffOptions((data.items ?? []) as StaffOption[])
+      setStaffLoaded(true)
+    } catch (cause: any) {
+      setExceptionError(String(cause?.message || cause))
+    } finally {
+      setStaffLoading(false)
+    }
+  }
+
+  function openException(row: ScheduleTrainingSession) {
+    const current = assignmentsBySession.get(row.id) ?? []
+    const primary = current.find((assignment) => assignment.assignment_role === 'primary_coach')
+    const assistants = current.filter((assignment) => assignment.assignment_role === 'assistant_coach')
+
+    setExceptionSession(row)
+    setExceptionOperation(row.status === 'cancelled' ? 'restore' : 'details')
+    setExceptionReason('')
+    setExceptionStartTime(normalizeTime(row.start_time))
+    setExceptionEndTime(normalizeTime(row.end_time))
+    setExceptionMat(row.mat_snapshot ?? '')
+    setExceptionPrimaryUserId(primary?.staff_user_id ?? '')
+    setExceptionAssistantUserIds(assistants.map((assignment) => assignment.staff_user_id))
+    setExceptionError(null)
+    void loadStaffForException()
+  }
+
+  function closeException() {
+    if (exceptionPending) return
+    setExceptionSession(null)
+    setExceptionReason('')
+    setExceptionError(null)
+  }
+
+  function toggleExceptionAssistant(userId: string) {
+    setExceptionAssistantUserIds((current) =>
+      current.includes(userId)
+        ? current.filter((id) => id !== userId)
+        : current.length >= 6
+          ? current
+          : [...current, userId],
+    )
+  }
+
+  async function saveException() {
+    if (!exceptionSession) return
+    const reason = exceptionReason.trim()
+    if (reason.length < 3) {
+      setExceptionError('Enter a clear reason for this one-off change.')
+      return
+    }
+    if (exceptionOperation === 'details') {
+      if (!exceptionStartTime) {
+        setExceptionError('Start time is required.')
+        return
+      }
+      if (exceptionEndTime && exceptionEndTime <= exceptionStartTime) {
+        setExceptionError('End time must be after start time.')
+        return
+      }
+    }
+    if (exceptionOperation === 'replace_staff' && !exceptionPrimaryUserId) {
+      setExceptionError('Choose the replacement Primary Coach.')
+      return
+    }
+
+    setExceptionPending(true)
+    setExceptionError(null)
+    setMessage(null)
+    setError(null)
+
+    try {
+      const response = await fetch('/api/schedule/session-exceptions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sessionId: exceptionSession.id,
+          operation: exceptionOperation,
+          reason,
+          startTime: exceptionOperation === 'details' ? exceptionStartTime : null,
+          endTime: exceptionOperation === 'details' ? exceptionEndTime || null : null,
+          mat: exceptionOperation === 'details' ? exceptionMat || null : null,
+          primaryUserId: exceptionOperation === 'replace_staff' ? exceptionPrimaryUserId : null,
+          assistantUserIds: exceptionOperation === 'replace_staff' ? exceptionAssistantUserIds : [],
+        }),
+      })
+      const data = await readJson(response)
+      if (!response.ok || data.ok !== true) {
+        throw new Error(data.details || data.error || 'Failed to apply the schedule exception.')
+      }
+
+      const labels = {
+        details: 'Session time / mat updated.',
+        cancel: 'Session cancelled.',
+        restore: 'Session restored.',
+        replace_staff: 'Coach replacement recorded.',
+      }
+      setMessage(labels[exceptionOperation])
+      setExceptionSession(null)
+      router.refresh()
+    } catch (cause: any) {
+      setExceptionError(String(cause?.message || cause))
+    } finally {
+      setExceptionPending(false)
+    }
+  }
 
   const grouped = React.useMemo(() => {
     const map = new Map<string, ScheduleTrainingSession[]>()
@@ -474,6 +625,8 @@ export default function TrainingSessionsManager({
                   const primary = sessionAssignments.find((assignment) => assignment.assignment_role === 'primary_coach')
                   const assistants = sessionAssignments.filter((assignment) => assignment.assignment_role === 'assistant_coach')
                   const programAssignment = programAssignmentBySession.get(row.id)
+                  const rowExceptionEvents = exceptionEventsBySession.get(row.id) ?? []
+                  const latestException = rowExceptionEvents[0]
 
                   return (
                     <article key={row.id} className="space-y-3 px-4 py-3">
@@ -566,10 +719,49 @@ export default function TrainingSessionsManager({
                         </div>
                       </div>
 
+                      {canManageSessions && row.status !== 'completed' ? (
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Button type="button" size="sm" variant="outline" onClick={() => openException(row)}>
+                            <AlertTriangle className="h-4 w-4" />
+                            Manage exception
+                          </Button>
+                          {latestException ? (
+                            <span className="inline-flex items-center gap-1.5 text-xs text-[hsl(var(--muted))]">
+                              <History className="h-3.5 w-3.5" />
+                              {exceptionEventLabel(latestException.event_type)} · {latestException.actor_name_snapshot} · {formatCairoDateTime(latestException.changed_at)}
+                            </span>
+                          ) : null}
+                        </div>
+                      ) : latestException ? (
+                        <div className="inline-flex items-center gap-1.5 text-xs text-[hsl(var(--muted))]">
+                          <History className="h-3.5 w-3.5" />
+                          {exceptionEventLabel(latestException.event_type)} · {formatCairoDateTime(latestException.changed_at)}
+                        </div>
+                      ) : null}
+
+                      {canManageSessions && rowExceptionEvents.length > 0 ? (
+                        <details className="rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--muted)/0.03)] px-3 py-2 text-xs">
+                          <summary className="cursor-pointer font-semibold">Exception audit history · {rowExceptionEvents.length}</summary>
+                          <div className="mt-2 space-y-2">
+                            {rowExceptionEvents.map((event) => (
+                              <div key={event.id} className="rounded-lg border border-[hsl(var(--border))] bg-white px-3 py-2">
+                                <div className="font-semibold">{exceptionEventLabel(event.event_type)}</div>
+                                <div className="mt-0.5 text-[hsl(var(--muted))]">
+                                  {event.actor_name_snapshot} · {formatCairoDateTime(event.changed_at)}
+                                </div>
+                                <div className="mt-1 whitespace-pre-wrap">{event.reason}</div>
+                              </div>
+                            ))}
+                          </div>
+                        </details>
+                      ) : null}
+
                       <div className="text-xs text-[hsl(var(--muted))]">
-                        {sessionAssignments.length > 0 || programAssignment
-                          ? `Operationally linked · protected from automatic template sync`
-                          : `${row.template_managed ? 'Template-managed' : 'Exception-locked'} · last sync ${formatCairoDateTime(row.synced_at)}`}
+                        {!row.template_managed
+                          ? `Exception-locked · protected from automatic template sync`
+                          : sessionAssignments.length > 0 || programAssignment
+                            ? `Operationally linked · protected from automatic template sync`
+                            : `Template-managed · last sync ${formatCairoDateTime(row.synced_at)}`}
                       </div>
                     </article>
                   )
@@ -579,6 +771,173 @@ export default function TrainingSessionsManager({
           ))
         )}
       </div>
+
+      <Modal
+        open={Boolean(exceptionSession)}
+        onClose={closeException}
+        title={exceptionSession ? `Schedule exception · ${exceptionSession.name_snapshot}` : 'Schedule exception'}
+        className="max-h-[88vh] overflow-y-auto"
+      >
+        {exceptionSession ? (
+          <div className="space-y-4">
+            <div className="rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--muted)/0.04)] px-3 py-2 text-sm">
+              <div className="font-semibold">{formatDate(exceptionSession.session_date)}</div>
+              <div className="text-[hsl(var(--muted))]">
+                Current: {formatTime(exceptionSession.start_time)}
+                {exceptionSession.end_time ? ` – ${formatTime(exceptionSession.end_time)}` : ''}
+                {exceptionSession.mat_snapshot ? ` · ${exceptionSession.mat_snapshot}` : ''}
+                {` · ${exceptionSession.status}`}
+              </div>
+            </div>
+
+            <Select
+              label="Exception action"
+              value={exceptionOperation}
+              onChange={(event) => {
+                const value = event.target.value as 'details' | 'cancel' | 'restore' | 'replace_staff'
+                setExceptionOperation(value)
+                setExceptionError(null)
+                if (value === 'replace_staff') void loadStaffForException()
+              }}
+              disabled={exceptionPending}
+            >
+              {exceptionSession.status === 'cancelled' ? (
+                <option value="restore">Restore cancelled session</option>
+              ) : (
+                <>
+                  <option value="details">Change time / mat</option>
+                  <option value="cancel">Cancel this session</option>
+                  <option value="replace_staff">Replace coaching staff</option>
+                </>
+              )}
+            </Select>
+
+            {exceptionOperation === 'details' ? (
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Input
+                  type="time"
+                  label="Start time"
+                  value={exceptionStartTime}
+                  onChange={(event) => setExceptionStartTime(event.target.value)}
+                  disabled={exceptionPending}
+                />
+                <Input
+                  type="time"
+                  label="End time"
+                  value={exceptionEndTime}
+                  onChange={(event) => setExceptionEndTime(event.target.value)}
+                  disabled={exceptionPending}
+                />
+                <div className="sm:col-span-2">
+                  <Input
+                    label="Mat"
+                    value={exceptionMat}
+                    onChange={(event) => setExceptionMat(event.target.value)}
+                    placeholder="Mat 1"
+                    maxLength={80}
+                    disabled={exceptionPending}
+                  />
+                </div>
+              </div>
+            ) : null}
+
+            {exceptionOperation === 'replace_staff' ? (
+              <div className="space-y-3">
+                {staffLoading ? (
+                  <div className="text-sm text-[hsl(var(--muted))]">Loading coaching staff…</div>
+                ) : (
+                  <>
+                    <Select
+                      label="Replacement Primary Coach"
+                      value={exceptionPrimaryUserId}
+                      onChange={(event) => {
+                        const value = event.target.value
+                        setExceptionPrimaryUserId(value)
+                        setExceptionAssistantUserIds((current) => current.filter((id) => id !== value))
+                      }}
+                      disabled={exceptionPending}
+                    >
+                      <option value="">Choose coach</option>
+                      {staffOptions.map((staff) => (
+                        <option key={staff.user_id} value={staff.user_id}>
+                          {staff.full_name} · {staffRoleLabel(staff.role)}
+                        </option>
+                      ))}
+                    </Select>
+
+                    <div>
+                      <div className="text-sm font-medium">Assistant Coach(s)</div>
+                      <div className="mt-1 max-h-52 space-y-1 overflow-y-auto rounded-xl border border-[hsl(var(--border))] p-2">
+                        {staffOptions
+                          .filter((staff) => staff.user_id !== exceptionPrimaryUserId)
+                          .map((staff) => {
+                            const checked = exceptionAssistantUserIds.includes(staff.user_id)
+                            return (
+                              <label key={staff.user_id} className="flex cursor-pointer items-center gap-3 rounded-lg px-2 py-2 hover:bg-black/5">
+                                <input
+                                  type="checkbox"
+                                  checked={checked}
+                                  disabled={exceptionPending || (!checked && exceptionAssistantUserIds.length >= 6)}
+                                  onChange={() => toggleExceptionAssistant(staff.user_id)}
+                                />
+                                <span className="min-w-0 flex-1">
+                                  <span className="block truncate text-sm font-medium">{staff.full_name}</span>
+                                  <span className="block text-xs text-[hsl(var(--muted))]">{staffRoleLabel(staff.role)}</span>
+                                </span>
+                              </label>
+                            )
+                          })}
+                      </div>
+                    </div>
+                  </>
+                )}
+              </div>
+            ) : null}
+
+            {exceptionOperation === 'cancel' ? (
+              <div className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-900">
+                The class will remain visible to members with a CANCELLED status. Coach/program history is preserved.
+              </div>
+            ) : null}
+
+            {exceptionOperation === 'restore' ? (
+              <div className="rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-950">
+                Restoring makes this dated session scheduled again, but it remains exception-locked and will not be overwritten by Class Template sync.
+              </div>
+            ) : null}
+
+            <Textarea
+              label="Reason · required"
+              value={exceptionReason}
+              onChange={(event) => setExceptionReason(event.target.value)}
+              placeholder="Why is this one-off change required?"
+              maxLength={1000}
+              rows={3}
+              disabled={exceptionPending}
+              hint="Internal audit note. It is not exposed on the member Schedule."
+            />
+
+            {exceptionError ? (
+              <div className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-800">
+                {exceptionError}
+              </div>
+            ) : null}
+
+            <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-950">
+              Any successful exception permanently sets this dated session to exception-locked. Time/mat changes are blocked after linked staff QR attendance or a Training Log. Cancellation and staff replacement are also protected by additional history checks.
+            </div>
+
+            <div className="flex flex-wrap justify-end gap-2">
+              <Button type="button" variant="ghost" onClick={closeException} disabled={exceptionPending}>
+                Close
+              </Button>
+              <Button type="button" onClick={saveException} loading={exceptionPending} loadingText="Applying…">
+                Apply exception
+              </Button>
+            </div>
+          </div>
+        ) : null}
+      </Modal>
 
       <ConfirmActionModal
         open={confirmOpen}
