@@ -73,6 +73,18 @@ export type ScheduleSessionTrainingProgramAssignment = {
   assigned_at: string
 }
 
+export type ScheduleSessionExceptionEvent = {
+  id: string
+  training_session_id: string
+  event_type: 'details_changed' | 'cancelled' | 'restored' | 'staff_replaced'
+  reason: string
+  before_state: Record<string, unknown>
+  after_state: Record<string, unknown>
+  actor_name_snapshot: string
+  actor_role_snapshot: 'head_coach' | 'super_admin'
+  changed_at: string
+}
+
 function cairoDateIso() {
   const parts = new Intl.DateTimeFormat('en-GB', {
     timeZone: 'Africa/Cairo',
@@ -142,8 +154,10 @@ export default async function ScheduleTrainingSessionsPage() {
   let sessions = (sessionResult.data ?? []) as ScheduleTrainingSession[]
   let assignments: ScheduleSessionCoachAssignment[] = []
   let programAssignments: ScheduleSessionTrainingProgramAssignment[] = []
+  let exceptionEvents: ScheduleSessionExceptionEvent[] = []
   let assignmentError: string | null = null
   let programAssignmentError: string | null = null
+  let exceptionError: string | null = null
 
   if (!sessionResult.error && sessions.length > 0) {
     const allSessionIds = sessions.map((row) => row.id)
@@ -167,7 +181,7 @@ export default async function ScheduleTrainingSessionsPage() {
 
     const visibleSessionIds = sessions.map((row) => row.id)
     if (visibleSessionIds.length > 0) {
-      const [activeAssignmentsResult, activeProgramsResult] = await Promise.all([
+      const [activeAssignmentsResult, activeProgramsResult, exceptionResult] = await Promise.all([
         supabase
           .from('schedule_session_coach_assignments')
           .select(
@@ -184,6 +198,13 @@ export default async function ScheduleTrainingSessionsPage() {
           )
           .eq('is_active', true)
           .in('training_session_id', visibleSessionIds),
+        canManageSessions
+          ? supabase
+              .from('schedule_session_exception_events')
+              .select('id,training_session_id,event_type,reason,before_state,after_state,actor_name_snapshot,actor_role_snapshot,changed_at')
+              .in('training_session_id', visibleSessionIds)
+              .order('changed_at', { ascending: false })
+          : Promise.resolve({ data: [], error: null }),
       ])
 
       if (activeAssignmentsResult.error) assignmentError = activeAssignmentsResult.error.message
@@ -191,10 +212,18 @@ export default async function ScheduleTrainingSessionsPage() {
 
       if (activeProgramsResult.error) programAssignmentError = activeProgramsResult.error.message
       else programAssignments = (activeProgramsResult.data ?? []) as ScheduleSessionTrainingProgramAssignment[]
+
+      if (exceptionResult.error) exceptionError = exceptionResult.error.message
+      else exceptionEvents = (exceptionResult.data ?? []) as ScheduleSessionExceptionEvent[]
     }
   }
 
-  const loadError = sessionResult.error?.message ?? programsResult.error?.message ?? assignmentError ?? programAssignmentError
+  const loadError =
+    sessionResult.error?.message
+    ?? programsResult.error?.message
+    ?? assignmentError
+    ?? programAssignmentError
+    ?? exceptionError
 
   return (
     <main>
@@ -237,11 +266,11 @@ export default async function ScheduleTrainingSessionsPage() {
         ) : (
           <>
             <div className="rounded-2xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-950">
-              Lot 2F links the planned Training Program to the same dated session used for coach assignment and staff QR attendance. Training Program assignment is internal and is not exposed on the member-facing Schedule.
+              Lot 2G adds auditable one-off schedule exceptions. Time, mat, cancellation/restoration and staff replacement changes apply only to the dated session and never rewrite the recurring Class Template.
             </div>
 
             <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950">
-              A session with active staff, QR attendance, a planned Training Program or a linked Training Log is protected from automatic Class Template synchronization.
+              An exception-locked session is permanently excluded from automatic Class Template synchronization. Member Schedule reads the dated session directly, so approved time/mat changes and cancellations are reflected immediately.
             </div>
           </>
         )}
@@ -260,6 +289,7 @@ export default async function ScheduleTrainingSessionsPage() {
             assignments={assignments}
             programs={(programsResult.data ?? []) as PublishedTrainingProgram[]}
             programAssignments={programAssignments}
+            exceptionEvents={exceptionEvents}
             today={today}
             previewUntil={previewUntil}
             defaultSyncUntil={defaultSyncUntil}
