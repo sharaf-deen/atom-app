@@ -47,6 +47,8 @@ type CurriculumSituation = {
 type SessionLog = {
   id: string
   program_id: string
+  training_session_id: string | null
+  session_assignment_role_snapshot: 'primary_coach' | 'assistant_coach' | null
   program_title_snapshot: string
   target_group_snapshot: string
   training_date: string
@@ -79,6 +81,36 @@ type SessionLogItem = {
   sort_order: number
 }
 
+export type LinkedScheduleSession = {
+  id: string
+  session_date: string
+  start_time: string
+  end_time: string | null
+  name_snapshot: string
+  mat_snapshot: string | null
+  assignment_role: 'primary_coach' | 'assistant_coach'
+  program_id: string
+  program_title_snapshot: string
+  program_target_group_snapshot: string
+}
+
+function cairoDateIso() {
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Africa/Cairo',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(new Date())
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]))
+  return `${values.year}-${values.month}-${values.day}`
+}
+
+function addDays(dateIso: string, days: number) {
+  const [year, month, day] = dateIso.split('-').map(Number)
+  const date = new Date(Date.UTC(year, month - 1, day + days))
+  return date.toISOString().slice(0, 10)
+}
+
 export default async function CoachTrainingLogsPage() {
   const me = await getSessionUser()
   if (!me) redirect('/login?next=/coach-operations/training-logs')
@@ -106,7 +138,11 @@ export default async function CoachTrainingLogsPage() {
     .order('start_date', { ascending: false })
 
   const programIds = (programsResult.data ?? []).map((row: any) => String(row.id))
-  const [programItemsResult, typesResult, blocksResult, techniquesResult, situationsResult, logsResult] = await Promise.all([
+  const today = cairoDateIso()
+  const linkedFrom = addDays(today, -30)
+  const linkedUntil = addDays(today, 14)
+
+  const [programItemsResult, typesResult, blocksResult, techniquesResult, situationsResult, logsResult, ownAssignmentsResult] = await Promise.all([
     programIds.length
       ? supabase
           .from('coach_training_program_items')
@@ -124,11 +160,79 @@ export default async function CoachTrainingLogsPage() {
       .order('name', { ascending: true }),
     supabase
       .from('coach_training_session_logs')
-      .select('id,program_id,program_title_snapshot,target_group_snapshot,training_date,session_time,coach_user_id,coach_name_snapshot,coach_role_snapshot,notes,status,completed_at,reopened_at,created_at,updated_at')
+      .select('id,program_id,training_session_id,session_assignment_role_snapshot,program_title_snapshot,target_group_snapshot,training_date,session_time,coach_user_id,coach_name_snapshot,coach_role_snapshot,notes,status,completed_at,reopened_at,created_at,updated_at')
       .order('training_date', { ascending: false })
       .order('session_time', { ascending: false })
       .order('created_at', { ascending: false }),
+    supabase
+      .from('schedule_session_coach_assignments')
+      .select('training_session_id,assignment_role')
+      .eq('is_active', true)
+      .eq('staff_user_id', me.id),
   ])
+
+  const ownAssignmentRows = (ownAssignmentsResult.data ?? []) as Array<{
+    training_session_id: string
+    assignment_role: 'primary_coach' | 'assistant_coach'
+  }>
+  const ownSessionIds = Array.from(new Set(ownAssignmentRows.map((row) => row.training_session_id)))
+
+  const linkedSessionsResult = ownSessionIds.length
+    ? await supabase
+        .from('schedule_training_sessions')
+        .select('id,session_date,start_time,end_time,name_snapshot,mat_snapshot,status')
+        .in('id', ownSessionIds)
+        .gte('session_date', linkedFrom)
+        .lte('session_date', linkedUntil)
+        .neq('status', 'cancelled')
+        .order('session_date', { ascending: false })
+        .order('start_time', { ascending: false })
+    : ({ data: [], error: null } as any)
+
+  const linkedSessionIds = (linkedSessionsResult.data ?? []).map((row: any) => String(row.id))
+  const linkedProgramsResult = linkedSessionIds.length
+    ? await supabase
+        .from('schedule_session_training_program_assignments')
+        .select('training_session_id,program_id,program_title_snapshot,target_group_snapshot')
+        .eq('is_active', true)
+        .in('training_session_id', linkedSessionIds)
+    : ({ data: [], error: null } as any)
+
+  const ownAssignmentMap = new Map(ownAssignmentRows.map((row) => [row.training_session_id, row.assignment_role]))
+  const linkedProgramMap = new Map(
+    ((linkedProgramsResult.data ?? []) as Array<{
+      training_session_id: string
+      program_id: string
+      program_title_snapshot: string
+      target_group_snapshot: string
+    }>).map((row) => [row.training_session_id, row]),
+  )
+  const publishedProgramIds = new Set(programIds)
+
+  const linkedSessions: LinkedScheduleSession[] = ((linkedSessionsResult.data ?? []) as Array<{
+    id: string
+    session_date: string
+    start_time: string
+    end_time: string | null
+    name_snapshot: string
+    mat_snapshot: string | null
+  }>).flatMap((row) => {
+    const assignmentRole = ownAssignmentMap.get(row.id)
+    const programAssignment = linkedProgramMap.get(row.id)
+    if (!assignmentRole || !programAssignment || !publishedProgramIds.has(programAssignment.program_id)) return []
+    return [{
+      id: row.id,
+      session_date: row.session_date,
+      start_time: row.start_time,
+      end_time: row.end_time,
+      name_snapshot: row.name_snapshot,
+      mat_snapshot: row.mat_snapshot,
+      assignment_role: assignmentRole,
+      program_id: programAssignment.program_id,
+      program_title_snapshot: programAssignment.program_title_snapshot,
+      program_target_group_snapshot: programAssignment.target_group_snapshot,
+    }]
+  })
 
   const logIds = (logsResult.data ?? []).map((row: any) => String(row.id))
   const logItemsResult = logIds.length
@@ -147,15 +251,18 @@ export default async function CoachTrainingLogsPage() {
     techniquesResult.error?.message ||
     situationsResult.error?.message ||
     logsResult.error?.message ||
+    ownAssignmentsResult.error?.message ||
+    linkedSessionsResult.error?.message ||
+    linkedProgramsResult.error?.message ||
     logItemsResult.error?.message ||
     null
 
   return (
     <main>
-      <PageHeader title="Training Logs" subtitle="Record what was actually taught and review previous sessions across the coaching team." />
+      <PageHeader title="Training Logs" subtitle="Record what was actually taught and link it to the real dated session when available." />
       <Section className="max-w-6xl space-y-4">
         <div className="rounded-2xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-950">
-          Training Logs use published Training Programs. This records coaching work only; staff QR attendance and member attendance are not changed in this lot.
+          Lot 2F connects the planned Training Program and actual Training Log to the same Scheduled Session. Existing historical/manual logs remain supported for continuity.
         </div>
 
         {loadError ? (
@@ -168,6 +275,7 @@ export default async function CoachTrainingLogsPage() {
             canCreate={canCreateCoachTrainingLogs(me.role)}
             canManage={canManageCoachTrainingLogs(me.role)}
             programs={(programsResult.data ?? []) as Program[]}
+            linkedSessions={linkedSessions}
             programItems={(programItemsResult.data ?? []) as ProgramItem[]}
             types={(typesResult.data ?? []) as CurriculumType[]}
             blocks={(blocksResult.data ?? []) as CurriculumBlock[]}

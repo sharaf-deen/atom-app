@@ -223,7 +223,7 @@ export async function POST(request: Request) {
   for (const batch of chunks(existing.map((row) => row.id), 150)) {
     if (!batch.length) continue
 
-    const [assignmentResult, attendanceResult] = await Promise.all([
+    const [assignmentResult, attendanceResult, programResult, trainingLogResult] = await Promise.all([
       supabase
         .from('schedule_session_coach_assignments')
         .select('training_session_id')
@@ -233,16 +233,33 @@ export async function POST(request: Request) {
         .from('coach_staff_attendance')
         .select('training_session_id')
         .in('training_session_id', batch),
+      supabase
+        .from('schedule_session_training_program_assignments')
+        .select('training_session_id')
+        .eq('is_active', true)
+        .in('training_session_id', batch),
+      supabase
+        .from('coach_training_session_logs')
+        .select('training_session_id')
+        .in('training_session_id', batch),
     ])
 
     if (assignmentResult.error) return dbFailure(assignmentResult.error, 'LOAD_SESSION_ASSIGNMENTS_FAILED')
     if (attendanceResult.error) return dbFailure(attendanceResult.error, 'LOAD_SESSION_ATTENDANCE_LINKS_FAILED')
+    if (programResult.error) return dbFailure(programResult.error, 'LOAD_SESSION_PROGRAM_LINKS_FAILED')
+    if (trainingLogResult.error) return dbFailure(trainingLogResult.error, 'LOAD_SESSION_TRAINING_LOG_LINKS_FAILED')
 
     for (const assignment of assignmentResult.data ?? []) {
       operationallyProtectedSessionIds.add(String(assignment.training_session_id))
     }
     for (const attendance of attendanceResult.data ?? []) {
       if (attendance.training_session_id) operationallyProtectedSessionIds.add(String(attendance.training_session_id))
+    }
+    for (const program of programResult.data ?? []) {
+      operationallyProtectedSessionIds.add(String(program.training_session_id))
+    }
+    for (const log of trainingLogResult.data ?? []) {
+      if (log.training_session_id) operationallyProtectedSessionIds.add(String(log.training_session_id))
     }
   }
 
