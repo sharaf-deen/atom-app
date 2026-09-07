@@ -527,6 +527,9 @@ export default async function VisitorTrialsPage({
             <Button asChild variant="outline" href="/reception">
               Front desk
             </Button>
+            <Button asChild variant="outline" href="/admin/members/family-intake">
+              Family intake
+            </Button>
             <Button asChild variant="outline" href="/kiosk">
               Create member
             </Button>
