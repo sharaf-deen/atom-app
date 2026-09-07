@@ -81,6 +81,7 @@ const APP_NAV_BY_ROLE: MenuByRole = {
     { label: 'Training Useful', href: '/training-useful', icon: 'dashboard' },
     { label: 'Training Curriculum', href: '/coach-operations/curriculum', icon: 'file-text' },
     { label: 'Training Programs', href: '/coach-operations/programs', icon: 'calendar' },
+    { label: 'My Assigned Sessions', href: '/schedule/sessions', icon: 'calendar' },
     { label: 'Training Logs', href: '/coach-operations/training-logs', icon: 'file-text' },
     { label: 'Staff Attendance', href: '/coach-operations/staff-attendance', icon: 'scan' },
     { label: 'Member Incidents', href: '/coach-operations/incidents', icon: 'file-text' },
@@ -94,6 +95,7 @@ const APP_NAV_BY_ROLE: MenuByRole = {
     { label: 'Training Useful', href: '/training-useful', icon: 'dashboard' },
     { label: 'Training Curriculum', href: '/coach-operations/curriculum', icon: 'file-text' },
     { label: 'Training Programs', href: '/coach-operations/programs', icon: 'calendar' },
+    { label: 'My Assigned Sessions', href: '/schedule/sessions', icon: 'calendar' },
     { label: 'Training Logs', href: '/coach-operations/training-logs', icon: 'file-text' },
     { label: 'Staff Attendance', href: '/coach-operations/staff-attendance', icon: 'scan' },
     { label: 'Member Incidents', href: '/coach-operations/incidents', icon: 'file-text' },
@@ -426,10 +428,14 @@ export function canManageScheduleClassTemplates(role: Role | null | undefined) {
 }
 
 export function canAccessScheduleTrainingSessions(role: Role | null | undefined) {
-  return hasAnyRole(role, ['head_coach', 'super_admin'])
+  return hasAnyRole(role, ['assistant_coach', 'coach', 'head_coach', 'super_admin'])
 }
 
 export function canManageScheduleTrainingSessions(role: Role | null | undefined) {
+  return hasAnyRole(role, ['head_coach', 'super_admin'])
+}
+
+export function canManageScheduleSessionCoachAssignments(role: Role | null | undefined) {
   return hasAnyRole(role, ['head_coach', 'super_admin'])
 }
 
@@ -706,9 +712,17 @@ const CAPABILITY_BLUEPRINTS: CapabilityBlueprint[] = [
     key: 'schedule_training_sessions',
     category: 'Core',
     label: 'Scheduled sessions',
-    description: 'Generate and review dated academy sessions materialized from active Class Templates.',
+    description: 'Review dated academy sessions; coaches see their assignments while Head Coach and Super Admin can generate and manage the schedule.',
     href: '/schedule/sessions',
     check: (role) => canAccessScheduleTrainingSessions(role),
+  },
+  {
+    key: 'schedule_session_coach_assignments_manage',
+    category: 'Core',
+    label: 'Manage session coach assignments',
+    description: 'Assign a Primary Coach and optional Assistant Coaches to real dated training sessions.',
+    href: '/schedule/sessions',
+    check: (role) => canManageScheduleSessionCoachAssignments(role),
   },
   {
     key: 'coach_curriculum',

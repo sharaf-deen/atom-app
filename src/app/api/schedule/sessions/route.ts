@@ -219,6 +219,23 @@ export async function POST(request: Request) {
   const existing = (existingData ?? []) as ExistingSession[]
   const existingByKey = new Map(existing.map((row) => [sessionKey(row.class_template_id, row.session_date), row]))
 
+  const assignedSessionIds = new Set<string>()
+  for (const batch of chunks(existing.map((row) => row.id), 150)) {
+    if (!batch.length) continue
+
+    const { data: assignmentData, error: assignmentError } = await supabase
+      .from('schedule_session_coach_assignments')
+      .select('training_session_id')
+      .eq('is_active', true)
+      .in('training_session_id', batch)
+
+    if (assignmentError) return dbFailure(assignmentError, 'LOAD_SESSION_ASSIGNMENTS_FAILED')
+
+    for (const assignment of assignmentData ?? []) {
+      assignedSessionIds.add(String(assignment.training_session_id))
+    }
+  }
+
   const insertRows: Array<Record<string, unknown>> = []
   const refreshRows: Array<Record<string, unknown>> = []
   let protectedCount = 0
@@ -235,20 +252,28 @@ export async function POST(request: Request) {
       continue
     }
 
-    if (current.status === 'scheduled' && current.template_managed) {
+    if (
+      current.status === 'scheduled'
+      && current.template_managed
+      && !assignedSessionIds.has(current.id)
+    ) {
       refreshRows.push(row)
     } else {
       protectedCount += 1
     }
   }
 
-  const staleIds = existing
-    .filter(
-      (row) =>
-        row.status === 'scheduled' &&
-        row.template_managed &&
-        !desired.has(sessionKey(row.class_template_id, row.session_date)),
-    )
+  const staleCandidates = existing.filter(
+    (row) =>
+      row.status === 'scheduled'
+      && row.template_managed
+      && !desired.has(sessionKey(row.class_template_id, row.session_date)),
+  )
+
+  protectedCount += staleCandidates.filter((row) => assignedSessionIds.has(row.id)).length
+
+  const staleIds = staleCandidates
+    .filter((row) => !assignedSessionIds.has(row.id))
     .map((row) => row.id)
 
   let createdCount = 0

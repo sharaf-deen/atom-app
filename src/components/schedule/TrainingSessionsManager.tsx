@@ -2,11 +2,24 @@
 
 import * as React from 'react'
 import { useRouter } from 'next/navigation'
-import { CalendarDays, Clock3, Layers3, MapPin, RefreshCw } from 'lucide-react'
-import type { ScheduleTrainingSession } from '@/app/schedule/sessions/page'
+import { CalendarDays, Clock3, Layers3, MapPin, RefreshCw, UserCheck, Users } from 'lucide-react'
+import type {
+  ScheduleSessionCoachAssignment,
+  ScheduleTrainingSession,
+} from '@/app/schedule/sessions/page'
 import Button from '@/components/ui/Button'
 import ConfirmActionModal from '@/components/ui/ConfirmActionModal'
 import Input from '@/components/ui/Input'
+import Modal from '@/components/ui/Modal'
+import Select from '@/components/ui/Select'
+
+type StaffOption = {
+  user_id: string
+  full_name: string
+  email: string | null
+  member_id: string | null
+  role: 'assistant_coach' | 'coach' | 'head_coach' | 'super_admin'
+}
 
 function normalizeTime(value: string | null) {
   if (!value) return ''
@@ -68,20 +81,38 @@ function uniformLabel(value: ScheduleTrainingSession['uniform_snapshot']) {
   return labels[value]
 }
 
+function staffRoleLabel(value: ScheduleSessionCoachAssignment['staff_profile_role_snapshot'] | StaffOption['role']) {
+  const labels = {
+    assistant_coach: 'Assistant Coach',
+    coach: 'Coach',
+    head_coach: 'Head Coach',
+    super_admin: 'Super Admin',
+  }
+  return labels[value]
+}
+
 async function readJson(response: Response) {
   const data = await response.json().catch(() => null)
   return data && typeof data === 'object' ? (data as Record<string, any>) : {}
 }
 
 export default function TrainingSessionsManager({
-  canManage,
+  canManageSessions,
+  canManageAssignments,
+  personalView,
+  viewerUserId,
   sessions,
+  assignments,
   today,
   previewUntil,
   defaultSyncUntil,
 }: {
-  canManage: boolean
+  canManageSessions: boolean
+  canManageAssignments: boolean
+  personalView: boolean
+  viewerUserId: string
   sessions: ScheduleTrainingSession[]
+  assignments: ScheduleSessionCoachAssignment[]
   today: string
   previewUntil: string
   defaultSyncUntil: string
@@ -94,6 +125,25 @@ export default function TrainingSessionsManager({
   const [message, setMessage] = React.useState<string | null>(null)
   const [error, setError] = React.useState<string | null>(null)
 
+  const [assignmentSession, setAssignmentSession] = React.useState<ScheduleTrainingSession | null>(null)
+  const [primaryUserId, setPrimaryUserId] = React.useState('')
+  const [assistantUserIds, setAssistantUserIds] = React.useState<string[]>([])
+  const [staffOptions, setStaffOptions] = React.useState<StaffOption[]>([])
+  const [staffLoaded, setStaffLoaded] = React.useState(false)
+  const [staffLoading, setStaffLoading] = React.useState(false)
+  const [assignmentPending, setAssignmentPending] = React.useState(false)
+  const [assignmentError, setAssignmentError] = React.useState<string | null>(null)
+
+  const assignmentsBySession = React.useMemo(() => {
+    const map = new Map<string, ScheduleSessionCoachAssignment[]>()
+    for (const row of assignments) {
+      const current = map.get(row.training_session_id) ?? []
+      current.push(row)
+      map.set(row.training_session_id, current)
+    }
+    return map
+  }, [assignments])
+
   const grouped = React.useMemo(() => {
     const map = new Map<string, ScheduleTrainingSession[]>()
     for (const row of sessions) {
@@ -104,8 +154,16 @@ export default function TrainingSessionsManager({
     return Array.from(map.entries())
   }, [sessions])
 
-  const scheduledCount = sessions.filter((row) => row.status === 'scheduled').length
   const uniqueSeries = new Set(sessions.map((row) => row.series_key_snapshot)).size
+  const sessionsWithPrimary = sessions.filter((row) =>
+    (assignmentsBySession.get(row.id) ?? []).some((assignment) => assignment.assignment_role === 'primary_coach'),
+  ).length
+  const myPrimaryCount = assignments.filter(
+    (row) => row.staff_user_id === viewerUserId && row.assignment_role === 'primary_coach',
+  ).length
+  const myAssistantCount = assignments.filter(
+    (row) => row.staff_user_id === viewerUserId && row.assignment_role === 'assistant_coach',
+  ).length
 
   async function syncSessions() {
     setPending(true)
@@ -141,12 +199,98 @@ export default function TrainingSessionsManager({
     }
   }
 
+  async function loadStaff() {
+    if (staffLoaded || staffLoading) return
+    setStaffLoading(true)
+    setAssignmentError(null)
+    try {
+      const response = await fetch('/api/schedule/session-assignments', {
+        method: 'GET',
+        cache: 'no-store',
+      })
+      const data = await readJson(response)
+      if (!response.ok || data.ok !== true) {
+        throw new Error(data.details || data.error || 'Failed to load coaching staff.')
+      }
+      setStaffOptions((data.items ?? []) as StaffOption[])
+      setStaffLoaded(true)
+    } catch (cause: any) {
+      setAssignmentError(String(cause?.message || cause))
+    } finally {
+      setStaffLoading(false)
+    }
+  }
+
+  function openAssignments(row: ScheduleTrainingSession) {
+    const current = assignmentsBySession.get(row.id) ?? []
+    const primary = current.find((assignment) => assignment.assignment_role === 'primary_coach')
+    const assistants = current.filter((assignment) => assignment.assignment_role === 'assistant_coach')
+
+    setAssignmentSession(row)
+    setPrimaryUserId(primary?.staff_user_id ?? '')
+    setAssistantUserIds(assistants.map((assignment) => assignment.staff_user_id))
+    setAssignmentError(null)
+    void loadStaff()
+  }
+
+  function closeAssignments() {
+    if (assignmentPending) return
+    setAssignmentSession(null)
+    setAssignmentError(null)
+  }
+
+  function toggleAssistant(userId: string) {
+    setAssistantUserIds((current) =>
+      current.includes(userId)
+        ? current.filter((id) => id !== userId)
+        : current.length >= 6
+          ? current
+          : [...current, userId],
+    )
+  }
+
+  async function saveAssignments() {
+    if (!assignmentSession) return
+    if (!primaryUserId && assistantUserIds.length > 0) {
+      setAssignmentError('Choose a Primary Coach before adding assistants.')
+      return
+    }
+
+    setAssignmentPending(true)
+    setAssignmentError(null)
+
+    try {
+      const response = await fetch('/api/schedule/session-assignments', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sessionId: assignmentSession.id,
+          primaryUserId: primaryUserId || null,
+          assistantUserIds,
+        }),
+      })
+
+      const data = await readJson(response)
+      if (!response.ok || data.ok !== true) {
+        throw new Error(data.details || data.error || 'Failed to save coach assignments.')
+      }
+
+      setAssignmentSession(null)
+      setMessage('Coach assignments updated.')
+      router.refresh()
+    } catch (cause: any) {
+      setAssignmentError(String(cause?.message || cause))
+    } finally {
+      setAssignmentPending(false)
+    }
+  }
+
   return (
     <div className="space-y-5">
       <div className="grid gap-3 sm:grid-cols-3">
         <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4 shadow-soft">
           <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-[hsl(var(--muted))]">
-            <CalendarDays className="h-4 w-4" /> Preview sessions
+            <CalendarDays className="h-4 w-4" /> {personalView ? 'Assigned sessions' : 'Preview sessions'}
           </div>
           <div className="mt-1 text-2xl font-bold">{sessions.length}</div>
           <div className="mt-1 text-xs text-[hsl(var(--muted))]">{today} → {previewUntil}</div>
@@ -154,27 +298,32 @@ export default function TrainingSessionsManager({
 
         <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4 shadow-soft">
           <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-[hsl(var(--muted))]">
-            <Layers3 className="h-4 w-4" /> Class series
+            {personalView ? <UserCheck className="h-4 w-4" /> : <Layers3 className="h-4 w-4" />}
+            {personalView ? 'Primary responsibility' : 'Class series'}
           </div>
-          <div className="mt-1 text-2xl font-bold">{uniqueSeries}</div>
-          <div className="mt-1 text-xs text-[hsl(var(--muted))]">represented in the preview</div>
+          <div className="mt-1 text-2xl font-bold">{personalView ? myPrimaryCount : uniqueSeries}</div>
+          <div className="mt-1 text-xs text-[hsl(var(--muted))]">
+            {personalView ? 'sessions where you are Primary Coach' : 'represented in the preview'}
+          </div>
         </div>
 
         <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4 shadow-soft">
           <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-[hsl(var(--muted))]">
-            <RefreshCw className="h-4 w-4" /> Scheduled
+            <Users className="h-4 w-4" /> {personalView ? 'Assistant role' : 'Primary assigned'}
           </div>
-          <div className="mt-1 text-2xl font-bold">{scheduledCount}</div>
-          <div className="mt-1 text-xs text-[hsl(var(--muted))]">no coach/session links yet</div>
+          <div className="mt-1 text-2xl font-bold">{personalView ? myAssistantCount : sessionsWithPrimary}</div>
+          <div className="mt-1 text-xs text-[hsl(var(--muted))]">
+            {personalView ? 'sessions where you assist' : `${sessions.length - sessionsWithPrimary} still unassigned`}
+          </div>
         </div>
       </div>
 
-      {canManage ? (
+      {canManageSessions ? (
         <div className="space-y-4 rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4 shadow-soft sm:p-5">
           <div>
             <h2 className="font-semibold">Generate / sync dated sessions</h2>
             <p className="mt-1 text-sm text-[hsl(var(--muted))]">
-              Default range is the next 90 days. Running the same range again is safe and does not create duplicate sessions.
+              Default range is the next 90 days. Sessions with active staff assignments are protected from automatic refresh/removal.
             </p>
           </div>
 
@@ -227,58 +376,106 @@ export default function TrainingSessionsManager({
 
       <div className="space-y-3">
         <div>
-          <h2 className="font-semibold">Upcoming session preview</h2>
-          <p className="text-sm text-[hsl(var(--muted))]">Next 14 calendar days only. Synchronization can generate a longer future window.</p>
+          <h2 className="font-semibold">{personalView ? 'My upcoming assignments' : 'Upcoming session preview'}</h2>
+          <p className="text-sm text-[hsl(var(--muted))]">
+            {personalView
+              ? 'Next 14 calendar days. Only sessions assigned to you are shown.'
+              : 'Next 14 calendar days with internal coaching assignments.'}
+          </p>
         </div>
 
         {grouped.length === 0 ? (
           <div className="rounded-2xl border border-dashed border-[hsl(var(--border))] p-6 text-center text-sm text-[hsl(var(--muted))]">
-            No dated sessions have been generated for this preview window yet. Use <strong>Sync sessions</strong> above.
+            {personalView
+              ? 'No coaching sessions are currently assigned to you in this preview window.'
+              : 'No dated sessions have been generated for this preview window yet. Use Sync sessions above.'}
           </div>
         ) : (
           grouped.map(([date, rows]) => (
             <section key={date} className="overflow-hidden rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] shadow-soft">
               <div className="border-b border-[hsl(var(--border))] px-4 py-3">
                 <h3 className="font-semibold">{formatDate(date)}</h3>
-                <p className="text-xs text-[hsl(var(--muted))]">{rows.length} scheduled class{rows.length === 1 ? '' : 'es'}</p>
+                <p className="text-xs text-[hsl(var(--muted))]">{rows.length} class{rows.length === 1 ? '' : 'es'}</p>
               </div>
 
               <div className="divide-y divide-[hsl(var(--border))]">
-                {rows.map((row) => (
-                  <article key={row.id} className="space-y-2 px-4 py-3">
-                    <div className="flex flex-wrap items-start justify-between gap-2">
-                      <div>
-                        <div className="font-semibold">{row.name_snapshot}</div>
-                        <div className="mt-0.5 text-sm text-[hsl(var(--muted))]">
-                          {row.level_snapshot} · {activityLabel(row.activity_type_snapshot)} · {uniformLabel(row.uniform_snapshot)}
+                {rows.map((row) => {
+                  const sessionAssignments = assignmentsBySession.get(row.id) ?? []
+                  const primary = sessionAssignments.find((assignment) => assignment.assignment_role === 'primary_coach')
+                  const assistants = sessionAssignments.filter((assignment) => assignment.assignment_role === 'assistant_coach')
+
+                  return (
+                    <article key={row.id} className="space-y-3 px-4 py-3">
+                      <div className="flex flex-wrap items-start justify-between gap-2">
+                        <div>
+                          <div className="font-semibold">{row.name_snapshot}</div>
+                          <div className="mt-0.5 text-sm text-[hsl(var(--muted))]">
+                            {row.level_snapshot} · {activityLabel(row.activity_type_snapshot)} · {uniformLabel(row.uniform_snapshot)}
+                          </div>
                         </div>
+
+                        <span className="rounded-full border border-[hsl(var(--border))] px-2.5 py-1 text-xs font-semibold uppercase tracking-wide">
+                          {row.status}
+                        </span>
                       </div>
 
-                      <span className="rounded-full border border-[hsl(var(--border))] px-2.5 py-1 text-xs font-semibold uppercase tracking-wide">
-                        {row.status}
-                      </span>
-                    </div>
-
-                    <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm">
-                      <span className="inline-flex items-center gap-1.5">
-                        <Clock3 className="h-4 w-4 text-[hsl(var(--muted))]" />
-                        {formatTime(row.start_time)}
-                        {row.end_time ? ` – ${formatTime(row.end_time)}` : ''}
-                      </span>
-
-                      {row.mat_snapshot ? (
+                      <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm">
                         <span className="inline-flex items-center gap-1.5">
-                          <MapPin className="h-4 w-4 text-[hsl(var(--muted))]" />
-                          {row.mat_snapshot}
+                          <Clock3 className="h-4 w-4 text-[hsl(var(--muted))]" />
+                          {formatTime(row.start_time)}
+                          {row.end_time ? ` – ${formatTime(row.end_time)}` : ''}
                         </span>
-                      ) : null}
-                    </div>
 
-                    <div className="text-xs text-[hsl(var(--muted))]">
-                      {row.template_managed ? 'Template-managed' : 'Exception-locked'} · last sync {formatCairoDateTime(row.synced_at)}
-                    </div>
-                  </article>
-                ))}
+                        {row.mat_snapshot ? (
+                          <span className="inline-flex items-center gap-1.5">
+                            <MapPin className="h-4 w-4 text-[hsl(var(--muted))]" />
+                            {row.mat_snapshot}
+                          </span>
+                        ) : null}
+                      </div>
+
+                      <div className="rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--muted)/0.04)] px-3 py-2.5">
+                        <div className="grid gap-2 text-sm sm:grid-cols-2">
+                          <div>
+                            <div className="text-xs font-semibold uppercase tracking-wide text-[hsl(var(--muted))]">Primary Coach</div>
+                            <div className="mt-0.5 font-medium">
+                              {primary ? primary.staff_name_snapshot : 'Unassigned'}
+                            </div>
+                            {primary ? (
+                              <div className="text-xs text-[hsl(var(--muted))]">
+                                {staffRoleLabel(primary.staff_profile_role_snapshot)}
+                              </div>
+                            ) : null}
+                          </div>
+
+                          <div>
+                            <div className="text-xs font-semibold uppercase tracking-wide text-[hsl(var(--muted))]">Assistant Coach(s)</div>
+                            <div className="mt-0.5 font-medium">
+                              {assistants.length
+                                ? assistants.map((assignment) => assignment.staff_name_snapshot).join(', ')
+                                : 'None'}
+                            </div>
+                          </div>
+                        </div>
+
+                        {canManageAssignments && row.status === 'scheduled' ? (
+                          <div className="mt-3">
+                            <Button type="button" size="sm" variant="outline" onClick={() => openAssignments(row)}>
+                              <Users className="h-4 w-4" />
+                              Manage coaches
+                            </Button>
+                          </div>
+                        ) : null}
+                      </div>
+
+                      <div className="text-xs text-[hsl(var(--muted))]">
+                        {sessionAssignments.length > 0
+                          ? `Staff assigned · protected from automatic template sync`
+                          : `${row.template_managed ? 'Template-managed' : 'Exception-locked'} · last sync ${formatCairoDateTime(row.synced_at)}`}
+                      </div>
+                    </article>
+                  )
+                })}
               </div>
             </section>
           ))
@@ -299,8 +496,115 @@ export default function TrainingSessionsManager({
           { label: 'To', value: toDate || '—' },
           { label: 'Source', value: 'Active Class Templates' },
         ]}
-        warning="Past, completed, cancelled and future exception-locked sessions are not rewritten by this synchronization."
+        warning="Past, completed, cancelled, exception-locked and actively staffed sessions are not rewritten by this synchronization."
       />
+
+      <Modal
+        open={Boolean(assignmentSession)}
+        onClose={closeAssignments}
+        title={assignmentSession ? `Coach assignment · ${assignmentSession.name_snapshot}` : 'Coach assignment'}
+        className="max-h-[86vh] overflow-y-auto"
+      >
+        {assignmentSession ? (
+          <div className="space-y-4">
+            <div className="rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--muted)/0.04)] px-3 py-2 text-sm">
+              <div className="font-semibold">{formatDate(assignmentSession.session_date)}</div>
+              <div className="text-[hsl(var(--muted))]">
+                {formatTime(assignmentSession.start_time)}
+                {assignmentSession.end_time ? ` – ${formatTime(assignmentSession.end_time)}` : ''}
+                {assignmentSession.mat_snapshot ? ` · ${assignmentSession.mat_snapshot}` : ''}
+              </div>
+            </div>
+
+            {staffLoading ? (
+              <div className="text-sm text-[hsl(var(--muted))]">Loading coaching staff…</div>
+            ) : (
+              <>
+                <Select
+                  label="Primary Coach"
+                  value={primaryUserId}
+                  onChange={(event) => {
+                    const value = event.target.value
+                    setPrimaryUserId(value)
+                    setAssistantUserIds((current) => current.filter((id) => id !== value))
+                  }}
+                  disabled={assignmentPending}
+                >
+                  <option value="">Unassigned</option>
+                  {staffOptions.map((staff) => (
+                    <option key={staff.user_id} value={staff.user_id}>
+                      {staff.full_name} · {staffRoleLabel(staff.role)}
+                    </option>
+                  ))}
+                </Select>
+
+                <div className="space-y-2">
+                  <div>
+                    <div className="text-sm font-medium">Assistant Coach(s)</div>
+                    <div className="text-xs text-[hsl(var(--muted))]">Optional · up to 6 staff members.</div>
+                  </div>
+
+                  {!primaryUserId ? (
+                    <div className="rounded-xl border border-dashed border-[hsl(var(--border))] px-3 py-3 text-sm text-[hsl(var(--muted))]">
+                      Choose a Primary Coach before adding assistants.
+                    </div>
+                  ) : (
+                    <div className="max-h-56 space-y-1 overflow-y-auto rounded-xl border border-[hsl(var(--border))] p-2">
+                      {staffOptions
+                        .filter((staff) => staff.user_id !== primaryUserId)
+                        .map((staff) => {
+                          const checked = assistantUserIds.includes(staff.user_id)
+                          return (
+                            <label
+                              key={staff.user_id}
+                              className="flex cursor-pointer items-center gap-3 rounded-lg px-2 py-2 hover:bg-black/5"
+                            >
+                              <input
+                                type="checkbox"
+                                checked={checked}
+                                disabled={assignmentPending || (!checked && assistantUserIds.length >= 6)}
+                                onChange={() => toggleAssistant(staff.user_id)}
+                              />
+                              <span className="min-w-0 flex-1">
+                                <span className="block truncate text-sm font-medium">{staff.full_name}</span>
+                                <span className="block text-xs text-[hsl(var(--muted))]">{staffRoleLabel(staff.role)}</span>
+                              </span>
+                            </label>
+                          )
+                        })}
+                    </div>
+                  )}
+                </div>
+              </>
+            )}
+
+            {assignmentError ? (
+              <div className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-800">
+                {assignmentError}
+              </div>
+            ) : null}
+
+            <div className="flex flex-wrap justify-end gap-2 pt-1">
+              <Button type="button" variant="ghost" onClick={closeAssignments} disabled={assignmentPending}>
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                onClick={saveAssignments}
+                loading={assignmentPending}
+                loadingText="Saving…"
+                disabled={staffLoading || Boolean(assignmentError && !staffLoaded)}
+              >
+                Save assignments
+              </Button>
+            </div>
+
+            <div className="text-xs text-[hsl(var(--muted))]">
+              Clearing all assignments is allowed. Assignment changes keep an audit history in the database; previous rows are deactivated rather than physically deleted.
+            </div>
+          </div>
+        ) : null}
+      </Modal>
     </div>
   )
 }
