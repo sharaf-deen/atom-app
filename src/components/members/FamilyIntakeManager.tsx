@@ -379,7 +379,29 @@ export default function FamilyIntakeManager({ actorRole }: { actorRole: string }
               <div><span className="font-semibold">Intake:</span> {lastResult.intake_id}</div>
               <div><span className="font-semibold">Family:</span> {lastResult.family_id ? 'Created / reused' : 'Not created yet — trial stage'}</div>
               <div><span className="font-semibold">Children:</span> {Array.isArray(lastResult.children) ? lastResult.children.length : 0}</div>
-              <div className="pt-2"><Button type="button" onClick={resetForm}>Start another family intake</Button></div>
+              {Array.isArray(lastResult.children) && lastResult.children.some((child: any) => (child.kind === 'visitor' || child.kind === 'existing_visitor') && child.id) ? (
+                <div className="rounded-xl border border-sky-200 bg-sky-50 p-3">
+                  <div className="font-semibold text-sky-950">Visitors ready for later conversion</div>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {lastResult.children
+                      .filter((child: any) => (child.kind === 'visitor' || child.kind === 'existing_visitor') && child.id)
+                      .map((child: any) => (
+                        <Button
+                          key={child.id}
+                          asChild
+                          variant="outline"
+                          href={`/admin/members/family-intake/convert/${child.id}`}
+                        >
+                          Convert {fullName(child.first_name, child.last_name)}
+                        </Button>
+                      ))}
+                  </div>
+                </div>
+              ) : null}
+              <div className="pt-2 flex flex-wrap gap-2">
+                <Button type="button" onClick={resetForm}>Start another family intake</Button>
+                <Button asChild variant="outline" href="/admin/visitors">Open Visitors</Button>
+              </div>
             </div>
           </CardContent>
         </Card>
@@ -519,7 +541,7 @@ export default function FamilyIntakeManager({ actorRole }: { actorRole: string }
                       <p className="mt-3 text-xs text-[hsl(var(--muted))]">
                         {child.mode === 'visitor' ? 'Creates a Visitor trial only. No member profile is created.' : null}
                         {child.mode === 'member' ? 'Creates a family-managed Member profile without a separate child login/email.' : null}
-                        {child.mode === 'existing_visitor' ? 'Keeps the existing Visitor record and attaches it to this guardian intake. Conversion happens later in Lot 2B.' : null}
+                        {child.mode === 'existing_visitor' ? 'Keeps the existing Visitor record and attaches it to this guardian intake. It can then be converted directly to a family-managed Member from Visitors.' : null}
                         {child.mode === 'existing_member' ? 'Links the existing Member only if the profile is not already attached to another family.' : null}
                       </p>
                     </div>
