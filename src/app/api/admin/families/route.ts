@@ -5,7 +5,14 @@ export const revalidate = 0
 import { randomUUID } from 'crypto'
 import { revalidatePath, revalidateTag } from 'next/cache'
 import { NextResponse } from 'next/server'
-import { MEMBER_LIKE_ROLES, normalizeRole } from '@/lib/rbac'
+import {
+  canAccessFamilyAccounts,
+  canCreateStandaloneFamily,
+  canManageFamilyGuardianAuthority,
+  canManageExceptionalFamilyActions,
+  MEMBER_LIKE_ROLES,
+  normalizeRole,
+} from '@/lib/rbac'
 import { createSupabaseAdminClient } from '@/lib/supabaseAdmin'
 import { createSupabaseServerActionClient } from '@/lib/supabaseServer'
 import { extractActionLink, sendFamilyParentInviteEmail } from '@/lib/memberInviteEmail'
@@ -93,7 +100,7 @@ function todayUtcDateOnly() {
   return new Date().toISOString().slice(0, 10)
 }
 
-async function requireAdminActor() {
+async function requireFamilyActor() {
   const supabase = createSupabaseServerActionClient()
   const { data: authData, error: authError } = await supabase.auth.getUser()
 
@@ -117,7 +124,7 @@ async function requireAdminActor() {
   }
 
   const role = normalizeRole(profile?.role)
-  if (role !== 'admin' && role !== 'super_admin') {
+  if (!canAccessFamilyAccounts(role)) {
     return { error: noStore({ ok: false, error: 'FORBIDDEN' }, { status: 403 }) } as const
   }
 
@@ -162,7 +169,7 @@ function revalidateFamilyViews() {
 }
 
 export async function POST(req: Request) {
-  const actor = await requireAdminActor()
+  const actor = await requireFamilyActor()
   if ('error' in actor) return actor.error
 
   let body: ActionBody
@@ -176,6 +183,13 @@ export async function POST(req: Request) {
   const action = String(body?.action ?? '')
 
   if (action === 'create') {
+    if (!canCreateStandaloneFamily(actor.role)) {
+      return noStore(
+        { ok: false, error: 'ADMIN_REQUIRED', details: 'Reception should create new households through Family Intake.' },
+        { status: 403 },
+      )
+    }
+
     const familyName = normalizeFamilyName((body as any)?.familyName)
 
     if (familyName.length < 2 || familyName.length > 120) {
@@ -232,7 +246,7 @@ export async function POST(req: Request) {
   }
 
   if (action === 'delete_family') {
-    if (actor.role !== 'super_admin') {
+    if (!canManageExceptionalFamilyActions(actor.role)) {
       return noStore({ ok: false, error: 'SUPER_ADMIN_REQUIRED' }, { status: 403 })
     }
 
@@ -386,6 +400,46 @@ export async function POST(req: Request) {
 
     if (!UUID_RE.test(familyId) || !UUID_RE.test(memberId)) {
       return noStore({ ok: false, error: 'INVALID_ID' }, { status: 400 })
+    }
+
+    const [{ data: existing, error: existingError }, { data: memberProfile, error: memberProfileError }] = await Promise.all([
+      admin
+        .from('family_members')
+        .select('family_id,member_id')
+        .eq('family_id', familyId)
+        .eq('member_id', memberId)
+        .maybeSingle(),
+      admin
+        .from('profiles')
+        .select('user_id,email,role')
+        .eq('user_id', memberId)
+        .maybeSingle(),
+    ])
+
+    if (existingError || memberProfileError) {
+      return noStore(
+        {
+          ok: false,
+          error: 'FAMILY_LINK_LOOKUP_FAILED',
+          details: existingError?.message ?? memberProfileError?.message ?? null,
+        },
+        { status: 500 },
+      )
+    }
+    if (!existing) return noStore({ ok: true, already_unlinked: true })
+    if (!memberProfile) {
+      return noStore({ ok: false, error: 'MEMBER_NOT_FOUND' }, { status: 404 })
+    }
+
+    if (!canManageExceptionalFamilyActions(actor.role) && !normalizeEmail(memberProfile.email)) {
+      return noStore(
+        {
+          ok: false,
+          error: 'SUPER_ADMIN_REVIEW_REQUIRED',
+          details: 'This family-managed member has no personal login/email. Unlinking would create an orphan profile, so Super Admin review is required.',
+        },
+        { status: 409 },
+      )
     }
 
     const { error } = await admin
@@ -674,6 +728,13 @@ export async function POST(req: Request) {
 
 
   if (action === 'promote_guardian_to_member') {
+    if (!canManageExceptionalFamilyActions(actor.role)) {
+      return noStore(
+        { ok: false, error: 'SUPER_ADMIN_REQUIRED', details: 'Guardian → Member conversion remains a Super Admin action.' },
+        { status: 403 },
+      )
+    }
+
     const familyId = String((body as any)?.familyId ?? '').trim()
     const authUserId = String((body as any)?.authUserId ?? '').trim()
 
@@ -721,7 +782,7 @@ export async function POST(req: Request) {
   }
 
   if (action === 'preview_guardian_member_cleanup' || action === 'remove_guardian_member_profile') {
-    if (actor.role !== 'super_admin') {
+    if (!canManageExceptionalFamilyActions(actor.role)) {
       return noStore({ ok: false, error: 'SUPER_ADMIN_REQUIRED' }, { status: 403 })
     }
 
@@ -780,6 +841,13 @@ export async function POST(req: Request) {
   }
 
   if (action === 'set_primary_guardian') {
+    if (!canManageFamilyGuardianAuthority(actor.role)) {
+      return noStore(
+        { ok: false, error: 'ADMIN_REQUIRED', details: 'Reception cannot change the primary guardian.' },
+        { status: 403 },
+      )
+    }
+
     const familyId = String((body as any)?.familyId ?? '').trim()
     const authUserId = String((body as any)?.authUserId ?? '').trim()
 
@@ -824,6 +892,13 @@ export async function POST(req: Request) {
   }
 
   if (action === 'remove_guardian') {
+    if (!canManageFamilyGuardianAuthority(actor.role)) {
+      return noStore(
+        { ok: false, error: 'ADMIN_REQUIRED', details: 'Reception cannot remove guardian access.' },
+        { status: 403 },
+      )
+    }
+
     const familyId = String((body as any)?.familyId ?? '').trim()
     const authUserId = String((body as any)?.authUserId ?? '').trim()
 

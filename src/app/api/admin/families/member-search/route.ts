@@ -3,7 +3,7 @@ export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
 import { NextResponse } from 'next/server'
-import { MEMBER_LIKE_ROLES } from '@/lib/rbac'
+import { canAccessFamilyAccounts, MEMBER_LIKE_ROLES } from '@/lib/rbac'
 import { createSupabaseAdminClient } from '@/lib/supabaseAdmin'
 import { getSessionUser } from '@/lib/session'
 
@@ -28,7 +28,7 @@ function digitsOnly(value: string) {
 export async function GET(req: Request) {
   const me = await getSessionUser()
   if (!me) return noStore({ ok: false, error: 'NOT_AUTHENTICATED' }, { status: 401 })
-  if (me.role !== 'admin' && me.role !== 'super_admin') {
+  if (!canAccessFamilyAccounts(me.role)) {
     return noStore({ ok: false, error: 'FORBIDDEN' }, { status: 403 })
   }
 
