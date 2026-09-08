@@ -760,7 +760,8 @@ export default function FamilyAccountsManager({
           return (
             <section
               key={family.id}
-              className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4 shadow-soft"
+              id={`family-${family.id}`}
+              className="scroll-mt-24 rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4 shadow-soft"
             >
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>
