@@ -527,6 +527,9 @@ export default async function VisitorTrialsPage({
         subtitle="Free trial leads, 1-session rule, and J+7 follow-up."
         right={
           <div className="flex flex-wrap gap-2">
+            <Button asChild variant="outline" href="/admin/members/family-operations">
+              Family operations
+            </Button>
             <Button asChild variant="outline" href="/reception">
               Front desk
             </Button>

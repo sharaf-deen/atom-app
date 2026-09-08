@@ -149,6 +149,9 @@ export default async function FamilyAccountsPage() {
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
+          <Button asChild variant="outline" href="/admin/members/family-operations">
+            Family Operations
+          </Button>
           <Button asChild variant="outline" href="/admin/members">
             ← Members
           </Button>
