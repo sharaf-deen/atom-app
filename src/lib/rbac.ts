@@ -123,6 +123,7 @@ const APP_NAV_BY_ROLE: MenuByRole = {
     { label: 'CRM', href: '/admin/crm', icon: 'users' },
     { label: 'Visitors', href: '/admin/visitors', icon: 'users' },
     { label: 'Family Intake', href: '/admin/members/family-intake', icon: 'users' },
+    { label: 'Family Accounts', href: '/admin/members/families', icon: 'users' },
     { label: 'Packages & Promos', href: '/packages-and-promos', icon: 'gift' },
     { label: 'Store Catalog', href: '/admin/store', icon: 'bag' },
   ],
@@ -145,6 +146,7 @@ const APP_NAV_BY_ROLE: MenuByRole = {
     { label: 'CRM', href: '/admin/crm', icon: 'users' },
     { label: 'Visitors', href: '/admin/visitors', icon: 'users' },
     { label: 'Family Intake', href: '/admin/members/family-intake', icon: 'users' },
+    { label: 'Family Accounts', href: '/admin/members/families', icon: 'users' },
     { label: 'Coaches', href: '/coaches', icon: 'user-cog' },
     { label: 'Athletes', href: '/head-coach/athletes', icon: 'users' },
     { label: 'Store Dashboard', href: '/admin/store/dashboard', icon: 'bag' },
@@ -178,6 +180,7 @@ const APP_NAV_BY_ROLE: MenuByRole = {
     { label: 'CRM', href: '/admin/crm', icon: 'users' },
     { label: 'Visitors', href: '/admin/visitors', icon: 'users' },
     { label: 'Family Intake', href: '/admin/members/family-intake', icon: 'users' },
+    { label: 'Family Accounts', href: '/admin/members/families', icon: 'users' },
     { label: 'Coaches', href: '/coaches', icon: 'user-cog' },
     { label: 'Schedule Operations', href: '/schedule/operations', icon: 'calendar' },
     { label: 'Training Curriculum', href: '/coach-operations/curriculum', icon: 'file-text' },
@@ -348,6 +351,22 @@ export function canAccessVisitorTrials(role: Role | null | undefined) {
 
 export function canAccessFamilyIntake(role: Role | null | undefined) {
   return hasAnyRole(role, FRONT_DESK_ROLES)
+}
+
+export function canAccessFamilyAccounts(role: Role | null | undefined) {
+  return hasAnyRole(role, FRONT_DESK_ROLES)
+}
+
+export function canCreateStandaloneFamily(role: Role | null | undefined) {
+  return hasAnyRole(role, ADMIN_ROLES)
+}
+
+export function canManageFamilyGuardianAuthority(role: Role | null | undefined) {
+  return hasAnyRole(role, ADMIN_ROLES)
+}
+
+export function canManageExceptionalFamilyActions(role: Role | null | undefined) {
+  return hasAnyRole(role, SUPER_ADMIN_ROLES)
 }
 
 export function canAccessCoaches(role: Role | null | undefined) {
@@ -574,6 +593,14 @@ const CAPABILITY_BLUEPRINTS: CapabilityBlueprint[] = [
     description: 'Start guardian + multi-child onboarding without requiring Super Admin.',
     href: '/admin/members/family-intake',
     check: (role) => canAccessFamilyIntake(role),
+  },
+  {
+    key: 'family_accounts',
+    category: 'Front desk',
+    label: 'Family accounts',
+    description: 'Review families and perform role-safe guardian/member relationship updates.',
+    href: '/admin/members/families',
+    check: (role) => canAccessFamilyAccounts(role),
   },
   {
     key: 'other_member_profile',
