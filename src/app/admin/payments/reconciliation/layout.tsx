@@ -31,6 +31,13 @@ export default function PaymentsReconciliationLayout({
             >
               Evidence / Proof
             </Link>
+            <Link
+              prefetch={false}
+              href="/admin/payments/reconciliation/bank-matching"
+              className="inline-flex items-center rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm font-medium hover:bg-black/[0.03]"
+            >
+              Bank Matching
+            </Link>
           </div>
         </div>
       </div>
