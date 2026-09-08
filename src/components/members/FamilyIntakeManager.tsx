@@ -361,6 +361,7 @@ export default function FamilyIntakeManager({ actorRole }: { actorRole: string }
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
+          <Button asChild variant="outline" href="/admin/members/family-operations">Family Operations</Button>
           <Button asChild variant="outline" href="/admin/visitors">Visitors</Button>
           {actorRole !== 'reception' ? <Button asChild variant="outline" href="/admin/members/families">Family Accounts</Button> : null}
         </div>

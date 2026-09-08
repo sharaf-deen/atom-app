@@ -85,6 +85,7 @@ export default async function VisitorFamilyConversionPage({
         subtitle="Create the child Member without duplicate Auth, Family or Visitor records."
         right={
           <div className="flex flex-wrap gap-2">
+            <Button asChild variant="outline" href="/admin/members/family-operations">Family Operations</Button>
             <Button asChild variant="outline" href="/admin/visitors">Visitors</Button>
             <Button asChild variant="outline" href="/admin/members/family-intake">Family Intake</Button>
           </div>

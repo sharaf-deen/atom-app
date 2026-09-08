@@ -122,8 +122,7 @@ const APP_NAV_BY_ROLE: MenuByRole = {
     { label: 'Inactive Accounts', href: '/admin/members/inactive', icon: 'users' },
     { label: 'CRM', href: '/admin/crm', icon: 'users' },
     { label: 'Visitors', href: '/admin/visitors', icon: 'users' },
-    { label: 'Family Intake', href: '/admin/members/family-intake', icon: 'users' },
-    { label: 'Family Accounts', href: '/admin/members/families', icon: 'users' },
+    { label: 'Family Operations', href: '/admin/members/family-operations', icon: 'users' },
     { label: 'Packages & Promos', href: '/packages-and-promos', icon: 'gift' },
     { label: 'Store Catalog', href: '/admin/store', icon: 'bag' },
   ],
@@ -145,8 +144,7 @@ const APP_NAV_BY_ROLE: MenuByRole = {
     { label: 'Inactive Accounts', href: '/admin/members/inactive', icon: 'users' },
     { label: 'CRM', href: '/admin/crm', icon: 'users' },
     { label: 'Visitors', href: '/admin/visitors', icon: 'users' },
-    { label: 'Family Intake', href: '/admin/members/family-intake', icon: 'users' },
-    { label: 'Family Accounts', href: '/admin/members/families', icon: 'users' },
+    { label: 'Family Operations', href: '/admin/members/family-operations', icon: 'users' },
     { label: 'Coaches', href: '/coaches', icon: 'user-cog' },
     { label: 'Athletes', href: '/head-coach/athletes', icon: 'users' },
     { label: 'Store Dashboard', href: '/admin/store/dashboard', icon: 'bag' },
@@ -179,8 +177,7 @@ const APP_NAV_BY_ROLE: MenuByRole = {
     { label: 'Inactive Accounts', href: '/admin/members/inactive', icon: 'users' },
     { label: 'CRM', href: '/admin/crm', icon: 'users' },
     { label: 'Visitors', href: '/admin/visitors', icon: 'users' },
-    { label: 'Family Intake', href: '/admin/members/family-intake', icon: 'users' },
-    { label: 'Family Accounts', href: '/admin/members/families', icon: 'users' },
+    { label: 'Family Operations', href: '/admin/members/family-operations', icon: 'users' },
     { label: 'Coaches', href: '/coaches', icon: 'user-cog' },
     { label: 'Schedule Operations', href: '/schedule/operations', icon: 'calendar' },
     { label: 'Training Curriculum', href: '/coach-operations/curriculum', icon: 'file-text' },
@@ -354,6 +351,10 @@ export function canAccessFamilyIntake(role: Role | null | undefined) {
 }
 
 export function canAccessFamilyAccounts(role: Role | null | undefined) {
+  return hasAnyRole(role, FRONT_DESK_ROLES)
+}
+
+export function canAccessFamilyOperations(role: Role | null | undefined) {
   return hasAnyRole(role, FRONT_DESK_ROLES)
 }
 
@@ -585,6 +586,14 @@ const CAPABILITY_BLUEPRINTS: CapabilityBlueprint[] = [
     description: 'Track free trial visitors, follow-up due cases, and member conversions.',
     href: '/admin/visitors',
     check: (role) => canAccessVisitorTrials(role),
+  },
+  {
+    key: 'family_operations',
+    category: 'Front desk',
+    label: 'Family operations',
+    description: 'Open the central family intake, visitor conversion, search and Family Accounts workspace.',
+    href: '/admin/members/family-operations',
+    check: (role) => canAccessFamilyOperations(role),
   },
   {
     key: 'family_intake',
