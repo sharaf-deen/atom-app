@@ -37,6 +37,9 @@ type VisitorTrialRow = {
   follow_up_sent_at: string | null
   notes: string | null
   linked_member_id: string | null
+  family_intake_id: string | null
+  date_of_birth: string | null
+  family_converted_at: string | null
   created_at: string
   created_by: string | null
   updated_at: string
@@ -441,7 +444,7 @@ export default async function VisitorTrialsPage({
 
   let query = admin
     .from('visitor_trials')
-    .select('id,first_name,last_name,phone,email,source_key,status,trial_date,trial_attended_at,free_trial_used,follow_up_due_at,follow_up_sent_at,notes,linked_member_id,created_at,created_by,updated_at,updated_by')
+    .select('id,first_name,last_name,phone,email,source_key,status,trial_date,trial_attended_at,free_trial_used,follow_up_due_at,follow_up_sent_at,notes,linked_member_id,family_intake_id,date_of_birth,family_converted_at,created_at,created_by,updated_at,updated_by')
     .order('created_at', { ascending: false })
     .limit(200)
 
@@ -586,7 +589,7 @@ export default async function VisitorTrialsPage({
                 placeholder="Goal, age, schedule preference, who referred them, etc."
               />
               <InlineAlert variant="info" compact>
-                One free trial only. The visitor is linked to a member later from the kiosk flow, and follow-up becomes due 7 days after attendance if no subscription exists.
+                One free trial only. Family Intake visitors can be converted directly to family-managed Members; standalone visitors keep the existing kiosk conversion. Follow-up becomes due 7 days after attendance if no subscription exists.
               </InlineAlert>
               <div className="flex flex-wrap gap-2">
                 <Button type="submit">Save visitor</Button>
@@ -688,6 +691,17 @@ export default async function VisitorTrialsPage({
                           </div>
                         ) : null}
 
+                        {row.family_intake_id ? (
+                          <div className="rounded-2xl border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-sky-900">
+                            <div className="font-medium">Family Intake linked</div>
+                            <div className="mt-1">
+                              {row.family_converted_at
+                                ? 'Converted to a family-managed Member. Trial history preserved.'
+                                : 'Guardian context is ready for direct family conversion.'}
+                            </div>
+                          </div>
+                        ) : null}
+
                         {row.linked_member_id ? (
                           <div className="rounded-2xl border border-violet-200 bg-violet-50 px-3 py-2 text-sm text-violet-900">
                             <div className="font-medium">Linked member</div>
@@ -702,9 +716,15 @@ export default async function VisitorTrialsPage({
 
                       <div className="flex w-full shrink-0 flex-col gap-2 lg:w-[250px]">
                         {!row.linked_member_id ? (
-                          <Button asChild href={buildCreateMemberHref(row)}>
-                            Convert in kiosk
-                          </Button>
+                          row.family_intake_id ? (
+                            <Button asChild href={`/admin/members/family-intake/convert/${row.id}`}>
+                              Convert to family member
+                            </Button>
+                          ) : (
+                            <Button asChild href={buildCreateMemberHref(row)}>
+                              Convert in kiosk
+                            </Button>
+                          )
                         ) : linkedHref ? (
                           <Button asChild href={linkedHref}>
                             Open member
