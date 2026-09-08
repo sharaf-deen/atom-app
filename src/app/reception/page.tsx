@@ -540,7 +540,7 @@ export default async function ReceptionPage({ searchParams }: { searchParams?: S
           <ActionTile href="/admin/outstanding-dues" title="Outstanding dues" desc="Payment collection and due follow-up." icon={Wallet} />
           <ActionTile href="/admin/crm" title="CRM queue" desc="Open the live contact queue." icon={MessageSquare} />
           <ActionTile href="/kiosk" title="Create member" desc="Start a new member flow." icon={IdCard} />
-          <ActionTile href="/admin/members/family-intake" title="Family intake" desc="Register a guardian and several children in one flow." icon={UserPlus} />
+          <ActionTile href="/admin/members/family-operations" title="Family operations" desc="Intake, Visitor conversion and Family Accounts in one workspace." icon={UserPlus} />
           <ActionTile href="/schedule" title="Schedule" desc="Keep today’s class times close." icon={CalendarDays} />
         </div>
       </Section>
