@@ -1,24 +1,26 @@
 'use client'
 
 import Link from 'next/link'
+import { usePathname } from 'next/navigation'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
-  ChevronUp,
-  ChevronDown,
-  LayoutDashboard,
   Bell,
-  Gift,
-  IdCard,
-  ScanLine,
-  Users,
-  UserCog,
-  ShoppingBag,
-  Wallet,
   CalendarDays,
-  FileText,
-  House,
+  ChevronDown,
+  ChevronRight,
   Circle,
+  FileText,
+  Gift,
+  House,
+  IdCard,
+  LayoutDashboard,
+  Menu as MenuIcon,
+  ScanLine,
   Search,
+  ShoppingBag,
+  UserCog,
+  Users,
+  Wallet,
   X,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
@@ -43,121 +45,275 @@ const ICONS: Record<IconKey, LucideIcon> = {
 const VISIBLE_POLL_MS = 5_000
 const HIDDEN_POLL_MS = 30_000
 
-// Keep the dropdown short by default (admins can have a lot of items).
-const QUICK_MAX = 7
+const STRUCTURED_ROLES: Role[] = ['reception', 'admin', 'super_admin']
+const LITE_MENU_ROLES: Role[] = [
+  'member',
+  'champion',
+  'vip',
+  'assistant_coach',
+  'coach',
+  'head_coach',
+]
+
+const QUICK_MAX = 6
+
+type SectionKey =
+  | 'overview'
+  | 'members'
+  | 'training'
+  | 'finance'
+  | 'store'
+  | 'administration'
+
+type NavSection = {
+  key: SectionKey
+  label: string
+  items: MenuItem[]
+}
+
+const SECTION_ORDER: Array<{ key: SectionKey; label: string }> = [
+  { key: 'overview', label: 'Overview' },
+  { key: 'members', label: 'Members' },
+  { key: 'training', label: 'Training' },
+  { key: 'finance', label: 'Finance' },
+  { key: 'store', label: 'Store' },
+  { key: 'administration', label: 'Administration' },
+]
 
 function uniqByHref(items: MenuItem[]) {
   const out: MenuItem[] = []
   const seen = new Set<string>()
-  for (const it of items) {
-    if (seen.has(it.href)) continue
-    seen.add(it.href)
-    out.push(it)
+
+  for (const item of items) {
+    if (seen.has(item.href)) continue
+    seen.add(item.href)
+    out.push(item)
   }
+
   return out
+}
+
+function normalizeMenuItems(items: MenuItem[]) {
+  return uniqByHref(
+    items.map((item) =>
+      item.href === '/store/admin'
+        ? { ...item, href: '/admin/store/dashboard' }
+        : item
+    )
+  )
 }
 
 function pickQuick(items: MenuItem[]) {
   const priority = [
     '/admin',
+    '/reception',
     '/members',
-    '/admin/private-coaching',
-    '/head-coach/private-coaching',
-    '/private-coaching',
-    '/scan',
-    '/admin/expiring-soon',
-    '/admin/attendance',
-    '/admin/scan-audit',
-    '/admin/health-monitor',
-    '/admin/outstanding-dues',
-    '/admin/cash-report',
+    '/admin/members/family-operations',
     '/admin/payments',
-    '/expenses',
+    '/schedule/operations',
+    '/admin/private-coaching',
+    '/admin/store/dashboard',
+    '/scan',
     '/notifications',
     '/schedule',
-    '/store',
     '/profile',
-    '/packages-and-promos',
   ]
 
-  const byHref = new Map(items.map((it) => [it.href, it] as const))
+  const byHref = new Map(items.map((item) => [item.href, item] as const))
   const quick: MenuItem[] = []
 
   for (const href of priority) {
-    const it = byHref.get(href)
-    if (!it) continue
-    if (quick.some((q) => q.href === it.href)) continue
-    quick.push(it)
+    const item = byHref.get(href)
+    if (!item) continue
+    if (quick.some((existing) => existing.href === item.href)) continue
+
+    quick.push(item)
     if (quick.length >= QUICK_MAX) break
   }
 
-  // Ensure Scan Audit is always visible if present
-  const scanAudit = byHref.get('/admin/scan-audit')
-  if (scanAudit && !quick.some((q) => q.href === '/admin/scan-audit')) {
-    if (quick.length >= QUICK_MAX) quick.pop()
-    quick.push(scanAudit)
-  }
-
-  // Ensure Notifications is always visible if present
-  const notif = byHref.get('/notifications')
-  if (notif && !quick.some((q) => q.href === '/notifications')) {
-    if (quick.length >= QUICK_MAX) quick.pop()
-    quick.push(notif)
-  }
-
-  // If still short, fill with first items (stable)
   if (quick.length < Math.min(QUICK_MAX, items.length)) {
-    for (const it of items) {
+    for (const item of items) {
       if (quick.length >= QUICK_MAX) break
-      if (quick.some((q) => q.href === it.href)) continue
-      quick.push(it)
+      if (quick.some((existing) => existing.href === item.href)) continue
+      quick.push(item)
     }
   }
 
   return quick
 }
 
+function sectionFor(item: MenuItem): SectionKey {
+  const href = item.href
+  const label = item.label.toLowerCase()
+
+  if (
+    href === '/' ||
+    href === '/admin' ||
+    href === '/reception' ||
+    href === '/notifications' ||
+    href === '/profile'
+  ) {
+    return 'overview'
+  }
+
+  if (
+    href === '/members' ||
+    href === '/kiosk' ||
+    href === '/scan' ||
+    href === '/coaches' ||
+    href === '/head-coach/athletes' ||
+    href.startsWith('/admin/members/') ||
+    href.startsWith('/admin/crm') ||
+    href.startsWith('/admin/visitors') ||
+    href.startsWith('/admin/freeze-requests') ||
+    href.startsWith('/admin/expiring-soon') ||
+    href.startsWith('/admin/membership-activity') ||
+    label.includes('member') ||
+    label.includes('family') ||
+    label.includes('visitor')
+  ) {
+    return 'members'
+  }
+
+  if (
+    href === '/schedule' ||
+    href.startsWith('/schedule/') ||
+    href.startsWith('/coach-operations/') ||
+    href.startsWith('/admin/private-coaching') ||
+    href.startsWith('/head-coach/private-coaching') ||
+    href.startsWith('/private-coaching') ||
+    href.startsWith('/admin/attendance')
+  ) {
+    return 'training'
+  }
+
+  if (
+    href === '/invoices' ||
+    href === '/expenses' ||
+    href.startsWith('/admin/payments') ||
+    href.startsWith('/admin/membership-refunds') ||
+    href.startsWith('/admin/cash-report') ||
+    href.startsWith('/admin/outstanding-dues') ||
+    href.startsWith('/admin/external-income') ||
+    label.includes('payment') ||
+    label.includes('refund') ||
+    label.includes('cash') ||
+    label.includes('expense') ||
+    label.includes('income') ||
+    label.includes('invoice')
+  ) {
+    return 'finance'
+  }
+
+  if (
+    href === '/store' ||
+    href.startsWith('/admin/store') ||
+    href === '/packages-and-promos' ||
+    label.includes('store') ||
+    label.includes('package') ||
+    label.includes('promo')
+  ) {
+    return 'store'
+  }
+
+  return 'administration'
+}
+
+function groupItems(items: MenuItem[]): NavSection[] {
+  const groups = new Map<SectionKey, MenuItem[]>()
+
+  for (const item of items) {
+    const key = sectionFor(item)
+    const current = groups.get(key) ?? []
+    current.push(item)
+    groups.set(key, current)
+  }
+
+  return SECTION_ORDER.flatMap(({ key, label }) => {
+    const sectionItems = groups.get(key) ?? []
+    return sectionItems.length ? [{ key, label, items: sectionItems }] : []
+  })
+}
+
 function useBodyScrollLock(locked: boolean) {
   useEffect(() => {
     if (!locked) return
-    const prev = document.body.style.overflow
+
+    const previous = document.body.style.overflow
     document.body.style.overflow = 'hidden'
+
     return () => {
-      document.body.style.overflow = prev
+      document.body.style.overflow = previous
     }
   }, [locked])
 }
 
-const LITE_MENU_ROLES: Role[] = ['member', 'champion', 'vip', 'assistant_coach', 'coach', 'head_coach']
+function roleLabel(role?: Role) {
+  if (role === 'super_admin') return 'Super Admin'
+  if (role === 'admin') return 'Admin'
+  if (role === 'reception') return 'Reception'
+  if (role === 'head_coach') return 'Head Coach'
+  if (role === 'assistant_coach') return 'Assistant Coach'
+  if (role === 'coach') return 'Coach'
+  if (role === 'champion') return 'Champion'
+  if (role === 'vip') return 'VIP'
+  return 'Member'
+}
 
-export default function RoleMenu({ items, role }: { items: MenuItem[]; role?: Role }) {
+function itemIsActive(pathname: string, href: string) {
+  if (href === '/') return pathname === '/'
+  if (href === '/admin') return pathname === '/admin'
+  if (href === '/store') return pathname === '/store'
+  if (href === '/schedule') return pathname === '/schedule'
+  if (href === '/members') return pathname === '/members'
+  if (href === '/reception') return pathname === '/reception'
+  if (href === '/profile') return pathname === '/profile'
+
+  return pathname === href || pathname.startsWith(`${href}/`)
+}
+
+export default function RoleMenu({
+  items,
+  role,
+}: {
+  items: MenuItem[]
+  role?: Role
+}) {
+  const pathname = usePathname()
   const [open, setOpen] = useState(false)
-  const [showAll, setShowAll] = useState(false)
-  const [q, setQ] = useState('')
-  const btnRef = useRef<HTMLButtonElement | null>(null)
+  const [query, setQuery] = useState('')
+  const [openSections, setOpenSections] = useState<Set<SectionKey>>(
+    () => new Set<SectionKey>(['overview'])
+  )
 
-  // Important: mobile + desktop panels both exist in the DOM (desktop is hidden by CSS on mobile).
-  // Using a single ref causes "outside click" to mis-detect and close the menu when you press "All (...)". 
-  const mobilePanelRef = useRef<HTMLDivElement | null>(null)
-  const desktopPanelRef = useRef<HTMLDivElement | null>(null)
+  const panelRef = useRef<HTMLDivElement | null>(null)
 
-  useBodyScrollLock(open)
-
-  // Normalize legacy routes: remove /store/admin from the menu (use the Store V2 dashboard instead).
-  // Also de-duplicate by href in case both exist.
-  const menuItems = useMemo(() => {
-    const mapped = items.map((it) => (it.href === '/store/admin' ? { ...it, href: '/admin/store/dashboard' } : it))
-    return uniqByHref(mapped)
-  }, [items])
-
+  const menuItems = useMemo(() => normalizeMenuItems(items), [items])
   const quickItems = useMemo(() => pickQuick(menuItems), [menuItems])
-  const isLiteMenu = !!role && LITE_MENU_ROLES.includes(role)
-  const supportsAllTools = !isLiteMenu && menuItems.length > QUICK_MAX
+  const sections = useMemo(() => groupItems(menuItems), [menuItems])
 
-  const hasNotifications = useMemo(() => menuItems.some((it) => it.href === '/notifications'), [menuItems])
-  const [unreadCount, setUnreadCount] = useState<number>(0)
+  const isStructuredRole = !!role && STRUCTURED_ROLES.includes(role)
+  const isLiteMenu = !!role && LITE_MENU_ROLES.includes(role)
+
+  const filteredItems = useMemo(() => {
+    const normalizedQuery = query.trim().toLowerCase()
+    if (!normalizedQuery) return menuItems
+
+    return menuItems.filter((item) =>
+      `${item.label} ${item.href}`.toLowerCase().includes(normalizedQuery)
+    )
+  }, [menuItems, query])
+
+  const hasNotifications = useMemo(
+    () => menuItems.some((item) => item.href === '/notifications'),
+    [menuItems]
+  )
+
+  const [unreadCount, setUnreadCount] = useState(0)
   const timerRef = useRef<number | null>(null)
   const inFlightRef = useRef(false)
+
+  useBodyScrollLock(open)
 
   async function refreshUnread() {
     if (!hasNotifications) {
@@ -165,29 +321,42 @@ export default function RoleMenu({ items, role }: { items: MenuItem[]; role?: Ro
       return
     }
     if (inFlightRef.current) return
+
     inFlightRef.current = true
+
     try {
-      const r = await fetch('/api/notifications/unread-count', { cache: 'no-store' })
-      const j = await r.json().catch(() => ({}))
-      if (!r.ok || !j?.ok) return
-      setUnreadCount(Number(j.count || 0))
+      const response = await fetch('/api/notifications/unread-count', {
+        cache: 'no-store',
+      })
+      const payload = await response.json().catch(() => ({}))
+      if (!response.ok || !payload?.ok) return
+      setUnreadCount(Number(payload.count || 0))
     } catch {
-      // ignore
+      // Keep navigation usable if notification polling fails.
     } finally {
       inFlightRef.current = false
     }
   }
 
   function currentPollMs() {
-    const visible = typeof document !== 'undefined' && document.visibilityState === 'visible'
+    const visible =
+      typeof document !== 'undefined' &&
+      document.visibilityState === 'visible'
+
     return visible ? VISIBLE_POLL_MS : HIDDEN_POLL_MS
   }
 
   function setTimer(ms: number) {
-    if (timerRef.current) window.clearInterval(timerRef.current)
+    if (timerRef.current) {
+      window.clearInterval(timerRef.current)
+    }
+
     timerRef.current = null
+
     if (!hasNotifications) return
-    if (ms > 0) timerRef.current = window.setInterval(refreshUnread, ms)
+    if (ms > 0) {
+      timerRef.current = window.setInterval(refreshUnread, ms)
+    }
   }
 
   useEffect(() => {
@@ -197,7 +366,9 @@ export default function RoleMenu({ items, role }: { items: MenuItem[]; role?: Ro
     const onUpdate = () => refreshUnread()
 
     function onVisibility() {
-      if (document.visibilityState === 'visible') refreshUnread()
+      if (document.visibilityState === 'visible') {
+        refreshUnread()
+      }
       setTimer(currentPollMs())
     }
 
@@ -208,278 +379,405 @@ export default function RoleMenu({ items, role }: { items: MenuItem[]; role?: Ro
 
     return () => {
       window.removeEventListener('notifications:updated', onUpdate)
-      window.removeEventListener('atom:notifications:changed', onUpdate as any)
+      window.removeEventListener(
+        'atom:notifications:changed',
+        onUpdate as any
+      )
       document.removeEventListener('visibilitychange', onVisibility)
       window.removeEventListener('focus', onVisibility)
-      if (timerRef.current) window.clearInterval(timerRef.current)
+
+      if (timerRef.current) {
+        window.clearInterval(timerRef.current)
+      }
+
       timerRef.current = null
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hasNotifications])
 
   useEffect(() => {
-    if (open) refreshUnread()
+    if (open) {
+      refreshUnread()
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open])
 
   useEffect(() => {
-    function onClick(e: MouseEvent) {
-      if (!open) return
-      const t = e.target as Node
+    setOpen(false)
+    setQuery('')
+  }, [pathname])
 
-      // click inside: ignore
-      if (
-        btnRef.current?.contains(t) ||
-        mobilePanelRef.current?.contains(t) ||
-        desktopPanelRef.current?.contains(t)
-      ) {
-        return
-      }
-
-      // outside closes
-      setOpen(false)
-      setShowAll(false)
-      setQ('')
-    }
-    function onEsc(e: KeyboardEvent) {
-      if (e.key === 'Escape') {
+  useEffect(() => {
+    function onEscape(event: KeyboardEvent) {
+      if (event.key === 'Escape') {
         setOpen(false)
-        setShowAll(false)
-        setQ('')
+        setQuery('')
       }
     }
-    window.addEventListener('click', onClick)
-    window.addEventListener('keydown', onEsc)
-    return () => {
-      window.removeEventListener('click', onClick)
-      window.removeEventListener('keydown', onEsc)
-    }
-  }, [open])
 
-  const filteredAll = useMemo(() => {
-    const qq = q.trim().toLowerCase()
-    if (!qq) return menuItems
-    return menuItems.filter((it) => (it.label + ' ' + it.href).toLowerCase().includes(qq))
-  }, [menuItems, q])
-
-  const list = isLiteMenu ? menuItems : showAll ? filteredAll : quickItems
+    window.addEventListener('keydown', onEscape)
+    return () => window.removeEventListener('keydown', onEscape)
+  }, [])
 
   function close() {
     setOpen(false)
-    setShowAll(false)
-    setQ('')
+    setQuery('')
   }
 
-  function MenuList({ dense = false }: { dense?: boolean }) {
+  function toggleSection(key: SectionKey) {
+    setOpenSections((current) => {
+      const next = new Set(current)
+
+      if (next.has(key)) {
+        next.delete(key)
+      } else {
+        next.add(key)
+      }
+
+      return next
+    })
+  }
+
+  function MenuItemLink({
+    item,
+    compact = false,
+  }: {
+    item: MenuItem
+    compact?: boolean
+  }) {
+    const Icon = ICONS[item.icon] ?? Circle
+    const notificationUnread =
+      item.href === '/notifications' && unreadCount > 0
+    const active = itemIsActive(pathname, item.href)
+
     return (
-      <nav className={dense ? 'py-1' : 'py-2'}>
-        {list.map((it) => {
-          const Icon = ICONS[it.icon] ?? Circle
-          const isNotifUnread = it.href === '/notifications' && unreadCount > 0
-
-          return (
-            <Link
-              key={it.href}
-              href={it.href}
-              onClick={close}
+      <Link
+        href={item.href}
+        onClick={close}
+        className={
+          'group flex min-w-0 items-center justify-between gap-3 rounded-2xl outline-none transition ' +
+          (compact ? 'px-3 py-2.5 text-sm ' : 'px-3 py-3 text-[15px] ') +
+          (active
+            ? 'bg-black text-white dark:bg-white dark:text-black '
+            : 'hover:bg-black/[0.04] focus:bg-black/[0.05] dark:hover:bg-white/[0.07] dark:focus:bg-white/[0.09] ') +
+          (notificationUnread && !active ? 'font-semibold text-red-700 ' : '')
+        }
+      >
+        <div className="flex min-w-0 items-center gap-3">
+          <span
+            className={
+              'inline-flex shrink-0 items-center justify-center rounded-xl border ' +
+              (compact ? 'h-8 w-8 ' : 'h-9 w-9 ') +
+              (active
+                ? 'border-white/20 bg-white/10 dark:border-black/10 dark:bg-black/5 '
+                : notificationUnread
+                  ? 'border-red-200 bg-red-50 dark:border-white/10 dark:bg-white/10 '
+                  : 'border-black/10 bg-black/[0.02] dark:border-white/10 dark:bg-white/[0.04] ')
+            }
+          >
+            <Icon
+              size={17}
+              strokeWidth={2.2}
               className={
-                'flex items-center justify-between gap-3 px-3 ' +
-                (isLiteMenu ? 'rounded-2xl py-3 text-[15px] ' : 'rounded-2xl py-2.5 text-[15px] ') +
-                'hover:bg-black/[0.03] dark:hover:bg-white/[0.06] focus:bg-black/[0.04] dark:focus:bg-white/[0.08] outline-none ' +
-                (isNotifUnread ? 'text-red-700 font-semibold' : '')
+                active
+                  ? 'text-white dark:text-black'
+                  : notificationUnread
+                    ? 'text-red-700'
+                    : 'text-black dark:text-white'
               }
-            >
-              <div className="flex min-w-0 items-center gap-3">
-                <span
-                  className={
-                    'inline-flex shrink-0 items-center justify-center border border-black/10 dark:border-white/10 ' +
-                    (isLiteMenu ? 'h-10 w-10 rounded-2xl bg-[hsl(var(--bg))] ' : 'h-9 w-9 rounded-2xl bg-[hsl(var(--bg))] ') +
-                    (isNotifUnread ? 'border-red-200 bg-red-50 dark:bg-white/10' : '')
-                  }
-                >
-                  <Icon
-                    size={18}
-                    strokeWidth={2.2}
-                    className={isNotifUnread ? 'text-red-700' : 'text-black dark:text-white'}
-                  />
-                </span>
-                <span className="truncate">{it.label}</span>
-              </div>
+            />
+          </span>
 
-              {isNotifUnread ? (
-                <span
-                  className="inline-flex min-w-[24px] h-6 items-center justify-center rounded-full bg-red-600 px-2 text-xs font-bold text-white"
-                  aria-label={`${unreadCount} unread notifications`}
-                  title={`${unreadCount} unread notifications`}
-                >
-                  {unreadCount > 99 ? '99+' : unreadCount}
+          <span className="truncate">{item.label}</span>
+        </div>
+
+        {notificationUnread ? (
+          <span
+            className={
+              'inline-flex h-6 min-w-[24px] shrink-0 items-center justify-center rounded-full px-2 text-xs font-bold ' +
+              (active
+                ? 'bg-white text-black dark:bg-black dark:text-white'
+                : 'bg-red-600 text-white')
+            }
+            aria-label={`${unreadCount} unread notifications`}
+            title={`${unreadCount} unread notifications`}
+          >
+            {unreadCount > 99 ? '99+' : unreadCount}
+          </span>
+        ) : null}
+      </Link>
+    )
+  }
+
+  function StructuredNavigation() {
+    return (
+      <>
+        <div
+          className="fixed inset-0 z-40 bg-black/45 backdrop-blur-[1px]"
+          aria-hidden
+          onClick={close}
+        />
+
+        <aside
+          role="dialog"
+          aria-modal="true"
+          aria-label={`${roleLabel(role)} navigation`}
+          className="fixed inset-y-0 left-0 z-50 flex w-full flex-col border-r border-black/10 bg-white shadow-2xl dark:border-white/10 dark:bg-black sm:w-[380px]"
+        >
+          <div className="flex items-center justify-between gap-3 border-b border-black/10 px-4 py-4 dark:border-white/10">
+            <div className="min-w-0">
+              <div className="text-xs font-semibold uppercase tracking-[0.16em] text-black/50 dark:text-white/50">
+                ATOM Operations
+              </div>
+              <div className="mt-1 flex items-center gap-2">
+                <div className="truncate text-lg font-semibold">
+                  {roleLabel(role)}
+                </div>
+                <span className="rounded-full bg-black px-2 py-0.5 text-[10px] font-semibold text-white dark:bg-white dark:text-black">
+                  {menuItems.length} tools
                 </span>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={close}
+              className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-black/10 hover:bg-black/[0.04] dark:border-white/10 dark:hover:bg-white/[0.07]"
+              aria-label="Close navigation"
+            >
+              <X size={19} />
+            </button>
+          </div>
+
+          <div className="border-b border-black/10 p-4 dark:border-white/10">
+            <div className="relative">
+              <Search
+                size={17}
+                className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-black/45 dark:text-white/45"
+              />
+              <input
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder="Search pages…"
+                className="w-full rounded-2xl border border-black/10 bg-black/[0.02] py-2.5 pl-10 pr-10 text-sm outline-none transition focus:border-black/30 focus:bg-white focus:ring-2 focus:ring-black/5 dark:border-white/10 dark:bg-white/[0.04] dark:focus:border-white/30 dark:focus:bg-black dark:focus:ring-white/10"
+                autoFocus
+              />
+
+              {query ? (
+                <button
+                  type="button"
+                  onClick={() => setQuery('')}
+                  className="absolute right-2 top-1/2 inline-flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-full hover:bg-black/[0.04] dark:hover:bg-white/[0.07]"
+                  aria-label="Clear search"
+                >
+                  <X size={15} />
+                </button>
               ) : null}
-            </Link>
-          )
-        })}
-      </nav>
+            </div>
+          </div>
+
+          <div className="min-h-0 flex-1 overflow-y-auto">
+            {query.trim() ? (
+              <div className="p-4">
+                <div className="mb-2 flex items-center justify-between gap-2">
+                  <div className="text-xs font-semibold uppercase tracking-[0.12em] text-black/45 dark:text-white/45">
+                    Search results
+                  </div>
+                  <div className="text-xs text-black/45 dark:text-white/45">
+                    {filteredItems.length}
+                  </div>
+                </div>
+
+                {filteredItems.length ? (
+                  <nav className="space-y-1">
+                    {filteredItems.map((item) => (
+                      <MenuItemLink key={item.href} item={item} compact />
+                    ))}
+                  </nav>
+                ) : (
+                  <div className="rounded-2xl border border-dashed border-black/10 px-4 py-6 text-center text-sm text-black/50 dark:border-white/10 dark:text-white/50">
+                    No page matches “{query.trim()}”.
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="space-y-5 p-4">
+                <section>
+                  <div className="mb-2 text-xs font-semibold uppercase tracking-[0.12em] text-black/45 dark:text-white/45">
+                    Quick Access
+                  </div>
+
+                  <nav className="grid grid-cols-2 gap-2">
+                    {quickItems.map((item) => (
+                      <MenuItemLink key={item.href} item={item} compact />
+                    ))}
+                  </nav>
+                </section>
+
+                <section>
+                  <div className="mb-2 text-xs font-semibold uppercase tracking-[0.12em] text-black/45 dark:text-white/45">
+                    All tools
+                  </div>
+
+                  <div className="space-y-2">
+                    {sections.map((section) => {
+                      const expanded = openSections.has(section.key)
+
+                      return (
+                        <div
+                          key={section.key}
+                          className="overflow-hidden rounded-2xl border border-black/10 dark:border-white/10"
+                        >
+                          <button
+                            type="button"
+                            onClick={() => toggleSection(section.key)}
+                            className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left hover:bg-black/[0.025] dark:hover:bg-white/[0.05]"
+                            aria-expanded={expanded}
+                          >
+                            <div>
+                              <div className="text-sm font-semibold">
+                                {section.label}
+                              </div>
+                              <div className="mt-0.5 text-xs text-black/45 dark:text-white/45">
+                                {section.items.length}{' '}
+                                {section.items.length === 1 ? 'tool' : 'tools'}
+                              </div>
+                            </div>
+
+                            <ChevronRight
+                              size={18}
+                              className={
+                                'shrink-0 transition-transform ' +
+                                (expanded ? 'rotate-90' : '')
+                              }
+                            />
+                          </button>
+
+                          {expanded ? (
+                            <nav className="space-y-1 border-t border-black/10 p-2 dark:border-white/10">
+                              {section.items.map((item) => (
+                                <MenuItemLink
+                                  key={item.href}
+                                  item={item}
+                                  compact
+                                />
+                              ))}
+                            </nav>
+                          ) : null}
+                        </div>
+                      )
+                    })}
+                  </div>
+                </section>
+              </div>
+            )}
+          </div>
+
+          <div className="border-t border-black/10 px-4 py-3 dark:border-white/10">
+            <div className="flex items-center justify-between gap-3 text-xs text-black/50 dark:text-white/50">
+              <span>Role-aware navigation</span>
+              <span>Esc to close</span>
+            </div>
+          </div>
+        </aside>
+      </>
+    )
+  }
+
+  function CompactNavigation() {
+    return (
+      <>
+        <div
+          className="fixed inset-0 z-40 bg-black/40"
+          aria-hidden
+          onClick={close}
+        />
+
+        <div className="fixed inset-x-0 bottom-0 z-50 sm:hidden">
+          <div className="mx-auto w-full max-w-md rounded-t-[28px] border border-black/10 bg-white shadow-2xl dark:border-white/10 dark:bg-black">
+            <div className="flex items-center justify-center pt-2">
+              <div className="h-1.5 w-12 rounded-full bg-black/20 dark:bg-white/20" />
+            </div>
+
+            <div className="flex items-center justify-between gap-2 px-4 pb-2 pt-3">
+              <div className="text-base font-semibold">
+                {roleLabel(role)} Menu
+              </div>
+              <button
+                type="button"
+                onClick={close}
+                className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-black/10 hover:bg-black/[0.03] dark:border-white/10 dark:hover:bg-white/[0.06]"
+                aria-label="Close menu"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <nav className="max-h-[70vh] space-y-1 overflow-y-auto px-2 pb-4">
+              {menuItems.map((item) => (
+                <MenuItemLink key={item.href} item={item} />
+              ))}
+            </nav>
+          </div>
+        </div>
+
+        <div
+          ref={panelRef}
+          className="absolute z-50 mt-3 hidden w-72 rounded-3xl border border-black/10 bg-white p-2 shadow-xl dark:border-white/10 dark:bg-black sm:block"
+        >
+          <div className="flex items-center justify-between gap-2 px-2 py-2">
+            <div className="text-sm font-semibold">
+              {isLiteMenu ? 'Menu' : roleLabel(role)}
+            </div>
+            <button
+              type="button"
+              onClick={close}
+              className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-black/10 hover:bg-black/[0.03] dark:border-white/10 dark:hover:bg-white/[0.06]"
+              aria-label="Close menu"
+            >
+              <X size={16} />
+            </button>
+          </div>
+
+          <nav className="max-h-[70vh] space-y-1 overflow-y-auto">
+            {menuItems.map((item) => (
+              <MenuItemLink key={item.href} item={item} compact />
+            ))}
+          </nav>
+        </div>
+      </>
     )
   }
 
   return (
     <div className="relative">
       <button
-        ref={btnRef}
-        onClick={() => {
-          setOpen((v) => !v)
-          if (open) {
-            setShowAll(false)
-            setQ('')
-          }
-        }}
+        type="button"
+        onClick={() => setOpen((current) => !current)}
         className="relative rounded-full border border-black bg-black px-4 py-2 text-sm font-semibold text-white shadow-soft transition hover:opacity-95 focus:outline-none focus:ring-2 focus:ring-black/60 dark:border-white dark:bg-white dark:text-black dark:focus:ring-white/60"
-        aria-haspopup="menu"
+        aria-haspopup="dialog"
         aria-expanded={open}
-        aria-label="Menu"
+        aria-label="Open navigation"
       >
         <span className="inline-flex items-center gap-2">
-          Menu {open ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+          <MenuIcon size={16} />
+          Menu
+          {!isStructuredRole ? (
+            <ChevronDown
+              size={15}
+              className={
+                'transition-transform ' + (open ? 'rotate-180' : '')
+              }
+            />
+          ) : null}
         </span>
       </button>
 
-      {/* Overlay */}
-      {open && <div className="fixed inset-0 bg-black/40 z-40" aria-hidden onClick={close} />}
-
-      {/* Mobile: bottom sheet (no awkward dropdown, always fits) */}
-      {open && (
-        <div className="fixed inset-x-0 bottom-0 z-50 sm:hidden">
-          <div
-            ref={mobilePanelRef}
-            className="mx-auto w-full max-w-md rounded-t-[28px] border border-black/10 bg-white dark:bg-black shadow-2xl"
-          >
-            {/* Handle */}
-            <div className="flex items-center justify-center pt-2">
-              <div className="h-1.5 w-12 rounded-full bg-black/20 dark:bg-white/20" />
-            </div>
-
-            {/* Header */}
-            <div className="flex items-center justify-between gap-2 px-4 pt-3 pb-2">
-              <div className="text-base font-semibold">{isLiteMenu ? 'Menu' : showAll ? 'All tools' : 'Quick menu'}</div>
-              <div className="flex items-center gap-2">
-                {supportsAllTools ? (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setShowAll((v) => !v)
-                      setQ('')
-                    }}
-                    className="text-xs font-semibold rounded-full border px-2.5 py-1 hover:bg-black/[0.03] dark:hover:bg-white/[0.06]"
-                  >
-                    {showAll ? 'Quick' : `All (${menuItems.length})`}
-                  </button>
-                ) : null}
-                <button
-                  type="button"
-                  onClick={close}
-                  className="inline-flex h-9 w-9 items-center justify-center rounded-full border hover:bg-black/[0.03] dark:hover:bg-white/[0.06]"
-                  aria-label="Close menu"
-                >
-                  <X size={18} />
-                </button>
-              </div>
-            </div>
-
-            {!isLiteMenu && showAll ? (
-              <div className="px-4 pb-2">
-                <div className="relative">
-                  <Search
-                    size={16}
-                    className="absolute left-3 top-1/2 -translate-y-1/2 text-black/50 dark:text-white/50"
-                  />
-                  <input
-                    value={q}
-                    onChange={(e) => setQ(e.target.value)}
-                    placeholder="Search…"
-                    className="w-full rounded-xl border border-black/10 dark:border-white/10 bg-white dark:bg-black px-9 py-2 text-sm outline-none focus:ring-2 focus:ring-black/50 dark:focus:ring-white/50"
-                    autoFocus
-                  />
-                </div>
-              </div>
-            ) : null}
-
-            <div className="max-h-[70vh] overflow-y-auto pb-1">
-              <MenuList />
-              <div className="border-t border-black/10 dark:border-white/10 px-4 py-3">
-                <Link href="/" onClick={close} className="text-sm font-semibold underline">
-                  Home
-                </Link>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Desktop: dropdown panel */}
-      {open && (
-        <div
-          ref={desktopPanelRef}
-          className="absolute z-50 mt-3 hidden w-72 rounded-3xl border border-black/10 bg-white dark:bg-black shadow-xl sm:block"
-        >
-          <div className="flex items-center justify-between gap-2 px-3 pt-3 pb-2">
-            <div className="text-sm font-semibold">{isLiteMenu ? 'Menu' : showAll ? 'All tools' : 'Quick menu'}</div>
-            {supportsAllTools ? (
-              <button
-                type="button"
-                onClick={() => {
-                  setShowAll((v) => !v)
-                  setQ('')
-                }}
-                className="text-xs font-semibold rounded-full border px-2.5 py-1 hover:bg-black/[0.03] dark:hover:bg-white/[0.06]"
-              >
-                {showAll ? 'Quick' : `All (${menuItems.length})`}
-              </button>
-            ) : null}
-          </div>
-
-          {!isLiteMenu && showAll ? (
-            <div className="px-3 pb-2">
-              <div className="relative">
-                <Search
-                  size={16}
-                  className="absolute left-3 top-1/2 -translate-y-1/2 text-black/50 dark:text-white/50"
-                />
-                <input
-                  value={q}
-                  onChange={(e) => setQ(e.target.value)}
-                  placeholder="Search…"
-                  className="w-full rounded-xl border border-black/10 dark:border-white/10 bg-white dark:bg-black px-9 py-2 text-sm outline-none focus:ring-2 focus:ring-black/50 dark:focus:ring-white/50"
-                  autoFocus
-                />
-              </div>
-            </div>
-          ) : null}
-
-          <div className={showAll ? 'max-h-[70vh] overflow-y-auto pb-1' : 'pb-1'}>
-            <MenuList dense />
-            <div className="mt-1 border-t border-black/10 dark:border-white/10 px-3 py-2">
-              <div className="flex items-center justify-between gap-2">
-                <Link
-                  href="/"
-                  onClick={close}
-                  className="text-xs font-semibold underline"
-                  title="Open the Home dashboard"
-                >
-                  Home dashboard
-                </Link>
-
-                <button
-                  type="button"
-                  onClick={close}
-                  className="text-xs font-semibold rounded-full border px-2.5 py-1 hover:bg-black/[0.03] dark:hover:bg-white/[0.06]"
-                >
-                  Close
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+      {open
+        ? isStructuredRole
+          ? <StructuredNavigation />
+          : <CompactNavigation />
+        : null}
     </div>
   )
 }
