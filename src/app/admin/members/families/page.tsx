@@ -5,6 +5,12 @@ import { redirect } from 'next/navigation'
 import AccessDeniedCard from '@/components/AccessDeniedCard'
 import Button from '@/components/ui/Button'
 import { getSessionUser } from '@/lib/session'
+import {
+  canAccessFamilyAccounts,
+  canCreateStandaloneFamily,
+  canManageFamilyGuardianAuthority,
+  canManageExceptionalFamilyActions,
+} from '@/lib/rbac'
 import { getSupabaseAdminClientCached } from '@/lib/requestCache'
 import FamilyAccountsManager from './FamilyAccountsManager'
 
@@ -45,14 +51,14 @@ export default async function FamilyAccountsPage() {
   const me = await getSessionUser()
   if (!me) redirect('/login?next=/admin/members/families')
 
-  if (me.role !== 'admin' && me.role !== 'super_admin') {
+  if (!canAccessFamilyAccounts(me.role)) {
     return (
       <main className="mx-auto max-w-4xl p-4 sm:p-6">
         <h1 className="text-2xl font-bold">Family Accounts</h1>
         <div className="mt-4">
           <AccessDeniedCard
             title="Forbidden"
-            message="Only Admin / Super Admin can manage family accounts."
+            message="Reception, Admin or Super Admin access is required for family accounts."
             nextPath="/admin/members/families"
             showBackHome
             signedInAs={me.email}
@@ -146,8 +152,8 @@ export default async function FamilyAccountsPage() {
           <Button asChild variant="outline" href="/admin/members">
             ← Members
           </Button>
-          <Button asChild variant="outline" href="/admin">
-            Admin
+          <Button asChild variant="outline" href={me.role === 'reception' ? '/reception' : '/admin'}>
+            {me.role === 'reception' ? 'Front Desk' : 'Admin'}
           </Button>
         </div>
       </div>
@@ -156,12 +162,23 @@ export default async function FamilyAccountsPage() {
         Family members created here receive their own Member ID and QR code but do not need a separate email or login. Existing member accounts remain unchanged.
       </div>
 
+      {me.role === 'reception' ? (
+        <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          Reception can handle routine family updates, add guardians and members, and link safe existing accounts. Primary-guardian changes, guardian removal, cleanup and other exceptional actions require Admin or Super Admin.
+        </div>
+      ) : null}
+
       {loadError ? (
         <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">
           Failed to load family accounts: {loadError}
         </div>
       ) : (
-        <FamilyAccountsManager families={hydratedFamilies} canCleanupMemberProfiles={me.role === 'super_admin'} />
+        <FamilyAccountsManager
+          families={hydratedFamilies}
+          canCreateFamily={canCreateStandaloneFamily(me.role)}
+          canManageGuardianAuthority={canManageFamilyGuardianAuthority(me.role)}
+          canManageExceptionalActions={canManageExceptionalFamilyActions(me.role)}
+        />
       )}
     </main>
   )

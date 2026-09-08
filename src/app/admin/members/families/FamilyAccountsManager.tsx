@@ -101,10 +101,14 @@ async function readJson(response: Response) {
 
 export default function FamilyAccountsManager({
   families,
-  canCleanupMemberProfiles = false,
+  canCreateFamily = false,
+  canManageGuardianAuthority = false,
+  canManageExceptionalActions = false,
 }: {
   families: FamilyAccount[]
-  canCleanupMemberProfiles?: boolean
+  canCreateFamily?: boolean
+  canManageGuardianAuthority?: boolean
+  canManageExceptionalActions?: boolean
 }) {
   const router = useRouter()
   const [familyName, setFamilyName] = React.useState('')
@@ -708,27 +712,33 @@ export default function FamilyAccountsManager({
 
   return (
     <div className="space-y-5">
-      <form
-        onSubmit={createFamily}
-        className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4 shadow-soft"
-      >
-        <div className="grid gap-3 sm:grid-cols-[1fr_auto] sm:items-end">
-          <Input
-            label="Create family"
-            value={familyName}
-            onChange={(event) => setFamilyName(event.target.value)}
-            placeholder="e.g. Ahmed Family"
-            maxLength={120}
-            autoComplete="off"
-          />
-          <Button type="submit" loading={creating} loadingText="Creating…" className="w-full sm:w-auto">
-            Create family
-          </Button>
+      {canCreateFamily ? (
+        <form
+          onSubmit={createFamily}
+          className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4 shadow-soft"
+        >
+          <div className="grid gap-3 sm:grid-cols-[1fr_auto] sm:items-end">
+            <Input
+              label="Create family"
+              value={familyName}
+              onChange={(event) => setFamilyName(event.target.value)}
+              placeholder="e.g. Ahmed Family"
+              maxLength={120}
+              autoComplete="off"
+            />
+            <Button type="submit" loading={creating} loadingText="Creating…" className="w-full sm:w-auto">
+              Create family
+            </Button>
+          </div>
+          <p className="mt-2 text-xs text-[hsl(var(--muted))]">
+            Create the family first, then add one or more parent/guardian accounts and as many member profiles as needed.
+          </p>
+        </form>
+      ) : (
+        <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4 text-sm text-[hsl(var(--muted))] shadow-soft">
+          New households should be started through <a className="font-semibold underline" href="/admin/members/family-intake">Family Intake</a>. Reception can manage routine updates on existing families here.
         </div>
-        <p className="mt-2 text-xs text-[hsl(var(--muted))]">
-          Create the family first, then add one or more parent/guardian accounts and as many member profiles as needed.
-        </p>
-      </form>
+      )}
 
       {message ? (
         <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
@@ -773,7 +783,7 @@ export default function FamilyAccountsManager({
                   >
                     {editingFamilyId === family.id ? 'Close edit' : 'Edit family'}
                   </Button>
-                  {canCleanupMemberProfiles ? (
+                  {canManageExceptionalActions ? (
                     <Button
                       type="button"
                       variant="outline"
@@ -817,7 +827,7 @@ export default function FamilyAccountsManager({
                 </form>
               ) : null}
 
-              {canCleanupMemberProfiles && family.members.length > 0 ? (
+              {canManageExceptionalActions && family.members.length > 0 ? (
                 <p className="mt-2 text-xs text-[hsl(var(--muted))]">
                   To delete this family, remove its member links first. Member profiles are never deleted with the family.
                 </p>
@@ -892,7 +902,7 @@ export default function FamilyAccountsManager({
                               Edit guardian
                             </Button>
 
-                            {!guardian.member_profile ? (
+                            {canManageExceptionalActions && !guardian.member_profile ? (
                               <Button
                                 type="button"
                                 size="sm"
@@ -909,7 +919,7 @@ export default function FamilyAccountsManager({
                               </Button>
                             ) : null}
 
-                            {!guardian.is_primary ? (
+                            {canManageGuardianAuthority && !guardian.is_primary ? (
                               <>
                                 <Button
                                   type="button"
@@ -944,7 +954,7 @@ export default function FamilyAccountsManager({
                               </>
                             ) : null}
 
-                            {canCleanupMemberProfiles && guardian.member_profile ? (
+                            {canManageExceptionalActions && guardian.member_profile ? (
                               <Button
                                 type="button"
                                 variant="outline"
@@ -1210,15 +1220,21 @@ export default function FamilyAccountsManager({
                           ID: {member.member_id?.trim() || '—'} · {member.email || member.phone || 'Family-managed member'}
                         </div>
                       </div>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        disabled={actionKey === `unlink:${family.id}:${member.user_id}`}
-                        onClick={() => setUnlinkTarget({ familyId: family.id, familyName: family.name, member })}
-                      >
-                        Remove from family
-                      </Button>
+                      {canManageExceptionalActions || member.email ? (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          disabled={actionKey === `unlink:${family.id}:${member.user_id}`}
+                          onClick={() => setUnlinkTarget({ familyId: family.id, familyName: family.name, member })}
+                        >
+                          Remove from family
+                        </Button>
+                      ) : (
+                        <span className="max-w-xs text-xs text-amber-700">
+                          Family-managed profile · Super Admin review required to unlink.
+                        </span>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -1296,7 +1312,7 @@ export default function FamilyAccountsManager({
 
         {families.length === 0 ? (
           <div className="rounded-2xl border border-dashed border-[hsl(var(--border))] bg-[hsl(var(--card))] p-6 text-center text-sm text-[hsl(var(--muted))]">
-            No families yet. Create the first family above.
+            {canCreateFamily ? 'No families yet. Create the first family above.' : 'No families yet. Start the household through Family Intake.'}
           </div>
         ) : null}
       </div>
