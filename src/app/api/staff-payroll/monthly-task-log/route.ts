@@ -263,7 +263,7 @@ export async function POST(req: Request) {
         const { data, error } = await admin
           .from('staff_monthly_task_logs')
           .select(
-            'id,month_start,staff_user_id,task_id,voided_at,task_name_snapshot,area_name_snapshot,unit_snapshot,importance_level_snapshot,importance_multiplier_snapshot'
+            'id,month_start,staff_user_id,task_id,voided_at,task_name_snapshot,area_name_snapshot,unit_snapshot,importance_level_snapshot,importance_multiplier_snapshot,source'
           )
           .eq('id', logId)
           .maybeSingle()
@@ -297,7 +297,7 @@ export async function POST(req: Request) {
         const { data, error } = await admin
           .from('staff_monthly_task_logs')
           .select(
-            'id,month_start,staff_user_id,task_id,voided_at,task_name_snapshot,area_name_snapshot,unit_snapshot,importance_level_snapshot,importance_multiplier_snapshot'
+            'id,month_start,staff_user_id,task_id,voided_at,task_name_snapshot,area_name_snapshot,unit_snapshot,importance_level_snapshot,importance_multiplier_snapshot,source'
           )
           .eq('month_start', monthStart)
           .eq('staff_user_id', staffUserId)
@@ -352,12 +352,14 @@ export async function POST(req: Request) {
       }
 
       if (existing?.id) {
+        const manualEditOfScheduleImport = existing.source === 'schedule'
         const { data: updated, error: updateErr } = await admin
           .from('staff_monthly_task_logs')
           .update({
             work_quantity: quantity,
             actual_hours: actualHours,
             note,
+            source: manualEditOfScheduleImport ? 'adjustment' : existing.source,
             updated_by: actor.actorId,
           })
           .eq('id', existing.id)
@@ -395,7 +397,12 @@ export async function POST(req: Request) {
             quantity,
             actual_hours: actualHours,
             note,
-            note_scope: 'Monthly task log only. No salary calculation or payment was changed.',
+            source_before: existing.source ?? 'manual',
+            source_after: manualEditOfScheduleImport ? 'adjustment' : (existing.source ?? 'manual'),
+            schedule_import_adjusted_manually: manualEditOfScheduleImport,
+            note_scope: manualEditOfScheduleImport
+              ? 'Manual edit changed the schedule-sourced row to adjustment. Existing session import audit links remain preserved.'
+              : 'Monthly task log only. No salary calculation or payment was changed.',
           },
         })
 
