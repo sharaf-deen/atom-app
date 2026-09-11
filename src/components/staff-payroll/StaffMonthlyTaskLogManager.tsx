@@ -57,6 +57,9 @@ type Props = {
   defaultAssignees: StaffTaskDefaultAssignee[]
   logs: MonthlyTaskLogRow[]
   canWrite: boolean
+  monthLocked: boolean
+  lockVersion: number
+  approvedAt: string | null
 }
 
 function unitLabel(unit: string, quantity = 1) {
@@ -110,8 +113,21 @@ function errorLabel(code: string) {
   if (code === 'FUTURE_MONTH_NOT_ALLOWED') return 'Future months cannot be logged.'
   if (code === 'VOID_REASON_REQUIRED') return 'A reason is required to remove a monthly task entry.'
   if (code === 'FORBIDDEN') return 'Only Super Admin can change monthly task logs.'
-  if (code === 'MIGRATION_REQUIRED') return 'Apply the Staff Payroll 1B migration first.'
+  if (code === 'PAYROLL_MONTH_LOCKED' || code === 'STAFF_PAYROLL_MONTH_LOCKED') {
+    return 'This payroll month is approved and locked. Reopen it from Salary Calculation before changing monthly tasks.'
+  }
+  if (code === 'MIGRATION_REQUIRED') return 'Apply the Staff Payroll 1D migration first.'
   return code.replace(/_/g, ' ')
+}
+
+function dateTimeLabel(value: string) {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+  return new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Africa/Cairo',
+    dateStyle: 'medium',
+    timeStyle: 'short',
+  }).format(date)
 }
 
 export default function StaffMonthlyTaskLogManager({
@@ -122,8 +138,12 @@ export default function StaffMonthlyTaskLogManager({
   defaultAssignees,
   logs,
   canWrite,
+  monthLocked,
+  lockVersion,
+  approvedAt,
 }: Props) {
   const router = useRouter()
+  const canModify = canWrite && !monthLocked
   const activeLogs = logs.filter((log) => !log.voided_at)
   const voidedLogs = logs.filter((log) => Boolean(log.voided_at))
   const loggedTaskIds = new Set(activeLogs.map((log) => log.task_id))
@@ -377,6 +397,22 @@ export default function StaffMonthlyTaskLogManager({
 
   return (
     <div className="space-y-6">
+      {monthLocked ? (
+        <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-950">
+          <div className="font-semibold">Payroll month approved & locked</div>
+          <div className="mt-1 text-xs">
+            Monthly task logs for this month cannot be added, edited or removed.
+            {lockVersion > 0 ? ` Approval Version ${lockVersion}.` : ''}
+            {approvedAt ? ` Approved ${dateTimeLabel(approvedAt)}.` : ''}
+          </div>
+          {canWrite ? (
+            <div className="mt-2 text-xs">
+              To correct this month, use Exceptional Reopen from Staff Payroll → Salary Calculation. The previous approved version will remain preserved.
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+
       {success ? (
         <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-900">
           {success}
@@ -425,7 +461,7 @@ export default function StaffMonthlyTaskLogManager({
                       <div className="mt-2 text-base font-semibold">{log.task_name_snapshot}</div>
                     </div>
 
-                    {canWrite ? (
+                    {canModify ? (
                       <button
                         type="button"
                         onClick={() => editLog(log)}
@@ -464,7 +500,7 @@ export default function StaffMonthlyTaskLogManager({
 
                   {editing && catalogTask ? <LogEditForm task={catalogTask} isEditing /> : null}
 
-                  {canWrite && !editing ? (
+                  {canModify && !editing ? (
                     <div className="mt-4 border-t border-black/10 pt-3">
                       {voidingLogId === log.id ? (
                         <div className="space-y-2">
@@ -523,7 +559,7 @@ export default function StaffMonthlyTaskLogManager({
         )}
       </section>
 
-      {canWrite ? (
+      {canModify ? (
         <section className="rounded-3xl border border-black/10 bg-white p-4 sm:p-5">
           <div>
             <h2 className="text-lg font-semibold">Add performed task</h2>
@@ -611,7 +647,9 @@ export default function StaffMonthlyTaskLogManager({
         <div className="rounded-2xl border border-sky-200 bg-sky-50 p-3 text-sm text-sky-950">
           <div className="font-semibold">Read-only access</div>
           <div className="mt-1 text-xs">
-            Only Super Admin can add, edit or remove monthly task entries.
+            {monthLocked
+              ? 'This approved payroll month is locked. No monthly task changes are allowed until an exceptional reopen.'
+              : 'Only Super Admin can add, edit or remove monthly task entries.'}
           </div>
         </div>
       )}

@@ -187,7 +187,13 @@ export default async function StaffPayrollMonthlyTasksPage({
   const selectedMonth = normalizeMonth(getOne(searchParams?.month))
   const monthStart = `${selectedMonth}-01`
 
-  const [areasResult, tasksResult, assigneesResult, logsResult] = await Promise.all([
+  const [
+    areasResult,
+    tasksResult,
+    assigneesResult,
+    logsResult,
+    payrollSnapshotResult,
+  ] = await Promise.all([
     admin
       .from('staff_task_areas')
       .select('id,name,sort_order,is_active')
@@ -211,6 +217,11 @@ export default async function StaffPayrollMonthlyTasksPage({
           .eq('staff_user_id', selectedStaffId)
           .order('created_at', { ascending: true })
       : Promise.resolve({ data: [], error: null } as any),
+    admin
+      .from('staff_payroll_monthly_snapshots')
+      .select('id,status,approval_version_no,approved_at')
+      .eq('month_start', monthStart)
+      .maybeSingle(),
   ])
 
   const loadError =
@@ -219,10 +230,12 @@ export default async function StaffPayrollMonthlyTasksPage({
     tasksResult.error?.message ||
     assigneesResult.error?.message ||
     logsResult.error?.message ||
+    payrollSnapshotResult.error?.message ||
     ''
 
   const migrationMissing =
     loadError.includes('staff_monthly_task_logs') ||
+    loadError.includes('approval_version_no') ||
     loadError.toLowerCase().includes('does not exist')
 
   const areas = ((areasResult.data ?? []) as any[]).map((row) => ({
@@ -286,6 +299,11 @@ export default async function StaffPayrollMonthlyTasksPage({
     0
   )
   const areasCovered = new Set(activeLogs.map((log) => log.area_name_snapshot)).size
+  const monthLocked = payrollSnapshotResult.data?.status === 'approved'
+  const lockVersion = Number(payrollSnapshotResult.data?.approval_version_no ?? 0)
+  const approvedAt = payrollSnapshotResult.data?.approved_at
+    ? String(payrollSnapshotResult.data.approved_at)
+    : null
 
   return (
     <main className="mx-auto max-w-6xl space-y-5 p-4 sm:p-6">
@@ -363,9 +381,9 @@ export default async function StaffPayrollMonthlyTasksPage({
 
       {migrationMissing ? (
         <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950">
-          <div className="font-semibold">Staff Payroll 1B migration required</div>
+          <div className="font-semibold">Staff Payroll 1D migration required</div>
           <div className="mt-1 text-xs">
-            Apply the Monthly Task Log migration, then refresh this page.
+            Apply the Payroll Approval & Monthly Locking migration, then refresh this page.
           </div>
         </div>
       ) : null}
@@ -414,6 +432,9 @@ export default async function StaffPayrollMonthlyTasksPage({
             defaultAssignees={defaultAssignees}
             logs={logs}
             canWrite={canWrite}
+            monthLocked={monthLocked}
+            lockVersion={lockVersion}
+            approvedAt={approvedAt}
           />
         </>
       ) : null}
