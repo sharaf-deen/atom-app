@@ -4,6 +4,7 @@ export const revalidate = 0
 
 import { revalidatePath } from 'next/cache'
 import { NextResponse } from 'next/server'
+import { createClient } from '@supabase/supabase-js'
 import { canManageCoachTrainingPrograms } from '@/lib/rbac'
 import { getSessionUser } from '@/lib/session'
 import { createSupabaseServerActionClient } from '@/lib/supabaseServer'
@@ -22,6 +23,8 @@ type Body = {
   blockIds?: string[]
   techniqueIds?: string[]
   situationIds?: string[]
+  responsibleCoachUserId?: string
+  assistantCoachUserIds?: string[]
   status?: ProgramStatus
 }
 
@@ -32,6 +35,13 @@ function json(body: unknown, status = 200) {
   const response = NextResponse.json(body, { status })
   response.headers.set('Cache-Control', 'no-store')
   return response
+}
+
+function adminClient() {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL
+  const service = process.env.SUPABASE_SERVICE_ROLE_KEY
+  if (!url || !service) return null
+  return createClient(url, service, { auth: { persistSession: false, autoRefreshToken: false } })
 }
 
 function cleanText(value: unknown, max: number) {
@@ -116,12 +126,23 @@ export async function POST(request: Request) {
     }
 
     if (status === 'published') {
-      const { count, error: countError } = await supabase
-        .from('coach_training_program_items')
-        .select('id', { count: 'exact', head: true })
-        .eq('program_id', id)
-      if (countError) return json({ ok: false, error: 'ITEM_CHECK_FAILED', details: countError.message }, 500)
-      if (!count) return json({ ok: false, error: 'PROGRAM_EMPTY', details: 'Add at least one curriculum item before publishing.' }, 400)
+      const [itemCountResult, teamResult] = await Promise.all([
+        supabase
+          .from('coach_training_program_items')
+          .select('id', { count: 'exact', head: true })
+          .eq('program_id', id),
+        supabase
+          .from('coach_training_programs')
+          .select('responsible_coach_user_id')
+          .eq('id', id)
+          .maybeSingle(),
+      ])
+      if (itemCountResult.error) return json({ ok: false, error: 'ITEM_CHECK_FAILED', details: itemCountResult.error.message }, 500)
+      if (teamResult.error) return json({ ok: false, error: 'TEAM_CHECK_FAILED', details: teamResult.error.message }, 500)
+      if (!itemCountResult.count) return json({ ok: false, error: 'PROGRAM_EMPTY', details: 'Add at least one curriculum item before publishing.' }, 400)
+      if (!teamResult.data?.responsible_coach_user_id) {
+        return json({ ok: false, error: 'PROGRAM_RESPONSIBLE_COACH_REQUIRED', details: 'Choose the Responsible Coach before publishing the program.' }, 400)
+      }
     }
 
     const patch: Record<string, unknown> = {
@@ -156,10 +177,38 @@ export async function POST(request: Request) {
   const startDate = String(body.startDate ?? '').trim()
   const endDate = String(body.endDate ?? '').trim()
   const notes = cleanLongText(body.notes, 3000)
+  const responsibleCoachUserId = String(body.responsibleCoachUserId ?? '').trim()
+  const assistantCoachUserIds = uniqueUuidList(body.assistantCoachUserIds)
 
   if (title.length < 2) return json({ ok: false, error: 'INVALID_TITLE' }, 400)
   if (targetGroup.length < 2) return json({ ok: false, error: 'INVALID_TARGET_GROUP' }, 400)
   if (!isValidDateRange(startDate, endDate)) return json({ ok: false, error: 'INVALID_DATE_RANGE' }, 400)
+  if (!UUID_RE.test(responsibleCoachUserId)) {
+    return json({ ok: false, error: 'PROGRAM_RESPONSIBLE_COACH_REQUIRED', details: 'Choose one Responsible Coach for this program.' }, 400)
+  }
+  if (assistantCoachUserIds.length > 2) {
+    return json({ ok: false, error: 'TOO_MANY_PROGRAM_ASSISTANTS', details: 'A program can have up to two assistant coaches.' }, 400)
+  }
+  if (assistantCoachUserIds.includes(responsibleCoachUserId)) {
+    return json({ ok: false, error: 'DUPLICATE_PROGRAM_TEAM_MEMBER', details: 'The Responsible Coach cannot also be selected as an assistant.' }, 400)
+  }
+
+  const admin = adminClient()
+  if (!admin) return json({ ok: false, error: 'SERVER_ENV_MISSING' }, 500)
+  const teamUserIds = [responsibleCoachUserId, ...assistantCoachUserIds]
+  const { data: teamProfiles, error: teamError } = await admin
+    .from('profiles')
+    .select('user_id,role')
+    .in('user_id', teamUserIds)
+  if (teamError) return json({ ok: false, error: 'PROGRAM_TEAM_LOOKUP_FAILED', details: teamError.message }, 500)
+  const validTeamIds = new Set(
+    (teamProfiles ?? [])
+      .filter((row: any) => ['assistant_coach', 'coach', 'head_coach', 'super_admin'].includes(String(row.role ?? '')))
+      .map((row: any) => String(row.user_id)),
+  )
+  if (teamUserIds.some((userId) => !validTeamIds.has(userId))) {
+    return json({ ok: false, error: 'INVALID_PROGRAM_TEAM', details: 'Responsible and assistant coaches must be active coaching staff.' }, 400)
+  }
 
   const blockIds = uniqueUuidList(body.blockIds)
   const techniqueIds = uniqueUuidList(body.techniqueIds)
@@ -215,6 +264,9 @@ export async function POST(request: Request) {
     start_date: startDate,
     end_date: endDate,
     notes,
+    responsible_coach_user_id: responsibleCoachUserId,
+    assistant_coach_1_user_id: assistantCoachUserIds[0] ?? null,
+    assistant_coach_2_user_id: assistantCoachUserIds[1] ?? null,
     updated_by: me.id,
     updated_at: now,
   }
@@ -227,7 +279,13 @@ export async function POST(request: Request) {
       .eq('id', programId)
       .select('id')
       .maybeSingle()
-    if (error) return json({ ok: false, error: 'PROGRAM_UPDATE_FAILED', details: error.message }, 500)
+    if (error) {
+      const message = String(error.message || '')
+      if (message.includes('INVALID_PROGRAM_RESPONSIBLE_COACH')) return json({ ok: false, error: 'INVALID_PROGRAM_RESPONSIBLE_COACH', details: 'Choose an active coaching staff member as Responsible Coach.' }, 400)
+      if (message.includes('INVALID_PROGRAM_ASSISTANT_COACH')) return json({ ok: false, error: 'INVALID_PROGRAM_ASSISTANT_COACH', details: 'Every assistant must be an active coaching staff member.' }, 400)
+      if (message.includes('DUPLICATE_PROGRAM_TEAM_MEMBER')) return json({ ok: false, error: 'DUPLICATE_PROGRAM_TEAM_MEMBER', details: 'Each coach can appear only once in the program team.' }, 400)
+      return json({ ok: false, error: 'PROGRAM_UPDATE_FAILED', details: message }, 500)
+    }
     if (!data) return json({ ok: false, error: 'NOT_FOUND' }, 404)
   } else {
     const { data, error } = await supabase
@@ -235,7 +293,13 @@ export async function POST(request: Request) {
       .insert({ ...basePatch, status: 'draft', created_by: me.id })
       .select('id')
       .single()
-    if (error) return json({ ok: false, error: 'PROGRAM_CREATE_FAILED', details: error.message }, 500)
+    if (error) {
+      const message = String(error.message || '')
+      if (message.includes('INVALID_PROGRAM_RESPONSIBLE_COACH')) return json({ ok: false, error: 'INVALID_PROGRAM_RESPONSIBLE_COACH', details: 'Choose an active coaching staff member as Responsible Coach.' }, 400)
+      if (message.includes('INVALID_PROGRAM_ASSISTANT_COACH')) return json({ ok: false, error: 'INVALID_PROGRAM_ASSISTANT_COACH', details: 'Every assistant must be an active coaching staff member.' }, 400)
+      if (message.includes('DUPLICATE_PROGRAM_TEAM_MEMBER')) return json({ ok: false, error: 'DUPLICATE_PROGRAM_TEAM_MEMBER', details: 'Each coach can appear only once in the program team.' }, 400)
+      return json({ ok: false, error: 'PROGRAM_CREATE_FAILED', details: message }, 500)
+    }
     programId = String(data.id)
   }
 
@@ -291,5 +355,7 @@ export async function POST(request: Request) {
   if (insertError) return json({ ok: false, error: 'PROGRAM_ITEMS_SAVE_FAILED', details: insertError.message }, 500)
 
   revalidatePath('/coach-operations/programs')
+  revalidatePath('/coach-operations/training-logs')
+  revalidatePath('/schedule/sessions')
   return json({ ok: true, id: programId })
 }

@@ -154,6 +154,10 @@ export default function TrainingSessionLogsManager({
 
   const currentProgram = programs.find((program) => program.id === programId) ?? null
   const currentLinkedSession = linkedSessions.find((session) => session.id === trainingSessionId) ?? null
+  const selectableLinkedSessions = React.useMemo(
+    () => linkedSessions.filter((session) => canManage || session.assignment_role === 'primary_coach'),
+    [linkedSessions, canManage],
+  )
   const linkedSessionIdsInUse = React.useMemo(
     () => new Set(logs.filter((log) => log.training_session_id && log.id !== editingId).map((log) => log.training_session_id!)),
     [logs, editingId],
@@ -477,7 +481,7 @@ export default function TrainingSessionLogsManager({
                 {trainingSessionId && !currentLinkedSession ? (
                   <option value={trainingSessionId}>Linked Scheduled Session (historical / outside current window)</option>
                 ) : null}
-                {linkedSessions
+                {selectableLinkedSessions
                   .filter((session) => !linkedSessionIdsInUse.has(session.id) || session.id === trainingSessionId)
                   .map((session) => (
                     <option key={session.id} value={session.id}>
@@ -503,7 +507,7 @@ export default function TrainingSessionLogsManager({
               </div>
             ) : (
               <div className="text-xs text-[hsl(var(--muted))]">
-                Choose one of your assigned dated sessions when possible. Manual mode remains available for historical or exceptional logs.
+                Choose a dated session where you are the Responsible / Primary Coach. Assistant assignments remain visible in Schedule but do not edit the session technical log. Manual mode remains available for historical or exceptional logs.
               </div>
             )}
           </div>

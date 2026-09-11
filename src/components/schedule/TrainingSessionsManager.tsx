@@ -143,6 +143,8 @@ export default function TrainingSessionsManager({
   const [staffLoading, setStaffLoading] = React.useState(false)
   const [assignmentPending, setAssignmentPending] = React.useState(false)
   const [assignmentError, setAssignmentError] = React.useState<string | null>(null)
+  const assignmentSelfService = Boolean(assignmentSession) && !canManageAssignments && primaryUserId === viewerUserId
+  const assignmentAssistantLimit = assignmentSelfService ? 2 : 6
 
   const [programSession, setProgramSession] = React.useState<ScheduleTrainingSession | null>(null)
   const [programId, setProgramId] = React.useState('')
@@ -464,7 +466,7 @@ export default function TrainingSessionsManager({
     setAssistantUserIds((current) =>
       current.includes(userId)
         ? current.filter((id) => id !== userId)
-        : current.length >= 6
+        : current.length >= assignmentAssistantLimit
           ? current
           : [...current, userId],
     )
@@ -474,6 +476,14 @@ export default function TrainingSessionsManager({
     if (!assignmentSession) return
     if (!primaryUserId && assistantUserIds.length > 0) {
       setAssignmentError('Choose a Primary Coach before adding assistants.')
+      return
+    }
+    if (!canManageAssignments && primaryUserId !== viewerUserId) {
+      setAssignmentError('Only the Responsible / Primary Coach can manage assistants for this session.')
+      return
+    }
+    if (assistantUserIds.length > assignmentAssistantLimit) {
+      setAssignmentError(`Choose no more than ${assignmentAssistantLimit} assistants.`)
       return
     }
 
@@ -497,7 +507,7 @@ export default function TrainingSessionsManager({
       }
 
       setAssignmentSession(null)
-      setMessage('Coach assignments updated.')
+      setMessage(assignmentSelfService ? 'Session assistants updated.' : 'Coach assignments updated.')
       router.refresh()
     } catch (cause: any) {
       setAssignmentError(String(cause?.message || cause))
@@ -682,11 +692,15 @@ export default function TrainingSessionsManager({
                           </div>
                         </div>
 
-                        {canManageAssignments && row.status === 'scheduled' ? (
+                        {(canManageAssignments || primary?.staff_user_id === viewerUserId) && row.status === 'scheduled' ? (
                           <div className="mt-3">
                             <Button type="button" size="sm" variant="outline" onClick={() => openAssignments(row)}>
                               <Users className="h-4 w-4" />
-                              Manage coaches
+                              {primary?.staff_user_id === viewerUserId && !canManageAssignments
+                                ? 'Manage assistants'
+                                : programAssignment
+                                  ? 'Override coach team'
+                                  : 'Manage coaches'}
                             </Button>
                           </div>
                         ) : null}
@@ -1022,7 +1036,7 @@ export default function TrainingSessionsManager({
       <Modal
         open={Boolean(assignmentSession)}
         onClose={closeAssignments}
-        title={assignmentSession ? `Coach assignment · ${assignmentSession.name_snapshot}` : 'Coach assignment'}
+        title={assignmentSession ? `${assignmentSelfService ? 'Session assistants' : 'Coach assignment'} · ${assignmentSession.name_snapshot}` : 'Coach assignment'}
         className="max-h-[86vh] overflow-y-auto"
       >
         {assignmentSession ? (
@@ -1040,28 +1054,38 @@ export default function TrainingSessionsManager({
               <div className="text-sm text-[hsl(var(--muted))]">Loading coaching staff…</div>
             ) : (
               <>
-                <Select
-                  label="Primary Coach"
-                  value={primaryUserId}
-                  onChange={(event) => {
-                    const value = event.target.value
-                    setPrimaryUserId(value)
-                    setAssistantUserIds((current) => current.filter((id) => id !== value))
-                  }}
-                  disabled={assignmentPending}
-                >
-                  <option value="">Unassigned</option>
-                  {staffOptions.map((staff) => (
-                    <option key={staff.user_id} value={staff.user_id}>
-                      {staff.full_name} · {staffRoleLabel(staff.role)}
-                    </option>
-                  ))}
-                </Select>
+                {assignmentSelfService ? (
+                  <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-950">
+                    <div className="text-xs font-semibold uppercase tracking-wide">Responsible Coach</div>
+                    <div className="mt-0.5 font-semibold">
+                      {staffOptions.find((staff) => staff.user_id === primaryUserId)?.full_name ?? 'You'}
+                    </div>
+                    <div className="mt-1 text-xs">The Responsible Coach stays fixed. You can adjust only the assistants for this dated session.</div>
+                  </div>
+                ) : (
+                  <Select
+                    label="Primary Coach"
+                    value={primaryUserId}
+                    onChange={(event) => {
+                      const value = event.target.value
+                      setPrimaryUserId(value)
+                      setAssistantUserIds((current) => current.filter((id) => id !== value))
+                    }}
+                    disabled={assignmentPending}
+                  >
+                    <option value="">Unassigned</option>
+                    {staffOptions.map((staff) => (
+                      <option key={staff.user_id} value={staff.user_id}>
+                        {staff.full_name} · {staffRoleLabel(staff.role)}
+                      </option>
+                    ))}
+                  </Select>
+                )}
 
                 <div className="space-y-2">
                   <div>
                     <div className="text-sm font-medium">Assistant Coach(s)</div>
-                    <div className="text-xs text-[hsl(var(--muted))]">Optional · up to 6 staff members.</div>
+                    <div className="text-xs text-[hsl(var(--muted))]">Optional · up to {assignmentAssistantLimit} staff members.</div>
                   </div>
 
                   {!primaryUserId ? (
@@ -1082,7 +1106,7 @@ export default function TrainingSessionsManager({
                               <input
                                 type="checkbox"
                                 checked={checked}
-                                disabled={assignmentPending || (!checked && assistantUserIds.length >= 6)}
+                                disabled={assignmentPending || (!checked && assistantUserIds.length >= assignmentAssistantLimit)}
                                 onChange={() => toggleAssistant(staff.user_id)}
                               />
                               <span className="min-w-0 flex-1">
@@ -1115,12 +1139,14 @@ export default function TrainingSessionsManager({
                 loadingText="Saving…"
                 disabled={staffLoading || Boolean(assignmentError && !staffLoaded)}
               >
-                Save assignments
+                {assignmentSelfService ? 'Save assistants' : 'Save assignments'}
               </Button>
             </div>
 
             <div className="text-xs text-[hsl(var(--muted))]">
-              Clearing all assignments is allowed. Assignment changes keep an audit history in the database; previous rows are deactivated rather than physically deleted.
+              {assignmentSelfService
+                ? 'This is a one-session assistant override. The program Responsible Coach remains unchanged, and the session keeps its assignment history.'
+                : 'Manager changes are treated as a session override. Assignment history is preserved; previous rows are deactivated rather than physically deleted.'}
             </div>
           </div>
         ) : null}

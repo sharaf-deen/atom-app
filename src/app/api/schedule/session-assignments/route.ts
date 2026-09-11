@@ -5,7 +5,7 @@ export const revalidate = 0
 import { revalidatePath } from 'next/cache'
 import { NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
-import { canManageScheduleSessionCoachAssignments } from '@/lib/rbac'
+import { canAccessScheduleTrainingSessions, canManageScheduleSessionCoachAssignments } from '@/lib/rbac'
 import { getSessionUser } from '@/lib/session'
 import { createSupabaseServerActionClient } from '@/lib/supabaseServer'
 
@@ -28,9 +28,10 @@ function adminClient() {
 export async function GET() {
   const me = await getSessionUser()
   if (!me) return json({ ok: false, error: 'NOT_AUTHENTICATED' }, 401)
-  if (!canManageScheduleSessionCoachAssignments(me.role)) {
+  if (!canAccessScheduleTrainingSessions(me.role)) {
     return json({ ok: false, error: 'FORBIDDEN' }, 403)
   }
+  const canManage = canManageScheduleSessionCoachAssignments(me.role)
 
   const admin = adminClient()
   if (!admin) return json({ ok: false, error: 'SERVER_ENV_MISSING' }, 500)
@@ -57,8 +58,8 @@ export async function GET() {
     return {
       user_id: String(row.user_id),
       full_name: fullName,
-      email: row.email ?? null,
-      member_id: row.member_id ?? null,
+      email: canManage ? row.email ?? null : null,
+      member_id: canManage ? row.member_id ?? null : null,
       role: String(row.role ?? 'coach'),
     }
   })
@@ -69,9 +70,10 @@ export async function GET() {
 export async function POST(request: Request) {
   const me = await getSessionUser()
   if (!me) return json({ ok: false, error: 'NOT_AUTHENTICATED' }, 401)
-  if (!canManageScheduleSessionCoachAssignments(me.role)) {
+  if (!canAccessScheduleTrainingSessions(me.role)) {
     return json({ ok: false, error: 'FORBIDDEN' }, 403)
   }
+  const canManage = canManageScheduleSessionCoachAssignments(me.role)
 
   let body: any
   try {
@@ -101,14 +103,18 @@ export async function POST(request: Request) {
   if (primaryUserId && !UUID_RE.test(primaryUserId)) {
     return json({ ok: false, error: 'INVALID_PRIMARY_COACH' }, 400)
   }
-  if (assistantUserIds.length > 6 || assistantUserIds.some((id) => !UUID_RE.test(id))) {
-    return json({ ok: false, error: 'INVALID_ASSISTANTS' }, 400)
+  const assistantLimit = canManage ? 6 : 2
+  if (assistantUserIds.length > assistantLimit || assistantUserIds.some((id) => !UUID_RE.test(id))) {
+    return json({ ok: false, error: 'INVALID_ASSISTANTS', details: canManage ? 'Choose up to 6 assistants.' : 'Responsible Coach can choose up to 2 assistants.' }, 400)
   }
   if (primaryUserId && assistantUserIds.includes(primaryUserId)) {
     return json({ ok: false, error: 'DUPLICATE_STAFF_ASSIGNMENT' }, 400)
   }
   if (!primaryUserId && assistantUserIds.length > 0) {
     return json({ ok: false, error: 'PRIMARY_COACH_REQUIRED' }, 400)
+  }
+  if (!canManage && primaryUserId !== me.id) {
+    return json({ ok: false, error: 'RESPONSIBLE_COACH_ONLY', details: 'Only the Responsible / Primary Coach can change assistants for this session.' }, 403)
   }
 
   const supabase = createSupabaseServerActionClient()
@@ -119,11 +125,21 @@ export async function POST(request: Request) {
   })
 
   if (error) {
+    const message = String(error.message || '')
+    if (message.includes('FORBIDDEN') || error.code === '42501') {
+      return json({ ok: false, error: 'FORBIDDEN', details: 'Only Head Coach / Super Admin, or the Responsible Coach for this session, can update the coaching team.' }, 403)
+    }
+    if (message.includes('TOO_MANY_ASSISTANTS')) {
+      return json({ ok: false, error: 'TOO_MANY_ASSISTANTS', details: canManage ? 'Choose up to 6 assistants.' : 'Responsible Coach can choose up to 2 assistants.' }, 400)
+    }
+    if (message.includes('SESSION_LOG_COMPLETED')) {
+      return json({ ok: false, error: 'SESSION_LOG_COMPLETED', details: 'Assistants cannot be changed after this session Training Log is completed.' }, 409)
+    }
     return json(
       {
         ok: false,
         error: 'ASSIGNMENT_UPDATE_FAILED',
-        details: error.message,
+        details: message,
       },
       400,
     )

@@ -2,10 +2,11 @@
 
 import * as React from 'react'
 import { useRouter } from 'next/navigation'
-import { Archive, CalendarDays, ChevronDown, Pencil, Plus, RotateCcw, Send, Trash2 } from 'lucide-react'
+import { Archive, CalendarDays, ChevronDown, Pencil, Plus, RotateCcw, Send, Trash2, Users } from 'lucide-react'
 import Button from '@/components/ui/Button'
 import ConfirmActionModal from '@/components/ui/ConfirmActionModal'
 import Input from '@/components/ui/Input'
+import Select from '@/components/ui/Select'
 import Textarea from '@/components/ui/Textarea'
 
 type ProgramStatus = 'draft' | 'published' | 'archived'
@@ -18,6 +19,15 @@ type Program = {
   end_date: string
   notes: string | null
   status: ProgramStatus
+  responsible_coach_user_id: string | null
+  responsible_coach_name_snapshot: string | null
+  responsible_coach_role_snapshot: string | null
+  assistant_coach_1_user_id: string | null
+  assistant_coach_1_name_snapshot: string | null
+  assistant_coach_1_role_snapshot: string | null
+  assistant_coach_2_user_id: string | null
+  assistant_coach_2_name_snapshot: string | null
+  assistant_coach_2_role_snapshot: string | null
   published_at: string | null
   updated_at: string
 }
@@ -64,6 +74,23 @@ type CurriculumSituation = {
   coaching_response: string | null
   sort_order: number
   is_active: boolean
+}
+
+
+type StaffOption = {
+  user_id: string
+  full_name: string
+  email: string | null
+  member_id: string | null
+  role: 'assistant_coach' | 'coach' | 'head_coach' | 'super_admin'
+}
+
+function staffRoleLabel(value: StaffOption['role'] | string | null) {
+  if (!value) return 'Coach'
+  return String(value)
+    .split('_')
+    .map((part) => part ? part[0].toUpperCase() + part.slice(1) : part)
+    .join(' ')
 }
 
 type StatusTarget = {
@@ -140,6 +167,12 @@ export default function TrainingProgramsManager({
   const [startDate, setStartDate] = React.useState(todayIso())
   const [endDate, setEndDate] = React.useState(plusDays(todayIso(), 6))
   const [notes, setNotes] = React.useState('')
+  const [responsibleCoachUserId, setResponsibleCoachUserId] = React.useState('')
+  const [assistantCoachUserIds, setAssistantCoachUserIds] = React.useState<string[]>([])
+  const [staffOptions, setStaffOptions] = React.useState<StaffOption[]>([])
+  const [staffLoaded, setStaffLoaded] = React.useState(false)
+  const [staffLoading, setStaffLoading] = React.useState(false)
+  const [staffError, setStaffError] = React.useState<string | null>(null)
   const [selectedBlocks, setSelectedBlocks] = React.useState<Set<string>>(new Set())
   const [selectedTechniques, setSelectedTechniques] = React.useState<Set<string>>(new Set())
   const [selectedSituations, setSelectedSituations] = React.useState<Set<string>>(new Set())
@@ -160,6 +193,35 @@ export default function TrainingProgramsManager({
     setError(null)
   }
 
+  async function loadStaff() {
+    if (staffLoaded || staffLoading) return
+    setStaffLoading(true)
+    setStaffError(null)
+    try {
+      const response = await fetch('/api/schedule/session-assignments', { method: 'GET', cache: 'no-store' })
+      const data = await readJson(response)
+      if (!response.ok || data.ok !== true) {
+        throw new Error(data.details || data.error || 'Failed to load coaching staff.')
+      }
+      setStaffOptions((data.items ?? []) as StaffOption[])
+      setStaffLoaded(true)
+    } catch (cause: any) {
+      setStaffError(String(cause?.message || cause))
+    } finally {
+      setStaffLoading(false)
+    }
+  }
+
+  function toggleProgramAssistant(userId: string) {
+    setAssistantCoachUserIds((current) =>
+      current.includes(userId)
+        ? current.filter((id) => id !== userId)
+        : current.length >= 2
+          ? current
+          : [...current, userId],
+    )
+  }
+
   function openNew() {
     resetFeedback()
     setEditingId(null)
@@ -168,9 +230,12 @@ export default function TrainingProgramsManager({
     setStartDate(todayIso())
     setEndDate(plusDays(todayIso(), 6))
     setNotes('')
+    setResponsibleCoachUserId('')
+    setAssistantCoachUserIds([])
     setSelectedBlocks(new Set())
     setSelectedTechniques(new Set())
     setSelectedSituations(new Set())
+    void loadStaff()
     setFormOpen(true)
   }
 
@@ -182,6 +247,11 @@ export default function TrainingProgramsManager({
     setStartDate(program.start_date)
     setEndDate(program.end_date)
     setNotes(program.notes ?? '')
+    setResponsibleCoachUserId(program.responsible_coach_user_id ?? '')
+    setAssistantCoachUserIds(
+      [program.assistant_coach_1_user_id, program.assistant_coach_2_user_id].filter((id): id is string => Boolean(id)),
+    )
+    void loadStaff()
     const programItems = items.filter((item) => item.program_id === program.id)
     setSelectedBlocks(new Set(programItems.filter((item) => item.selected_level === 'block').map((item) => item.block_id)))
     setSelectedTechniques(
@@ -239,6 +309,9 @@ export default function TrainingProgramsManager({
     if (cleanTitle.length < 2) return setError('Enter a program title.')
     if (cleanGroup.length < 2) return setError('Enter the group or class this program is for.')
     if (!startDate || !endDate || endDate < startDate) return setError('Choose a valid program period.')
+    if (!responsibleCoachUserId) return setError('Choose the Responsible Coach for this program.')
+    if (assistantCoachUserIds.length > 2) return setError('Choose no more than two assistant coaches.')
+    if (assistantCoachUserIds.includes(responsibleCoachUserId)) return setError('The Responsible Coach cannot also be an assistant.')
     if (!selectedBlocks.size) return setError('Select at least one technical block.')
 
     setPending(true)
@@ -254,6 +327,8 @@ export default function TrainingProgramsManager({
           startDate,
           endDate,
           notes,
+          responsibleCoachUserId,
+          assistantCoachUserIds,
           blockIds: Array.from(selectedBlocks),
           techniqueIds: Array.from(selectedTechniques),
           situationIds: Array.from(selectedSituations),
@@ -422,6 +497,73 @@ export default function TrainingProgramsManager({
           </div>
           <Textarea label="Head Coach notes (optional)" value={notes} onChange={(event) => setNotes(event.target.value)} rows={3} placeholder="Focus on control before speed…" />
 
+          <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))]/30 p-4">
+            <div className="flex items-start gap-2">
+              <Users className="mt-0.5 h-4 w-4 text-[hsl(var(--muted))]" />
+              <div>
+                <h4 className="text-sm font-semibold">Program coaching team</h4>
+                <p className="mt-0.5 text-xs text-[hsl(var(--muted))]">
+                  Sessions linked to this program inherit this team automatically. The Responsible Coach can later adjust assistants for one specific session.
+                </p>
+              </div>
+            </div>
+
+            {staffLoading ? <div className="mt-3 text-sm text-[hsl(var(--muted))]">Loading coaching staff…</div> : null}
+            {staffError ? <div className="mt-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-800">{staffError}</div> : null}
+
+            <div className="mt-3 grid gap-4 md:grid-cols-2">
+              <Select
+                label="Responsible Coach"
+                value={responsibleCoachUserId}
+                onChange={(event) => {
+                  const value = event.target.value
+                  setResponsibleCoachUserId(value)
+                  setAssistantCoachUserIds((current) => current.filter((id) => id !== value))
+                }}
+                disabled={pending || staffLoading}
+              >
+                <option value="">Choose responsible coach</option>
+                {staffOptions.map((staff) => (
+                  <option key={staff.user_id} value={staff.user_id}>
+                    {staff.full_name} · {staffRoleLabel(staff.role)}
+                  </option>
+                ))}
+              </Select>
+
+              <div>
+                <div className="text-sm font-medium">Assistant Coach(es)</div>
+                <div className="mt-0.5 text-xs text-[hsl(var(--muted))]">Optional · maximum 2 assistants.</div>
+                {!responsibleCoachUserId ? (
+                  <div className="mt-2 rounded-xl border border-dashed border-[hsl(var(--border))] px-3 py-3 text-sm text-[hsl(var(--muted))]">
+                    Choose the Responsible Coach first.
+                  </div>
+                ) : (
+                  <div className="mt-2 max-h-48 space-y-1 overflow-y-auto rounded-xl border border-[hsl(var(--border))] bg-white p-2">
+                    {staffOptions
+                      .filter((staff) => staff.user_id !== responsibleCoachUserId)
+                      .map((staff) => {
+                        const checked = assistantCoachUserIds.includes(staff.user_id)
+                        return (
+                          <label key={staff.user_id} className="flex cursor-pointer items-center gap-3 rounded-lg px-2 py-2 hover:bg-black/5">
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              disabled={pending || (!checked && assistantCoachUserIds.length >= 2)}
+                              onChange={() => toggleProgramAssistant(staff.user_id)}
+                            />
+                            <span className="min-w-0 flex-1">
+                              <span className="block truncate text-sm font-medium">{staff.full_name}</span>
+                              <span className="block text-xs text-[hsl(var(--muted))]">{staffRoleLabel(staff.role)}</span>
+                            </span>
+                          </label>
+                        )
+                      })}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+
           <div>
             <div className="mb-2">
               <h4 className="text-sm font-semibold">Curriculum assignment</h4>
@@ -510,6 +652,12 @@ export default function TrainingProgramsManager({
                     </div>
                     <div className="mt-1 text-sm text-[hsl(var(--muted))]">{program.target_group} · {formatDate(program.start_date)} → {formatDate(program.end_date)}</div>
                     {program.notes ? <p className="mt-2 whitespace-pre-wrap text-sm text-black">{program.notes}</p> : null}
+                    <div className="mt-3 rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--muted)/0.04)] px-3 py-2 text-xs">
+                      <div><span className="font-semibold">Responsible:</span> {program.responsible_coach_name_snapshot ?? 'Not assigned'}</div>
+                      <div className="mt-1 text-[hsl(var(--muted))]">
+                        Assistants: {[program.assistant_coach_1_name_snapshot, program.assistant_coach_2_name_snapshot].filter(Boolean).join(', ') || 'None'}
+                      </div>
+                    </div>
                   </div>
                   <div className="flex flex-wrap gap-2">
                     <Button type="button" variant="outline" size="sm" onClick={() => toggleProgramDetails(program.id)}>
