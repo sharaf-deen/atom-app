@@ -1,0 +1,641 @@
+'use client'
+
+import * as React from 'react'
+import { useRouter } from 'next/navigation'
+
+type StaffProfile = {
+  user_id: string
+  email: string | null
+  first_name: string | null
+  last_name: string | null
+  role: string | null
+}
+
+type CompensationProfile = {
+  staff_user_id: string
+  fixed_monthly_base: number
+  weighted_hour_rate: number
+  bonus_eligible: boolean
+  updated_at: string | null
+}
+
+type Snapshot = {
+  id: string
+  month_start: string
+  status: string
+  eligible_revenue_scope: string
+  bonus_pool_percent: number
+  membership_revenue: number
+  membership_payment_count: number
+  paid_membership_refunds: number
+  paid_membership_refund_count: number
+  net_membership_revenue: number
+  eligible_operating_expenses: number
+  eligible_expense_count: number
+  excluded_payroll_expenses: number
+  excluded_payroll_expense_count: number
+  operating_result_before_payroll: number
+  guaranteed_payroll: number
+  available_result_after_guaranteed_payroll: number
+  performance_bonus_pool: number
+  calculated_payroll_total: number
+  staff_count: number
+  missing_hours_task_count: number
+  unconfigured_staff_count: number
+  calculated_at: string
+  source_data_as_of: string
+}
+
+type Calculation = {
+  id: string
+  snapshot_id: string
+  month_start: string
+  staff_user_id: string
+  staff_name_snapshot: string
+  staff_role_snapshot: string | null
+  compensation_configured: boolean
+  fixed_monthly_base: number
+  weighted_hour_rate: number
+  bonus_eligible: boolean
+  active_task_count: number
+  missing_hours_task_count: number
+  actual_hours: number
+  weighted_hours: number
+  task_compensation: number
+  guaranteed_compensation: number
+  bonus_weight_share_percent: number
+  performance_bonus: number
+  calculated_salary: number
+  updated_at: string
+}
+
+type ProfileDraft = {
+  fixedMonthlyBase: string
+  weightedHourRate: string
+  bonusEligible: boolean
+}
+
+type Props = {
+  monthStart: string
+  staffProfiles: StaffProfile[]
+  compensationProfiles: CompensationProfile[]
+  snapshot: Snapshot | null
+  calculations: Calculation[]
+  canWrite: boolean
+}
+
+function money(value: number) {
+  const amount = Number(value ?? 0)
+  try {
+    return new Intl.NumberFormat('en-EG', {
+      style: 'currency',
+      currency: 'EGP',
+      maximumFractionDigits: 2,
+    }).format(amount)
+  } catch {
+    return `${amount.toLocaleString('en-US', { maximumFractionDigits: 2 })} EGP`
+  }
+}
+
+function number(value: number) {
+  return Number(value ?? 0).toLocaleString('en-US', {
+    maximumFractionDigits: 2,
+  })
+}
+
+function staffName(profile: StaffProfile) {
+  const name = `${profile.first_name ?? ''} ${profile.last_name ?? ''}`.trim()
+  return name || profile.email || profile.user_id.slice(0, 8)
+}
+
+function roleLabel(role: string | null) {
+  switch (role) {
+    case 'super_admin':
+      return 'Super Admin'
+    case 'admin':
+      return 'Admin'
+    case 'reception':
+      return 'Reception'
+    case 'head_coach':
+      return 'Head Coach'
+    case 'assistant_coach':
+      return 'Assistant Coach'
+    case 'coach':
+      return 'Coach'
+    default:
+      return role || 'Staff'
+  }
+}
+
+function monthLabel(monthStart: string) {
+  const [year, month] = monthStart.slice(0, 7).split('-').map(Number)
+  const date = new Date(Date.UTC(year, month - 1, 1))
+  return new Intl.DateTimeFormat('en-US', {
+    timeZone: 'UTC',
+    month: 'long',
+    year: 'numeric',
+  }).format(date)
+}
+
+function dateTimeLabel(value: string) {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+  return new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Africa/Cairo',
+    dateStyle: 'medium',
+    timeStyle: 'short',
+  }).format(date)
+}
+
+export default function StaffPayrollCalculationManager({
+  monthStart,
+  staffProfiles,
+  compensationProfiles,
+  snapshot,
+  calculations,
+  canWrite,
+}: Props) {
+  const router = useRouter()
+  const compensationMap = React.useMemo(
+    () => new Map(compensationProfiles.map((profile) => [profile.staff_user_id, profile])),
+    [compensationProfiles]
+  )
+
+  const [profileDrafts, setProfileDrafts] = React.useState<Record<string, ProfileDraft>>(() => {
+    const result: Record<string, ProfileDraft> = {}
+    for (const staff of staffProfiles) {
+      const configured = compensationMap.get(staff.user_id)
+      result[staff.user_id] = {
+        fixedMonthlyBase: String(configured?.fixed_monthly_base ?? 0),
+        weightedHourRate: String(configured?.weighted_hour_rate ?? 0),
+        bonusEligible: configured?.bonus_eligible ?? true,
+      }
+    }
+    return result
+  })
+
+  const [bonusPoolPercent, setBonusPoolPercent] = React.useState(
+    String(snapshot?.bonus_pool_percent ?? 0)
+  )
+  const [pendingKey, setPendingKey] = React.useState<string | null>(null)
+  const [message, setMessage] = React.useState<string | null>(null)
+  const [error, setError] = React.useState<string | null>(null)
+
+  React.useEffect(() => {
+    const result: Record<string, ProfileDraft> = {}
+    for (const staff of staffProfiles) {
+      const configured = compensationMap.get(staff.user_id)
+      result[staff.user_id] = {
+        fixedMonthlyBase: String(configured?.fixed_monthly_base ?? 0),
+        weightedHourRate: String(configured?.weighted_hour_rate ?? 0),
+        bonusEligible: configured?.bonus_eligible ?? true,
+      }
+    }
+    setProfileDrafts(result)
+  }, [staffProfiles, compensationMap])
+
+  React.useEffect(() => {
+    setBonusPoolPercent(String(snapshot?.bonus_pool_percent ?? 0))
+  }, [snapshot?.bonus_pool_percent, monthStart])
+
+  function updateDraft(staffUserId: string, patch: Partial<ProfileDraft>) {
+    setProfileDrafts((current) => ({
+      ...current,
+      [staffUserId]: {
+        ...(current[staffUserId] ?? {
+          fixedMonthlyBase: '0',
+          weightedHourRate: '0',
+          bonusEligible: true,
+        }),
+        ...patch,
+      },
+    }))
+  }
+
+  async function post(body: any) {
+    const response = await fetch('/api/staff-payroll/calculation', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+    const payload = await response.json().catch(() => null)
+    if (!response.ok || !payload?.ok) {
+      throw new Error(payload?.details || payload?.error || `HTTP_${response.status}`)
+    }
+    return payload
+  }
+
+  async function saveProfile(staffUserId: string) {
+    const draft = profileDrafts[staffUserId]
+    if (!draft) return
+
+    setPendingKey(`profile:${staffUserId}`)
+    setMessage(null)
+    setError(null)
+
+    try {
+      await post({
+        action: 'save_compensation_profile',
+        staffUserId,
+        fixedMonthlyBase: draft.fixedMonthlyBase,
+        weightedHourRate: draft.weightedHourRate,
+        bonusEligible: draft.bonusEligible,
+      })
+      setMessage('Compensation settings saved. Recalculate the month to apply them to the draft.')
+      router.refresh()
+    } catch (caught: any) {
+      setError(caught?.message ?? 'Failed to save compensation settings.')
+    } finally {
+      setPendingKey(null)
+    }
+  }
+
+  async function refreshDraft() {
+    setPendingKey('refresh')
+    setMessage(null)
+    setError(null)
+
+    try {
+      await post({
+        action: 'refresh_draft',
+        monthStart,
+        bonusPoolPercent,
+      })
+      setMessage(`${monthLabel(monthStart)} payroll draft recalculated.`)
+      router.refresh()
+    } catch (caught: any) {
+      setError(caught?.message ?? 'Failed to recalculate payroll draft.')
+    } finally {
+      setPendingKey(null)
+    }
+  }
+
+  return (
+    <div className="space-y-5">
+      {!canWrite ? (
+        <div className="rounded-2xl border border-sky-200 bg-sky-50 p-3 text-sm text-sky-950">
+          <div className="font-semibold">Read-only access</div>
+          <div className="mt-1 text-xs">
+            Admin can review compensation settings and monthly calculations. Only Super Admin can change rates or recalculate a payroll draft.
+          </div>
+        </div>
+      ) : null}
+
+      {message ? (
+        <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-3 text-sm font-medium text-emerald-800">
+          {message}
+        </div>
+      ) : null}
+
+      {error ? (
+        <div className="rounded-2xl border border-rose-200 bg-rose-50 p-3 text-sm font-medium text-rose-800">
+          {error}
+        </div>
+      ) : null}
+
+      <section className="rounded-3xl border border-black/10 bg-white p-4 sm:p-5">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <div className="text-xs font-semibold uppercase tracking-[0.12em] text-[hsl(var(--muted))]">
+              Compensation settings
+            </div>
+            <h2 className="mt-1 text-xl font-bold">Staff rates</h2>
+            <p className="mt-1 max-w-3xl text-sm text-[hsl(var(--muted))]">
+              Fixed monthly base is optional. Task compensation uses weighted hours × the staff member&apos;s weighted-hour rate.
+              These are current settings; the monthly calculation snapshots their values when recalculated.
+            </p>
+          </div>
+        </div>
+
+        <div className="mt-4 grid gap-3 lg:grid-cols-2">
+          {staffProfiles.map((staff) => {
+            const configured = compensationMap.get(staff.user_id)
+            const draft = profileDrafts[staff.user_id] ?? {
+              fixedMonthlyBase: '0',
+              weightedHourRate: '0',
+              bonusEligible: true,
+            }
+            const pending = pendingKey === `profile:${staff.user_id}`
+
+            return (
+              <div key={staff.user_id} className="rounded-2xl border border-black/10 p-4">
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <div>
+                    <div className="font-semibold">{staffName(staff)}</div>
+                    <div className="text-xs text-[hsl(var(--muted))]">{roleLabel(staff.role)}</div>
+                  </div>
+                  <span
+                    className={
+                      'rounded-full px-2.5 py-1 text-[11px] font-semibold ' +
+                      (configured
+                        ? 'bg-emerald-50 text-emerald-800'
+                        : 'bg-amber-50 text-amber-900')
+                    }
+                  >
+                    {configured ? 'Configured' : 'Needs configuration'}
+                  </span>
+                </div>
+
+                <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                  <label className="text-xs font-medium">
+                    Fixed monthly base (EGP)
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={draft.fixedMonthlyBase}
+                      disabled={!canWrite || pending}
+                      onChange={(event) =>
+                        updateDraft(staff.user_id, { fixedMonthlyBase: event.target.value })
+                      }
+                      className="mt-1 w-full rounded-xl border border-black/10 bg-white px-3 py-2 text-sm disabled:bg-black/[0.03]"
+                    />
+                  </label>
+
+                  <label className="text-xs font-medium">
+                    Weighted-hour rate (EGP)
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={draft.weightedHourRate}
+                      disabled={!canWrite || pending}
+                      onChange={(event) =>
+                        updateDraft(staff.user_id, { weightedHourRate: event.target.value })
+                      }
+                      className="mt-1 w-full rounded-xl border border-black/10 bg-white px-3 py-2 text-sm disabled:bg-black/[0.03]"
+                    />
+                  </label>
+                </div>
+
+                <label className="mt-3 flex items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={draft.bonusEligible}
+                    disabled={!canWrite || pending}
+                    onChange={(event) =>
+                      updateDraft(staff.user_id, { bonusEligible: event.target.checked })
+                    }
+                  />
+                  Eligible for performance bonus distribution
+                </label>
+
+                {canWrite ? (
+                  <div className="mt-3 flex justify-end">
+                    <button
+                      type="button"
+                      onClick={() => saveProfile(staff.user_id)}
+                      disabled={Boolean(pendingKey)}
+                      className="rounded-xl bg-black px-3 py-2 text-xs font-semibold text-white disabled:opacity-50"
+                    >
+                      {pending ? 'Saving…' : 'Save settings'}
+                    </button>
+                  </div>
+                ) : null}
+              </div>
+            )
+          })}
+        </div>
+      </section>
+
+      <section className="rounded-3xl border border-black/10 bg-white p-4 sm:p-5">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+          <div>
+            <div className="text-xs font-semibold uppercase tracking-[0.12em] text-[hsl(var(--muted))]">
+              {monthLabel(monthStart)}
+            </div>
+            <h2 className="mt-1 text-xl font-bold">Draft calculation</h2>
+            <p className="mt-1 max-w-3xl text-sm text-[hsl(var(--muted))]">
+              Membership revenue − paid membership refunds − eligible operating expenses = operating result before payroll.
+              Guaranteed payroll is then deducted before any performance bonus is created.
+            </p>
+          </div>
+
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
+            <label className="text-xs font-medium">
+              Performance bonus pool
+              <div className="mt-1 flex items-center gap-2">
+                <input
+                  type="number"
+                  min="0"
+                  max="100"
+                  step="0.01"
+                  value={bonusPoolPercent}
+                  disabled={!canWrite || pendingKey === 'refresh'}
+                  onChange={(event) => setBonusPoolPercent(event.target.value)}
+                  className="w-28 rounded-xl border border-black/10 bg-white px-3 py-2 text-sm disabled:bg-black/[0.03]"
+                />
+                <span className="text-sm font-semibold">%</span>
+              </div>
+            </label>
+
+            {canWrite ? (
+              <button
+                type="button"
+                onClick={refreshDraft}
+                disabled={Boolean(pendingKey)}
+                className="rounded-xl bg-black px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+              >
+                {pendingKey === 'refresh'
+                  ? 'Calculating…'
+                  : snapshot
+                    ? 'Recalculate draft'
+                    : 'Calculate draft'}
+              </button>
+            ) : null}
+          </div>
+        </div>
+
+        <div className="mt-3 rounded-2xl border border-violet-200 bg-violet-50 p-3 text-xs text-violet-950">
+          <strong>Revenue scope:</strong> membership/subscription payments only. External Income, Store revenue and Funding are not included.
+          Payroll expense categories already recorded in Expenses (Coaches, Reception, Assistants, Bonuses) are shown separately and excluded from operating expenses to avoid double counting.
+        </div>
+      </section>
+
+      {!snapshot ? (
+        <section className="rounded-3xl border border-dashed border-black/15 bg-white p-8 text-center">
+          <div className="text-lg font-semibold">No payroll draft calculated yet</div>
+          <div className="mt-2 text-sm text-[hsl(var(--muted))]">
+            Configure staff rates, choose the bonus percentage and calculate the {monthLabel(monthStart)} draft.
+          </div>
+        </section>
+      ) : (
+        <>
+          <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4">
+              <div className="text-xs text-emerald-900/70">Membership revenue</div>
+              <div className="mt-1 text-xl font-bold text-emerald-950">{money(snapshot.membership_revenue)}</div>
+              <div className="mt-1 text-xs text-emerald-900/70">{snapshot.membership_payment_count} payments</div>
+            </div>
+
+            <div className="rounded-2xl border border-rose-200 bg-rose-50 p-4">
+              <div className="text-xs text-rose-900/70">Paid membership refunds</div>
+              <div className="mt-1 text-xl font-bold text-rose-950">− {money(snapshot.paid_membership_refunds)}</div>
+              <div className="mt-1 text-xs text-rose-900/70">{snapshot.paid_membership_refund_count} refunds</div>
+            </div>
+
+            <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4">
+              <div className="text-xs text-amber-900/70">Eligible operating expenses</div>
+              <div className="mt-1 text-xl font-bold text-amber-950">− {money(snapshot.eligible_operating_expenses)}</div>
+              <div className="mt-1 text-xs text-amber-900/70">{snapshot.eligible_expense_count} expense rows</div>
+            </div>
+
+            <div className="rounded-2xl border border-black/10 bg-white p-4">
+              <div className="text-xs text-[hsl(var(--muted))]">Operating result before payroll</div>
+              <div className="mt-1 text-xl font-bold">{money(snapshot.operating_result_before_payroll)}</div>
+              <div className="mt-1 text-xs text-[hsl(var(--muted))]">Net membership revenue: {money(snapshot.net_membership_revenue)}</div>
+            </div>
+          </section>
+
+          <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <div className="rounded-2xl border border-black/10 bg-white p-4">
+              <div className="text-xs text-[hsl(var(--muted))]">Guaranteed payroll</div>
+              <div className="mt-1 text-xl font-bold">{money(snapshot.guaranteed_payroll)}</div>
+              <div className="mt-1 text-xs text-[hsl(var(--muted))]">Fixed base + task compensation</div>
+            </div>
+
+            <div className="rounded-2xl border border-black/10 bg-white p-4">
+              <div className="text-xs text-[hsl(var(--muted))]">Result after guaranteed payroll</div>
+              <div className="mt-1 text-xl font-bold">{money(snapshot.available_result_after_guaranteed_payroll)}</div>
+            </div>
+
+            <div className="rounded-2xl border border-violet-200 bg-violet-50 p-4">
+              <div className="text-xs text-violet-900/70">Performance bonus pool</div>
+              <div className="mt-1 text-xl font-bold text-violet-950">{money(snapshot.performance_bonus_pool)}</div>
+              <div className="mt-1 text-xs text-violet-900/70">{number(snapshot.bonus_pool_percent)}% of positive available result</div>
+            </div>
+
+            <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4">
+              <div className="text-xs text-emerald-900/70">Calculated payroll total</div>
+              <div className="mt-1 text-xl font-bold text-emerald-950">{money(snapshot.calculated_payroll_total)}</div>
+              <div className="mt-1 text-xs text-emerald-900/70">Draft only · not approved / not paid</div>
+            </div>
+          </section>
+
+          <section className="rounded-2xl border border-black/10 bg-white p-4">
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              <div>
+                <div className="text-xs text-[hsl(var(--muted))]">Payroll-type expenses excluded</div>
+                <div className="mt-1 font-semibold">{money(snapshot.excluded_payroll_expenses)}</div>
+                <div className="text-xs text-[hsl(var(--muted))]">{snapshot.excluded_payroll_expense_count} rows</div>
+              </div>
+              <div>
+                <div className="text-xs text-[hsl(var(--muted))]">Staff in draft</div>
+                <div className="mt-1 font-semibold">{snapshot.staff_count}</div>
+              </div>
+              <div>
+                <div className="text-xs text-[hsl(var(--muted))]">Tasks missing actual hours</div>
+                <div className={snapshot.missing_hours_task_count ? 'mt-1 font-semibold text-amber-700' : 'mt-1 font-semibold text-emerald-700'}>
+                  {snapshot.missing_hours_task_count}
+                </div>
+              </div>
+              <div>
+                <div className="text-xs text-[hsl(var(--muted))]">Staff without rate configuration</div>
+                <div className={snapshot.unconfigured_staff_count ? 'mt-1 font-semibold text-amber-700' : 'mt-1 font-semibold text-emerald-700'}>
+                  {snapshot.unconfigured_staff_count}
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-3 border-t border-black/10 pt-3 text-xs text-[hsl(var(--muted))]">
+              Recalculated {dateTimeLabel(snapshot.calculated_at)} · source data as of {dateTimeLabel(snapshot.source_data_as_of)}.
+            </div>
+          </section>
+
+          {(snapshot.missing_hours_task_count > 0 || snapshot.unconfigured_staff_count > 0) ? (
+            <div className="rounded-2xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950">
+              <div className="font-semibold">Draft requires attention</div>
+              <div className="mt-1 text-xs">
+                Tasks without actual hours remain visible but contribute 0 weighted hours, and staff without compensation settings are calculated at 0 EGP rates. Complete these items and recalculate before a future payroll approval lot.
+              </div>
+            </div>
+          ) : null}
+
+          <section className="overflow-hidden rounded-3xl border border-black/10 bg-white">
+            <div className="border-b border-black/10 p-4 sm:p-5">
+              <div className="text-xs font-semibold uppercase tracking-[0.12em] text-[hsl(var(--muted))]">Staff calculation</div>
+              <h2 className="mt-1 text-xl font-bold">Salary preview</h2>
+              <p className="mt-1 text-sm text-[hsl(var(--muted))]">
+                Performance bonus is distributed by each eligible staff member&apos;s share of weighted hours.
+              </p>
+            </div>
+
+            {calculations.length ? (
+              <div className="divide-y divide-black/10">
+                {calculations.map((row) => (
+                  <article key={row.id} className="p-4 sm:p-5">
+                    <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                      <div>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <div className="font-semibold">{row.staff_name_snapshot}</div>
+                          <span className="rounded-full bg-black/[0.04] px-2 py-1 text-[11px] font-medium">
+                            {roleLabel(row.staff_role_snapshot)}
+                          </span>
+                          {!row.compensation_configured ? (
+                            <span className="rounded-full bg-amber-50 px-2 py-1 text-[11px] font-semibold text-amber-900">
+                              Rate not configured
+                            </span>
+                          ) : null}
+                          {row.missing_hours_task_count > 0 ? (
+                            <span className="rounded-full bg-amber-50 px-2 py-1 text-[11px] font-semibold text-amber-900">
+                              {row.missing_hours_task_count} missing-hours task{row.missing_hours_task_count === 1 ? '' : 's'}
+                            </span>
+                          ) : null}
+                        </div>
+                        <div className="mt-1 text-xs text-[hsl(var(--muted))]">
+                          {row.active_task_count} tasks · {number(row.actual_hours)} actual h · {number(row.weighted_hours)} weighted h
+                        </div>
+                      </div>
+
+                      <div className="text-left lg:text-right">
+                        <div className="text-xs text-[hsl(var(--muted))]">Calculated salary</div>
+                        <div className="text-2xl font-bold">{money(row.calculated_salary)}</div>
+                      </div>
+                    </div>
+
+                    <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+                      <div className="rounded-xl bg-black/[0.025] p-3">
+                        <div className="text-[11px] text-[hsl(var(--muted))]">Fixed base</div>
+                        <div className="mt-1 text-sm font-semibold">{money(row.fixed_monthly_base)}</div>
+                      </div>
+                      <div className="rounded-xl bg-black/[0.025] p-3">
+                        <div className="text-[11px] text-[hsl(var(--muted))]">Weighted-hour rate</div>
+                        <div className="mt-1 text-sm font-semibold">{money(row.weighted_hour_rate)} / h</div>
+                      </div>
+                      <div className="rounded-xl bg-black/[0.025] p-3">
+                        <div className="text-[11px] text-[hsl(var(--muted))]">Task compensation</div>
+                        <div className="mt-1 text-sm font-semibold">{money(row.task_compensation)}</div>
+                      </div>
+                      <div className="rounded-xl bg-violet-50 p-3">
+                        <div className="text-[11px] text-violet-900/70">Performance bonus</div>
+                        <div className="mt-1 text-sm font-semibold text-violet-950">{money(row.performance_bonus)}</div>
+                        <div className="mt-0.5 text-[10px] text-violet-900/70">
+                          {row.bonus_eligible ? `${number(row.bonus_weight_share_percent)}% share` : 'Not bonus eligible'}
+                        </div>
+                      </div>
+                      <div className="rounded-xl bg-emerald-50 p-3">
+                        <div className="text-[11px] text-emerald-900/70">Total draft salary</div>
+                        <div className="mt-1 text-sm font-bold text-emerald-950">{money(row.calculated_salary)}</div>
+                      </div>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            ) : (
+              <div className="p-6 text-center text-sm text-[hsl(var(--muted))]">
+                No staff calculations were generated for this month.
+              </div>
+            )}
+          </section>
+
+          <div className="rounded-2xl border border-sky-200 bg-sky-50 p-3 text-sm text-sky-950">
+            <div className="font-semibold">1C remains a draft engine.</div>
+            <div className="mt-1 text-xs">
+              Recalculation can change these values whenever membership payments, refunds, expenses, monthly tasks or staff rates change. Payroll approval/locking and salary payment tracking are intentionally deferred to later lots.
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
