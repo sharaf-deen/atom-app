@@ -1,4 +1,4 @@
-// Staff Payroll 1C — Financial Snapshot & Salary Calculation Engine
+// Staff Payroll 1D — Financial Snapshot, Salary Calculation & Approval
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
@@ -105,7 +105,13 @@ export default async function StaffPayrollCalculationPage({
   const selectedMonth = normalizeClosedMonth(getOne(searchParams?.month))
   const monthStart = `${selectedMonth}-01`
 
-  const [staffResult, compensationResult, snapshotResult] = await Promise.all([
+  const [
+    staffResult,
+    compensationResult,
+    snapshotResult,
+    approvalVersionsResult,
+    reopenEventsResult,
+  ] = await Promise.all([
     admin
       .from('profiles')
       .select('user_id,email,first_name,last_name,role')
@@ -119,22 +125,41 @@ export default async function StaffPayrollCalculationPage({
     admin
       .from('staff_payroll_monthly_snapshots')
       .select(
-        'id,month_start,status,eligible_revenue_scope,bonus_pool_percent,membership_revenue,membership_payment_count,paid_membership_refunds,paid_membership_refund_count,net_membership_revenue,eligible_operating_expenses,eligible_expense_count,excluded_payroll_expenses,excluded_payroll_expense_count,operating_result_before_payroll,guaranteed_payroll,available_result_after_guaranteed_payroll,performance_bonus_pool,calculated_payroll_total,staff_count,missing_hours_task_count,unconfigured_staff_count,calculated_at,source_data_as_of'
+        'id,month_start,status,eligible_revenue_scope,bonus_pool_percent,membership_revenue,membership_payment_count,paid_membership_refunds,paid_membership_refund_count,net_membership_revenue,eligible_operating_expenses,eligible_expense_count,excluded_payroll_expenses,excluded_payroll_expense_count,operating_result_before_payroll,guaranteed_payroll,available_result_after_guaranteed_payroll,performance_bonus_pool,calculated_payroll_total,staff_count,missing_hours_task_count,unconfigured_staff_count,calculated_at,source_data_as_of,approval_version_no,approved_at,approved_by,last_reopened_at,last_reopened_by,last_reopen_reason,financial_source_hash,task_source_hash,compensation_source_hash,staff_source_hash,draft_snapshot_hash,draft_calculation_hash'
       )
       .eq('month_start', monthStart)
       .maybeSingle(),
+    admin
+      .from('staff_payroll_approval_versions')
+      .select(
+        'id,snapshot_id,month_start,version_no,approved_at,approved_by,approved_by_name_snapshot,approval_note,calculated_payroll_total,staff_count'
+      )
+      .eq('month_start', monthStart)
+      .order('version_no', { ascending: false }),
+    admin
+      .from('staff_payroll_reopen_events')
+      .select(
+        'id,snapshot_id,approval_version_id,month_start,reopened_at,reopened_by,reopened_by_name_snapshot,reason'
+      )
+      .eq('month_start', monthStart)
+      .order('reopened_at', { ascending: false }),
   ])
 
   const loadError =
     staffResult.error?.message ||
     compensationResult.error?.message ||
     snapshotResult.error?.message ||
+    approvalVersionsResult.error?.message ||
+    reopenEventsResult.error?.message ||
     ''
 
   const migrationMissing =
     loadError.includes('staff_compensation_profiles') ||
     loadError.includes('staff_payroll_monthly_snapshots') ||
     loadError.includes('staff_payroll_monthly_calculations') ||
+    loadError.includes('staff_payroll_approval_versions') ||
+    loadError.includes('staff_payroll_reopen_events') ||
+    loadError.includes('financial_source_hash') ||
     loadError.toLowerCase().includes('does not exist')
 
   let calculationsResult: any = { data: [], error: null }
@@ -222,6 +247,30 @@ export default async function StaffPayrollCalculationPage({
         ),
         calculated_at: String(snapshotResult.data.calculated_at),
         source_data_as_of: String(snapshotResult.data.source_data_as_of),
+        approval_version_no: Number(snapshotResult.data.approval_version_no ?? 0),
+        approved_at: snapshotResult.data.approved_at
+          ? String(snapshotResult.data.approved_at)
+          : null,
+        approved_by: snapshotResult.data.approved_by
+          ? String(snapshotResult.data.approved_by)
+          : null,
+        last_reopened_at: snapshotResult.data.last_reopened_at
+          ? String(snapshotResult.data.last_reopened_at)
+          : null,
+        last_reopened_by: snapshotResult.data.last_reopened_by
+          ? String(snapshotResult.data.last_reopened_by)
+          : null,
+        last_reopen_reason: snapshotResult.data.last_reopen_reason
+          ? String(snapshotResult.data.last_reopen_reason)
+          : null,
+        integrity_ready: Boolean(
+          snapshotResult.data.financial_source_hash &&
+          snapshotResult.data.task_source_hash &&
+          snapshotResult.data.compensation_source_hash &&
+          snapshotResult.data.staff_source_hash &&
+          snapshotResult.data.draft_snapshot_hash &&
+          snapshotResult.data.draft_calculation_hash
+        ),
       }
     : null
 
@@ -250,6 +299,32 @@ export default async function StaffPayrollCalculationPage({
     updated_at: String(row.updated_at),
   }))
 
+  const approvalVersions = ((approvalVersionsResult.data ?? []) as any[]).map(
+    (row) => ({
+      id: String(row.id),
+      snapshot_id: String(row.snapshot_id),
+      month_start: String(row.month_start),
+      version_no: Number(row.version_no ?? 0),
+      approved_at: String(row.approved_at),
+      approved_by: row.approved_by ? String(row.approved_by) : null,
+      approved_by_name_snapshot: String(row.approved_by_name_snapshot ?? 'Super Admin'),
+      approval_note: row.approval_note ? String(row.approval_note) : null,
+      calculated_payroll_total: Number(row.calculated_payroll_total ?? 0),
+      staff_count: Number(row.staff_count ?? 0),
+    })
+  )
+
+  const reopenEvents = ((reopenEventsResult.data ?? []) as any[]).map((row) => ({
+    id: String(row.id),
+    snapshot_id: String(row.snapshot_id),
+    approval_version_id: String(row.approval_version_id),
+    month_start: String(row.month_start),
+    reopened_at: String(row.reopened_at),
+    reopened_by: row.reopened_by ? String(row.reopened_by) : null,
+    reopened_by_name_snapshot: String(row.reopened_by_name_snapshot ?? 'Super Admin'),
+    reason: String(row.reason ?? ''),
+  }))
+
   return (
     <main className="mx-auto max-w-6xl space-y-5 p-4 sm:p-6">
       <section className="rounded-3xl border border-black/10 bg-gradient-to-br from-white to-black/[0.02] p-5 sm:p-6">
@@ -257,7 +332,7 @@ export default async function StaffPayrollCalculationPage({
           <div className="max-w-3xl">
             <div className="flex flex-wrap items-center gap-2">
               <span className="rounded-full bg-black px-3 py-1 text-xs font-semibold text-white">
-                Staff Payroll 1C
+                Staff Payroll 1D
               </span>
               <span
                 className={
@@ -272,15 +347,15 @@ export default async function StaffPayrollCalculationPage({
             </div>
 
             <h1 className="mt-3 text-2xl font-bold sm:text-3xl">
-              Financial Snapshot & Salary Calculation
+              Financial Snapshot, Salary Calculation & Approval
             </h1>
             <p className="mt-2 text-sm text-[hsl(var(--muted))] sm:text-base">
               Calculate a monthly payroll draft from membership payments, paid membership refunds,
-              operating expenses and the weighted work recorded in Monthly Tasks.
+              operating expenses and weighted work, then approve and lock the month when the draft is ready.
             </p>
             <p className="mt-2 text-xs text-[hsl(var(--muted))]">
               Eligible revenue is membership/subscription payments only. External Income, Store revenue,
-              Funding and other revenue streams are excluded from Staff Payroll 1C.
+              Funding and other revenue streams remain excluded. Approved months are locked and versioned.
             </p>
           </div>
         </div>
@@ -313,9 +388,9 @@ export default async function StaffPayrollCalculationPage({
 
       {migrationMissing ? (
         <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950">
-          <div className="font-semibold">Staff Payroll 1C migration required</div>
+          <div className="font-semibold">Staff Payroll 1D migration required</div>
           <div className="mt-1 text-xs">
-            Apply the Financial Snapshot & Salary Calculation migration, then refresh this page.
+            Apply the Financial Snapshot, Salary Calculation & Approval migration, then refresh this page.
           </div>
         </div>
       ) : null}
@@ -333,6 +408,8 @@ export default async function StaffPayrollCalculationPage({
           compensationProfiles={compensationProfiles}
           snapshot={snapshot}
           calculations={calculations}
+          approvalVersions={approvalVersions}
+          reopenEvents={reopenEvents}
           canWrite={canWrite}
         />
       ) : null}

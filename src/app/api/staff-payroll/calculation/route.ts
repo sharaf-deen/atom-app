@@ -8,6 +8,11 @@ import { revalidatePath } from 'next/cache'
 import { createClient } from '@supabase/supabase-js'
 import { cairoDayBoundsUTC } from '@/lib/cairoTime'
 import { createSupabaseServerActionClient } from '@/lib/supabaseServer'
+import {
+  buildPayrollCalculationsHash,
+  buildPayrollSnapshotHash,
+  buildPayrollSourceHashes,
+} from '@/lib/staffPayrollIntegrity'
 
 const STAFF_ROLES = [
   'assistant_coach',
@@ -154,6 +159,10 @@ function looksLikeMigrationMissing(message: string) {
     lower.includes('staff_compensation_profiles') ||
     lower.includes('staff_payroll_monthly_snapshots') ||
     lower.includes('staff_payroll_monthly_calculations') ||
+    lower.includes('financial_source_hash') ||
+    lower.includes('task_source_hash') ||
+    lower.includes('draft_snapshot_hash') ||
+    lower.includes('draft_calculation_hash') ||
     lower.includes('does not exist')
   )
 }
@@ -475,7 +484,7 @@ export async function POST(req: Request) {
         admin
           .from('staff_monthly_task_logs')
           .select(
-            'id,staff_user_id,task_id,actual_hours,weighted_hours,voided_at'
+            'id,staff_user_id,task_id,task_name_snapshot,area_name_snapshot,unit_snapshot,importance_level_snapshot,importance_multiplier_snapshot,work_quantity,actual_hours,weighted_hours,note,updated_at,voided_at'
           )
           .eq('month_start', monthStart)
           .is('voided_at', null)
@@ -483,7 +492,7 @@ export async function POST(req: Request) {
         admin
           .from('staff_compensation_profiles')
           .select(
-            'staff_user_id,fixed_monthly_base,weighted_hour_rate,bonus_eligible'
+            'staff_user_id,fixed_monthly_base,weighted_hour_rate,bonus_eligible,updated_at'
           )
           .limit(10000),
         admin
@@ -520,6 +529,15 @@ export async function POST(req: Request) {
       const logs = (logsResult.data ?? []) as any[]
       const compensationProfiles = (compensationResult.data ?? []) as any[]
       const staffProfiles = (staffResult.data ?? []) as any[]
+
+      const sourceHashes = buildPayrollSourceHashes({
+        payments,
+        refunds,
+        expenses,
+        logs,
+        compensationProfiles,
+        staffProfiles,
+      })
 
       const membershipRevenue = round2(
         payments.reduce((sum, row) => sum + Number(row.amount ?? 0), 0)
@@ -716,8 +734,14 @@ export async function POST(req: Request) {
         calculated_at: now,
         calculated_by: actor.actorId,
         source_data_as_of: now,
+        financial_source_hash: sourceHashes.financial_source_hash,
+        task_source_hash: sourceHashes.task_source_hash,
+        compensation_source_hash: sourceHashes.compensation_source_hash,
+        staff_source_hash: sourceHashes.staff_source_hash,
         updated_by: actor.actorId,
       }
+
+      const draftSnapshotHash = buildPayrollSnapshotHash(snapshotPayload)
 
       const { data: snapshot, error: snapshotSaveError } = await admin
         .from('staff_payroll_monthly_snapshots')
@@ -771,6 +795,30 @@ export async function POST(req: Request) {
         }
       }
 
+      const draftCalculationHash = buildPayrollCalculationsHash(draftRows)
+      const { error: integrityUpdateError } = await admin
+        .from('staff_payroll_monthly_snapshots')
+        .update({
+          draft_snapshot_hash: draftSnapshotHash,
+          draft_calculation_hash: draftCalculationHash,
+          updated_by: actor.actorId,
+        })
+        .eq('id', snapshot.id)
+        .eq('status', 'draft')
+
+      if (integrityUpdateError) {
+        const message = integrityUpdateError.message ?? String(integrityUpdateError)
+        return json(500, {
+          ok: false,
+          error: looksLikeMigrationMissing(message)
+            ? 'MIGRATION_REQUIRED'
+            : 'DRAFT_INTEGRITY_SAVE_FAILED',
+          details: looksLikeMigrationMissing(message)
+            ? 'Apply Staff Payroll 1D migration, then recalculate the payroll draft.'
+            : message,
+        })
+      }
+
       await safeAudit(admin, {
         actor_user_id: actor.actorId,
         target_user_id: null,
@@ -802,6 +850,11 @@ export async function POST(req: Request) {
           staff_count: draftRows.length,
           missing_hours_task_count: missingHoursTaskCount,
           unconfigured_staff_count: unconfiguredStaffCount,
+          source_integrity: {
+            ...sourceHashes,
+            draft_snapshot_hash: draftSnapshotHash,
+            draft_calculation_hash: draftCalculationHash,
+          },
           note_scope:
             'Draft calculation only. No payroll approval, salary payment or payslip was created.',
         },

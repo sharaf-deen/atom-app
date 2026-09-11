@@ -115,6 +115,30 @@ async function getActor() {
   }
 }
 
+async function isPayrollMonthLocked(admin: any, monthStart: string) {
+  const { data, error } = await admin
+    .from('staff_payroll_monthly_snapshots')
+    .select('status,approval_version_no')
+    .eq('month_start', monthStart)
+    .maybeSingle()
+
+  if (error) {
+    const message = error.message ?? String(error)
+    if (
+      message.includes('approval_version_no') ||
+      message.toLowerCase().includes('does not exist')
+    ) {
+      throw new Error('STAFF_PAYROLL_1D_MIGRATION_REQUIRED')
+    }
+    throw error
+  }
+
+  return {
+    locked: data?.status === 'approved',
+    versionNo: Number(data?.approval_version_no ?? 0),
+  }
+}
+
 export async function POST(req: Request) {
   try {
     const actor = await getActor()
@@ -169,6 +193,15 @@ export async function POST(req: Request) {
           ok: false,
           error: 'FUTURE_MONTH_NOT_ALLOWED',
           details: 'Monthly task logs can be created for the current or a past month only.',
+        })
+      }
+
+      const monthLock = await isPayrollMonthLocked(admin, monthStart)
+      if (monthLock.locked) {
+        return json(409, {
+          ok: false,
+          error: 'PAYROLL_MONTH_LOCKED',
+          details: `This payroll month is approved and locked${monthLock.versionNo ? ` (Version ${monthLock.versionNo})` : ''}. Reopen it before changing monthly tasks.`,
         })
       }
 
@@ -335,10 +368,18 @@ export async function POST(req: Request) {
           .maybeSingle()
 
         if (updateErr) {
+          const message = updateErr.message ?? String(updateErr)
+          if (message.includes('STAFF_PAYROLL_MONTH_LOCKED')) {
+            return json(409, {
+              ok: false,
+              error: 'PAYROLL_MONTH_LOCKED',
+              details: 'This payroll month is approved and locked.',
+            })
+          }
           return json(500, {
             ok: false,
             error: 'LOG_UPDATE_FAILED',
-            details: updateErr.message,
+            details: message,
           })
         }
 
@@ -388,6 +429,13 @@ export async function POST(req: Request) {
 
       if (insertErr) {
         const message = insertErr.message ?? String(insertErr)
+        if (message.includes('STAFF_PAYROLL_MONTH_LOCKED')) {
+          return json(409, {
+            ok: false,
+            error: 'PAYROLL_MONTH_LOCKED',
+            details: 'This payroll month is approved and locked.',
+          })
+        }
         if (message.toLowerCase().includes('unique')) {
           return json(409, {
             ok: false,
@@ -462,6 +510,15 @@ export async function POST(req: Request) {
         return json(409, { ok: false, error: 'LOG_ALREADY_VOIDED' })
       }
 
+      const monthLock = await isPayrollMonthLocked(admin, String(existing.month_start))
+      if (monthLock.locked) {
+        return json(409, {
+          ok: false,
+          error: 'PAYROLL_MONTH_LOCKED',
+          details: `This payroll month is approved and locked${monthLock.versionNo ? ` (Version ${monthLock.versionNo})` : ''}. Reopen it before changing monthly tasks.`,
+        })
+      }
+
       const now = new Date().toISOString()
       const { error: voidErr } = await admin
         .from('staff_monthly_task_logs')
@@ -475,10 +532,18 @@ export async function POST(req: Request) {
         .is('voided_at', null)
 
       if (voidErr) {
+        const message = voidErr.message ?? String(voidErr)
+        if (message.includes('STAFF_PAYROLL_MONTH_LOCKED')) {
+          return json(409, {
+            ok: false,
+            error: 'PAYROLL_MONTH_LOCKED',
+            details: 'This payroll month is approved and locked.',
+          })
+        }
         return json(500, {
           ok: false,
           error: 'LOG_VOID_FAILED',
-          details: voidErr.message,
+          details: message,
         })
       }
 
@@ -504,10 +569,18 @@ export async function POST(req: Request) {
 
     return json(400, { ok: false, error: 'UNKNOWN_ACTION' })
   } catch (error: any) {
+    const message = error?.message ?? String(error)
+    if (message.includes('STAFF_PAYROLL_1D_MIGRATION_REQUIRED')) {
+      return json(500, {
+        ok: false,
+        error: 'MIGRATION_REQUIRED',
+        details: 'Apply Staff Payroll 1D migration first.',
+      })
+    }
     return json(500, {
       ok: false,
       error: 'SERVER_ERROR',
-      details: error?.message ?? String(error),
+      details: message,
     })
   }
 }
