@@ -9,7 +9,7 @@ import { getSessionUser } from '@/lib/session'
 import { createSupabaseServerActionClient } from '@/lib/supabaseServer'
 
 type ProgramStatus = 'draft' | 'published' | 'archived'
-type Operation = 'save' | 'set_status'
+type Operation = 'save' | 'set_status' | 'delete_permanent'
 
 type Body = {
   operation?: Operation
@@ -65,12 +65,47 @@ export async function POST(request: Request) {
   }
 
   const operation = body.operation
-  if (!operation || !['save', 'set_status'].includes(operation)) {
+  if (!operation || !['save', 'set_status', 'delete_permanent'].includes(operation)) {
     return json({ ok: false, error: 'INVALID_OPERATION' }, 400)
   }
 
   const supabase = createSupabaseServerActionClient()
   const now = new Date().toISOString()
+
+  if (operation === 'delete_permanent') {
+    if (me.role !== 'super_admin') {
+      return json({ ok: false, error: 'FORBIDDEN' }, 403)
+    }
+
+    const id = String(body.id ?? '').trim()
+    if (!UUID_RE.test(id)) return json({ ok: false, error: 'INVALID_ID' }, 400)
+
+    const { data, error } = await supabase.rpc('coach_delete_training_program_if_unused', {
+      p_program_id: id,
+    })
+
+    if (error) {
+      return json({ ok: false, error: 'DELETE_CHECK_FAILED', details: error.message }, 500)
+    }
+
+    const result = data && typeof data === 'object' ? (data as Record<string, any>) : {}
+    if (result.ok !== true) {
+      const apiError = String(result.error || 'DELETE_BLOCKED')
+      const status =
+        apiError === 'NOT_FOUND'
+          ? 404
+          : apiError === 'FORBIDDEN'
+            ? 403
+            : apiError === 'NOT_AUTHENTICATED'
+              ? 401
+              : 409
+      return json({ ok: false, error: apiError, details: result.details, count: result.count }, status)
+    }
+
+    revalidatePath('/coach-operations/programs')
+    revalidatePath('/coach-operations/curriculum')
+    return json({ ok: true, deleted: { id } })
+  }
 
   if (operation === 'set_status') {
     const id = String(body.id ?? '').trim()
