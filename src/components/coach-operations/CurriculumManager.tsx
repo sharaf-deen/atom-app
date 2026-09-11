@@ -2,7 +2,7 @@
 
 import * as React from 'react'
 import { useRouter } from 'next/navigation'
-import { ChevronDown, Plus, Pencil, Archive, RotateCcw } from 'lucide-react'
+import { ChevronDown, Plus, Pencil, Archive, RotateCcw, Trash2 } from 'lucide-react'
 import Button from '@/components/ui/Button'
 import ConfirmActionModal from '@/components/ui/ConfirmActionModal'
 import Input from '@/components/ui/Input'
@@ -63,6 +63,12 @@ type ToggleTarget = {
   isActive: boolean
 }
 
+type DeleteTarget = {
+  entity: Entity
+  id: string
+  name: string
+}
+
 function badgeClass(active: boolean) {
   return active
     ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
@@ -99,12 +105,14 @@ async function readJson(response: Response) {
 
 export default function CurriculumManager({
   canManage,
+  canDeletePermanent,
   types,
   blocks,
   techniques,
   situations,
 }: {
   canManage: boolean
+  canDeletePermanent: boolean
   types: CurriculumType[]
   blocks: CurriculumBlock[]
   techniques: CurriculumTechnique[]
@@ -113,6 +121,7 @@ export default function CurriculumManager({
   const router = useRouter()
   const [formTarget, setFormTarget] = React.useState<FormTarget | null>(null)
   const [toggleTarget, setToggleTarget] = React.useState<ToggleTarget | null>(null)
+  const [deleteTarget, setDeleteTarget] = React.useState<DeleteTarget | null>(null)
   const [name, setName] = React.useState('')
   const [description, setDescription] = React.useState('')
   const [opponentReaction, setOpponentReaction] = React.useState('')
@@ -236,6 +245,35 @@ export default function CurriculumManager({
     }
   }
 
+  async function confirmPermanentDelete() {
+    if (!deleteTarget || !canDeletePermanent) return
+    resetFeedback()
+    setPending(true)
+    try {
+      const response = await fetch('/api/coach-operations/curriculum', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          operation: 'delete_permanent',
+          entity: deleteTarget.entity,
+          id: deleteTarget.id,
+        }),
+      })
+      const data = await readJson(response)
+      if (!response.ok || data.ok !== true) {
+        throw new Error(data.details || data.error || 'Permanent delete was blocked.')
+      }
+
+      setMessage(`${deleteTarget.name} permanently deleted.`)
+      setDeleteTarget(null)
+      router.refresh()
+    } catch (cause: any) {
+      setError(String(cause?.message || cause))
+    } finally {
+      setPending(false)
+    }
+  }
+
   const activeBlockCount = blocks.filter((item) => item.is_active).length
   const activeTechniqueCount = techniques.filter((item) => item.is_active).length
   const activeSituationCount = situations.filter((item) => item.is_active).length
@@ -254,7 +292,9 @@ export default function CurriculumManager({
           <h2 className="text-lg font-semibold">Curriculum library</h2>
           <p className="text-sm text-[hsl(var(--muted))]">
             {canManage
-              ? 'Build the shared curriculum. Archive items instead of deleting history.'
+              ? canDeletePermanent
+                ? 'Build the shared curriculum. Archive preserves real history; unused test data can be permanently deleted.'
+                : 'Build the shared curriculum. Archive items instead of deleting history.'
               : 'Read-only curriculum shared by the Head Coach.'}
           </p>
         </div>
@@ -380,6 +420,9 @@ export default function CurriculumManager({
                         <Pencil className="h-4 w-4" /> Edit
                       </Button>
                       <ArchiveButton entity="type" item={type} onClick={setToggleTarget} />
+                      {canDeletePermanent ? (
+                        <PermanentDeleteButton entity="type" item={type} onClick={setDeleteTarget} />
+                      ) : null}
                     </div>
                   ) : null}
                 </div>
@@ -400,6 +443,8 @@ export default function CurriculumManager({
                         openCreate={openCreate}
                         openEdit={openEdit}
                         setToggleTarget={setToggleTarget}
+                        canDeletePermanent={canDeletePermanent}
+                        setDeleteTarget={setDeleteTarget}
                       />
                     ))}
                   </div>
@@ -431,6 +476,27 @@ export default function CurriculumManager({
         onCancel={() => !pending && setToggleTarget(null)}
         onConfirm={confirmToggle}
       />
+
+      <ConfirmActionModal
+        open={Boolean(deleteTarget)}
+        title="Permanently delete this test item?"
+        description="ATOM will delete this curriculum item only if it has never been used and has no child items that must be handled first."
+        confirmLabel="Delete permanently"
+        pendingLabel="Deleting…"
+        tone="destructive"
+        pending={pending}
+        summaryItems={
+          deleteTarget
+            ? [
+                { label: 'Item', value: deleteTarget.name },
+                { label: 'Type', value: entityLabel(deleteTarget.entity) },
+              ]
+            : []
+        }
+        warning="Permanent deletion cannot be undone. Use Archive for real curriculum history."
+        onCancel={() => !pending && setDeleteTarget(null)}
+        onConfirm={confirmPermanentDelete}
+      />
     </div>
   )
 }
@@ -438,19 +504,23 @@ export default function CurriculumManager({
 function BlockTree({
   block,
   canManage,
+  canDeletePermanent,
   techniques,
   situations,
   openCreate,
   openEdit,
   setToggleTarget,
+  setDeleteTarget,
 }: {
   block: CurriculumBlock
   canManage: boolean
+  canDeletePermanent: boolean
   techniques: CurriculumTechnique[]
   situations: CurriculumSituation[]
   openCreate: (entity: Entity, parentId?: string, parentLabel?: string) => void
   openEdit: (entity: Entity, item: AnyItem) => void
   setToggleTarget: (target: ToggleTarget) => void
+  setDeleteTarget: (target: DeleteTarget) => void
 }) {
   const blockTechniques = techniques.filter(
     (technique) => technique.block_id === block.id && (canManage || technique.is_active),
@@ -481,6 +551,9 @@ function BlockTree({
               <Pencil className="h-4 w-4" /> Edit block
             </Button>
             <ArchiveButton entity="block" item={block} onClick={setToggleTarget} />
+            {canDeletePermanent ? (
+              <PermanentDeleteButton entity="block" item={block} onClick={setDeleteTarget} />
+            ) : null}
           </div>
         ) : null}
 
@@ -497,6 +570,8 @@ function BlockTree({
                 openCreate={openCreate}
                 openEdit={openEdit}
                 setToggleTarget={setToggleTarget}
+                canDeletePermanent={canDeletePermanent}
+                setDeleteTarget={setDeleteTarget}
               />
             ))}
           </div>
@@ -509,17 +584,21 @@ function BlockTree({
 function TechniqueTree({
   technique,
   canManage,
+  canDeletePermanent,
   situations,
   openCreate,
   openEdit,
   setToggleTarget,
+  setDeleteTarget,
 }: {
   technique: CurriculumTechnique
   canManage: boolean
+  canDeletePermanent: boolean
   situations: CurriculumSituation[]
   openCreate: (entity: Entity, parentId?: string, parentLabel?: string) => void
   openEdit: (entity: Entity, item: AnyItem) => void
   setToggleTarget: (target: ToggleTarget) => void
+  setDeleteTarget: (target: DeleteTarget) => void
 }) {
   const techniqueSituations = situations.filter(
     (situation) => situation.technique_id === technique.id && (canManage || situation.is_active),
@@ -544,6 +623,9 @@ function TechniqueTree({
               <Pencil className="h-4 w-4" /> Edit
             </Button>
             <ArchiveButton entity="technique" item={technique} onClick={setToggleTarget} />
+            {canDeletePermanent ? (
+              <PermanentDeleteButton entity="technique" item={technique} onClick={setDeleteTarget} />
+            ) : null}
           </div>
         ) : null}
       </div>
@@ -575,6 +657,9 @@ function TechniqueTree({
                       <Pencil className="h-4 w-4" /> Edit
                     </Button>
                     <ArchiveButton entity="situation" item={situation} onClick={setToggleTarget} />
+                    {canDeletePermanent ? (
+                      <PermanentDeleteButton entity="situation" item={situation} onClick={setDeleteTarget} />
+                    ) : null}
                   </div>
                 ) : null}
               </div>
@@ -583,6 +668,28 @@ function TechniqueTree({
         )}
       </div>
     </div>
+  )
+}
+
+function PermanentDeleteButton({
+  entity,
+  item,
+  onClick,
+}: {
+  entity: Entity
+  item: AnyItem
+  onClick: (target: DeleteTarget) => void
+}) {
+  return (
+    <Button
+      type="button"
+      size="sm"
+      variant="ghost"
+      className="text-rose-700 hover:bg-rose-50 hover:text-rose-800"
+      onClick={() => onClick({ entity, id: item.id, name: item.name })}
+    >
+      <Trash2 className="h-4 w-4" /> Delete permanently
+    </Button>
   )
 }
 

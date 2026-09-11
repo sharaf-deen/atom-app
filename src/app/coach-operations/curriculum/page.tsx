@@ -116,6 +116,7 @@ export default async function CoachCurriculumPage() {
         ) : (
           <CurriculumManager
             canManage={canManageCoachCurriculum(me.role)}
+            canDeletePermanent={me.role === 'super_admin'}
             types={(typesResult.data ?? []) as CurriculumType[]}
             blocks={(blocksResult.data ?? []) as CurriculumBlock[]}
             techniques={(techniquesResult.data ?? []) as CurriculumTechnique[]}
