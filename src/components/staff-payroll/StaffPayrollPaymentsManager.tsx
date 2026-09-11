@@ -477,7 +477,7 @@ export default function StaffPayrollPaymentsManager({
           {!canWrite ? (
             <div className="rounded-2xl border border-sky-200 bg-sky-50 p-3 text-sm text-sky-950">
               <div className="font-semibold">Read-only access</div>
-              <div className="mt-1 text-xs">Only Super Admin can record or reverse salary payments.</div>
+              <div className="mt-1 text-xs">Admin can view payroll and download salary statements only. Only Super Admin can change salary settings, calculate/approve payroll, or record/reverse salary payments.</div>
             </div>
           ) : null}
 
@@ -517,18 +517,28 @@ export default function StaffPayrollPaymentsManager({
                       </div>
                     </div>
 
-                    <div className="grid grid-cols-3 gap-2 text-right sm:min-w-[330px]">
-                      <div>
-                        <div className="text-[11px] text-[hsl(var(--muted))]">Due</div>
-                        <div className="font-bold">{money(calculation.calculated_salary)}</div>
+                    <div className="space-y-2 sm:min-w-[330px]">
+                      <div className="grid grid-cols-3 gap-2 text-right">
+                        <div>
+                          <div className="text-[11px] text-[hsl(var(--muted))]">Due</div>
+                          <div className="font-bold">{money(calculation.calculated_salary)}</div>
+                        </div>
+                        <div>
+                          <div className="text-[11px] text-[hsl(var(--muted))]">Paid</div>
+                          <div className="font-bold text-emerald-700">{money(paid)}</div>
+                        </div>
+                        <div>
+                          <div className="text-[11px] text-[hsl(var(--muted))]">Remaining</div>
+                          <div className="font-bold text-amber-800">{money(remaining)}</div>
+                        </div>
                       </div>
-                      <div>
-                        <div className="text-[11px] text-[hsl(var(--muted))]">Paid</div>
-                        <div className="font-bold text-emerald-700">{money(paid)}</div>
-                      </div>
-                      <div>
-                        <div className="text-[11px] text-[hsl(var(--muted))]">Remaining</div>
-                        <div className="font-bold text-amber-800">{money(remaining)}</div>
+                      <div className="flex justify-end">
+                        <a
+                          href={`/api/staff-payroll/statements/${calculation.id}/download`}
+                          className="inline-flex items-center rounded-xl border border-black/10 bg-white px-3 py-2 text-xs font-semibold hover:bg-black/[0.03]"
+                        >
+                          Download salary statement
+                        </a>
                       </div>
                     </div>
                   </div>
