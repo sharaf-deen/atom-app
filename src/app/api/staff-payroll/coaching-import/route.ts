@@ -75,8 +75,8 @@ function timeDurationHours(start: unknown, end: unknown) {
   const startText = typeof start === 'string' ? start : ''
   const endText = typeof end === 'string' ? end : ''
   if (!/^\d{2}:\d{2}/.test(startText) || !/^\d{2}:\d{2}/.test(endText)) return null
-  const [sh, sm, ss = '0'] = startText.split(':').map(Number)
-  const [eh, em, es = '0'] = endText.split(':').map(Number)
+  const [sh, sm, ss = 0] = startText.split(':').map(Number)
+  const [eh, em, es = 0] = endText.split(':').map(Number)
   const startSec = sh * 3600 + sm * 60 + ss
   const endSec = eh * 3600 + em * 60 + es
   if (endSec <= startSec) return null
