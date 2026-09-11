@@ -110,6 +110,7 @@ export default async function CoachTrainingProgramsPage() {
         ) : (
           <TrainingProgramsManager
             canManage={canManageCoachTrainingPrograms(me.role)}
+            canDeletePermanent={me.role === 'super_admin'}
             programs={(programsResult.data ?? []) as Program[]}
             items={(itemsResult.data ?? []) as ProgramItem[]}
             types={(typesResult.data ?? []) as CurriculumType[]}

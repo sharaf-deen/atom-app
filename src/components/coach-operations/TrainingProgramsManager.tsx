@@ -2,7 +2,7 @@
 
 import * as React from 'react'
 import { useRouter } from 'next/navigation'
-import { Archive, CalendarDays, ChevronDown, Pencil, Plus, RotateCcw, Send } from 'lucide-react'
+import { Archive, CalendarDays, ChevronDown, Pencil, Plus, RotateCcw, Send, Trash2 } from 'lucide-react'
 import Button from '@/components/ui/Button'
 import ConfirmActionModal from '@/components/ui/ConfirmActionModal'
 import Input from '@/components/ui/Input'
@@ -72,6 +72,11 @@ type StatusTarget = {
   nextStatus: ProgramStatus
 }
 
+type DeleteTarget = {
+  id: string
+  title: string
+}
+
 function todayIso() {
   const now = new Date()
   const y = now.getFullYear()
@@ -110,6 +115,7 @@ async function readJson(response: Response) {
 
 export default function TrainingProgramsManager({
   canManage,
+  canDeletePermanent,
   programs,
   items,
   types,
@@ -118,6 +124,7 @@ export default function TrainingProgramsManager({
   situations,
 }: {
   canManage: boolean
+  canDeletePermanent: boolean
   programs: Program[]
   items: ProgramItem[]
   types: CurriculumType[]
@@ -141,6 +148,7 @@ export default function TrainingProgramsManager({
   const [message, setMessage] = React.useState<string | null>(null)
   const [error, setError] = React.useState<string | null>(null)
   const [statusTarget, setStatusTarget] = React.useState<StatusTarget | null>(null)
+  const [deleteTarget, setDeleteTarget] = React.useState<DeleteTarget | null>(null)
 
   const activeTypes = types.filter((row) => row.is_active)
   const activeBlocks = blocks.filter((row) => row.is_active)
@@ -287,6 +295,31 @@ export default function TrainingProgramsManager({
     }
   }
 
+  async function confirmPermanentDelete() {
+    if (!deleteTarget || !canDeletePermanent) return
+    setPending(true)
+    resetFeedback()
+    try {
+      const response = await fetch('/api/coach-operations/programs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ operation: 'delete_permanent', id: deleteTarget.id }),
+      })
+      const data = await readJson(response)
+      if (!response.ok || data.ok !== true) {
+        throw new Error(data.details || data.error || 'Permanent delete was blocked.')
+      }
+
+      setMessage(`${deleteTarget.title} permanently deleted.`)
+      setDeleteTarget(null)
+      router.refresh()
+    } catch (cause: any) {
+      setError(String(cause?.message || cause))
+    } finally {
+      setPending(false)
+    }
+  }
+
   function toggleProgramDetails(id: string) {
     const next = new Set(expandedPrograms)
     if (next.has(id)) next.delete(id)
@@ -357,7 +390,11 @@ export default function TrainingProgramsManager({
         <div>
           <h2 className="text-lg font-semibold">Training programs</h2>
           <p className="text-sm text-[hsl(var(--muted))]">
-            {canManage ? 'Prepare and publish curriculum for a group or class.' : 'Published programs shared by the Head Coach.'}
+            {canManage
+              ? canDeletePermanent
+                ? 'Prepare and publish curriculum for a group or class. Unused test programs can be permanently deleted.'
+                : 'Prepare and publish curriculum for a group or class.'
+              : 'Published programs shared by the Head Coach.'}
           </p>
         </div>
         {canManage ? (
@@ -489,6 +526,17 @@ export default function TrainingProgramsManager({
                         {program.status !== 'archived' ? (
                           <Button type="button" variant="ghost" size="sm" onClick={() => setStatusTarget({ id: program.id, title: program.title, nextStatus: 'archived' })}><Archive className="h-4 w-4" /> Archive</Button>
                         ) : null}
+                        {canDeletePermanent ? (
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            className="text-rose-700 hover:bg-rose-50 hover:text-rose-800"
+                            onClick={() => setDeleteTarget({ id: program.id, title: program.title })}
+                          >
+                            <Trash2 className="h-4 w-4" /> Delete permanently
+                          </Button>
+                        ) : null}
                       </>
                     ) : null}
                   </div>
@@ -510,6 +558,20 @@ export default function TrainingProgramsManager({
         summaryItems={statusTarget ? [{ label: 'Program', value: statusTarget.title }] : []}
         onCancel={() => !pending && setStatusTarget(null)}
         onConfirm={applyStatus}
+      />
+
+      <ConfirmActionModal
+        open={Boolean(deleteTarget)}
+        title="Permanently delete this test program?"
+        description="ATOM will delete the program only if it has never been assigned to a scheduled session and has no training-session history."
+        confirmLabel="Delete permanently"
+        pendingLabel="Deleting…"
+        tone="destructive"
+        pending={pending}
+        summaryItems={deleteTarget ? [{ label: 'Program', value: deleteTarget.title }] : []}
+        warning="Permanent deletion cannot be undone. Program curriculum items will be removed with the unused program. Use Archive for real history."
+        onCancel={() => !pending && setDeleteTarget(null)}
+        onConfirm={confirmPermanentDelete}
       />
     </div>
   )
