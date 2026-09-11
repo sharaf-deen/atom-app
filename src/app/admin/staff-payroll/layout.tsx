@@ -22,6 +22,12 @@ export default function StaffPayrollLayout({
             Salary Calculation
           </Link>
           <Link
+            href="/admin/staff-payroll/payments"
+            className="rounded-xl border border-black/10 px-3 py-2 text-sm font-semibold hover:bg-black/[0.03]"
+          >
+            Payments
+          </Link>
+          <Link
             href="/admin/staff-payroll/tasks"
             className="rounded-xl border border-black/10 px-3 py-2 text-sm font-semibold hover:bg-black/[0.03]"
           >

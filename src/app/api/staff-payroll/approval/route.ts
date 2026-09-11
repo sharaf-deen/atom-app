@@ -124,6 +124,9 @@ function rpcErrorDetails(message: string) {
   if (message.includes('STAFF_PAYROLL_REOPEN_REASON_REQUIRED')) {
     return 'A reason is required to reopen an approved payroll.'
   }
+  if (message.includes('STAFF_PAYROLL_ACTIVE_PAYMENTS_BLOCK_REOPEN')) {
+    return 'This payroll has active salary payments. Reverse all active payments first, then reopen if a payroll correction is still required.'
+  }
   return message
 }
 
@@ -395,6 +398,7 @@ export async function POST(req: Request) {
 
       revalidatePath('/admin/staff-payroll/calculation')
       revalidatePath('/admin/staff-payroll/monthly-tasks')
+      revalidatePath('/admin/staff-payroll/payments')
       return json(200, {
         ok: true,
         versionNo: approval?.version_no ?? null,
@@ -477,6 +481,7 @@ export async function POST(req: Request) {
 
       revalidatePath('/admin/staff-payroll/calculation')
       revalidatePath('/admin/staff-payroll/monthly-tasks')
+      revalidatePath('/admin/staff-payroll/payments')
       return json(200, {
         ok: true,
         reopenedVersionNo: reopen?.reopened_version_no ?? null,
