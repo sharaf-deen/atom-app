@@ -52,6 +52,9 @@ export async function POST(request: Request) {
     if (message.includes('SESSION_OUTSIDE_PROGRAM_PERIOD')) {
       return json({ ok: false, error: 'SESSION_OUTSIDE_PROGRAM_PERIOD', details: 'Choose a published program whose date range includes this scheduled session.' }, 400)
     }
+    if (message.includes('PROGRAM_RESPONSIBLE_COACH_REQUIRED')) {
+      return json({ ok: false, error: 'PROGRAM_RESPONSIBLE_COACH_REQUIRED', details: 'Assign a Responsible Coach to this Training Program before linking it to a scheduled session.' }, 409)
+    }
     if (message.includes('SESSION_HAS_TRAINING_LOG')) {
       return json({ ok: false, error: 'SESSION_HAS_TRAINING_LOG', details: 'The planned program cannot be changed after a Training Log has been linked to this session.' }, 409)
     }

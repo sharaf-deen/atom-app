@@ -143,6 +143,13 @@ export async function POST(request: Request) {
     if (!sessionResult.data) return json({ ok: false, error: 'SCHEDULED_SESSION_NOT_FOUND' }, 404)
     if (sessionResult.data.status === 'cancelled') return json({ ok: false, error: 'SCHEDULED_SESSION_CANCELLED' }, 409)
     if (!assignmentResult.data) return json({ ok: false, error: 'NOT_ASSIGNED_TO_SESSION' }, 403)
+    if (!canManage && assignmentResult.data.assignment_role !== 'primary_coach') {
+      return json({
+        ok: false,
+        error: 'RESPONSIBLE_COACH_REQUIRED',
+        details: 'Only the Responsible / Primary Coach can edit the technical content of this scheduled session.',
+      }, 403)
+    }
     if (!programAssignmentResult.data) {
       return json({ ok: false, error: 'SESSION_PROGRAM_REQUIRED', details: 'Head Coach must assign a published Training Program to this Scheduled Session first.' }, 409)
     }

@@ -18,6 +18,15 @@ type Program = {
   end_date: string
   notes: string | null
   status: 'draft' | 'published' | 'archived'
+  responsible_coach_user_id: string | null
+  responsible_coach_name_snapshot: string | null
+  responsible_coach_role_snapshot: string | null
+  assistant_coach_1_user_id: string | null
+  assistant_coach_1_name_snapshot: string | null
+  assistant_coach_1_role_snapshot: string | null
+  assistant_coach_2_user_id: string | null
+  assistant_coach_2_name_snapshot: string | null
+  assistant_coach_2_role_snapshot: string | null
   published_at: string | null
   updated_at: string
 }
@@ -69,7 +78,7 @@ export default async function CoachTrainingProgramsPage() {
   const [programsResult, itemsResult, typesResult, blocksResult, techniquesResult, situationsResult] = await Promise.all([
     supabase
       .from('coach_training_programs')
-      .select('id,title,target_group,start_date,end_date,notes,status,published_at,updated_at')
+      .select('id,title,target_group,start_date,end_date,notes,status,responsible_coach_user_id,responsible_coach_name_snapshot,responsible_coach_role_snapshot,assistant_coach_1_user_id,assistant_coach_1_name_snapshot,assistant_coach_1_role_snapshot,assistant_coach_2_user_id,assistant_coach_2_name_snapshot,assistant_coach_2_role_snapshot,published_at,updated_at')
       .order('start_date', { ascending: false })
       .order('created_at', { ascending: false }),
     supabase
@@ -100,7 +109,7 @@ export default async function CoachTrainingProgramsPage() {
       <PageHeader title="Training Programs" subtitle="Shared weekly or period-based program for the ATOM coaching team." />
       <Section className="max-w-6xl space-y-4">
         <div className="rounded-2xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-950">
-          Head Coach and Super Admin prepare the program from the Training Curriculum. Coach and Assistant Coach can read published programs. This lot does not change the academy Schedule.
+          Head Coach and Super Admin prepare the curriculum and assign one Responsible Coach plus up to two default assistants. Scheduled sessions inherit that program team automatically when the program is linked.
         </div>
 
         {loadError ? (
