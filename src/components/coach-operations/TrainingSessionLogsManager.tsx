@@ -9,6 +9,8 @@ import Input from '@/components/ui/Input'
 import Textarea from '@/components/ui/Textarea'
 import type { LinkedScheduleSession } from '@/app/coach-operations/training-logs/page'
 
+type TechnicalLevel = 'beginner' | 'intermediate' | 'advanced'
+
 type Program = {
   id: string
   title: string
@@ -16,6 +18,7 @@ type Program = {
   start_date: string
   end_date: string
   notes: string | null
+  technical_level: TechnicalLevel
   status: 'published'
 }
 
@@ -32,7 +35,7 @@ type ProgramItem = {
 
 type CurriculumType = { id: string; name: string; sort_order: number; is_active: boolean }
 type CurriculumBlock = { id: string; type_id: string; name: string; sort_order: number; is_active: boolean }
-type CurriculumTechnique = { id: string; block_id: string; name: string; sort_order: number; is_active: boolean }
+type CurriculumTechnique = { id: string; block_id: string; name: string; technical_level: TechnicalLevel; sort_order: number; is_active: boolean }
 type CurriculumSituation = {
   id: string
   technique_id: string
@@ -100,6 +103,24 @@ function normalizeTime(value: string) {
 
 function roleLabel(value: string) {
   return value.replace(/_/g, ' ').replace(/\b\w/g, (char) => char.toUpperCase())
+}
+
+function technicalLevelRank(level: TechnicalLevel) {
+  if (level === 'beginner') return 1
+  if (level === 'intermediate') return 2
+  return 3
+}
+
+function technicalLevelLabel(level: TechnicalLevel) {
+  if (level === 'beginner') return 'Beginner'
+  if (level === 'intermediate') return 'Intermediate'
+  return 'Advanced'
+}
+
+function technicalLevelClass(level: TechnicalLevel) {
+  if (level === 'beginner') return 'border-emerald-200 bg-emerald-50 text-emerald-800'
+  if (level === 'intermediate') return 'border-amber-200 bg-amber-50 text-amber-800'
+  return 'border-rose-200 bg-rose-50 text-rose-800'
 }
 
 async function readJson(response: Response) {
@@ -179,8 +200,12 @@ export default function TrainingSessionLogsManager({
         .filter((row) => row.program_id === id && row.selected_level === 'technique' && row.block_id === blockId && row.technique_id)
         .map((row) => row.technique_id!),
     )
-    if (explicitIds.size) return techniques.filter((technique) => explicitIds.has(technique.id))
-    return techniques.filter((technique) => technique.block_id === blockId && technique.is_active)
+    const program = programs.find((row) => row.id === id)
+    if (!program) return []
+    const levelAllows = (technique: CurriculumTechnique) =>
+      technicalLevelRank(technique.technical_level) <= technicalLevelRank(program.technical_level)
+    if (explicitIds.size) return techniques.filter((technique) => explicitIds.has(technique.id) && levelAllows(technique))
+    return techniques.filter((technique) => technique.block_id === blockId && technique.is_active && levelAllows(technique))
   }
 
   function allowedSituations(id: string, techniqueId: string) {
@@ -231,9 +256,29 @@ export default function TrainingSessionLogsManager({
     setSessionTime(normalizeTime(log.session_time) || '18:00')
     setNotes(log.notes ?? '')
     const items = logItems.filter((item) => item.session_log_id === log.id)
+    const program = programs.find((row) => row.id === log.program_id)
+    const allowedTechniqueIds = new Set(
+      program
+        ? techniques
+            .filter((technique) => technicalLevelRank(technique.technical_level) <= technicalLevelRank(program.technical_level))
+            .map((technique) => technique.id)
+        : [],
+    )
     setSelectedBlocks(new Set(items.filter((item) => item.selected_level === 'block').map((item) => item.block_id)))
-    setSelectedTechniques(new Set(items.filter((item) => item.selected_level === 'technique' && item.technique_id).map((item) => item.technique_id!)))
-    setSelectedSituations(new Set(items.filter((item) => item.selected_level === 'situation' && item.situation_id).map((item) => item.situation_id!)))
+    setSelectedTechniques(
+      new Set(
+        items
+          .filter((item) => item.selected_level === 'technique' && item.technique_id && allowedTechniqueIds.has(item.technique_id))
+          .map((item) => item.technique_id!),
+      ),
+    )
+    setSelectedSituations(
+      new Set(
+        items
+          .filter((item) => item.selected_level === 'situation' && item.situation_id && item.technique_id && allowedTechniqueIds.has(item.technique_id))
+          .map((item) => item.situation_id!),
+      ),
+    )
     setFormOpen(true)
   }
 
@@ -541,8 +586,16 @@ export default function TrainingSessionLogsManager({
 
           {currentProgram ? (
             <div className="mt-4 rounded-2xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-950">
-              <div className="font-semibold">{currentProgram.target_group}</div>
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="font-semibold">{currentProgram.target_group}</div>
+                <span className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold ${technicalLevelClass(currentProgram.technical_level)}`}>
+                  {technicalLevelLabel(currentProgram.technical_level)}
+                </span>
+              </div>
               <div className="mt-0.5 text-xs">Program period: {formatDate(currentProgram.start_date)} → {formatDate(currentProgram.end_date)}</div>
+              <div className="mt-1 text-xs">
+                Allowed curriculum: {currentProgram.technical_level === 'beginner' ? 'Beginner techniques only.' : currentProgram.technical_level === 'intermediate' ? 'Beginner + Intermediate techniques.' : 'Beginner + Intermediate + Advanced techniques.'}
+              </div>
               {currentProgram.notes ? <div className="mt-2 whitespace-pre-wrap text-xs">Head Coach notes: {currentProgram.notes}</div> : null}
             </div>
           ) : null}
@@ -551,7 +604,7 @@ export default function TrainingSessionLogsManager({
             <div className="mt-4">
               <div className="mb-2">
                 <h4 className="text-sm font-semibold text-black">What was actually worked?</h4>
-                <p className="text-xs text-[hsl(var(--muted))]">Select the block first, then the technique and the relevant opponent-reaction situation when applicable.</p>
+                <p className="text-xs text-[hsl(var(--muted))]">Select the block first. Techniques above the Program level are not available; situations inherit the level of their parent technique.</p>
               </div>
               <div className="space-y-3">
                 {Array.from(
@@ -583,7 +636,12 @@ export default function TrainingSessionLogsManager({
                                     <div key={technique.id}>
                                       <label className="flex cursor-pointer items-center gap-3 text-sm">
                                         <input type="checkbox" className="h-4 w-4" checked={techniqueSelected} onChange={(event) => toggleTechnique(technique.id, event.target.checked)} />
-                                        <span className="font-medium">{technique.name}{!technique.is_active ? ' (Archived)' : ''}</span>
+                                        <span className="flex flex-wrap items-center gap-2">
+                                          <span className="font-medium">{technique.name}{!technique.is_active ? ' (Archived)' : ''}</span>
+                                          <span className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold ${technicalLevelClass(technique.technical_level)}`}>
+                                            {technicalLevelLabel(technique.technical_level)}
+                                          </span>
+                                        </span>
                                       </label>
                                       {techniqueSelected && childSituations.length ? (
                                         <div className="mt-2 space-y-2 pl-7">
@@ -689,6 +747,7 @@ export default function TrainingSessionLogsManager({
         pending={pending}
         summaryItems={currentProgram ? [
           { label: 'Program', value: currentProgram.title },
+          { label: 'Level', value: technicalLevelLabel(currentProgram.technical_level) },
           { label: 'Group', value: currentProgram.target_group },
           { label: 'Session', value: `${formatDate(trainingDate)} · ${sessionTime}` },
           { label: 'Dated link', value: currentLinkedSession ? 'Linked to Scheduled Session' : 'Manual / legacy' },

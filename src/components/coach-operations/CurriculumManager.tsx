@@ -8,6 +8,8 @@ import ConfirmActionModal from '@/components/ui/ConfirmActionModal'
 import Input from '@/components/ui/Input'
 import Textarea from '@/components/ui/Textarea'
 
+type TechnicalLevel = 'beginner' | 'intermediate' | 'advanced'
+
 type CurriculumType = {
   id: string
   name: string
@@ -31,6 +33,7 @@ type CurriculumTechnique = {
   block_id: string
   name: string
   description: string | null
+  technical_level: TechnicalLevel
   sort_order: number
   is_active: boolean
 }
@@ -98,6 +101,24 @@ function situationResponse(item?: AnyItem) {
   return item.coaching_response ?? ''
 }
 
+function techniqueLevel(item?: AnyItem): TechnicalLevel {
+  if (!item || !('technical_level' in item)) return 'beginner'
+  const level = String(item.technical_level ?? '').toLowerCase()
+  return level === 'intermediate' || level === 'advanced' ? level : 'beginner'
+}
+
+function levelLabel(level: TechnicalLevel) {
+  if (level === 'beginner') return 'Beginner'
+  if (level === 'intermediate') return 'Intermediate'
+  return 'Advanced'
+}
+
+function levelBadgeClass(level: TechnicalLevel) {
+  if (level === 'beginner') return 'border-emerald-200 bg-emerald-50 text-emerald-800'
+  if (level === 'intermediate') return 'border-amber-200 bg-amber-50 text-amber-800'
+  return 'border-rose-200 bg-rose-50 text-rose-800'
+}
+
 async function readJson(response: Response) {
   const data = await response.json().catch(() => null)
   return data && typeof data === 'object' ? (data as Record<string, any>) : {}
@@ -124,6 +145,7 @@ export default function CurriculumManager({
   const [deleteTarget, setDeleteTarget] = React.useState<DeleteTarget | null>(null)
   const [name, setName] = React.useState('')
   const [description, setDescription] = React.useState('')
+  const [technicalLevel, setTechnicalLevel] = React.useState<TechnicalLevel>('beginner')
   const [opponentReaction, setOpponentReaction] = React.useState('')
   const [coachingResponse, setCoachingResponse] = React.useState('')
   const [sortOrder, setSortOrder] = React.useState('100')
@@ -146,6 +168,7 @@ export default function CurriculumManager({
     setFormTarget({ mode: 'create', entity, parentId, parentLabel })
     setName('')
     setDescription('')
+    setTechnicalLevel('beginner')
     setOpponentReaction('')
     setCoachingResponse('')
     setSortOrder('100')
@@ -156,6 +179,7 @@ export default function CurriculumManager({
     setFormTarget({ mode: 'edit', entity, item })
     setName(item.name)
     setDescription(itemDescription(entity, item))
+    setTechnicalLevel(entity === 'technique' ? techniqueLevel(item) : 'beginner')
     setOpponentReaction(situationReaction(item))
     setCoachingResponse(situationResponse(item))
     setSortOrder(String(item.sort_order ?? 100))
@@ -193,6 +217,7 @@ export default function CurriculumManager({
           parentId: formTarget.parentId,
           name: cleanName,
           description,
+          technicalLevel: formTarget.entity === 'technique' ? technicalLevel : undefined,
           opponentReaction,
           coachingResponse,
           sortOrder,
@@ -202,6 +227,8 @@ export default function CurriculumManager({
       if (!response.ok || data.ok !== true) {
         if (data.error === 'DUPLICATE_NAME') throw new Error('That name already exists at this level.')
         if (data.error === 'OPPONENT_REACTION_REQUIRED') throw new Error('Opponent reaction is required.')
+        if (data.error === 'INVALID_TECHNICAL_LEVEL') throw new Error('Choose Beginner, Intermediate or Advanced.')
+        if (data.error === 'TECHNIQUE_LEVEL_IN_USE') throw new Error(data.details || 'This technique is assigned to a lower-level program.')
         throw new Error(data.details || data.error || 'Failed to save curriculum item.')
       }
 
@@ -358,6 +385,24 @@ export default function CurriculumManager({
               hint="Lower numbers appear first."
             />
           </div>
+
+          {formTarget.entity === 'technique' ? (
+            <label className="mt-4 block">
+              <span className="mb-1.5 block text-sm font-semibold text-black">Technical level</span>
+              <select
+                value={technicalLevel}
+                onChange={(event) => setTechnicalLevel(event.target.value as TechnicalLevel)}
+                className="min-h-[44px] w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3.5 py-2.5 text-sm text-black shadow-soft outline-none focus-visible:ring-2 focus-visible:ring-ring sm:max-w-xs"
+              >
+                <option value="beginner">Beginner</option>
+                <option value="intermediate">Intermediate</option>
+                <option value="advanced">Advanced</option>
+              </select>
+              <span className="mt-1 block text-xs text-[hsl(var(--muted))]">
+                Situations inherit this level from their parent technique.
+              </span>
+            </label>
+          ) : null}
 
           {formTarget.entity === 'situation' ? (
             <div className="mt-4 grid gap-4 lg:grid-cols-2">
@@ -633,6 +678,9 @@ function TechniqueTree({
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
               <h5 className="truncate font-semibold">{technique.name}</h5>
+              <span className={`inline-flex rounded-full border px-2 py-0.5 text-[11px] font-semibold ${levelBadgeClass(technique.technical_level)}`}>
+                {levelLabel(technique.technical_level)}
+              </span>
               <StatusBadge active={technique.is_active} />
             </div>
           </div>

@@ -17,6 +17,7 @@ type Program = {
   start_date: string
   end_date: string
   notes: string | null
+  technical_level: 'beginner' | 'intermediate' | 'advanced'
   status: 'published'
 }
 
@@ -33,7 +34,7 @@ type ProgramItem = {
 
 type CurriculumType = { id: string; name: string; sort_order: number; is_active: boolean }
 type CurriculumBlock = { id: string; type_id: string; name: string; sort_order: number; is_active: boolean }
-type CurriculumTechnique = { id: string; block_id: string; name: string; sort_order: number; is_active: boolean }
+type CurriculumTechnique = { id: string; block_id: string; name: string; technical_level: 'beginner' | 'intermediate' | 'advanced'; sort_order: number; is_active: boolean }
 type CurriculumSituation = {
   id: string
   technique_id: string
@@ -133,7 +134,7 @@ export default async function CoachTrainingLogsPage() {
   const supabase = createSupabaseRSC()
   const programsResult = await supabase
     .from('coach_training_programs')
-    .select('id,title,target_group,start_date,end_date,notes,status')
+    .select('id,title,target_group,start_date,end_date,notes,technical_level,status')
     .eq('status', 'published')
     .order('start_date', { ascending: false })
 
@@ -152,7 +153,7 @@ export default async function CoachTrainingLogsPage() {
       : Promise.resolve({ data: [], error: null } as any),
     supabase.from('coach_curriculum_types').select('id,name,sort_order,is_active').order('sort_order', { ascending: true }).order('name', { ascending: true }),
     supabase.from('coach_curriculum_blocks').select('id,type_id,name,sort_order,is_active').order('sort_order', { ascending: true }).order('name', { ascending: true }),
-    supabase.from('coach_curriculum_techniques').select('id,block_id,name,sort_order,is_active').order('sort_order', { ascending: true }).order('name', { ascending: true }),
+    supabase.from('coach_curriculum_techniques').select('id,block_id,name,technical_level,sort_order,is_active').order('sort_order', { ascending: true }).order('name', { ascending: true }),
     supabase
       .from('coach_curriculum_situations')
       .select('id,technique_id,name,opponent_reaction,coaching_response,sort_order,is_active')

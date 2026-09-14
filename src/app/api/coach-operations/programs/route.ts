@@ -10,6 +10,7 @@ import { getSessionUser } from '@/lib/session'
 import { createSupabaseServerActionClient } from '@/lib/supabaseServer'
 
 type ProgramStatus = 'draft' | 'published' | 'archived'
+type TechnicalLevel = 'beginner' | 'intermediate' | 'advanced'
 type Operation = 'save' | 'set_status' | 'delete_permanent'
 
 type Body = {
@@ -17,6 +18,7 @@ type Body = {
   id?: string
   title?: string
   targetGroup?: string
+  technicalLevel?: string
   startDate?: string
   endDate?: string
   notes?: string | null
@@ -61,6 +63,19 @@ function uniqueUuidList(value: unknown) {
 
 function isValidDateRange(startDate: string, endDate: string) {
   return DATE_RE.test(startDate) && DATE_RE.test(endDate) && endDate >= startDate
+}
+
+function normalizeTechnicalLevel(value: unknown): TechnicalLevel | null {
+  const normalized = String(value ?? '').trim().toLowerCase()
+  return normalized === 'beginner' || normalized === 'intermediate' || normalized === 'advanced'
+    ? normalized
+    : null
+}
+
+function technicalLevelRank(level: TechnicalLevel) {
+  if (level === 'beginner') return 1
+  if (level === 'intermediate') return 2
+  return 3
 }
 
 export async function POST(request: Request) {
@@ -127,14 +142,14 @@ export async function POST(request: Request) {
     }
 
     if (status === 'published') {
-      const [itemCountResult, teamResult, scheduleCountResult] = await Promise.all([
+      const [programItemsResult, teamResult, scheduleCountResult] = await Promise.all([
         supabase
           .from('coach_training_program_items')
-          .select('id', { count: 'exact', head: true })
+          .select('id,technique_id')
           .eq('program_id', id),
         supabase
           .from('coach_training_programs')
-          .select('responsible_coach_user_id')
+          .select('responsible_coach_user_id,technical_level')
           .eq('id', id)
           .maybeSingle(),
         supabase
@@ -143,15 +158,43 @@ export async function POST(request: Request) {
           .eq('program_id', id)
           .eq('is_active', true),
       ])
-      if (itemCountResult.error) return json({ ok: false, error: 'ITEM_CHECK_FAILED', details: itemCountResult.error.message }, 500)
+      if (programItemsResult.error) return json({ ok: false, error: 'ITEM_CHECK_FAILED', details: programItemsResult.error.message }, 500)
       if (teamResult.error) return json({ ok: false, error: 'TEAM_CHECK_FAILED', details: teamResult.error.message }, 500)
       if (scheduleCountResult.error) return json({ ok: false, error: 'SCHEDULE_CHECK_FAILED', details: scheduleCountResult.error.message }, 500)
-      if (!itemCountResult.count) return json({ ok: false, error: 'PROGRAM_EMPTY', details: 'Add at least one curriculum item before publishing.' }, 400)
+      if (!(programItemsResult.data ?? []).length) return json({ ok: false, error: 'PROGRAM_EMPTY', details: 'Add at least one curriculum item before publishing.' }, 400)
       if (!teamResult.data?.responsible_coach_user_id) {
         return json({ ok: false, error: 'PROGRAM_RESPONSIBLE_COACH_REQUIRED', details: 'Choose the Responsible Coach before publishing the program.' }, 400)
       }
       if (!scheduleCountResult.count) {
         return json({ ok: false, error: 'PROGRAM_SCHEDULE_REQUIRED', details: 'Select at least one recurring Schedule class before publishing the program.' }, 400)
+      }
+
+      const publishProgramLevel = normalizeTechnicalLevel(teamResult.data?.technical_level)
+      if (!publishProgramLevel) {
+        return json({ ok: false, error: 'PROGRAM_TECHNICAL_LEVEL_REQUIRED', details: 'Choose the Program technical level before publishing.' }, 400)
+      }
+
+      const explicitTechniqueIds = Array.from(
+        new Set((programItemsResult.data ?? []).map((row: any) => row.technique_id).filter(Boolean).map(String)),
+      )
+      if (explicitTechniqueIds.length) {
+        const { data: techniqueRows, error: techniqueError } = await supabase
+          .from('coach_curriculum_techniques')
+          .select('id,name,technical_level')
+          .in('id', explicitTechniqueIds)
+        if (techniqueError) return json({ ok: false, error: 'CURRICULUM_LEVEL_LOOKUP_FAILED', details: techniqueError.message }, 500)
+
+        const incompatible = (techniqueRows ?? []).find((technique: any) => {
+          const techniqueLevel = normalizeTechnicalLevel(technique.technical_level)
+          return !techniqueLevel || technicalLevelRank(techniqueLevel) > technicalLevelRank(publishProgramLevel)
+        })
+        if (incompatible) {
+          return json({
+            ok: false,
+            error: 'CURRICULUM_LEVEL_EXCEEDS_PROGRAM',
+            details: `${String(incompatible.name || 'A selected technique')} is above the ${publishProgramLevel} Program level.`,
+          }, 409)
+        }
       }
     }
 
@@ -193,6 +236,7 @@ export async function POST(request: Request) {
 
   const title = cleanText(body.title, 160)
   const targetGroup = cleanText(body.targetGroup, 180)
+  const technicalLevel = normalizeTechnicalLevel(body.technicalLevel)
   const startDate = String(body.startDate ?? '').trim()
   const endDate = String(body.endDate ?? '').trim()
   const notes = cleanLongText(body.notes, 3000)
@@ -202,6 +246,7 @@ export async function POST(request: Request) {
 
   if (title.length < 2) return json({ ok: false, error: 'INVALID_TITLE' }, 400)
   if (targetGroup.length < 2) return json({ ok: false, error: 'INVALID_TARGET_GROUP' }, 400)
+  if (!technicalLevel) return json({ ok: false, error: 'PROGRAM_TECHNICAL_LEVEL_REQUIRED', details: 'Choose Beginner, Intermediate or Advanced.' }, 400)
   if (!isValidDateRange(startDate, endDate)) return json({ ok: false, error: 'INVALID_DATE_RANGE' }, 400)
   if (!UUID_RE.test(responsibleCoachUserId)) {
     return json({ ok: false, error: 'PROGRAM_RESPONSIBLE_COACH_REQUIRED', details: 'Choose one Responsible Coach for this program.' }, 400)
@@ -296,7 +341,7 @@ export async function POST(request: Request) {
       ? supabase.from('coach_curriculum_blocks').select('id,type_id,is_active').in('id', blockIds)
       : Promise.resolve({ data: [], error: null } as any),
     techniqueIds.length
-      ? supabase.from('coach_curriculum_techniques').select('id,block_id,is_active').in('id', techniqueIds)
+      ? supabase.from('coach_curriculum_techniques').select('id,block_id,name,technical_level,is_active').in('id', techniqueIds)
       : Promise.resolve({ data: [], error: null } as any),
     situationIds.length
       ? supabase.from('coach_curriculum_situations').select('id,technique_id,is_active').in('id', situationIds)
@@ -307,7 +352,7 @@ export async function POST(request: Request) {
   if (curriculumError) return json({ ok: false, error: 'CURRICULUM_LOOKUP_FAILED', details: curriculumError.message }, 500)
 
   const blocks = (blocksResult.data ?? []) as Array<{ id: string; type_id: string; is_active: boolean }>
-  const techniques = (techniquesResult.data ?? []) as Array<{ id: string; block_id: string; is_active: boolean }>
+  const techniques = (techniquesResult.data ?? []) as Array<{ id: string; block_id: string; name: string; technical_level: TechnicalLevel; is_active: boolean }>
   const situations = (situationsResult.data ?? []) as Array<{ id: string; technique_id: string; is_active: boolean }>
 
   if (blocks.length !== blockIds.length || techniques.length !== techniqueIds.length || situations.length !== situationIds.length) {
@@ -315,6 +360,17 @@ export async function POST(request: Request) {
   }
   if ([...blocks, ...techniques, ...situations].some((item) => item.is_active !== true)) {
     return json({ ok: false, error: 'ARCHIVED_CURRICULUM_ITEM', details: 'Only active curriculum can be assigned to a new or edited program.' }, 400)
+  }
+
+  const incompatibleTechnique = techniques.find(
+    (technique) => technicalLevelRank(technique.technical_level) > technicalLevelRank(technicalLevel),
+  )
+  if (incompatibleTechnique) {
+    return json({
+      ok: false,
+      error: 'CURRICULUM_LEVEL_EXCEEDS_PROGRAM',
+      details: `${incompatibleTechnique.name} is ${incompatibleTechnique.technical_level} and cannot be assigned to a ${technicalLevel} Program.`,
+    }, 409)
   }
 
   const blockMap = new Map(blocks.map((row) => [row.id, row]))
@@ -335,6 +391,7 @@ export async function POST(request: Request) {
   const basePatch = {
     title,
     target_group: targetGroup,
+    technical_level: technicalLevel,
     start_date: startDate,
     end_date: endDate,
     notes,
@@ -426,7 +483,13 @@ export async function POST(request: Request) {
   if (deleteError) return json({ ok: false, error: 'PROGRAM_ITEMS_RESET_FAILED', details: deleteError.message }, 500)
 
   const { error: insertError } = await supabase.from('coach_training_program_items').insert(rows)
-  if (insertError) return json({ ok: false, error: 'PROGRAM_ITEMS_SAVE_FAILED', details: insertError.message }, 500)
+  if (insertError) {
+    const message = String(insertError.message || '')
+    if (message.includes('CURRICULUM_LEVEL_EXCEEDS_PROGRAM') || insertError.code === '23514') {
+      return json({ ok: false, error: 'CURRICULUM_LEVEL_EXCEEDS_PROGRAM', details: insertError.details || message }, 409)
+    }
+    return json({ ok: false, error: 'PROGRAM_ITEMS_SAVE_FAILED', details: message }, 500)
+  }
 
   const { data: scheduleSync, error: scheduleSyncError } = await supabase.rpc('set_coach_training_program_schedule_templates', {
     p_program_id: programId,
