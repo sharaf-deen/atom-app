@@ -51,6 +51,7 @@ export type ScheduleSessionCoachAssignment = {
   assignment_role: 'primary_coach' | 'assistant_coach'
   staff_name_snapshot: string
   staff_profile_role_snapshot: 'assistant_coach' | 'coach' | 'head_coach' | 'super_admin'
+  assignment_source: 'manual' | 'program' | 'session_override' | 'schedule_default'
   assigned_at: string
 }
 
@@ -83,6 +84,32 @@ export type ScheduleSessionExceptionEvent = {
   actor_name_snapshot: string
   actor_role_snapshot: 'head_coach' | 'super_admin'
   changed_at: string
+}
+
+export type ScheduleRecurringClassTemplate = {
+  id: string
+  series_key: string
+  name: string
+  level: string
+  audience: 'kids_teens' | 'adults' | 'all'
+  day_of_week: number
+  start_time: string
+  mat: string | null
+}
+
+export type ScheduleSeriesCoachingTeam = {
+  series_key: string
+  primary_coach_user_id: string
+  primary_coach_name_snapshot: string
+  primary_coach_role_snapshot: 'assistant_coach' | 'coach' | 'head_coach' | 'super_admin'
+  assistant_coach_1_user_id: string | null
+  assistant_coach_1_name_snapshot: string | null
+  assistant_coach_1_role_snapshot: 'assistant_coach' | 'coach' | 'head_coach' | 'super_admin' | null
+  assistant_coach_2_user_id: string | null
+  assistant_coach_2_name_snapshot: string | null
+  assistant_coach_2_role_snapshot: 'assistant_coach' | 'coach' | 'head_coach' | 'super_admin' | null
+  is_active: boolean
+  updated_at: string
 }
 
 function cairoDateIso() {
@@ -130,7 +157,7 @@ export default async function ScheduleTrainingSessionsPage() {
   const defaultSyncUntil = addDays(today, 89)
 
   const supabase = createSupabaseRSC()
-  const [sessionResult, programsResult] = await Promise.all([
+  const [sessionResult, programsResult, recurringTemplatesResult, seriesTeamsResult] = await Promise.all([
     supabase
       .from('schedule_training_sessions')
       .select(
@@ -149,6 +176,20 @@ export default async function ScheduleTrainingSessionsPage() {
       .gte('end_date', today)
       .order('start_date', { ascending: true })
       .order('title', { ascending: true }),
+    supabase
+      .from('schedule_class_templates')
+      .select('id,series_key,name,level,audience,day_of_week,start_time,mat')
+      .eq('is_active', true)
+      .order('name', { ascending: true })
+      .order('day_of_week', { ascending: true })
+      .order('start_time', { ascending: true }),
+    supabase
+      .from('schedule_series_coaching_teams')
+      .select(
+        'series_key,primary_coach_user_id,primary_coach_name_snapshot,primary_coach_role_snapshot,assistant_coach_1_user_id,assistant_coach_1_name_snapshot,assistant_coach_1_role_snapshot,assistant_coach_2_user_id,assistant_coach_2_name_snapshot,assistant_coach_2_role_snapshot,is_active,updated_at',
+      )
+      .eq('is_active', true)
+      .order('series_key', { ascending: true }),
   ])
 
   let sessions = (sessionResult.data ?? []) as ScheduleTrainingSession[]
@@ -185,7 +226,7 @@ export default async function ScheduleTrainingSessionsPage() {
         supabase
           .from('schedule_session_coach_assignments')
           .select(
-            'id,training_session_id,staff_user_id,assignment_role,staff_name_snapshot,staff_profile_role_snapshot,assigned_at',
+            'id,training_session_id,staff_user_id,assignment_role,staff_name_snapshot,staff_profile_role_snapshot,assignment_source,assigned_at',
           )
           .eq('is_active', true)
           .in('training_session_id', visibleSessionIds)
@@ -221,6 +262,8 @@ export default async function ScheduleTrainingSessionsPage() {
   const loadError =
     sessionResult.error?.message
     ?? programsResult.error?.message
+    ?? recurringTemplatesResult.error?.message
+    ?? seriesTeamsResult.error?.message
     ?? assignmentError
     ?? programAssignmentError
     ?? exceptionError
@@ -298,6 +341,8 @@ export default async function ScheduleTrainingSessionsPage() {
             programs={(programsResult.data ?? []) as PublishedTrainingProgram[]}
             programAssignments={programAssignments}
             exceptionEvents={exceptionEvents}
+            recurringTemplates={(recurringTemplatesResult.data ?? []) as ScheduleRecurringClassTemplate[]}
+            seriesCoachingTeams={(seriesTeamsResult.data ?? []) as ScheduleSeriesCoachingTeam[]}
             today={today}
             previewUntil={previewUntil}
             defaultSyncUntil={defaultSyncUntil}
