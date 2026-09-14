@@ -2,7 +2,7 @@
 
 import * as React from 'react'
 import { useRouter } from 'next/navigation'
-import { ChevronDown, Plus, Pencil, Archive, RotateCcw, Trash2 } from 'lucide-react'
+import { ChevronRight, Plus, Pencil, Archive, RotateCcw, Trash2 } from 'lucide-react'
 import Button from '@/components/ui/Button'
 import ConfirmActionModal from '@/components/ui/ConfirmActionModal'
 import Input from '@/components/ui/Input'
@@ -525,23 +525,40 @@ function BlockTree({
   const blockTechniques = techniques.filter(
     (technique) => technique.block_id === block.id && (canManage || technique.is_active),
   )
+  const techniqueIds = new Set(blockTechniques.map((technique) => technique.id))
+  const blockSituationCount = situations.filter(
+    (situation) => techniqueIds.has(situation.technique_id) && (canManage || situation.is_active),
+  ).length
 
   return (
-    <details open className={`group rounded-2xl border bg-[hsl(var(--bg))]/40 ${block.is_active ? 'border-[hsl(var(--border))]' : 'border-slate-200 opacity-75'}`}>
-      <summary className="flex cursor-pointer list-none items-start justify-between gap-3 p-3 sm:p-4 [&::-webkit-details-marker]:hidden">
-        <div className="flex min-w-0 items-start gap-2">
-          <ChevronDown className="mt-0.5 h-4 w-4 shrink-0 transition group-open:rotate-180" />
-          <div>
+    <details
+      className={`rounded-2xl border bg-[hsl(var(--bg))]/40 [&[open]>summary_.block-chevron]:rotate-90 ${
+        block.is_active ? 'border-[hsl(var(--border))]' : 'border-slate-200 opacity-75'
+      }`}
+    >
+      <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-3 sm:px-4 [&::-webkit-details-marker]:hidden">
+        <div className="flex min-w-0 items-center gap-2">
+          <ChevronRight className="block-chevron h-4 w-4 shrink-0 transition-transform" />
+          <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
-              <h4 className="font-semibold">{block.name}</h4>
+              <h4 className="truncate font-semibold">{block.name}</h4>
               <StatusBadge active={block.is_active} />
             </div>
-            {block.description ? <p className="mt-1 text-sm text-[hsl(var(--muted))]">{block.description}</p> : null}
           </div>
+        </div>
+        <div className="flex shrink-0 items-center gap-2 text-xs text-[hsl(var(--muted))]">
+          <span>{blockTechniques.length} technique{blockTechniques.length === 1 ? '' : 's'}</span>
+          {blockSituationCount > 0 ? (
+            <span className="hidden sm:inline">· {blockSituationCount} situation{blockSituationCount === 1 ? '' : 's'}</span>
+          ) : null}
         </div>
       </summary>
 
       <div className="border-t border-[hsl(var(--border))] p-3 sm:p-4">
+        {block.description ? (
+          <p className="mb-3 text-sm text-[hsl(var(--muted))]">{block.description}</p>
+        ) : null}
+
         {canManage ? (
           <div className="mb-3 flex flex-wrap gap-2">
             <Button type="button" size="sm" variant="outline" onClick={() => openCreate('technique', block.id, block.name)}>
@@ -560,7 +577,7 @@ function BlockTree({
         {blockTechniques.length === 0 ? (
           <EmptyState label="No techniques in this block yet." compact />
         ) : (
-          <div className="space-y-3">
+          <div className="space-y-2">
             {blockTechniques.map((technique) => (
               <TechniqueTree
                 key={technique.id}
@@ -605,17 +622,33 @@ function TechniqueTree({
   )
 
   return (
-    <div className={`rounded-2xl border bg-white p-3 sm:p-4 ${technique.is_active ? 'border-[hsl(var(--border))]' : 'border-slate-200 opacity-75'}`}>
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-2">
-            <h5 className="font-semibold">{technique.name}</h5>
-            <StatusBadge active={technique.is_active} />
+    <details
+      className={`rounded-2xl border bg-white [&[open]>summary_.technique-chevron]:rotate-90 ${
+        technique.is_active ? 'border-[hsl(var(--border))]' : 'border-slate-200 opacity-75'
+      }`}
+    >
+      <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-3 [&::-webkit-details-marker]:hidden">
+        <div className="flex min-w-0 items-center gap-2">
+          <ChevronRight className="technique-chevron h-4 w-4 shrink-0 transition-transform" />
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <h5 className="truncate font-semibold">{technique.name}</h5>
+              <StatusBadge active={technique.is_active} />
+            </div>
           </div>
-          {technique.description ? <p className="mt-1 text-sm text-[hsl(var(--muted))]">{technique.description}</p> : null}
         </div>
+        <span className="shrink-0 text-xs text-[hsl(var(--muted))]">
+          {techniqueSituations.length} situation{techniqueSituations.length === 1 ? '' : 's'}
+        </span>
+      </summary>
+
+      <div className="border-t border-[hsl(var(--border))] p-3 sm:p-4">
+        {technique.description ? (
+          <p className="mb-3 text-sm text-[hsl(var(--muted))]">{technique.description}</p>
+        ) : null}
+
         {canManage ? (
-          <div className="flex flex-wrap gap-2">
+          <div className="mb-3 flex flex-wrap gap-2">
             <Button type="button" size="sm" variant="outline" onClick={() => openCreate('situation', technique.id, technique.name)}>
               <Plus className="h-4 w-4" /> Situation
             </Button>
@@ -628,46 +661,53 @@ function TechniqueTree({
             ) : null}
           </div>
         ) : null}
-      </div>
 
-      <div className="mt-3 space-y-2">
         {techniqueSituations.length === 0 ? (
           <EmptyState label="No opponent-reaction situations yet." compact />
         ) : (
-          techniqueSituations.map((situation) => (
-            <div key={situation.id} className={`rounded-2xl border px-3 py-3 ${situation.is_active ? 'border-[hsl(var(--border))] bg-[hsl(var(--bg))]/30' : 'border-slate-200 bg-slate-50 opacity-75'}`}>
-              <div className="flex flex-wrap items-start justify-between gap-3">
-                <div className="min-w-0 flex-1">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <div className="font-medium">{situation.name}</div>
-                    <StatusBadge active={situation.is_active} />
-                  </div>
-                  <div className="mt-2 text-xs font-semibold uppercase tracking-wide text-[hsl(var(--muted))]">Opponent reaction</div>
-                  <p className="mt-0.5 whitespace-pre-wrap text-sm">{situation.opponent_reaction}</p>
-                  {situation.coaching_response ? (
-                    <>
-                      <div className="mt-2 text-xs font-semibold uppercase tracking-wide text-[hsl(var(--muted))]">Coach response / notes</div>
-                      <p className="mt-0.5 whitespace-pre-wrap text-sm">{situation.coaching_response}</p>
-                    </>
-                  ) : null}
-                </div>
-                {canManage ? (
-                  <div className="flex gap-1">
-                    <Button type="button" size="sm" variant="ghost" onClick={() => openEdit('situation', situation)}>
-                      <Pencil className="h-4 w-4" /> Edit
-                    </Button>
-                    <ArchiveButton entity="situation" item={situation} onClick={setToggleTarget} />
-                    {canDeletePermanent ? (
-                      <PermanentDeleteButton entity="situation" item={situation} onClick={setDeleteTarget} />
+          <div className="space-y-2">
+            {techniqueSituations.map((situation) => (
+              <div
+                key={situation.id}
+                className={`rounded-2xl border px-3 py-3 ${
+                  situation.is_active
+                    ? 'border-[hsl(var(--border))] bg-[hsl(var(--bg))]/30'
+                    : 'border-slate-200 bg-slate-50 opacity-75'
+                }`}
+              >
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <div className="font-medium">{situation.name}</div>
+                      <StatusBadge active={situation.is_active} />
+                    </div>
+                    <div className="mt-2 text-xs font-semibold uppercase tracking-wide text-[hsl(var(--muted))]">Opponent reaction</div>
+                    <p className="mt-0.5 whitespace-pre-wrap text-sm">{situation.opponent_reaction}</p>
+                    {situation.coaching_response ? (
+                      <>
+                        <div className="mt-2 text-xs font-semibold uppercase tracking-wide text-[hsl(var(--muted))]">Coach response / notes</div>
+                        <p className="mt-0.5 whitespace-pre-wrap text-sm">{situation.coaching_response}</p>
+                      </>
                     ) : null}
                   </div>
-                ) : null}
+                  {canManage ? (
+                    <div className="flex gap-1">
+                      <Button type="button" size="sm" variant="ghost" onClick={() => openEdit('situation', situation)}>
+                        <Pencil className="h-4 w-4" /> Edit
+                      </Button>
+                      <ArchiveButton entity="situation" item={situation} onClick={setToggleTarget} />
+                      {canDeletePermanent ? (
+                        <PermanentDeleteButton entity="situation" item={situation} onClick={setDeleteTarget} />
+                      ) : null}
+                    </div>
+                  ) : null}
+                </div>
               </div>
-            </div>
-          ))
+            ))}
+          </div>
         )}
       </div>
-    </div>
+    </details>
   )
 }
 
