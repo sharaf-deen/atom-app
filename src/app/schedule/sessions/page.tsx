@@ -245,6 +245,14 @@ export default async function ScheduleTrainingSessionsPage() {
               Class Templates
             </Link>
           ) : null}
+          {personalView ? (
+            <Link
+              href="/coach-operations/programs"
+              className="rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] px-3 py-2 font-medium hover:bg-[hsl(var(--muted)/0.08)]"
+            >
+              My Programs
+            </Link>
+          ) : null}
           <Link
             href="/coach-operations/training-logs"
             className="rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] px-3 py-2 font-medium hover:bg-[hsl(var(--muted)/0.08)]"

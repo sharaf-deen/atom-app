@@ -23,6 +23,7 @@ type Body = {
   blockIds?: string[]
   techniqueIds?: string[]
   situationIds?: string[]
+  classTemplateIds?: string[]
   responsibleCoachUserId?: string
   assistantCoachUserIds?: string[]
   status?: ProgramStatus
@@ -126,7 +127,7 @@ export async function POST(request: Request) {
     }
 
     if (status === 'published') {
-      const [itemCountResult, teamResult] = await Promise.all([
+      const [itemCountResult, teamResult, scheduleCountResult] = await Promise.all([
         supabase
           .from('coach_training_program_items')
           .select('id', { count: 'exact', head: true })
@@ -136,12 +137,21 @@ export async function POST(request: Request) {
           .select('responsible_coach_user_id')
           .eq('id', id)
           .maybeSingle(),
+        supabase
+          .from('coach_training_program_class_templates')
+          .select('id', { count: 'exact', head: true })
+          .eq('program_id', id)
+          .eq('is_active', true),
       ])
       if (itemCountResult.error) return json({ ok: false, error: 'ITEM_CHECK_FAILED', details: itemCountResult.error.message }, 500)
       if (teamResult.error) return json({ ok: false, error: 'TEAM_CHECK_FAILED', details: teamResult.error.message }, 500)
+      if (scheduleCountResult.error) return json({ ok: false, error: 'SCHEDULE_CHECK_FAILED', details: scheduleCountResult.error.message }, 500)
       if (!itemCountResult.count) return json({ ok: false, error: 'PROGRAM_EMPTY', details: 'Add at least one curriculum item before publishing.' }, 400)
       if (!teamResult.data?.responsible_coach_user_id) {
         return json({ ok: false, error: 'PROGRAM_RESPONSIBLE_COACH_REQUIRED', details: 'Choose the Responsible Coach before publishing the program.' }, 400)
+      }
+      if (!scheduleCountResult.count) {
+        return json({ ok: false, error: 'PROGRAM_SCHEDULE_REQUIRED', details: 'Select at least one recurring Schedule class before publishing the program.' }, 400)
       }
     }
 
@@ -162,7 +172,16 @@ export async function POST(request: Request) {
       .select('*')
       .maybeSingle()
 
-    if (error) return json({ ok: false, error: 'STATUS_UPDATE_FAILED', details: error.message }, 500)
+    if (error) {
+      const message = String(error.message || '')
+      if (message.includes('PROGRAM_SCHEDULE_REQUIRED')) {
+        return json({ ok: false, error: 'PROGRAM_SCHEDULE_REQUIRED', details: 'Select at least one recurring Schedule class before publishing the program.' }, 400)
+      }
+      if (message.includes('PROGRAM_TEMPLATE_PERIOD_CONFLICT')) {
+        return json({ ok: false, error: 'PROGRAM_TEMPLATE_PERIOD_CONFLICT', details: 'Another published Training Program already targets one of these classes during an overlapping date range.' }, 409)
+      }
+      return json({ ok: false, error: 'STATUS_UPDATE_FAILED', details: message }, 500)
+    }
     if (!data) return json({ ok: false, error: 'NOT_FOUND' }, 404)
 
     revalidatePath('/coach-operations/programs')
@@ -179,6 +198,7 @@ export async function POST(request: Request) {
   const notes = cleanLongText(body.notes, 3000)
   const responsibleCoachUserId = String(body.responsibleCoachUserId ?? '').trim()
   const assistantCoachUserIds = uniqueUuidList(body.assistantCoachUserIds)
+  const classTemplateIds = uniqueUuidList(body.classTemplateIds)
 
   if (title.length < 2) return json({ ok: false, error: 'INVALID_TITLE' }, 400)
   if (targetGroup.length < 2) return json({ ok: false, error: 'INVALID_TARGET_GROUP' }, 400)
@@ -191,6 +211,60 @@ export async function POST(request: Request) {
   }
   if (assistantCoachUserIds.includes(responsibleCoachUserId)) {
     return json({ ok: false, error: 'DUPLICATE_PROGRAM_TEAM_MEMBER', details: 'The Responsible Coach cannot also be selected as an assistant.' }, 400)
+  }
+  if (!classTemplateIds.length) {
+    return json({ ok: false, error: 'PROGRAM_SCHEDULE_REQUIRED', details: 'Select at least one recurring Schedule class for this program.' }, 400)
+  }
+
+  const { data: scheduleTemplates, error: scheduleTemplatesError } = await supabase
+    .from('schedule_class_templates')
+    .select('id,is_active')
+    .in('id', classTemplateIds)
+  if (scheduleTemplatesError) {
+    return json({ ok: false, error: 'PROGRAM_SCHEDULE_LOOKUP_FAILED', details: scheduleTemplatesError.message }, 500)
+  }
+  if ((scheduleTemplates ?? []).length !== classTemplateIds.length || (scheduleTemplates ?? []).some((row: any) => row.is_active !== true)) {
+    return json({ ok: false, error: 'INVALID_PROGRAM_CLASS_TEMPLATE', details: 'Choose only active recurring Schedule classes.' }, 400)
+  }
+
+  if (id) {
+    const { data: currentProgram, error: currentProgramError } = await supabase
+      .from('coach_training_programs')
+      .select('status')
+      .eq('id', id)
+      .maybeSingle()
+    if (currentProgramError) return json({ ok: false, error: 'PROGRAM_LOOKUP_FAILED', details: currentProgramError.message }, 500)
+    if (!currentProgram) return json({ ok: false, error: 'NOT_FOUND' }, 404)
+
+    if (currentProgram.status === 'published') {
+      const { data: competingMappings, error: competingMappingsError } = await supabase
+        .from('coach_training_program_class_templates')
+        .select('program_id')
+        .eq('is_active', true)
+        .neq('program_id', id)
+        .in('class_template_id', classTemplateIds)
+      if (competingMappingsError) {
+        return json({ ok: false, error: 'PROGRAM_SCHEDULE_CONFLICT_CHECK_FAILED', details: competingMappingsError.message }, 500)
+      }
+
+      const competingProgramIds = Array.from(new Set((competingMappings ?? []).map((row: any) => String(row.program_id))))
+      if (competingProgramIds.length) {
+        const { data: overlappingPrograms, error: overlappingProgramsError } = await supabase
+          .from('coach_training_programs')
+          .select('id')
+          .in('id', competingProgramIds)
+          .eq('status', 'published')
+          .lte('start_date', endDate)
+          .gte('end_date', startDate)
+          .limit(1)
+        if (overlappingProgramsError) {
+          return json({ ok: false, error: 'PROGRAM_SCHEDULE_CONFLICT_CHECK_FAILED', details: overlappingProgramsError.message }, 500)
+        }
+        if ((overlappingPrograms ?? []).length) {
+          return json({ ok: false, error: 'PROGRAM_TEMPLATE_PERIOD_CONFLICT', details: 'Another published Training Program already targets one of these classes during an overlapping date range.' }, 409)
+        }
+      }
+    }
   }
 
   const admin = adminClient()
@@ -354,8 +428,26 @@ export async function POST(request: Request) {
   const { error: insertError } = await supabase.from('coach_training_program_items').insert(rows)
   if (insertError) return json({ ok: false, error: 'PROGRAM_ITEMS_SAVE_FAILED', details: insertError.message }, 500)
 
+  const { data: scheduleSync, error: scheduleSyncError } = await supabase.rpc('set_coach_training_program_schedule_templates', {
+    p_program_id: programId,
+    p_template_ids: classTemplateIds,
+  })
+  if (scheduleSyncError) {
+    const message = String(scheduleSyncError.message || '')
+    if (message.includes('PROGRAM_TEMPLATE_PERIOD_CONFLICT')) {
+      return json({ ok: false, error: 'PROGRAM_TEMPLATE_PERIOD_CONFLICT', details: 'Another published Training Program already targets one of these classes during an overlapping date range.' }, 409)
+    }
+    if (message.includes('PROGRAM_SCHEDULE_REQUIRED')) {
+      return json({ ok: false, error: 'PROGRAM_SCHEDULE_REQUIRED', details: 'Select at least one recurring Schedule class for this program.' }, 400)
+    }
+    if (message.includes('INVALID_PROGRAM_CLASS_TEMPLATE')) {
+      return json({ ok: false, error: 'INVALID_PROGRAM_CLASS_TEMPLATE', details: 'Choose only active recurring Schedule classes.' }, 400)
+    }
+    return json({ ok: false, error: 'PROGRAM_SCHEDULE_SYNC_FAILED', details: message }, 500)
+  }
+
   revalidatePath('/coach-operations/programs')
   revalidatePath('/coach-operations/training-logs')
   revalidatePath('/schedule/sessions')
-  return json({ ok: true, id: programId })
+  return json({ ok: true, id: programId, scheduleSync })
 }
