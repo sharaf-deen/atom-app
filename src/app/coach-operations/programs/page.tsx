@@ -55,6 +55,32 @@ type CurriculumSituation = {
   is_active: boolean
 }
 
+
+type ScheduleClassTemplate = {
+  id: string
+  series_key: string
+  name: string
+  day_of_week: number
+  start_time: string
+  mat: string | null
+  uniform: string
+  is_active: boolean
+  effective_from: string
+  effective_until: string | null
+}
+
+type ProgramClassTemplate = {
+  id: string
+  program_id: string
+  class_template_id: string
+  class_name_snapshot: string
+  series_key_snapshot: string
+  day_of_week_snapshot: number
+  start_time_snapshot: string
+  mat_snapshot: string | null
+  is_active: boolean
+}
+
 export default async function CoachTrainingProgramsPage() {
   const me = await getSessionUser()
   if (!me) redirect('/login?next=/coach-operations/programs')
@@ -74,13 +100,23 @@ export default async function CoachTrainingProgramsPage() {
     )
   }
 
+  const canManage = canManageCoachTrainingPrograms(me.role)
   const supabase = createSupabaseRSC()
-  const [programsResult, itemsResult, typesResult, blocksResult, techniquesResult, situationsResult] = await Promise.all([
-    supabase
-      .from('coach_training_programs')
-      .select('id,title,target_group,start_date,end_date,notes,status,responsible_coach_user_id,responsible_coach_name_snapshot,responsible_coach_role_snapshot,assistant_coach_1_user_id,assistant_coach_1_name_snapshot,assistant_coach_1_role_snapshot,assistant_coach_2_user_id,assistant_coach_2_name_snapshot,assistant_coach_2_role_snapshot,published_at,updated_at')
-      .order('start_date', { ascending: false })
-      .order('created_at', { ascending: false }),
+
+  let programsQuery = supabase
+    .from('coach_training_programs')
+    .select('id,title,target_group,start_date,end_date,notes,status,responsible_coach_user_id,responsible_coach_name_snapshot,responsible_coach_role_snapshot,assistant_coach_1_user_id,assistant_coach_1_name_snapshot,assistant_coach_1_role_snapshot,assistant_coach_2_user_id,assistant_coach_2_name_snapshot,assistant_coach_2_role_snapshot,published_at,updated_at')
+    .order('start_date', { ascending: false })
+    .order('created_at', { ascending: false })
+
+  if (!canManage) {
+    programsQuery = programsQuery
+      .eq('status', 'published')
+      .or(`responsible_coach_user_id.eq.${me.id},assistant_coach_1_user_id.eq.${me.id},assistant_coach_2_user_id.eq.${me.id}`)
+  }
+
+  const [programsResult, itemsResult, typesResult, blocksResult, techniquesResult, situationsResult, classTemplatesResult, programClassTemplatesResult] = await Promise.all([
+    programsQuery,
     supabase
       .from('coach_training_program_items')
       .select('id,program_id,selected_level,type_id,block_id,technique_id,situation_id,sort_order')
@@ -93,6 +129,16 @@ export default async function CoachTrainingProgramsPage() {
       .select('id,technique_id,name,opponent_reaction,coaching_response,sort_order,is_active')
       .order('sort_order', { ascending: true })
       .order('name', { ascending: true }),
+    supabase
+      .from('schedule_class_templates')
+      .select('id,series_key,name,day_of_week,start_time,mat,uniform,is_active,effective_from,effective_until')
+      .order('name', { ascending: true })
+      .order('day_of_week', { ascending: true })
+      .order('start_time', { ascending: true }),
+    supabase
+      .from('coach_training_program_class_templates')
+      .select('id,program_id,class_template_id,class_name_snapshot,series_key_snapshot,day_of_week_snapshot,start_time_snapshot,mat_snapshot,is_active')
+      .eq('is_active', true),
   ])
 
   const loadError =
@@ -102,14 +148,25 @@ export default async function CoachTrainingProgramsPage() {
     blocksResult.error?.message ||
     techniquesResult.error?.message ||
     situationsResult.error?.message ||
+    classTemplatesResult.error?.message ||
+    programClassTemplatesResult.error?.message ||
     null
 
   return (
     <main>
-      <PageHeader title="Training Programs" subtitle="Shared weekly or period-based program for the ATOM coaching team." />
+      <PageHeader
+        title={canManage ? 'Training Programs' : 'My Programs'}
+        subtitle={
+          canManage
+            ? 'Build the program, target recurring Schedule classes and assign the coaching team.'
+            : 'Programs where you are assigned as Responsible Coach or Assistant Coach.'
+        }
+      />
       <Section className="max-w-6xl space-y-4">
         <div className="rounded-2xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-950">
-          Head Coach and Super Admin prepare the curriculum and assign one Responsible Coach plus up to two default assistants. Scheduled sessions inherit that program team automatically when the program is linked.
+          {canManage
+            ? 'Head Coach and Super Admin select recurring Schedule classes once. Published programs then flow automatically to existing and future dated sessions, with the Responsible Coach and default assistants inherited.'
+            : 'This view shows only your published programs. Open My Assigned Sessions for the dated classes you are expected to coach.'}
         </div>
 
         {loadError ? (
@@ -118,14 +175,17 @@ export default async function CoachTrainingProgramsPage() {
           </div>
         ) : (
           <TrainingProgramsManager
-            canManage={canManageCoachTrainingPrograms(me.role)}
+            canManage={canManage}
             canDeletePermanent={me.role === 'super_admin'}
+            viewerUserId={me.id}
             programs={(programsResult.data ?? []) as Program[]}
             items={(itemsResult.data ?? []) as ProgramItem[]}
             types={(typesResult.data ?? []) as CurriculumType[]}
             blocks={(blocksResult.data ?? []) as CurriculumBlock[]}
             techniques={(techniquesResult.data ?? []) as CurriculumTechnique[]}
             situations={(situationsResult.data ?? []) as CurriculumSituation[]}
+            classTemplates={(classTemplatesResult.data ?? []) as ScheduleClassTemplate[]}
+            programClassTemplates={(programClassTemplatesResult.data ?? []) as ProgramClassTemplate[]}
           />
         )}
       </Section>

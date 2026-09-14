@@ -1,6 +1,7 @@
 'use client'
 
 import * as React from 'react'
+import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { Archive, CalendarDays, ChevronDown, Pencil, Plus, RotateCcw, Send, Trash2, Users } from 'lucide-react'
 import Button from '@/components/ui/Button'
@@ -85,6 +86,53 @@ type StaffOption = {
   role: 'assistant_coach' | 'coach' | 'head_coach' | 'super_admin'
 }
 
+
+type ScheduleClassTemplate = {
+  id: string
+  series_key: string
+  name: string
+  day_of_week: number
+  start_time: string
+  mat: string | null
+  uniform: string
+  is_active: boolean
+  effective_from: string
+  effective_until: string | null
+}
+
+type ProgramClassTemplate = {
+  id: string
+  program_id: string
+  class_template_id: string
+  class_name_snapshot: string
+  series_key_snapshot: string
+  day_of_week_snapshot: number
+  start_time_snapshot: string
+  mat_snapshot: string | null
+  is_active: boolean
+}
+
+const DAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+
+function normalizeClock(value: string) {
+  const match = String(value || '').match(/^(\d{2}):(\d{2})/)
+  return match ? `${match[1]}:${match[2]}` : value
+}
+
+function templateLabel(template: Pick<ScheduleClassTemplate, 'day_of_week' | 'start_time' | 'mat' | 'uniform'>) {
+  const day = DAY_LABELS[template.day_of_week] ?? `Day ${template.day_of_week}`
+  const mat = template.mat ? ` · ${template.mat}` : ''
+  const uniform = template.uniform && template.uniform !== 'none' ? ` · ${template.uniform.toUpperCase()}` : ''
+  return `${day} · ${normalizeClock(template.start_time)}${uniform}${mat}`
+}
+
+function mappingLabel(mapping: ProgramClassTemplate, template?: ScheduleClassTemplate) {
+  if (template) return templateLabel(template)
+  const day = DAY_LABELS[mapping.day_of_week_snapshot] ?? `Day ${mapping.day_of_week_snapshot}`
+  const mat = mapping.mat_snapshot ? ` · ${mapping.mat_snapshot}` : ''
+  return `${day} · ${normalizeClock(mapping.start_time_snapshot)}${mat}`
+}
+
 function staffRoleLabel(value: StaffOption['role'] | string | null) {
   if (!value) return 'Coach'
   return String(value)
@@ -143,21 +191,27 @@ async function readJson(response: Response) {
 export default function TrainingProgramsManager({
   canManage,
   canDeletePermanent,
+  viewerUserId,
   programs,
   items,
   types,
   blocks,
   techniques,
   situations,
+  classTemplates,
+  programClassTemplates,
 }: {
   canManage: boolean
   canDeletePermanent: boolean
+  viewerUserId: string
   programs: Program[]
   items: ProgramItem[]
   types: CurriculumType[]
   blocks: CurriculumBlock[]
   techniques: CurriculumTechnique[]
   situations: CurriculumSituation[]
+  classTemplates: ScheduleClassTemplate[]
+  programClassTemplates: ProgramClassTemplate[]
 }) {
   const router = useRouter()
   const [editingId, setEditingId] = React.useState<string | null>(null)
@@ -176,6 +230,7 @@ export default function TrainingProgramsManager({
   const [selectedBlocks, setSelectedBlocks] = React.useState<Set<string>>(new Set())
   const [selectedTechniques, setSelectedTechniques] = React.useState<Set<string>>(new Set())
   const [selectedSituations, setSelectedSituations] = React.useState<Set<string>>(new Set())
+  const [selectedClassTemplateIds, setSelectedClassTemplateIds] = React.useState<Set<string>>(new Set())
   const [expandedPrograms, setExpandedPrograms] = React.useState<Set<string>>(new Set())
   const [pending, setPending] = React.useState(false)
   const [message, setMessage] = React.useState<string | null>(null)
@@ -187,6 +242,33 @@ export default function TrainingProgramsManager({
   const activeBlocks = blocks.filter((row) => row.is_active)
   const activeTechniques = techniques.filter((row) => row.is_active)
   const activeSituations = situations.filter((row) => row.is_active)
+  const activeClassTemplates = classTemplates.filter((row) => row.is_active)
+  const classTemplateById = React.useMemo(() => new Map(classTemplates.map((row) => [row.id, row])), [classTemplates])
+  const visiblePrograms = React.useMemo(
+    () =>
+      canManage
+        ? programs
+        : programs.filter(
+            (program) =>
+              program.responsible_coach_user_id === viewerUserId
+              || program.assistant_coach_1_user_id === viewerUserId
+              || program.assistant_coach_2_user_id === viewerUserId,
+          ),
+    [canManage, programs, viewerUserId],
+  )
+
+  const templateGroups = React.useMemo(() => {
+    const map = new Map<string, ScheduleClassTemplate[]>()
+    for (const template of activeClassTemplates) {
+      const key = template.series_key || template.name
+      const current = map.get(key) ?? []
+      current.push(template)
+      map.set(key, current)
+    }
+    return Array.from(map.entries())
+      .map(([key, rows]) => [key, rows.sort((a, b) => a.day_of_week - b.day_of_week || a.start_time.localeCompare(b.start_time))] as const)
+      .sort((a, b) => a[1][0]?.name.localeCompare(b[1][0]?.name ?? '') || 0)
+  }, [activeClassTemplates])
 
   function resetFeedback() {
     setMessage(null)
@@ -235,6 +317,7 @@ export default function TrainingProgramsManager({
     setSelectedBlocks(new Set())
     setSelectedTechniques(new Set())
     setSelectedSituations(new Set())
+    setSelectedClassTemplateIds(new Set())
     void loadStaff()
     setFormOpen(true)
   }
@@ -260,7 +343,39 @@ export default function TrainingProgramsManager({
     setSelectedSituations(
       new Set(programItems.filter((item) => item.selected_level === 'situation' && item.situation_id).map((item) => item.situation_id!)),
     )
+    const mappedTemplateIds = programClassTemplates
+      .filter((mapping) => mapping.program_id === program.id && mapping.is_active)
+      .map((mapping) => mapping.class_template_id)
+    if (mappedTemplateIds.length) {
+      setSelectedClassTemplateIds(new Set(mappedTemplateIds))
+    } else {
+      const normalizedGroup = program.target_group.trim().toLowerCase()
+      setSelectedClassTemplateIds(
+        new Set(activeClassTemplates.filter((template) => template.name.trim().toLowerCase() === normalizedGroup).map((template) => template.id)),
+      )
+    }
     setFormOpen(true)
+  }
+
+  function toggleClassTemplate(templateId: string, checked: boolean) {
+    setSelectedClassTemplateIds((current) => {
+      const next = new Set(current)
+      if (checked) next.add(templateId)
+      else next.delete(templateId)
+      return next
+    })
+  }
+
+  function toggleTemplateGroup(groupTemplates: ScheduleClassTemplate[], checked: boolean) {
+    setSelectedClassTemplateIds((current) => {
+      const next = new Set(current)
+      for (const template of groupTemplates) {
+        if (checked) next.add(template.id)
+        else next.delete(template.id)
+      }
+      return next
+    })
+    if (checked && !targetGroup.trim() && groupTemplates[0]?.name) setTargetGroup(groupTemplates[0].name)
   }
 
   function toggleBlock(blockId: string, checked: boolean) {
@@ -312,6 +427,7 @@ export default function TrainingProgramsManager({
     if (!responsibleCoachUserId) return setError('Choose the Responsible Coach for this program.')
     if (assistantCoachUserIds.length > 2) return setError('Choose no more than two assistant coaches.')
     if (assistantCoachUserIds.includes(responsibleCoachUserId)) return setError('The Responsible Coach cannot also be an assistant.')
+    if (!selectedClassTemplateIds.size) return setError('Select at least one recurring Schedule class for this program.')
     if (!selectedBlocks.size) return setError('Select at least one technical block.')
 
     setPending(true)
@@ -329,6 +445,7 @@ export default function TrainingProgramsManager({
           notes,
           responsibleCoachUserId,
           assistantCoachUserIds,
+          classTemplateIds: Array.from(selectedClassTemplateIds),
           blockIds: Array.from(selectedBlocks),
           techniqueIds: Array.from(selectedTechniques),
           situationIds: Array.from(selectedSituations),
@@ -338,7 +455,13 @@ export default function TrainingProgramsManager({
       if (!response.ok || data.ok !== true) {
         throw new Error(data.details || data.error || 'Failed to save training program.')
       }
-      setMessage(editingId ? 'Training program updated.' : 'Training program created as draft.')
+      const sync = data.scheduleSync?.sync ?? data.scheduleSync ?? null
+      const linked = Number(sync?.linked ?? 0)
+      setMessage(
+        editingId
+          ? `Training program updated.${linked ? ` ${linked} upcoming session${linked === 1 ? '' : 's'} linked automatically.` : ''}`
+          : 'Training program created as draft. Publish it to push the program to its scheduled classes.',
+      )
       setFormOpen(false)
       router.refresh()
     } catch (cause: any) {
@@ -463,20 +586,27 @@ export default function TrainingProgramsManager({
 
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="text-lg font-semibold">Training programs</h2>
+          <h2 className="text-lg font-semibold">{canManage ? 'Training programs' : 'My programs'}</h2>
           <p className="text-sm text-[hsl(var(--muted))]">
             {canManage
               ? canDeletePermanent
-                ? 'Prepare and publish curriculum for a group or class. Unused test programs can be permanently deleted.'
-                : 'Prepare and publish curriculum for a group or class.'
-              : 'Published programs shared by the Head Coach.'}
+                ? 'Prepare curriculum, recurring classes and coaching teams. Unused test programs can be permanently deleted.'
+                : 'Prepare curriculum, recurring classes and coaching teams.'
+              : 'Published programs where you are assigned as Responsible Coach or Assistant Coach.'}
           </p>
         </div>
-        {canManage ? (
-          <Button type="button" onClick={openNew}>
-            <Plus className="h-4 w-4" /> New program
-          </Button>
-        ) : null}
+        <div className="flex flex-wrap gap-2">
+          {!canManage ? (
+            <Link href="/schedule/sessions" className="rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm font-medium hover:bg-black/5">
+              My Assigned Sessions
+            </Link>
+          ) : null}
+          {canManage ? (
+            <Button type="button" onClick={openNew}>
+              <Plus className="h-4 w-4" /> New program
+            </Button>
+          ) : null}
+        </div>
       </div>
 
       {canManage && formOpen ? (
@@ -484,7 +614,7 @@ export default function TrainingProgramsManager({
           <div className="flex items-start justify-between gap-3">
             <div>
               <h3 className="text-base font-semibold">{editingId ? 'Edit training program' : 'New training program'}</h3>
-              <p className="text-xs text-[hsl(var(--muted))]">The existing Schedule remains unchanged. Use the class/group name used by the academy.</p>
+              <p className="text-xs text-[hsl(var(--muted))]">Choose the recurring Schedule classes once. Published programs will flow automatically to their dated sessions during the program period.</p>
             </div>
             <Button type="button" variant="ghost" size="sm" onClick={() => setFormOpen(false)} disabled={pending}>Close</Button>
           </div>
@@ -496,6 +626,56 @@ export default function TrainingProgramsManager({
             <Input label="End date" type="date" value={endDate} min={startDate} onChange={(event) => setEndDate(event.target.value)} />
           </div>
           <Textarea label="Head Coach notes (optional)" value={notes} onChange={(event) => setNotes(event.target.value)} rows={3} placeholder="Focus on control before speed…" />
+
+          <div className="rounded-2xl border border-blue-200 bg-blue-50/60 p-4">
+            <div>
+              <h4 className="text-sm font-semibold text-blue-950">Schedule classes</h4>
+              <p className="mt-0.5 text-xs text-blue-900/80">
+                Select every recurring class that should receive this program. Existing dated sessions are linked on save/publish, and future generated sessions inherit the same program automatically.
+              </p>
+            </div>
+
+            {!templateGroups.length ? (
+              <div className="mt-3 rounded-xl border border-dashed border-blue-200 bg-white/70 px-3 py-3 text-sm text-blue-900">
+                No active recurring Schedule classes are available.
+              </div>
+            ) : (
+              <div className="mt-3 grid gap-3 lg:grid-cols-2">
+                {templateGroups.map(([groupKey, groupTemplates]) => {
+                  const selectedCount = groupTemplates.filter((template) => selectedClassTemplateIds.has(template.id)).length
+                  const allSelected = selectedCount === groupTemplates.length && groupTemplates.length > 0
+                  return (
+                    <div key={groupKey} className="rounded-2xl border border-blue-100 bg-white p-3">
+                      <label className="flex cursor-pointer items-start gap-3">
+                        <input
+                          type="checkbox"
+                          className="mt-0.5 h-4 w-4"
+                          checked={allSelected}
+                          onChange={(event) => toggleTemplateGroup(groupTemplates, event.target.checked)}
+                        />
+                        <span className="min-w-0 flex-1">
+                          <span className="block text-sm font-semibold text-black">{groupTemplates[0]?.name ?? groupKey}</span>
+                          <span className="block text-xs text-[hsl(var(--muted))]">{selectedCount}/{groupTemplates.length} recurring sessions selected</span>
+                        </span>
+                      </label>
+                      <div className="mt-2 space-y-1 border-l border-blue-100 pl-4">
+                        {groupTemplates.map((template) => (
+                          <label key={template.id} className="flex cursor-pointer items-center gap-3 rounded-lg px-2 py-2 text-xs hover:bg-blue-50">
+                            <input
+                              type="checkbox"
+                              checked={selectedClassTemplateIds.has(template.id)}
+                              onChange={(event) => toggleClassTemplate(template.id, event.target.checked)}
+                            />
+                            <span>{templateLabel(template)}</span>
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+          </div>
 
           <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))]/30 p-4">
             <div className="flex items-start gap-2">
@@ -632,16 +812,22 @@ export default function TrainingProgramsManager({
         </form>
       ) : null}
 
-      {!programs.length ? (
+      {!visiblePrograms.length ? (
         <div className="rounded-3xl border border-dashed border-[hsl(var(--border))] bg-white p-8 text-center">
           <CalendarDays className="mx-auto h-8 w-8 text-[hsl(var(--muted))]" />
-          <div className="mt-3 font-semibold">No training program yet</div>
-          <p className="mt-1 text-sm text-[hsl(var(--muted))]">{canManage ? 'Create the first program from the shared curriculum.' : 'The Head Coach has not published a program yet.'}</p>
+          <div className="mt-3 font-semibold">{canManage ? 'No training program yet' : 'No program assigned to you'}</div>
+          <p className="mt-1 text-sm text-[hsl(var(--muted))]">{canManage ? 'Create the first program from the shared curriculum.' : 'When the Head Coach assigns you to a published program, it will appear here.'}</p>
         </div>
       ) : (
         <div className="space-y-3">
-          {programs.map((program) => {
+          {visiblePrograms.map((program) => {
             const expanded = expandedPrograms.has(program.id)
+            const scheduleMappings = programClassTemplates.filter((mapping) => mapping.program_id === program.id && mapping.is_active)
+            const viewerRole = program.responsible_coach_user_id === viewerUserId
+              ? 'Responsible Coach'
+              : program.assistant_coach_1_user_id === viewerUserId || program.assistant_coach_2_user_id === viewerUserId
+                ? 'Assistant Coach'
+                : null
             return (
               <div key={program.id} className="rounded-3xl border border-[hsl(var(--border))] bg-white p-4 shadow-soft sm:p-5">
                 <div className="flex flex-wrap items-start justify-between gap-3">
@@ -649,6 +835,9 @@ export default function TrainingProgramsManager({
                     <div className="flex flex-wrap items-center gap-2">
                       <h3 className="text-base font-semibold text-black">{program.title}</h3>
                       <span className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold ${statusClass(program.status)}`}>{statusLabel(program.status)}</span>
+                      {!canManage && viewerRole ? (
+                        <span className="rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1 text-[11px] font-semibold text-blue-800">{viewerRole}</span>
+                      ) : null}
                     </div>
                     <div className="mt-1 text-sm text-[hsl(var(--muted))]">{program.target_group} · {formatDate(program.start_date)} → {formatDate(program.end_date)}</div>
                     {program.notes ? <p className="mt-2 whitespace-pre-wrap text-sm text-black">{program.notes}</p> : null}
@@ -657,6 +846,12 @@ export default function TrainingProgramsManager({
                       <div className="mt-1 text-[hsl(var(--muted))]">
                         Assistants: {[program.assistant_coach_1_name_snapshot, program.assistant_coach_2_name_snapshot].filter(Boolean).join(', ') || 'None'}
                       </div>
+                    </div>
+                    <div className="mt-2 rounded-xl border border-blue-100 bg-blue-50/50 px-3 py-2 text-xs text-blue-950">
+                      <span className="font-semibold">Schedule:</span>{' '}
+                      {scheduleMappings.length
+                        ? `${scheduleMappings.length} recurring class${scheduleMappings.length === 1 ? '' : 'es'} linked`
+                        : 'No recurring class linked yet'}
                     </div>
                   </div>
                   <div className="flex flex-wrap gap-2">
@@ -689,7 +884,25 @@ export default function TrainingProgramsManager({
                     ) : null}
                   </div>
                 </div>
-                {expanded ? <div className="mt-4">{renderAssignedCurriculum(program)}</div> : null}
+                {expanded ? (
+                  <div className="mt-4 space-y-4">
+                    <div className="rounded-2xl border border-blue-100 bg-blue-50/40 p-3">
+                      <div className="text-xs font-semibold uppercase tracking-wide text-blue-900">Scheduled classes</div>
+                      {scheduleMappings.length ? (
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          {scheduleMappings.map((mapping) => (
+                            <span key={mapping.id} className="rounded-full border border-blue-100 bg-white px-2.5 py-1 text-xs text-blue-950">
+                              {mapping.class_name_snapshot} · {mappingLabel(mapping, classTemplateById.get(mapping.class_template_id))}
+                            </span>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="mt-2 text-sm text-blue-900">No recurring Schedule class is linked to this program yet.</div>
+                      )}
+                    </div>
+                    <div>{renderAssignedCurriculum(program)}</div>
+                  </div>
+                ) : null}
               </div>
             )
           })}
@@ -699,7 +912,7 @@ export default function TrainingProgramsManager({
       <ConfirmActionModal
         open={Boolean(statusTarget)}
         title={statusTarget?.nextStatus === 'published' ? 'Publish training program?' : statusTarget?.nextStatus === 'draft' ? 'Unpublish training program?' : 'Archive training program?'}
-        description={statusTarget?.nextStatus === 'published' ? 'Coach and Assistant Coach will be able to read this program.' : statusTarget?.nextStatus === 'draft' ? 'Coach and Assistant Coach will no longer see this program until it is published again.' : 'Archived programs are kept for history but hidden from Coach and Assistant Coach.'}
+        description={statusTarget?.nextStatus === 'published' ? 'The program will become visible to its coaching team and will automatically link to eligible scheduled sessions for the selected recurring classes.' : statusTarget?.nextStatus === 'draft' ? 'Future no-log session links from this program will be removed, and the coaching team will no longer see it in My Programs.' : 'Archived programs are kept for history. Future no-log session links are removed while historical session records stay preserved.'}
         confirmLabel={statusTarget?.nextStatus === 'published' ? 'Publish' : statusTarget?.nextStatus === 'draft' ? 'Unpublish' : 'Archive'}
         tone={statusTarget?.nextStatus === 'archived' ? 'destructive' : 'default'}
         pending={pending}
