@@ -9,6 +9,8 @@ import type {
   ScheduleSessionTrainingProgramAssignment,
   ScheduleSessionExceptionEvent,
   ScheduleTrainingSession,
+  ScheduleRecurringClassTemplate,
+  ScheduleSeriesCoachingTeam,
 } from '@/app/schedule/sessions/page'
 import Button from '@/components/ui/Button'
 import ConfirmActionModal from '@/components/ui/ConfirmActionModal'
@@ -23,6 +25,15 @@ type StaffOption = {
   email: string | null
   member_id: string | null
   role: 'assistant_coach' | 'coach' | 'head_coach' | 'super_admin'
+}
+
+const DAY_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+
+function assignmentSourceLabel(value: ScheduleSessionCoachAssignment['assignment_source']) {
+  if (value === 'schedule_default') return 'Recurring class default'
+  if (value === 'program') return 'Training Program default'
+  if (value === 'session_override') return 'Session override'
+  return 'Manual session override'
 }
 
 function normalizeTime(value: string | null) {
@@ -110,6 +121,8 @@ export default function TrainingSessionsManager({
   programs,
   programAssignments,
   exceptionEvents,
+  recurringTemplates,
+  seriesCoachingTeams,
   today,
   previewUntil,
   defaultSyncUntil,
@@ -123,6 +136,8 @@ export default function TrainingSessionsManager({
   programs: PublishedTrainingProgram[]
   programAssignments: ScheduleSessionTrainingProgramAssignment[]
   exceptionEvents: ScheduleSessionExceptionEvent[]
+  recurringTemplates: ScheduleRecurringClassTemplate[]
+  seriesCoachingTeams: ScheduleSeriesCoachingTeam[]
   today: string
   previewUntil: string
   defaultSyncUntil: string
@@ -145,6 +160,12 @@ export default function TrainingSessionsManager({
   const [assignmentError, setAssignmentError] = React.useState<string | null>(null)
   const assignmentSelfService = Boolean(assignmentSession) && !canManageAssignments && primaryUserId === viewerUserId
   const assignmentAssistantLimit = assignmentSelfService ? 2 : 6
+
+  const [seriesTeamKey, setSeriesTeamKey] = React.useState<string | null>(null)
+  const [seriesPrimaryUserId, setSeriesPrimaryUserId] = React.useState('')
+  const [seriesAssistantUserIds, setSeriesAssistantUserIds] = React.useState<string[]>([])
+  const [seriesTeamPending, setSeriesTeamPending] = React.useState(false)
+  const [seriesTeamError, setSeriesTeamError] = React.useState<string | null>(null)
 
   const [programSession, setProgramSession] = React.useState<ScheduleTrainingSession | null>(null)
   const [programId, setProgramId] = React.useState('')
@@ -185,6 +206,135 @@ export default function TrainingSessionsManager({
     }
     return map
   }, [exceptionEvents])
+
+  const seriesTeamByKey = React.useMemo(
+    () => new Map(seriesCoachingTeams.map((row) => [row.series_key, row])),
+    [seriesCoachingTeams],
+  )
+
+  const recurringSeries = React.useMemo(() => {
+    const map = new Map<
+      string,
+      {
+        series_key: string
+        name: string
+        level: string
+        audience: ScheduleRecurringClassTemplate['audience']
+        occurrences: ScheduleRecurringClassTemplate[]
+      }
+    >()
+
+    for (const row of recurringTemplates) {
+      const current = map.get(row.series_key)
+      if (current) current.occurrences.push(row)
+      else {
+        map.set(row.series_key, {
+          series_key: row.series_key,
+          name: row.name,
+          level: row.level,
+          audience: row.audience,
+          occurrences: [row],
+        })
+      }
+    }
+
+    return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name))
+  }, [recurringTemplates])
+
+  const configuredSeriesCount = recurringSeries.filter((row) => seriesTeamByKey.has(row.series_key)).length
+
+  async function loadStaffForSeriesTeam() {
+    if (staffLoaded || staffLoading) return
+    setStaffLoading(true)
+    setSeriesTeamError(null)
+    try {
+      const response = await fetch('/api/schedule/session-assignments', { method: 'GET', cache: 'no-store' })
+      const data = await readJson(response)
+      if (!response.ok || data.ok !== true) {
+        throw new Error(data.details || data.error || 'Failed to load coaching staff.')
+      }
+      setStaffOptions((data.items ?? []) as StaffOption[])
+      setStaffLoaded(true)
+    } catch (cause: any) {
+      setSeriesTeamError(String(cause?.message || cause))
+    } finally {
+      setStaffLoading(false)
+    }
+  }
+
+  function openSeriesTeam(seriesKey: string) {
+    const current = seriesTeamByKey.get(seriesKey)
+    setSeriesTeamKey(seriesKey)
+    setSeriesPrimaryUserId(current?.primary_coach_user_id ?? '')
+    setSeriesAssistantUserIds(
+      [current?.assistant_coach_1_user_id, current?.assistant_coach_2_user_id].filter(
+        (id): id is string => Boolean(id),
+      ),
+    )
+    setSeriesTeamError(null)
+    void loadStaffForSeriesTeam()
+  }
+
+  function closeSeriesTeam() {
+    if (seriesTeamPending) return
+    setSeriesTeamKey(null)
+    setSeriesTeamError(null)
+  }
+
+  function toggleSeriesAssistant(userId: string) {
+    setSeriesAssistantUserIds((current) =>
+      current.includes(userId)
+        ? current.filter((id) => id !== userId)
+        : current.length >= 2
+          ? current
+          : [...current, userId],
+    )
+  }
+
+  async function saveSeriesTeam() {
+    if (!seriesTeamKey) return
+    if (!seriesPrimaryUserId && seriesAssistantUserIds.length > 0) {
+      setSeriesTeamError('Choose a Primary Coach before adding assistants.')
+      return
+    }
+    if (seriesAssistantUserIds.length > 2) {
+      setSeriesTeamError('Choose no more than two assistants.')
+      return
+    }
+
+    setSeriesTeamPending(true)
+    setSeriesTeamError(null)
+    setMessage(null)
+    setError(null)
+
+    try {
+      const response = await fetch('/api/schedule/default-coaching-team', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          seriesKey: seriesTeamKey,
+          primaryUserId: seriesPrimaryUserId || null,
+          assistantUserIds: seriesAssistantUserIds,
+        }),
+      })
+      const data = await readJson(response)
+      if (!response.ok || data.ok !== true) {
+        throw new Error(data.details || data.error || 'Failed to update the recurring-class coaching team.')
+      }
+
+      setSeriesTeamKey(null)
+      setMessage(
+        seriesPrimaryUserId
+          ? 'Default coaching team updated. Eligible future sessions were synchronized.'
+          : 'Default coaching team cleared. Eligible future sessions were synchronized.',
+      )
+      router.refresh()
+    } catch (cause: any) {
+      setSeriesTeamError(String(cause?.message || cause))
+    } finally {
+      setSeriesTeamPending(false)
+    }
+  }
 
   function openProgramAssignment(row: ScheduleTrainingSession) {
     const current = programAssignmentBySession.get(row.id)
@@ -549,6 +699,72 @@ export default function TrainingSessionsManager({
         </div>
       </div>
 
+      {canManageAssignments ? (
+        <details className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] shadow-soft">
+          <summary className="cursor-pointer list-none px-4 py-4 sm:px-5">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <h2 className="font-semibold">Default coaching teams by recurring class</h2>
+                <p className="mt-1 text-sm text-[hsl(var(--muted))]">
+                  Assign the normal Primary Coach once for each recurring schedule program. Future sessions inherit this team automatically.
+                </p>
+              </div>
+              <span className="rounded-full border border-[hsl(var(--border))] px-2.5 py-1 text-xs font-semibold">
+                {configuredSeriesCount}/{recurringSeries.length} assigned
+              </span>
+            </div>
+          </summary>
+
+          <div className="border-t border-[hsl(var(--border))] p-4 sm:p-5">
+            <div className="mb-4 rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-950">
+              Example: assign Mostafa to <strong>Teens 10–14 Intermediate</strong> once. Monday, Wednesday and every future session in that recurring class inherit Mostafa automatically. Use a dated-session exception only for a real replacement.
+            </div>
+
+            <div className="grid gap-3 lg:grid-cols-2">
+              {recurringSeries.map((series) => {
+                const team = seriesTeamByKey.get(series.series_key)
+                const assistants = [
+                  team?.assistant_coach_1_name_snapshot,
+                  team?.assistant_coach_2_name_snapshot,
+                ].filter((name): name is string => Boolean(name))
+
+                const occurrenceText = series.occurrences
+                  .map((row) => `${DAY_SHORT[row.day_of_week]} ${formatTime(row.start_time)}${row.mat ? ` · ${row.mat}` : ''}`)
+                  .join(' · ')
+
+                return (
+                  <div key={series.series_key} className="rounded-xl border border-[hsl(var(--border))] p-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="font-semibold">{series.name}</div>
+                        <div className="mt-0.5 text-xs text-[hsl(var(--muted))]">{series.level}</div>
+                      </div>
+                      <Button type="button" size="sm" variant="outline" onClick={() => openSeriesTeam(series.series_key)}>
+                        <Users className="h-4 w-4" />
+                        {team ? 'Edit team' : 'Assign coach'}
+                      </Button>
+                    </div>
+
+                    <div className="mt-2 text-xs text-[hsl(var(--muted))]">{occurrenceText}</div>
+
+                    <div className="mt-3 grid gap-2 text-sm sm:grid-cols-2">
+                      <div>
+                        <div className="text-xs font-semibold uppercase tracking-wide text-[hsl(var(--muted))]">Primary Coach</div>
+                        <div className="mt-0.5 font-medium">{team?.primary_coach_name_snapshot ?? 'Unassigned'}</div>
+                      </div>
+                      <div>
+                        <div className="text-xs font-semibold uppercase tracking-wide text-[hsl(var(--muted))]">Assistants</div>
+                        <div className="mt-0.5 font-medium">{assistants.length ? assistants.join(', ') : 'None'}</div>
+                      </div>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        </details>
+      ) : null}
+
       {canManageSessions ? (
         <div className="space-y-4 rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4 shadow-soft sm:p-5">
           <div>
@@ -677,7 +893,7 @@ export default function TrainingSessionsManager({
                             </div>
                             {primary ? (
                               <div className="text-xs text-[hsl(var(--muted))]">
-                                {staffRoleLabel(primary.staff_profile_role_snapshot)}
+                                {staffRoleLabel(primary.staff_profile_role_snapshot)} · {assignmentSourceLabel(primary.assignment_source)}
                               </div>
                             ) : null}
                           </div>
@@ -692,15 +908,11 @@ export default function TrainingSessionsManager({
                           </div>
                         </div>
 
-                        {(canManageAssignments || primary?.staff_user_id === viewerUserId) && row.status === 'scheduled' ? (
+                        {!canManageAssignments && primary?.staff_user_id === viewerUserId && row.status === 'scheduled' ? (
                           <div className="mt-3">
                             <Button type="button" size="sm" variant="outline" onClick={() => openAssignments(row)}>
                               <Users className="h-4 w-4" />
-                              {primary?.staff_user_id === viewerUserId && !canManageAssignments
-                                ? 'Manage assistants'
-                                : programAssignment
-                                  ? 'Override coach team'
-                                  : 'Manage coaches'}
+                              Manage assistants
                             </Button>
                           </div>
                         ) : null}
@@ -1034,6 +1246,108 @@ export default function TrainingSessionsManager({
       </Modal>
 
       <Modal
+        open={Boolean(seriesTeamKey)}
+        onClose={closeSeriesTeam}
+        title={
+          seriesTeamKey
+            ? `Default coaching team · ${recurringSeries.find((row) => row.series_key === seriesTeamKey)?.name ?? seriesTeamKey}`
+            : 'Default coaching team'
+        }
+        className="max-h-[86vh] overflow-y-auto"
+      >
+        {seriesTeamKey ? (
+          <div className="space-y-4">
+            <div className="rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-950">
+              This team is inherited by future dated sessions in the recurring class. Existing historical, completed and logged sessions are not rewritten. A one-session staff exception stays protected.
+            </div>
+
+            {staffLoading ? (
+              <div className="text-sm text-[hsl(var(--muted))]">Loading coaching staff…</div>
+            ) : (
+              <>
+                <Select
+                  label="Primary Coach"
+                  value={seriesPrimaryUserId}
+                  onChange={(event) => {
+                    const value = event.target.value
+                    setSeriesPrimaryUserId(value)
+                    setSeriesAssistantUserIds((current) => current.filter((id) => id !== value))
+                  }}
+                  disabled={seriesTeamPending}
+                >
+                  <option value="">Unassigned / clear default team</option>
+                  {staffOptions.map((staff) => (
+                    <option key={staff.user_id} value={staff.user_id}>
+                      {staff.full_name} · {staffRoleLabel(staff.role)}
+                    </option>
+                  ))}
+                </Select>
+
+                <div className="space-y-2">
+                  <div>
+                    <div className="text-sm font-medium">Assistant Coach(s)</div>
+                    <div className="text-xs text-[hsl(var(--muted))]">Optional · up to 2 assistants.</div>
+                  </div>
+
+                  {!seriesPrimaryUserId ? (
+                    <div className="rounded-xl border border-dashed border-[hsl(var(--border))] px-3 py-3 text-sm text-[hsl(var(--muted))]">
+                      Choose a Primary Coach before adding assistants.
+                    </div>
+                  ) : (
+                    <div className="max-h-56 space-y-1 overflow-y-auto rounded-xl border border-[hsl(var(--border))] p-2">
+                      {staffOptions
+                        .filter((staff) => staff.user_id !== seriesPrimaryUserId)
+                        .map((staff) => {
+                          const checked = seriesAssistantUserIds.includes(staff.user_id)
+                          return (
+                            <label
+                              key={staff.user_id}
+                              className="flex cursor-pointer items-center gap-3 rounded-lg px-2 py-2 hover:bg-black/5"
+                            >
+                              <input
+                                type="checkbox"
+                                checked={checked}
+                                disabled={seriesTeamPending || (!checked && seriesAssistantUserIds.length >= 2)}
+                                onChange={() => toggleSeriesAssistant(staff.user_id)}
+                              />
+                              <span className="min-w-0 flex-1">
+                                <span className="block truncate text-sm font-medium">{staff.full_name}</span>
+                                <span className="block text-xs text-[hsl(var(--muted))]">{staffRoleLabel(staff.role)}</span>
+                              </span>
+                            </label>
+                          )
+                        })}
+                    </div>
+                  )}
+                </div>
+              </>
+            )}
+
+            {seriesTeamError ? (
+              <div className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-800">
+                {seriesTeamError}
+              </div>
+            ) : null}
+
+            <div className="flex flex-wrap justify-end gap-2 pt-1">
+              <Button type="button" variant="ghost" onClick={closeSeriesTeam} disabled={seriesTeamPending}>
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                onClick={saveSeriesTeam}
+                loading={seriesTeamPending}
+                loadingText="Saving…"
+                disabled={staffLoading}
+              >
+                {seriesPrimaryUserId ? 'Save default team' : 'Clear default team'}
+              </Button>
+            </div>
+          </div>
+        ) : null}
+      </Modal>
+
+      <Modal
         open={Boolean(assignmentSession)}
         onClose={closeAssignments}
         title={assignmentSession ? `${assignmentSelfService ? 'Session assistants' : 'Coach assignment'} · ${assignmentSession.name_snapshot}` : 'Coach assignment'}
@@ -1146,7 +1460,7 @@ export default function TrainingSessionsManager({
             <div className="text-xs text-[hsl(var(--muted))]">
               {assignmentSelfService
                 ? 'This is a one-session assistant override. The program Responsible Coach remains unchanged, and the session keeps its assignment history.'
-                : 'Manager changes are treated as a session override. Assignment history is preserved; previous rows are deactivated rather than physically deleted.'}
+                : 'Manager session changes are exceptional overrides. Use Default coaching teams above for the normal recurring-class assignment.'}
             </div>
           </div>
         ) : null}
