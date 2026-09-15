@@ -1,0 +1,777 @@
+'use client'
+
+import { useMemo, useState } from 'react'
+import type {
+  FrontDeskStaffRow,
+  ProspectActivityRow,
+  ProspectRow,
+  ProspectSubmissionRow,
+} from '@/app/admin/prospects/page'
+import {
+  PROSPECT_LOST_REASONS,
+  PROSPECT_STATUSES,
+  normalizeProspectWhatsappDigits,
+  type ProspectLostReason,
+  type ProspectStatus,
+} from '@/lib/prospects'
+
+type Props = {
+  currentUserId: string
+  canManage: boolean
+  canImport: boolean
+  prospects: ProspectRow[]
+  submissions: ProspectSubmissionRow[]
+  activities: ProspectActivityRow[]
+  staff: FrontDeskStaffRow[]
+}
+
+type Draft = {
+  status: ProspectStatus
+  lost_reason: ProspectLostReason | ''
+  assigned_to: string
+  next_follow_up_at: string
+}
+
+type ImportSummary = {
+  total_messages: number
+  created_prospects: number
+  inserted_submissions: number
+  duplicate_messages: number
+  skipped_invalid: number
+  conflicts: number
+}
+
+const STATUS_LABELS: Record<ProspectStatus, string> = {
+  new: 'New',
+  contacted: 'Contacted',
+  awaiting_reply: 'Awaiting reply',
+  trial_booked: 'Trial booked',
+  trial_completed: 'Trial completed',
+  joined: 'Joined',
+  lost: 'Lost',
+}
+
+const LOST_REASON_LABELS: Record<ProspectLostReason, string> = {
+  no_response: 'No response',
+  not_interested: 'Not interested',
+  invalid: 'Invalid contact',
+  spam: 'Spam',
+  other: 'Other',
+}
+
+function sourceLabel(source: ProspectSubmissionRow['source']) {
+  if (source === 'contact_us') return 'Contact Us'
+  if (source === 'visitor_information') return 'Visitor Information'
+  return 'Website enquiry'
+}
+
+function sourceClass(source: ProspectSubmissionRow['source']) {
+  if (source === 'contact_us') return 'border-sky-200 bg-sky-50 text-sky-800'
+  if (source === 'visitor_information') return 'border-violet-200 bg-violet-50 text-violet-800'
+  return 'border-slate-200 bg-slate-50 text-slate-700'
+}
+
+function statusClass(status: ProspectStatus) {
+  if (status === 'new') return 'border-amber-200 bg-amber-50 text-amber-900'
+  if (status === 'contacted') return 'border-sky-200 bg-sky-50 text-sky-800'
+  if (status === 'awaiting_reply') return 'border-indigo-200 bg-indigo-50 text-indigo-800'
+  if (status === 'trial_booked') return 'border-violet-200 bg-violet-50 text-violet-800'
+  if (status === 'trial_completed') return 'border-emerald-200 bg-emerald-50 text-emerald-800'
+  if (status === 'joined') return 'border-green-200 bg-green-50 text-green-800'
+  return 'border-slate-200 bg-slate-50 text-slate-700'
+}
+
+function fmtDateTime(value?: string | null) {
+  if (!value) return '—'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+  return new Intl.DateTimeFormat('en-GB', {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+  }).format(date)
+}
+
+function toInputDateTime(value?: string | null) {
+  if (!value) return ''
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return ''
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`
+}
+
+function followUpIsDue(value?: string | null) {
+  if (!value) return false
+  const ms = new Date(value).getTime()
+  return Number.isFinite(ms) && ms <= Date.now()
+}
+
+function staffName(row?: FrontDeskStaffRow | null) {
+  if (!row) return 'Unassigned'
+  const full = `${row.first_name ?? ''} ${row.last_name ?? ''}`.trim()
+  return full || row.email || row.role
+}
+
+function latestSubmission(rows: ProspectSubmissionRow[]) {
+  return [...rows].sort((a, b) => new Date(b.received_at).getTime() - new Date(a.received_at).getTime())[0] ?? null
+}
+
+function terminalStatus(status: ProspectStatus) {
+  return status === 'joined' || status === 'lost'
+}
+
+export default function ProspectsManager({
+  currentUserId,
+  canManage,
+  canImport,
+  prospects: initialProspects,
+  submissions,
+  activities: initialActivities,
+  staff,
+}: Props) {
+  const [prospects, setProspects] = useState(initialProspects)
+  const [activities, setActivities] = useState(initialActivities)
+  const [query, setQuery] = useState('')
+  const [statusFilter, setStatusFilter] = useState<'all' | ProspectStatus>('all')
+  const [sourceFilter, setSourceFilter] = useState<'all' | ProspectSubmissionRow['source']>('all')
+  const [assigneeFilter, setAssigneeFilter] = useState<'all' | 'unassigned' | string>('all')
+  const [followUpOnly, setFollowUpOnly] = useState(false)
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({})
+  const [drafts, setDrafts] = useState<Record<string, Draft>>(() =>
+    Object.fromEntries(
+      initialProspects.map((row) => [
+        row.id,
+        {
+          status: row.status,
+          lost_reason: row.lost_reason ?? '',
+          assigned_to: row.assigned_to ?? '',
+          next_follow_up_at: toInputDateTime(row.next_follow_up_at),
+        },
+      ]),
+    ),
+  )
+  const [notes, setNotes] = useState<Record<string, string>>({})
+  const [busyId, setBusyId] = useState<string | null>(null)
+  const [flash, setFlash] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [importSummary, setImportSummary] = useState<ImportSummary | null>(null)
+  const [importBusy, setImportBusy] = useState(false)
+
+  const submissionsByProspect = useMemo(() => {
+    const map = new Map<string, ProspectSubmissionRow[]>()
+    for (const row of submissions) {
+      const current = map.get(row.prospect_id) ?? []
+      current.push(row)
+      map.set(row.prospect_id, current)
+    }
+    return map
+  }, [submissions])
+
+  const activitiesByProspect = useMemo(() => {
+    const map = new Map<string, ProspectActivityRow[]>()
+    for (const row of activities) {
+      const current = map.get(row.prospect_id) ?? []
+      current.push(row)
+      map.set(row.prospect_id, current)
+    }
+    for (const rows of map.values()) {
+      rows.sort((a, b) => new Date(b.occurred_at).getTime() - new Date(a.occurred_at).getTime())
+    }
+    return map
+  }, [activities])
+
+  const staffMap = useMemo(() => new Map(staff.map((row) => [row.user_id, row])), [staff])
+
+  const counts = useMemo(() => {
+    const due = prospects.filter((row) => !terminalStatus(row.status) && followUpIsDue(row.next_follow_up_at)).length
+    return {
+      new: prospects.filter((row) => row.status === 'new').length,
+      due,
+      active: prospects.filter((row) => ['contacted', 'awaiting_reply'].includes(row.status)).length,
+      trial: prospects.filter((row) => row.status === 'trial_booked').length,
+      joined: prospects.filter((row) => row.status === 'joined').length,
+    }
+  }, [prospects])
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase()
+
+    return prospects.filter((row) => {
+      const rows = submissionsByProspect.get(row.id) ?? []
+      const sourceMatch = sourceFilter === 'all' || rows.some((item) => item.source === sourceFilter)
+      if (!sourceMatch) return false
+      if (statusFilter !== 'all' && row.status !== statusFilter) return false
+      if (assigneeFilter === 'unassigned' && row.assigned_to) return false
+      if (assigneeFilter !== 'all' && assigneeFilter !== 'unassigned' && row.assigned_to !== assigneeFilter) return false
+      if (followUpOnly && (terminalStatus(row.status) || !followUpIsDue(row.next_follow_up_at))) return false
+
+      if (!q) return true
+
+      const haystack = [
+        row.full_name,
+        row.email ?? '',
+        row.phone ?? '',
+        ...rows.flatMap((item) => [
+          item.submitted_name ?? '',
+          item.submitted_email ?? '',
+          item.submitted_phone ?? '',
+          ...(item.requested_classes ?? []),
+          item.submitted_level ?? '',
+          ...(item.goals ?? []),
+          item.message ?? '',
+        ]),
+      ]
+        .join(' ')
+        .toLowerCase()
+
+      return haystack.includes(q)
+    })
+  }, [prospects, submissionsByProspect, query, statusFilter, sourceFilter, assigneeFilter, followUpOnly])
+
+  function updateDraft(id: string, patch: Partial<Draft>) {
+    setDrafts((current) => ({
+      ...current,
+      [id]: {
+        ...(current[id] ?? {
+          status: 'new',
+          lost_reason: '',
+          assigned_to: '',
+          next_follow_up_at: '',
+        }),
+        ...patch,
+      },
+    }))
+  }
+
+  function mergeProspect(updated: ProspectRow) {
+    setProspects((rows) => rows.map((row) => (row.id === updated.id ? { ...row, ...updated } : row)))
+    updateDraft(updated.id, {
+      status: updated.status,
+      lost_reason: updated.lost_reason ?? '',
+      assigned_to: updated.assigned_to ?? '',
+      next_follow_up_at: toInputDateTime(updated.next_follow_up_at),
+    })
+  }
+
+  async function saveProspect(row: ProspectRow) {
+    if (!canManage) return
+    const draft = drafts[row.id]
+    if (!draft) return
+
+    setBusyId(row.id)
+    setError(null)
+    setFlash(null)
+
+    try {
+      const followUpIso = draft.next_follow_up_at ? new Date(draft.next_follow_up_at).toISOString() : null
+      const res = await fetch('/api/admin/prospects', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          prospect_id: row.id,
+          status: draft.status,
+          lost_reason: draft.status === 'lost' ? draft.lost_reason || 'other' : null,
+          assigned_to: draft.assigned_to || null,
+          next_follow_up_at: followUpIso,
+        }),
+      })
+      const data = await res.json()
+      if (!res.ok || !data?.ok) throw new Error(data?.error || 'Update failed.')
+
+      mergeProspect(data.prospect as ProspectRow)
+      setFlash(`${row.full_name} updated.`)
+    } catch (e: any) {
+      setError(String(e?.message ?? e ?? 'Update failed.'))
+    } finally {
+      setBusyId(null)
+    }
+  }
+
+  async function addNote(row: ProspectRow) {
+    if (!canManage) return
+    const note = (notes[row.id] ?? '').trim()
+    if (!note) return
+
+    setBusyId(row.id)
+    setError(null)
+    setFlash(null)
+
+    try {
+      const res = await fetch('/api/admin/prospects', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          prospect_id: row.id,
+          action: 'note',
+          note,
+        }),
+      })
+      const data = await res.json()
+      if (!res.ok || !data?.ok) throw new Error(data?.error || 'Failed to add note.')
+
+      setActivities((rows) => [data.activity as ProspectActivityRow, ...rows])
+      setNotes((current) => ({ ...current, [row.id]: '' }))
+      setFlash(`Note added for ${row.full_name}.`)
+    } catch (e: any) {
+      setError(String(e?.message ?? e ?? 'Failed to add note.'))
+    } finally {
+      setBusyId(null)
+    }
+  }
+
+  function recordContact(row: ProspectRow, channel: 'whatsapp' | 'call' | 'email') {
+    if (!canManage) return
+
+    void fetch('/api/admin/prospects', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        prospect_id: row.id,
+        action: 'log_contact',
+        channel,
+      }),
+    })
+      .then((res) => res.json())
+      .then((data) => {
+        if (data?.prospect) mergeProspect(data.prospect as ProspectRow)
+        if (data?.activity) setActivities((rows) => [data.activity as ProspectActivityRow, ...rows])
+      })
+      .catch(() => undefined)
+  }
+
+  function openWhatsapp(row: ProspectRow) {
+    const digits = normalizeProspectWhatsappDigits(row.phone)
+    if (!digits) return
+    window.open(`https://wa.me/${digits}`, '_blank', 'noopener,noreferrer')
+    recordContact(row, 'whatsapp')
+  }
+
+  function openCall(row: ProspectRow) {
+    if (!row.phone) return
+    window.location.href = `tel:${row.phone}`
+    recordContact(row, 'call')
+  }
+
+  function openEmail(row: ProspectRow) {
+    if (!row.email) return
+    window.location.href = `mailto:${row.email}`
+    recordContact(row, 'email')
+  }
+
+  async function importBackfill(file: File | null) {
+    if (!canImport || !file) return
+
+    setImportBusy(true)
+    setImportSummary(null)
+    setError(null)
+    setFlash(null)
+
+    try {
+      const text = await file.text()
+      const payload = JSON.parse(text)
+
+      const res = await fetch('/api/admin/prospects/import', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+      const data = await res.json()
+      if (!res.ok || !data?.ok) throw new Error(data?.error || 'Import failed.')
+
+      setImportSummary(data.summary as ImportSummary)
+      setFlash('Gmail backfill import completed. Refreshing the prospect list…')
+      window.setTimeout(() => window.location.reload(), 1200)
+    } catch (e: any) {
+      setError(String(e?.message ?? e ?? 'Import failed.'))
+    } finally {
+      setImportBusy(false)
+    }
+  }
+
+  return (
+    <div className="space-y-5">
+      {flash ? (
+        <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
+          {flash}
+        </div>
+      ) : null}
+
+      {error ? (
+        <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">
+          {error}
+        </div>
+      ) : null}
+
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+        <Summary label="New" value={counts.new} />
+        <Summary label="Follow-up due" value={counts.due} />
+        <Summary label="In follow-up" value={counts.active} />
+        <Summary label="Trial booked" value={counts.trial} />
+        <Summary label="Joined" value={counts.joined} />
+      </div>
+
+      <div className="rounded-2xl border border-[hsl(var(--border))] bg-white p-4 shadow-soft">
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+          <label className="space-y-1 text-sm">
+            <span className="font-medium">Search</span>
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Name, phone, email, class…"
+              className="w-full rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2"
+            />
+          </label>
+
+          <label className="space-y-1 text-sm">
+            <span className="font-medium">Status</span>
+            <select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value as 'all' | ProspectStatus)}
+              className="w-full rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2"
+            >
+              <option value="all">All statuses</option>
+              {PROSPECT_STATUSES.map((status) => (
+                <option key={status} value={status}>
+                  {STATUS_LABELS[status]}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="space-y-1 text-sm">
+            <span className="font-medium">Source</span>
+            <select
+              value={sourceFilter}
+              onChange={(e) => setSourceFilter(e.target.value as typeof sourceFilter)}
+              className="w-full rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2"
+            >
+              <option value="all">All sources</option>
+              <option value="contact_us">Contact Us</option>
+              <option value="visitor_information">Visitor Information</option>
+              <option value="unknown">Unknown</option>
+            </select>
+          </label>
+
+          <label className="space-y-1 text-sm">
+            <span className="font-medium">Assigned to</span>
+            <select
+              value={assigneeFilter}
+              onChange={(e) => setAssigneeFilter(e.target.value)}
+              className="w-full rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2"
+            >
+              <option value="all">All staff</option>
+              <option value="unassigned">Unassigned</option>
+              {staff.map((row) => (
+                <option key={row.user_id} value={row.user_id}>
+                  {staffName(row)}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="flex items-end gap-2 rounded-xl border border-[hsl(var(--border))] px-3 py-2 text-sm">
+            <input
+              type="checkbox"
+              checked={followUpOnly}
+              onChange={(e) => setFollowUpOnly(e.target.checked)}
+            />
+            <span className="pb-0.5">Follow-up due only</span>
+          </label>
+        </div>
+
+        <div className="mt-3 text-xs text-[hsl(var(--muted))]">
+          Showing {filtered.length} of {prospects.length} prospects.
+        </div>
+      </div>
+
+      {canImport ? (
+        <details className="rounded-2xl border border-[hsl(var(--border))] bg-white p-4 shadow-soft">
+          <summary className="cursor-pointer font-semibold">Gmail historical backfill · Super Admin</summary>
+          <div className="mt-3 space-y-3 text-sm">
+            <p className="text-[hsl(var(--muted))]">
+              Upload a private JSON export of ATOM website form emails. Existing Gmail message IDs are ignored,
+              while matching email or phone reuses the same prospect record.
+            </p>
+            <input
+              type="file"
+              accept="application/json,.json"
+              disabled={importBusy}
+              onChange={(e) => void importBackfill(e.target.files?.[0] ?? null)}
+              className="block w-full text-sm"
+            />
+            {importBusy ? <div>Importing…</div> : null}
+            {importSummary ? (
+              <div className="grid gap-2 rounded-xl bg-slate-50 p-3 sm:grid-cols-3">
+                <div>Messages: <strong>{importSummary.total_messages}</strong></div>
+                <div>New prospects: <strong>{importSummary.created_prospects}</strong></div>
+                <div>Submissions: <strong>{importSummary.inserted_submissions}</strong></div>
+                <div>Duplicates skipped: <strong>{importSummary.duplicate_messages}</strong></div>
+                <div>Invalid skipped: <strong>{importSummary.skipped_invalid}</strong></div>
+                <div>Conflicts: <strong>{importSummary.conflicts}</strong></div>
+              </div>
+            ) : null}
+          </div>
+        </details>
+      ) : null}
+
+      <div className="space-y-3">
+        {filtered.map((row) => {
+          const rowSubmissions = submissionsByProspect.get(row.id) ?? []
+          const rowActivities = activitiesByProspect.get(row.id) ?? []
+          const latest = latestSubmission(rowSubmissions)
+          const draft = drafts[row.id]
+          const isExpanded = !!expanded[row.id]
+          const due = !terminalStatus(row.status) && followUpIsDue(row.next_follow_up_at)
+
+          return (
+            <article
+              key={row.id}
+              className="rounded-2xl border border-[hsl(var(--border))] bg-white p-4 shadow-soft"
+            >
+              <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                <div className="min-w-0 space-y-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h2 className="text-lg font-semibold">{row.full_name}</h2>
+                    <span className={`rounded-full border px-2 py-0.5 text-xs font-semibold ${statusClass(row.status)}`}>
+                      {STATUS_LABELS[row.status]}
+                    </span>
+                    {latest ? (
+                      <span className={`rounded-full border px-2 py-0.5 text-xs font-semibold ${sourceClass(latest.source)}`}>
+                        {sourceLabel(latest.source)}
+                      </span>
+                    ) : null}
+                    {due ? (
+                      <span className="rounded-full border border-rose-200 bg-rose-50 px-2 py-0.5 text-xs font-semibold text-rose-800">
+                        Follow-up due
+                      </span>
+                    ) : null}
+                  </div>
+
+                  <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-[hsl(var(--muted))]">
+                    {row.phone ? <span>{row.phone}</span> : null}
+                    {row.email ? <span>{row.email}</span> : null}
+                    <span>{rowSubmissions.length} submission{rowSubmissions.length === 1 ? '' : 's'}</span>
+                    <span>Last enquiry: {fmtDateTime(row.last_submission_at)}</span>
+                  </div>
+
+                  {latest ? (
+                    <div className="space-y-1 text-sm">
+                      {latest.requested_classes?.length ? (
+                        <div><strong>Classes:</strong> {latest.requested_classes.join(', ')}</div>
+                      ) : null}
+                      {latest.submitted_level ? (
+                        <div><strong>Level:</strong> {latest.submitted_level}</div>
+                      ) : null}
+                      {latest.goals?.length ? (
+                        <div><strong>Goals:</strong> {latest.goals.join(', ')}</div>
+                      ) : null}
+                      {latest.message ? (
+                        <div><strong>Message:</strong> {latest.message}</div>
+                      ) : null}
+                    </div>
+                  ) : null}
+                </div>
+
+                <div className="flex flex-wrap gap-2 lg:justify-end">
+                  <button
+                    type="button"
+                    disabled={!row.phone}
+                    onClick={() => openWhatsapp(row)}
+                    className="rounded-xl border border-green-200 bg-green-50 px-3 py-2 text-sm font-semibold text-green-800 disabled:opacity-40"
+                  >
+                    WhatsApp
+                  </button>
+                  <button
+                    type="button"
+                    disabled={!row.phone}
+                    onClick={() => openCall(row)}
+                    className="rounded-xl border border-[hsl(var(--border))] px-3 py-2 text-sm font-semibold disabled:opacity-40"
+                  >
+                    Call
+                  </button>
+                  <button
+                    type="button"
+                    disabled={!row.email}
+                    onClick={() => openEmail(row)}
+                    className="rounded-xl border border-[hsl(var(--border))] px-3 py-2 text-sm font-semibold disabled:opacity-40"
+                  >
+                    Email
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setExpanded((current) => ({ ...current, [row.id]: !current[row.id] }))}
+                    className="rounded-xl border border-[hsl(var(--border))] px-3 py-2 text-sm font-semibold"
+                  >
+                    {isExpanded ? 'Hide details' : 'Details'}
+                  </button>
+                </div>
+              </div>
+
+              {canManage && draft ? (
+                <div className="mt-4 grid gap-3 rounded-2xl bg-slate-50 p-3 md:grid-cols-2 xl:grid-cols-4">
+                  <label className="space-y-1 text-sm">
+                    <span className="font-medium">Status</span>
+                    <select
+                      value={draft.status}
+                      onChange={(e) => updateDraft(row.id, { status: e.target.value as ProspectStatus })}
+                      className="w-full rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2"
+                    >
+                      {PROSPECT_STATUSES.map((status) => (
+                        <option key={status} value={status}>
+                          {STATUS_LABELS[status]}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+
+                  {draft.status === 'lost' ? (
+                    <label className="space-y-1 text-sm">
+                      <span className="font-medium">Lost reason</span>
+                      <select
+                        value={draft.lost_reason}
+                        onChange={(e) => updateDraft(row.id, { lost_reason: e.target.value as ProspectLostReason })}
+                        className="w-full rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2"
+                      >
+                        <option value="">Select reason</option>
+                        {PROSPECT_LOST_REASONS.map((reason) => (
+                          <option key={reason} value={reason}>
+                            {LOST_REASON_LABELS[reason]}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  ) : (
+                    <label className="space-y-1 text-sm">
+                      <span className="font-medium">Assigned to</span>
+                      <select
+                        value={draft.assigned_to}
+                        onChange={(e) => updateDraft(row.id, { assigned_to: e.target.value })}
+                        className="w-full rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2"
+                      >
+                        <option value="">Unassigned</option>
+                        {staff.map((item) => (
+                          <option key={item.user_id} value={item.user_id}>
+                            {staffName(item)}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  )}
+
+                  <label className="space-y-1 text-sm">
+                    <span className="font-medium">Next follow-up</span>
+                    <input
+                      type="datetime-local"
+                      value={draft.next_follow_up_at}
+                      onChange={(e) => updateDraft(row.id, { next_follow_up_at: e.target.value })}
+                      className="w-full rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2"
+                    />
+                  </label>
+
+                  <div className="flex items-end">
+                    <button
+                      type="button"
+                      disabled={busyId === row.id}
+                      onClick={() => void saveProspect(row)}
+                      className="w-full rounded-xl bg-black px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+                    >
+                      {busyId === row.id ? 'Saving…' : 'Save'}
+                    </button>
+                  </div>
+                </div>
+              ) : null}
+
+              <div className="mt-3 flex flex-wrap gap-x-5 gap-y-1 text-xs text-[hsl(var(--muted))]">
+                <span>Assigned: {staffName(staffMap.get(row.assigned_to ?? ''))}</span>
+                <span>Next follow-up: {fmtDateTime(row.next_follow_up_at)}</span>
+                <span>Last contact: {fmtDateTime(row.last_contacted_at)}</span>
+              </div>
+
+              {isExpanded ? (
+                <div className="mt-4 grid gap-4 xl:grid-cols-2">
+                  <div className="space-y-3">
+                    <h3 className="font-semibold">Submissions</h3>
+                    {rowSubmissions.length ? (
+                      rowSubmissions.map((item) => (
+                        <div key={item.id} className="rounded-xl border border-[hsl(var(--border))] p-3 text-sm">
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <span className={`rounded-full border px-2 py-0.5 text-xs font-semibold ${sourceClass(item.source)}`}>
+                              {sourceLabel(item.source)}
+                            </span>
+                            <span className="text-xs text-[hsl(var(--muted))]">{fmtDateTime(item.received_at)}</span>
+                          </div>
+                          <div className="mt-2 space-y-1">
+                            {item.requested_classes?.length ? <div>Classes: {item.requested_classes.join(', ')}</div> : null}
+                            {item.submitted_level ? <div>Level: {item.submitted_level}</div> : null}
+                            {item.goals?.length ? <div>Goals: {item.goals.join(', ')}</div> : null}
+                            {item.message ? <div>Message: {item.message}</div> : null}
+                          </div>
+                        </div>
+                      ))
+                    ) : (
+                      <div className="text-sm text-[hsl(var(--muted))]">No submissions yet.</div>
+                    )}
+                  </div>
+
+                  <div className="space-y-3">
+                    <h3 className="font-semibold">Activity</h3>
+
+                    {canManage ? (
+                      <div className="flex gap-2">
+                        <textarea
+                          value={notes[row.id] ?? ''}
+                          onChange={(e) => setNotes((current) => ({ ...current, [row.id]: e.target.value }))}
+                          placeholder="Add internal note…"
+                          rows={2}
+                          className="min-h-[72px] flex-1 rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm"
+                        />
+                        <button
+                          type="button"
+                          disabled={busyId === row.id || !(notes[row.id] ?? '').trim()}
+                          onClick={() => void addNote(row)}
+                          className="self-end rounded-xl bg-black px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+                        >
+                          Add note
+                        </button>
+                      </div>
+                    ) : null}
+
+                    {rowActivities.length ? (
+                      <div className="space-y-2">
+                        {rowActivities.map((item) => (
+                          <div key={item.id} className="rounded-xl border border-[hsl(var(--border))] px-3 py-2 text-sm">
+                            <div>{item.summary}</div>
+                            <div className="mt-1 text-xs text-[hsl(var(--muted))]">
+                              {fmtDateTime(item.occurred_at)}
+                              {item.actor_user_id === currentUserId ? ' · You' : ''}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="text-sm text-[hsl(var(--muted))]">No activity yet.</div>
+                    )}
+                  </div>
+                </div>
+              ) : null}
+            </article>
+          )
+        })}
+
+        {!filtered.length ? (
+          <div className="rounded-2xl border border-dashed border-[hsl(var(--border))] p-8 text-center text-sm text-[hsl(var(--muted))]">
+            No prospects match the current filters.
+          </div>
+        ) : null}
+      </div>
+    </div>
+  )
+}
+
+function Summary({ label, value }: { label: string; value: number }) {
+  return (
+    <div className="rounded-2xl border border-[hsl(var(--border))] bg-white p-4 shadow-soft">
+      <div className="text-xs font-medium uppercase tracking-wide text-[hsl(var(--muted))]">{label}</div>
+      <div className="mt-1 text-2xl font-semibold">{value}</div>
+    </div>
+  )
+}

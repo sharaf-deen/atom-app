@@ -121,6 +121,7 @@ const APP_NAV_BY_ROLE: MenuByRole = {
     { label: 'Members', href: '/members', icon: 'users' },
     { label: 'Inactive Accounts', href: '/admin/members/inactive', icon: 'users' },
     { label: 'CRM', href: '/admin/crm', icon: 'users' },
+    { label: 'Prospects', href: '/admin/prospects', icon: 'users' },
     { label: 'Visitors', href: '/admin/visitors', icon: 'users' },
     { label: 'Family Operations', href: '/admin/members/family-operations', icon: 'users' },
     { label: 'Packages & Promos', href: '/packages-and-promos', icon: 'gift' },
@@ -143,6 +144,7 @@ const APP_NAV_BY_ROLE: MenuByRole = {
     { label: 'Members', href: '/members', icon: 'users' },
     { label: 'Inactive Accounts', href: '/admin/members/inactive', icon: 'users' },
     { label: 'CRM', href: '/admin/crm', icon: 'users' },
+    { label: 'Prospects', href: '/admin/prospects', icon: 'users' },
     { label: 'Visitors', href: '/admin/visitors', icon: 'users' },
     { label: 'Family Operations', href: '/admin/members/family-operations', icon: 'users' },
     { label: 'Coaches', href: '/coaches', icon: 'user-cog' },
@@ -176,6 +178,7 @@ const APP_NAV_BY_ROLE: MenuByRole = {
     { label: 'Members', href: '/members', icon: 'users' },
     { label: 'Inactive Accounts', href: '/admin/members/inactive', icon: 'users' },
     { label: 'CRM', href: '/admin/crm', icon: 'users' },
+    { label: 'Prospects', href: '/admin/prospects', icon: 'users' },
     { label: 'Visitors', href: '/admin/visitors', icon: 'users' },
     { label: 'Family Operations', href: '/admin/members/family-operations', icon: 'users' },
     { label: 'Coaches', href: '/coaches', icon: 'user-cog' },
@@ -240,6 +243,18 @@ export function canOpenOtherMemberProfile(role: Role | null | undefined) {
 
 export function canAccessCrm(role: Role | null | undefined) {
   return hasAnyRole(role, FRONT_DESK_ROLES)
+}
+
+export function canAccessProspects(role: Role | null | undefined) {
+  return hasAnyRole(role, FRONT_DESK_ROLES)
+}
+
+export function canManageProspects(role: Role | null | undefined) {
+  return hasAnyRole(role, FRONT_DESK_ROLES)
+}
+
+export function canImportProspects(role: Role | null | undefined) {
+  return hasAnyRole(role, SUPER_ADMIN_ROLES)
 }
 
 export function canAccessReceptionDesk(role: Role | null | undefined) {
@@ -578,6 +593,14 @@ const CAPABILITY_BLUEPRINTS: CapabilityBlueprint[] = [
     description: 'Review who should be contacted today and open desk follow-up actions.',
     href: '/admin/crm',
     check: (role) => canAccessCrm(role),
+  },
+  {
+    key: 'prospects',
+    category: 'Front desk',
+    label: 'Prospects',
+    description: 'Review website enquiries, contact prospects and manage follow-up.',
+    href: '/admin/prospects',
+    check: (role) => canAccessProspects(role),
   },
   {
     key: 'visitor_trials',
