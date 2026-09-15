@@ -219,7 +219,7 @@ export async function POST(req: Request) {
             ? 'MIGRATION_REQUIRED'
             : 'SALARY_PAYMENT_FAILED',
           details: isMigrationMissing(message)
-            ? 'Apply Staff Payroll 1E migration, then try again.'
+            ? 'Required database changes are not available yet. Deploy the latest database changes, then try again.'
             : rpcErrorDetails(message),
         })
       }
@@ -296,7 +296,7 @@ export async function POST(req: Request) {
             ? 'MIGRATION_REQUIRED'
             : 'SALARY_PAYMENT_REVERSAL_FAILED',
           details: isMigrationMissing(message)
-            ? 'Apply Staff Payroll 1E migration, then try again.'
+            ? 'Required database changes are not available yet. Deploy the latest database changes, then try again.'
             : rpcErrorDetails(message),
         })
       }

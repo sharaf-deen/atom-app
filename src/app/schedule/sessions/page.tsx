@@ -317,7 +317,7 @@ export default async function ScheduleTrainingSessionsPage() {
         ) : (
           <>
             <div className="rounded-2xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-950">
-              Lot 2G adds auditable one-off schedule exceptions. Time, mat, cancellation/restoration and staff replacement changes apply only to the dated session and never rewrite the recurring Class Template.
+              One-off schedule exceptions apply only to the dated session. Time, mat, cancellation/restoration and staff replacement changes never rewrite the recurring Class Template.
             </div>
 
             <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950">

@@ -597,7 +597,7 @@ export default async function AdminInactiveMembersPage({
         <div className="rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800">
           {profilesError ? <p>Profiles error: {profilesError.message}</p> : null}
           {subscriptionsError ? <p>Subscriptions error: {subscriptionsError.message}</p> : null}
-          {followupsError ? <p>Follow-up error: {followupsError.message}. Apply the Members Inactive Lot 2 migration if this is the first deployment.</p> : null}
+          {followupsError ? <p>Follow-up error: {followupsError.message}. Required follow-up database changes may not be deployed yet.</p> : null}
         </div>
       ) : null}
 
@@ -836,7 +836,7 @@ export default async function AdminInactiveMembersPage({
       </div>
 
       <p className="text-xs text-[hsl(var(--muted))]">
-Members Inactive Lot 2. This page can save follow-up notes/status only. It does not modify member accounts, subscriptions, access, or roles.
+This page can save follow-up notes/status only. It does not modify member accounts, subscriptions, access, or roles.
       </p>
     </main>
   )

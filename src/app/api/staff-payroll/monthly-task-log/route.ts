@@ -311,7 +311,7 @@ export async function POST(req: Request) {
             return json(500, {
               ok: false,
               error: 'MIGRATION_REQUIRED',
-              details: 'Apply Staff Payroll 1B migration, then try again.',
+              details: 'Required database changes are not available yet. Deploy the latest database changes, then try again.',
             })
           }
           return json(500, {
@@ -453,7 +453,7 @@ export async function POST(req: Request) {
           return json(500, {
             ok: false,
             error: 'MIGRATION_REQUIRED',
-            details: 'Apply Staff Payroll 1B migration, then try again.',
+            details: 'Required database changes are not available yet. Deploy the latest database changes, then try again.',
           })
         }
         return json(500, {
@@ -581,7 +581,7 @@ export async function POST(req: Request) {
       return json(500, {
         ok: false,
         error: 'MIGRATION_REQUIRED',
-        details: 'Apply Staff Payroll 1D migration first.',
+        details: 'Required database changes are not available yet. Deploy the latest database changes first.',
       })
     }
     return json(500, {

@@ -332,7 +332,7 @@ export default async function StaffPayrollMonthlyTasksPage({
               The default period is the previous month, ready for the future payroll calculation.
             </p>
             <p className="mt-2 text-xs text-[hsl(var(--muted))]">
-              This lot records work only. It does not calculate salary, approve payroll or create payments.
+              This page records work only. Salary calculation, approval and payments are handled separately.
             </p>
           </div>
         </div>
@@ -381,9 +381,9 @@ export default async function StaffPayrollMonthlyTasksPage({
 
       {migrationMissing ? (
         <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950">
-          <div className="font-semibold">Staff Payroll 1D migration required</div>
+          <div className="font-semibold">Database update required</div>
           <div className="mt-1 text-xs">
-            Apply the Payroll Approval & Monthly Locking migration, then refresh this page.
+            Deploy the latest database changes, then refresh this page.
           </div>
         </div>
       ) : null}

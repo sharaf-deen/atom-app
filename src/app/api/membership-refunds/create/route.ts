@@ -155,7 +155,7 @@ export async function POST(req: Request) {
         return json(500, {
           ok: false,
           error: 'MIGRATION_REQUIRED',
-          details: 'Apply the Membership Refunds migrations, then try again.',
+          details: 'Required refund workflow database changes are not available yet. Deploy the latest database changes, then try again.',
         })
       }
 

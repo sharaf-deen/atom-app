@@ -116,7 +116,7 @@ function errorLabel(code: string) {
   if (code === 'PAYROLL_MONTH_LOCKED' || code === 'STAFF_PAYROLL_MONTH_LOCKED') {
     return 'This payroll month is approved and locked. Reopen it from Salary Calculation before changing monthly tasks.'
   }
-  if (code === 'MIGRATION_REQUIRED') return 'Apply the Staff Payroll 1D migration first.'
+  if (code === 'MIGRATION_REQUIRED') return 'Required database changes are not available yet. Deploy the latest database changes first.'
   return code.replace(/_/g, ' ')
 }
 
