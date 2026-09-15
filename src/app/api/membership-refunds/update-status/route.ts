@@ -144,7 +144,7 @@ export async function POST(req: Request) {
         return json(500, {
           ok: false,
           error: 'MIGRATION_REQUIRED',
-          details: 'Apply the Membership Refunds Lot 1B migration, then try again.',
+          details: 'Required refund workflow database changes are not available yet. Deploy the latest database changes, then try again.',
         })
       }
       return json(500, { ok: false, error: 'REFUND_LOOKUP_FAILED', details: message })
@@ -176,7 +176,7 @@ export async function POST(req: Request) {
         return json(500, {
           ok: false,
           error: 'MIGRATION_REQUIRED',
-          details: 'Apply the Membership Refunds Lot 1B migration, then try again.',
+          details: 'Required refund workflow database changes are not available yet. Deploy the latest database changes, then try again.',
         })
       }
       return json(500, { ok: false, error: 'REFUND_UPDATE_FAILED', details: message })

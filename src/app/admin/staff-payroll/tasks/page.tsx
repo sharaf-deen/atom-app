@@ -272,10 +272,10 @@ export default async function StaffPayrollTasksPage() {
       {migrationMissing ? (
         <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950">
           <div className="font-semibold">
-            Staff Payroll 1A migration required
+            Database update required
           </div>
           <div className="mt-1 text-xs">
-            Apply the Staff Payroll 1A migration, then refresh this page. No
+            Deploy the latest database changes, then refresh this page. No
             payroll calculation has been created yet.
           </div>
         </div>
@@ -331,7 +331,7 @@ export default async function StaffPayrollTasksPage() {
               The source planning sheet does not define task-value
               coefficients, so imported tasks start at Standard ×1.00. Super
               Admin can classify importance here before the monthly salary
-              calculation lot is introduced.
+              payroll calculation is run.
             </div>
           </div>
 

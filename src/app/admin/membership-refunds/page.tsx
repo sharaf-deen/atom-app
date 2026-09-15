@@ -421,7 +421,7 @@ export default async function AdminMembershipRefundsPage({
           <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950">
             <p className="font-semibold">Refund history not available yet.</p>
             <p className="mt-1">{refundsErrorMessage}</p>
-            <p className="mt-1 text-xs">Apply the Membership Refunds Lot 1A, Lot 1B and Lot 1C migrations if this is the first deployment of the workflow.</p>
+            <p className="mt-1 text-xs">Required refund workflow database changes may not be deployed yet.</p>
           </div>
         ) : null}
 
@@ -596,7 +596,7 @@ export default async function AdminMembershipRefundsPage({
       </section>
 
       <p className="text-xs text-[hsl(var(--muted))]">
-        Membership Refunds Lot 1D. This page tracks refund workflow, proof uploads and explicit subscription impact decisions. Write actions are restricted to Super Admin. Original payments are never deleted and no subscription impact is applied without confirmation.
+        This page tracks refund workflow, proof uploads and explicit subscription impact decisions. Write actions are restricted to Super Admin. Original payments are never deleted and no subscription impact is applied without confirmation.
       </p>
     </main>
   )

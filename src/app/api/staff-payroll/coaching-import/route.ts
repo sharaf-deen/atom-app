@@ -447,7 +447,7 @@ export async function GET(req: Request) {
       return json(500, {
         ok: false,
         error: 'MIGRATION_REQUIRED',
-        details: 'Apply Staff Payroll 1G migration, then try again.',
+        details: 'Required database changes are not available yet. Deploy the latest database changes, then try again.',
       })
     }
     return json(500, { ok: false, error: 'SERVER_ERROR', details: message })
@@ -739,7 +739,7 @@ export async function POST(req: Request) {
       return json(500, {
         ok: false,
         error: 'MIGRATION_REQUIRED',
-        details: 'Apply Staff Payroll 1G migration, then try again.',
+        details: 'Required database changes are not available yet. Deploy the latest database changes, then try again.',
       })
     }
     return json(500, { ok: false, error: 'SERVER_ERROR', details: message })

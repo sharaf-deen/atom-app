@@ -123,7 +123,7 @@ function errorMessage(code: string, details?: string) {
     case 'INVALID_DEFAULT_ASSIGNEE':
       return 'One of the selected default assignees is not an eligible staff profile.'
     case 'MIGRATION_REQUIRED':
-      return 'Apply the Staff Payroll 1A database migration first.'
+      return 'Required database changes are not available yet. Deploy the latest database changes first.'
     default:
       return details || code.replace(/_/g, ' ')
   }

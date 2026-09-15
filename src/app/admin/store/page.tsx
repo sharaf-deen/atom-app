@@ -1156,7 +1156,7 @@ export default async function AdminStorePage({
     <main>
       <PageHeader
         title="Store Admin"
-        subtitle="Store V3 — operational hub with role-based access."
+        subtitle="Store operations hub with role-based access."
         right={
           <div className="flex flex-wrap items-center gap-2">
             {canSeeDashboard ? (
@@ -1242,7 +1242,7 @@ export default async function AdminStorePage({
               </Link>
             ) : null}
             <div className="rounded-2xl border bg-white p-3">
-              <div className="text-sm font-semibold">Store V3 hub</div>
+              <div className="text-sm font-semibold">Store operations hub</div>
               <div className="mt-1 text-xs text-[hsl(var(--muted))]">{canManageCatalog ? 'Full catalog controls stay on super admin. Preorders and sales remain separated.' : 'Preorders, supplier orders, sales, and catalog changes stay restricted to super admin.'}</div>
             </div>
           </CardContent>

@@ -542,7 +542,7 @@ export default async function ScanResultPage({ searchParams }: { searchParams: S
                       {staffAssignmentRole ? <span>• {roleLabel(staffAssignmentRole)}</span> : null}
                     </div>
                     <div className="mt-3 text-sm font-semibold">Timing delta: {timingDeltaLabel(staffArrivalDeltaMinutes)}</div>
-                    <div className="mt-1 text-xs text-[hsl(var(--muted))]">Factual difference only — no on-time/late judgment is calculated in this lot.</div>
+                    <div className="mt-1 text-xs text-[hsl(var(--muted))]">Factual difference only — no on-time/late judgment is calculated.</div>
                   </div>
                 ) : staffSessionMatch === 'ambiguous' ? (
                   <div className="rounded-3xl border border-sky-200 bg-sky-50 p-4 text-sm text-sky-900">

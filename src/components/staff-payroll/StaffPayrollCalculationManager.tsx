@@ -454,7 +454,7 @@ export default function StaffPayrollCalculationManager({
 
               <p className="mt-1 max-w-3xl text-sm">
                 {isApproved
-                  ? 'Monthly task logs and salary calculation rows are protected from modification. The approved version is preserved for audit and future salary payment lots.'
+                  ? 'Monthly task logs and salary calculation rows are protected from modification. The approved version is preserved for audit and future salary payment workflows.'
                   : 'Approval rechecks financial data, monthly tasks, staff settings and calculation integrity before the month can be locked.'}
               </p>
 
@@ -977,7 +977,7 @@ export default function StaffPayrollCalculationManager({
           <div className="rounded-2xl border border-sky-200 bg-sky-50 p-3 text-sm text-sky-950">
             <div className="font-semibold">1D approves and locks payroll; it does not pay salaries.</div>
             <div className="mt-1 text-xs">
-              Salary payment tracking, partial payments and payslips remain intentionally outside this lot.
+              Salary payment tracking, partial payments and payslips are handled in the Payments workflow.
             </div>
           </div>
         </>
