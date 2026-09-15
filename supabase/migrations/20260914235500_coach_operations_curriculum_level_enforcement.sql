@@ -42,6 +42,15 @@ create index if not exists coach_curriculum_techniques_level_idx
 alter table public.coach_training_programs
   add column if not exists technical_level text;
 
+-- Legacy published Programs may predate the Program Team requirement and can still
+-- have no Responsible Coach. The existing team snapshot trigger validates that
+-- invariant on every UPDATE, even when only technical_level is being backfilled.
+-- Temporarily disable that specific trigger for this metadata-only migration so
+-- the backfill does not rewrite or validate Program team data. The transaction
+-- guarantees the trigger state is rolled back if the migration fails.
+alter table public.coach_training_programs
+  disable trigger coach_training_program_team_snapshot_before_write;
+
 -- Backfill legacy programs from their title/target group first, then linked Schedule class level.
 update public.coach_training_programs p
 set technical_level = case
@@ -83,6 +92,9 @@ set technical_level = case
 end
 where p.technical_level is null
    or p.technical_level not in ('beginner','intermediate','advanced');
+
+alter table public.coach_training_programs
+  enable trigger coach_training_program_team_snapshot_before_write;
 
 alter table public.coach_training_programs
   alter column technical_level set default 'advanced',
