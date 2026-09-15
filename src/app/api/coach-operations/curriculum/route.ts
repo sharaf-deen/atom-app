@@ -18,6 +18,7 @@ type Body = {
   parentId?: string
   name?: string
   description?: string | null
+  technicalLevel?: string | null
   opponentReaction?: string | null
   coachingResponse?: string | null
   sortOrder?: number | string | null
@@ -48,6 +49,21 @@ function normalizeSortOrder(value: unknown) {
   const parsed = Number(value)
   if (!Number.isInteger(parsed)) return 100
   return Math.max(0, Math.min(10000, parsed))
+}
+
+type TechnicalLevel = 'beginner' | 'intermediate' | 'advanced'
+
+function normalizeTechnicalLevel(value: unknown): TechnicalLevel | null {
+  const normalized = String(value ?? '').trim().toLowerCase()
+  return normalized === 'beginner' || normalized === 'intermediate' || normalized === 'advanced'
+    ? normalized
+    : null
+}
+
+function technicalLevelRank(level: TechnicalLevel) {
+  if (level === 'beginner') return 1
+  if (level === 'intermediate') return 2
+  return 3
 }
 
 function slugify(value: string) {
@@ -185,6 +201,11 @@ export async function POST(request: Request) {
 
       if (entity === 'block' || entity === 'technique') {
         row.description = normalizeLongText(body.description, 1500)
+        if (entity === 'technique') {
+          const technicalLevel = normalizeTechnicalLevel(body.technicalLevel)
+          if (!technicalLevel) return json({ ok: false, error: 'INVALID_TECHNICAL_LEVEL' }, 400)
+          row.technical_level = technicalLevel
+        }
       } else {
         const opponentReaction = normalizeLongText(body.opponentReaction, 1000)
         if (!opponentReaction || opponentReaction.length < 2) {
@@ -197,8 +218,15 @@ export async function POST(request: Request) {
 
     const { data, error } = await supabase.from(table).insert(row).select('*').single()
     if (error) {
-      const status = error.code === '23505' ? 409 : error.code === '23503' ? 400 : 500
-      const apiError = error.code === '23505' ? 'DUPLICATE_NAME' : error.code === '23503' ? 'INVALID_PARENT' : 'CREATE_FAILED'
+      const status = error.code === '23505' ? 409 : error.code === '23503' || error.code === '23514' ? 400 : 500
+      const apiError =
+        error.code === '23505'
+          ? 'DUPLICATE_NAME'
+          : error.code === '23503'
+            ? 'INVALID_PARENT'
+            : error.code === '23514'
+              ? 'INVALID_TECHNICAL_LEVEL'
+              : 'CREATE_FAILED'
       return json({ ok: false, error: apiError, details: error.message }, status)
     }
 
@@ -239,6 +267,47 @@ export async function POST(request: Request) {
 
   if (entity === 'type' || entity === 'block' || entity === 'technique') {
     patch.description = normalizeLongText(body.description, entity === 'type' ? 1000 : 1500)
+
+    if (entity === 'technique') {
+      const technicalLevel = normalizeTechnicalLevel(body.technicalLevel)
+      if (!technicalLevel) return json({ ok: false, error: 'INVALID_TECHNICAL_LEVEL' }, 400)
+
+      const { data: programItemRows, error: programItemError } = await supabase
+        .from('coach_training_program_items')
+        .select('program_id')
+        .eq('technique_id', id)
+
+      if (programItemError) {
+        return json({ ok: false, error: 'TECHNIQUE_USAGE_LOOKUP_FAILED', details: programItemError.message }, 500)
+      }
+
+      const programIds = Array.from(new Set((programItemRows ?? []).map((row: any) => String(row.program_id))))
+      if (programIds.length) {
+        const { data: programRows, error: programError } = await supabase
+          .from('coach_training_programs')
+          .select('id,title,technical_level')
+          .in('id', programIds)
+
+        if (programError) {
+          return json({ ok: false, error: 'PROGRAM_LEVEL_LOOKUP_FAILED', details: programError.message }, 500)
+        }
+
+        const incompatibleProgram = (programRows ?? []).find(
+          (program: any) =>
+            technicalLevelRank(technicalLevel) > technicalLevelRank(program.technical_level as TechnicalLevel),
+        )
+
+        if (incompatibleProgram) {
+          return json({
+            ok: false,
+            error: 'TECHNIQUE_LEVEL_IN_USE',
+            details: `This technique is explicitly assigned to ${String(incompatibleProgram.title || 'a lower-level program')}. Remove it from that program before raising its technical level.`,
+          }, 409)
+        }
+      }
+
+      patch.technical_level = technicalLevel
+    }
   } else {
     const opponentReaction = normalizeLongText(body.opponentReaction, 1000)
     if (!opponentReaction || opponentReaction.length < 2) {
@@ -250,9 +319,13 @@ export async function POST(request: Request) {
 
   const { data, error } = await supabase.from(table).update(patch).eq('id', id).select('*').maybeSingle()
   if (error) {
-    const status = error.code === '23505' ? 409 : 500
+    const status = error.code === '23505' ? 409 : error.code === '23514' ? 400 : 500
     return json(
-      { ok: false, error: error.code === '23505' ? 'DUPLICATE_NAME' : 'UPDATE_FAILED', details: error.message },
+      {
+        ok: false,
+        error: error.code === '23505' ? 'DUPLICATE_NAME' : error.code === '23514' ? 'INVALID_TECHNICAL_LEVEL' : 'UPDATE_FAILED',
+        details: error.message,
+      },
       status,
     )
   }

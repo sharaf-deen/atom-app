@@ -7,6 +7,7 @@ on:
       - "supabase/migrations/**"
       - "supabase/roles.sql"
       - "supabase/config.toml"
+      - ".github/workflows/supabase-db-staging.yml"
   workflow_dispatch:
 
 jobs:
@@ -30,7 +31,7 @@ jobs:
       - name: Setup Supabase CLI
         uses: supabase/setup-cli@v1
         with:
-          version: latest
+          version: 2.74.5
 
       - name: Link project
         run: supabase link --project-ref $PROJECT_ID

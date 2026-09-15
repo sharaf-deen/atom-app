@@ -11,6 +11,7 @@ import Select from '@/components/ui/Select'
 import Textarea from '@/components/ui/Textarea'
 
 type ProgramStatus = 'draft' | 'published' | 'archived'
+type TechnicalLevel = 'beginner' | 'intermediate' | 'advanced'
 
 type Program = {
   id: string
@@ -19,6 +20,7 @@ type Program = {
   start_date: string
   end_date: string
   notes: string | null
+  technical_level: TechnicalLevel
   status: ProgramStatus
   responsible_coach_user_id: string | null
   responsible_coach_name_snapshot: string | null
@@ -63,6 +65,7 @@ type CurriculumTechnique = {
   id: string
   block_id: string
   name: string
+  technical_level: TechnicalLevel
   sort_order: number
   is_active: boolean
 }
@@ -183,6 +186,24 @@ function statusLabel(status: ProgramStatus) {
   return 'Draft'
 }
 
+function technicalLevelRank(level: TechnicalLevel) {
+  if (level === 'beginner') return 1
+  if (level === 'intermediate') return 2
+  return 3
+}
+
+function technicalLevelLabel(level: TechnicalLevel) {
+  if (level === 'beginner') return 'Beginner'
+  if (level === 'intermediate') return 'Intermediate'
+  return 'Advanced'
+}
+
+function technicalLevelClass(level: TechnicalLevel) {
+  if (level === 'beginner') return 'border-emerald-200 bg-emerald-50 text-emerald-800'
+  if (level === 'intermediate') return 'border-amber-200 bg-amber-50 text-amber-800'
+  return 'border-rose-200 bg-rose-50 text-rose-800'
+}
+
 async function readJson(response: Response) {
   const data = await response.json().catch(() => null)
   return data && typeof data === 'object' ? (data as Record<string, any>) : {}
@@ -218,6 +239,7 @@ export default function TrainingProgramsManager({
   const [formOpen, setFormOpen] = React.useState(false)
   const [title, setTitle] = React.useState('')
   const [targetGroup, setTargetGroup] = React.useState('')
+  const [technicalLevel, setTechnicalLevel] = React.useState<TechnicalLevel>('beginner')
   const [startDate, setStartDate] = React.useState(todayIso())
   const [endDate, setEndDate] = React.useState(plusDays(todayIso(), 6))
   const [notes, setNotes] = React.useState('')
@@ -309,6 +331,7 @@ export default function TrainingProgramsManager({
     setEditingId(null)
     setTitle('')
     setTargetGroup('')
+    setTechnicalLevel('beginner')
     setStartDate(todayIso())
     setEndDate(plusDays(todayIso(), 6))
     setNotes('')
@@ -327,6 +350,7 @@ export default function TrainingProgramsManager({
     setEditingId(program.id)
     setTitle(program.title)
     setTargetGroup(program.target_group)
+    setTechnicalLevel(program.technical_level)
     setStartDate(program.start_date)
     setEndDate(program.end_date)
     setNotes(program.notes ?? '')
@@ -336,12 +360,28 @@ export default function TrainingProgramsManager({
     )
     void loadStaff()
     const programItems = items.filter((item) => item.program_id === program.id)
+    const allowedTechniqueIds = new Set(
+      techniques
+        .filter((technique) => technicalLevelRank(technique.technical_level) <= technicalLevelRank(program.technical_level))
+        .map((technique) => technique.id),
+    )
     setSelectedBlocks(new Set(programItems.filter((item) => item.selected_level === 'block').map((item) => item.block_id)))
     setSelectedTechniques(
-      new Set(programItems.filter((item) => item.selected_level === 'technique' && item.technique_id).map((item) => item.technique_id!)),
+      new Set(
+        programItems
+          .filter((item) => item.selected_level === 'technique' && item.technique_id && allowedTechniqueIds.has(item.technique_id))
+          .map((item) => item.technique_id!),
+      ),
     )
     setSelectedSituations(
-      new Set(programItems.filter((item) => item.selected_level === 'situation' && item.situation_id).map((item) => item.situation_id!)),
+      new Set(
+        programItems
+          .filter((item) => {
+            if (item.selected_level !== 'situation' || !item.situation_id || !item.technique_id) return false
+            return allowedTechniqueIds.has(item.technique_id)
+          })
+          .map((item) => item.situation_id!),
+      ),
     )
     const mappedTemplateIds = programClassTemplates
       .filter((mapping) => mapping.program_id === program.id && mapping.is_active)
@@ -376,6 +416,24 @@ export default function TrainingProgramsManager({
       return next
     })
     if (checked && !targetGroup.trim() && groupTemplates[0]?.name) setTargetGroup(groupTemplates[0].name)
+  }
+
+  function changeTechnicalLevel(nextLevel: TechnicalLevel) {
+    setTechnicalLevel(nextLevel)
+    const allowedTechniqueIds = new Set(
+      techniques
+        .filter((technique) => technicalLevelRank(technique.technical_level) <= technicalLevelRank(nextLevel))
+        .map((technique) => technique.id),
+    )
+    setSelectedTechniques((current) => new Set(Array.from(current).filter((id) => allowedTechniqueIds.has(id))))
+    setSelectedSituations((current) => {
+      const allowedSituationIds = new Set(
+        situations
+          .filter((situation) => allowedTechniqueIds.has(situation.technique_id))
+          .map((situation) => situation.id),
+      )
+      return new Set(Array.from(current).filter((id) => allowedSituationIds.has(id)))
+    })
   }
 
   function toggleBlock(blockId: string, checked: boolean) {
@@ -424,6 +482,7 @@ export default function TrainingProgramsManager({
     if (cleanTitle.length < 2) return setError('Enter a program title.')
     if (cleanGroup.length < 2) return setError('Enter the group or class this program is for.')
     if (!startDate || !endDate || endDate < startDate) return setError('Choose a valid program period.')
+    if (!technicalLevel) return setError('Choose the Program technical level.')
     if (!responsibleCoachUserId) return setError('Choose the Responsible Coach for this program.')
     if (assistantCoachUserIds.length > 2) return setError('Choose no more than two assistant coaches.')
     if (assistantCoachUserIds.includes(responsibleCoachUserId)) return setError('The Responsible Coach cannot also be an assistant.')
@@ -440,6 +499,7 @@ export default function TrainingProgramsManager({
           id: editingId,
           title: cleanTitle,
           targetGroup: cleanGroup,
+          technicalLevel,
           startDate,
           endDate,
           notes,
@@ -553,7 +613,12 @@ export default function TrainingProgramsManager({
                             )
                             return (
                               <div key={technique.id}>
-                                <div className="text-sm font-medium text-black">{technique.name}</div>
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <div className="text-sm font-medium text-black">{technique.name}</div>
+                                  <span className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold ${technicalLevelClass(technique.technical_level)}`}>
+                                    {technicalLevelLabel(technique.technical_level)}
+                                  </span>
+                                </div>
                                 {childSituations.length ? (
                                   <div className="mt-1 space-y-1 pl-3 text-xs text-[hsl(var(--muted))]">
                                     {childSituations.map((situation) => (
@@ -622,6 +687,21 @@ export default function TrainingProgramsManager({
           <div className="grid gap-4 md:grid-cols-2">
             <Input label="Program title" value={title} onChange={(event) => setTitle(event.target.value)} placeholder="September Week 1 · Guard Passing" />
             <Input label="Group / class" value={targetGroup} onChange={(event) => setTargetGroup(event.target.value)} placeholder="Kids 6–9 Beginners" hint="Use the same group name used in the academy Schedule." />
+            <Select
+              label="Technical level"
+              value={technicalLevel}
+              onChange={(event) => changeTechnicalLevel(event.target.value as TechnicalLevel)}
+            >
+              <option value="beginner">Beginner — Beginner techniques only</option>
+              <option value="intermediate">Intermediate — Beginner + Intermediate</option>
+              <option value="advanced">Advanced — All curriculum levels</option>
+            </Select>
+            <div className="rounded-2xl border border-blue-100 bg-blue-50/60 px-3 py-2 text-xs text-blue-950">
+              <div className="font-semibold">Level rule</div>
+              <div className="mt-1">
+                Coaches can only select techniques allowed by this Program level in the Training Log.
+              </div>
+            </div>
             <Input label="Start date" type="date" value={startDate} onChange={(event) => setStartDate(event.target.value)} />
             <Input label="End date" type="date" value={endDate} min={startDate} onChange={(event) => setEndDate(event.target.value)} />
           </div>
@@ -747,7 +827,7 @@ export default function TrainingProgramsManager({
           <div>
             <div className="mb-2">
               <h4 className="text-sm font-semibold">Curriculum assignment</h4>
-              <p className="text-xs text-[hsl(var(--muted))]">Select a block first. Its techniques become available, then each technique reveals its situations.</p>
+              <p className="text-xs text-[hsl(var(--muted))]">Select a block first. Only techniques allowed by the {technicalLevelLabel(technicalLevel)} Program level are available; situations inherit their technique level.</p>
             </div>
             <div className="space-y-3">
               {activeTypes.map((type) => {
@@ -759,7 +839,11 @@ export default function TrainingProgramsManager({
                     <div className="mt-2 space-y-2">
                       {typeBlocks.map((block) => {
                         const blockSelected = selectedBlocks.has(block.id)
-                        const childTechniques = activeTechniques.filter((technique) => technique.block_id === block.id)
+                        const childTechniques = activeTechniques.filter(
+                          (technique) =>
+                            technique.block_id === block.id
+                            && technicalLevelRank(technique.technical_level) <= technicalLevelRank(technicalLevel),
+                        )
                         return (
                           <div key={block.id} className="rounded-2xl border border-[hsl(var(--border))] bg-white p-3">
                             <label className="flex cursor-pointer items-center gap-3 text-sm font-semibold">
@@ -775,7 +859,12 @@ export default function TrainingProgramsManager({
                                     <div key={technique.id}>
                                       <label className="flex cursor-pointer items-center gap-3 text-sm">
                                         <input type="checkbox" checked={techniqueSelected} onChange={(event) => toggleTechnique(technique.id, event.target.checked)} className="h-4 w-4" />
-                                        <span className="font-medium">{technique.name}</span>
+                                        <span className="flex flex-wrap items-center gap-2">
+                                          <span className="font-medium">{technique.name}</span>
+                                          <span className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold ${technicalLevelClass(technique.technical_level)}`}>
+                                            {technicalLevelLabel(technique.technical_level)}
+                                          </span>
+                                        </span>
                                       </label>
                                       {techniqueSelected && childSituations.length ? (
                                         <div className="mt-2 space-y-2 pl-7">
@@ -835,6 +924,9 @@ export default function TrainingProgramsManager({
                     <div className="flex flex-wrap items-center gap-2">
                       <h3 className="text-base font-semibold text-black">{program.title}</h3>
                       <span className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold ${statusClass(program.status)}`}>{statusLabel(program.status)}</span>
+                      <span className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold ${technicalLevelClass(program.technical_level)}`}>
+                        {technicalLevelLabel(program.technical_level)}
+                      </span>
                       {!canManage && viewerRole ? (
                         <span className="rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1 text-[11px] font-semibold text-blue-800">{viewerRole}</span>
                       ) : null}
