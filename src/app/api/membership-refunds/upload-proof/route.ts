@@ -138,7 +138,7 @@ export async function POST(req: Request) {
         return json(500, {
           ok: false,
           error: 'MIGRATION_REQUIRED',
-          details: 'Apply the Membership Refunds Lot 1D migration to create the proof storage bucket, then try again.',
+          details: 'Refund proof storage is not available yet. Deploy the latest database changes, then try again.',
         })
       }
       return json(500, { ok: false, error: 'UPLOAD_FAILED', details: message })

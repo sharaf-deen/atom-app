@@ -422,7 +422,7 @@ export default function AdminProductQuickEdit({
             </div>
 
             <div className="rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
-              Name, model, category, price and photos stay in the detailed editor to preserve the existing Store V3 flow.
+              Name, model, category, price and photos stay in the detailed editor to preserve the existing Store workflow.
             </div>
 
             <Button type="button" variant="outline" onClick={() => setEditOpen(true)}>

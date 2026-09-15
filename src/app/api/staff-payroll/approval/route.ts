@@ -189,7 +189,7 @@ export async function POST(req: Request) {
           ok: false,
           error: migrationMissing(message) ? 'MIGRATION_REQUIRED' : 'SNAPSHOT_LOOKUP_FAILED',
           details: migrationMissing(message)
-            ? 'Apply Staff Payroll 1D migration, then recalculate the draft.'
+            ? 'Required database changes are not available yet. Deploy the latest database changes, then recalculate the draft.'
             : message,
         })
       }
@@ -315,7 +315,7 @@ export async function POST(req: Request) {
           ok: false,
           error: migrationMissing(sourceError) ? 'MIGRATION_REQUIRED' : 'APPROVAL_SOURCE_LOAD_FAILED',
           details: migrationMissing(sourceError)
-            ? 'Apply Staff Payroll 1D migration, then recalculate the draft.'
+            ? 'Required database changes are not available yet. Deploy the latest database changes, then recalculate the draft.'
             : sourceError,
         })
       }
@@ -372,7 +372,7 @@ export async function POST(req: Request) {
           ok: false,
           error: migrationMissing(message) ? 'MIGRATION_REQUIRED' : 'APPROVAL_FAILED',
           details: migrationMissing(message)
-            ? 'Apply Staff Payroll 1D migration, then recalculate the draft.'
+            ? 'Required database changes are not available yet. Deploy the latest database changes, then recalculate the draft.'
             : rpcErrorDetails(message),
         })
       }
@@ -428,7 +428,7 @@ export async function POST(req: Request) {
           ok: false,
           error: migrationMissing(message) ? 'MIGRATION_REQUIRED' : 'SNAPSHOT_LOOKUP_FAILED',
           details: migrationMissing(message)
-            ? 'Apply Staff Payroll 1D migration first.'
+            ? 'Required database changes are not available yet. Deploy the latest database changes first.'
             : message,
         })
       }
@@ -457,7 +457,7 @@ export async function POST(req: Request) {
           ok: false,
           error: migrationMissing(message) ? 'MIGRATION_REQUIRED' : 'REOPEN_FAILED',
           details: migrationMissing(message)
-            ? 'Apply Staff Payroll 1D migration first.'
+            ? 'Required database changes are not available yet. Deploy the latest database changes first.'
             : rpcErrorDetails(message),
         })
       }

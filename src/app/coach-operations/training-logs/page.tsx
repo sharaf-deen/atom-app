@@ -262,10 +262,6 @@ export default async function CoachTrainingLogsPage() {
     <main>
       <PageHeader title="Training Logs" subtitle="Record what was actually taught and link it to the real dated session when available." />
       <Section className="max-w-6xl space-y-4">
-        <div className="rounded-2xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-950">
-          Lot 2F connects the planned Training Program and actual Training Log to the same Scheduled Session. Existing historical/manual logs remain supported for continuity.
-        </div>
-
         {loadError ? (
           <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">
             Failed to load training logs: {loadError}

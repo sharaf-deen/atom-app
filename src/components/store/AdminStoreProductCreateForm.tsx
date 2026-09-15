@@ -369,7 +369,7 @@ export default function AdminStoreProductCreateForm({
               ))}
             </select>
             <span className="mt-1 block text-xs text-[hsl(var(--muted))]">
-              Models keep Store V3 organized. Create a new model from the Models page if it does not exist yet.
+              Models keep the Store catalog organized. Create a new model from the Models page if it does not exist yet.
             </span>
           </label>
 

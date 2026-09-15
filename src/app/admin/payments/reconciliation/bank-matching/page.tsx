@@ -140,7 +140,7 @@ function flashMessage(code: string) {
     CSV_AMOUNT_COLUMNS_REQUIRED: 'No Debit/Credit or signed Amount column was recognized in the CSV.',
     CSV_NO_ELIGIBLE_ROWS_FROM_BASELINE: 'No eligible bank transaction was found on or after 01/08/2026.',
     STATEMENT_ALREADY_IMPORTED: 'This exact bank statement file has already been imported.',
-    MIGRATION_REQUIRED: 'Apply the Reconciliation 1D migration before importing a statement.',
+    MIGRATION_REQUIRED: 'Required bank-matching database changes are not available yet. Deploy the latest database changes before importing a statement.',
     STATEMENT_UPLOAD_FAILED: 'The original statement file could not be stored.',
     STATEMENT_SAVE_FAILED: 'The statement import record could not be saved.',
     BANK_LINES_INSERT_FAILED: 'The normalized bank lines could not be saved. The import was rolled back.',

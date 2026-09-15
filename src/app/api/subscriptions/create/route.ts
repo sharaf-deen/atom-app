@@ -94,7 +94,7 @@ function formatSubscriptionInsertError(err: any) {
         ok: false,
         error: 'OUTDATED_DUE_CONSTRAINT',
         details: 'The database still blocks a remaining due amount when it is higher than the amount paid now.',
-        hint: 'Apply the migration that removes subscriptions_amount_due_le_amount, then try again.',
+        hint: 'The subscription due rule is outdated. Deploy the latest database changes, then try again.',
       },
     }
   }

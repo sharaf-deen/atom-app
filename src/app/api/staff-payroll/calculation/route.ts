@@ -327,7 +327,7 @@ export async function POST(req: Request) {
           return json(500, {
             ok: false,
             error: 'MIGRATION_REQUIRED',
-            details: 'Apply Staff Payroll 1C migration, then try again.',
+            details: 'Required database changes are not available yet. Deploy the latest database changes, then try again.',
           })
         }
         return json(500, {
@@ -370,7 +370,7 @@ export async function POST(req: Request) {
             ? 'MIGRATION_REQUIRED'
             : 'COMPENSATION_PROFILE_SAVE_FAILED',
           details: looksLikeMigrationMissing(message)
-            ? 'Apply Staff Payroll 1C migration, then try again.'
+            ? 'Required database changes are not available yet. Deploy the latest database changes, then try again.'
             : message,
         })
       }
@@ -432,7 +432,7 @@ export async function POST(req: Request) {
           return json(500, {
             ok: false,
             error: 'MIGRATION_REQUIRED',
-            details: 'Apply Staff Payroll 1C migration, then try again.',
+            details: 'Required database changes are not available yet. Deploy the latest database changes, then try again.',
           })
         }
         return json(500, {
@@ -518,7 +518,7 @@ export async function POST(req: Request) {
             ? 'MIGRATION_REQUIRED'
             : 'PAYROLL_SOURCE_LOAD_FAILED',
           details: looksLikeMigrationMissing(sourceError)
-            ? 'Apply Staff Payroll 1C migration, then try again.'
+            ? 'Required database changes are not available yet. Deploy the latest database changes, then try again.'
             : sourceError,
         })
       }
@@ -757,7 +757,7 @@ export async function POST(req: Request) {
             ? 'MIGRATION_REQUIRED'
             : 'SNAPSHOT_SAVE_FAILED',
           details: looksLikeMigrationMissing(message)
-            ? 'Apply Staff Payroll 1C migration, then try again.'
+            ? 'Required database changes are not available yet. Deploy the latest database changes, then try again.'
             : message,
         })
       }
@@ -814,7 +814,7 @@ export async function POST(req: Request) {
             ? 'MIGRATION_REQUIRED'
             : 'DRAFT_INTEGRITY_SAVE_FAILED',
           details: looksLikeMigrationMissing(message)
-            ? 'Apply Staff Payroll 1D migration, then recalculate the payroll draft.'
+            ? 'Required database changes are not available yet. Deploy the latest database changes, then recalculate the payroll draft.'
             : message,
         })
       }

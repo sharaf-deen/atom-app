@@ -185,7 +185,7 @@ function errorLabel(code: string) {
     case 'PAYROLL_MAPPING_REQUIRED':
       return 'One of the selected sessions no longer has an active payroll mapping.'
     case 'MIGRATION_REQUIRED':
-      return 'Staff Payroll 1G migration is required.'
+      return 'Required database changes are not available yet. Deploy the latest database changes first.'
     default:
       return code.replaceAll('_', ' ').toLowerCase().replace(/^./, (c) => c.toUpperCase())
   }

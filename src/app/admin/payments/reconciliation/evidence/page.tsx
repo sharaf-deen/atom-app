@@ -188,7 +188,7 @@ function flashMessage(code: string) {
   if (code === 'REFERENCE_OR_FILE_REQUIRED') return 'Add a reference, a proof file, or both.'
   if (code === 'FILE_TOO_LARGE') return 'Proof file is too large. Maximum size is 10 MB.'
   if (code === 'UNSUPPORTED_FILE_TYPE') return 'Allowed proof files: JPG, PNG, WEBP, or PDF.'
-  if (code === 'MIGRATION_REQUIRED') return 'The reconciliation proof storage bucket is not available yet. Apply the 1C migration first.'
+  if (code === 'MIGRATION_REQUIRED') return 'The reconciliation proof storage is not available yet. Deploy the latest database changes first.'
   if (code === 'UPLOAD_FAILED') return 'The proof file could not be uploaded.'
   if (code === 'EVIDENCE_SAVE_FAILED') return 'The evidence record could not be saved.'
   if (code === 'SERVICE_ROLE_MISSING') return 'Server storage configuration is missing.'
@@ -434,8 +434,8 @@ export default async function ReconciliationEvidencePage({
 
       {batchesErr || evidenceErr ? (
         <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">
-          Could not load reconciliation evidence. Confirm the 1C migration has
-          been applied, then refresh.
+          Could not load reconciliation evidence. Confirm the latest database changes have
+          been deployed, then refresh.
         </div>
       ) : null}
 

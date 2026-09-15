@@ -388,9 +388,9 @@ export default async function StaffPayrollCalculationPage({
 
       {migrationMissing ? (
         <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950">
-          <div className="font-semibold">Staff Payroll 1D migration required</div>
+          <div className="font-semibold">Database update required</div>
           <div className="mt-1 text-xs">
-            Apply the Financial Snapshot, Salary Calculation & Approval migration, then refresh this page.
+            Deploy the latest database changes, then refresh this page.
           </div>
         </div>
       ) : null}

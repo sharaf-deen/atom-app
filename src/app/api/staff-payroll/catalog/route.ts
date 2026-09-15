@@ -775,7 +775,7 @@ export async function POST(req: Request) {
         ok: false,
         error: 'MIGRATION_REQUIRED',
         details:
-          'Apply the Staff Payroll 1A migration before using the Task Catalog.',
+          'Required database changes are not available yet. Deploy the latest database changes before using the Task Catalog.',
       })
     }
 
