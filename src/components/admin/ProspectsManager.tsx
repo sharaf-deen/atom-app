@@ -119,6 +119,44 @@ function terminalStatus(status: ProspectStatus) {
   return status === 'joined' || status === 'lost'
 }
 
+function activityActorLabel(
+  item: ProspectActivityRow,
+  currentUserId: string,
+  staffMap: Map<string, FrontDeskStaffRow>,
+) {
+  if (!item.actor_user_id) return ''
+  if (item.actor_user_id === currentUserId) return 'You'
+  const actor = staffMap.get(item.actor_user_id)
+  return actor ? staffName(actor) : 'Staff'
+}
+
+function activityDetail(item: ProspectActivityRow, staffMap: Map<string, FrontDeskStaffRow>) {
+  const details = item.details ?? {}
+
+  if (item.activity_type === 'assignment') {
+    const to = typeof details.to === 'string' ? details.to : ''
+    const target = to ? staffMap.get(to) : null
+    return to ? `Assigned to ${target ? staffName(target) : 'staff member'}` : 'Assignment cleared'
+  }
+
+  if (item.activity_type === 'follow_up_scheduled') {
+    const to = typeof details.to === 'string' ? details.to : ''
+    return to ? `Next follow-up: ${fmtDateTime(to)}` : 'Follow-up cleared'
+  }
+
+  if (item.activity_type === 'lost') {
+    const reason = typeof details.lost_reason === 'string' ? details.lost_reason as ProspectLostReason : null
+    return reason && PROSPECT_LOST_REASONS.includes(reason) ? `Reason: ${LOST_REASON_LABELS[reason]}` : ''
+  }
+
+  if (item.activity_type === 'status_change' && typeof details.to_lost_reason === 'string') {
+    const reason = details.to_lost_reason as ProspectLostReason
+    return PROSPECT_LOST_REASONS.includes(reason) ? `Reason: ${LOST_REASON_LABELS[reason]}` : ''
+  }
+
+  return ''
+}
+
 export default function ProspectsManager({
   currentUserId,
   canManage,
@@ -186,7 +224,7 @@ export default function ProspectsManager({
     return {
       new: prospects.filter((row) => row.status === 'new').length,
       due,
-      active: prospects.filter((row) => ['contacted', 'awaiting_reply'].includes(row.status)).length,
+      active: prospects.filter((row) => ['contacted', 'awaiting_reply', 'trial_completed'].includes(row.status)).length,
       trial: prospects.filter((row) => row.status === 'trial_booked').length,
       joined: prospects.filter((row) => row.status === 'joined').length,
     }
@@ -257,19 +295,28 @@ export default function ProspectsManager({
     const draft = drafts[row.id]
     if (!draft) return
 
+    if (draft.status === 'lost' && !draft.lost_reason) {
+      setError('Select a lost reason before saving this prospect as Lost.')
+      return
+    }
+
     setBusyId(row.id)
     setError(null)
     setFlash(null)
 
     try {
-      const followUpIso = draft.next_follow_up_at ? new Date(draft.next_follow_up_at).toISOString() : null
+      const followUpIso = terminalStatus(draft.status)
+        ? null
+        : draft.next_follow_up_at
+          ? new Date(draft.next_follow_up_at).toISOString()
+          : null
       const res = await fetch('/api/admin/prospects', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           prospect_id: row.id,
           status: draft.status,
-          lost_reason: draft.status === 'lost' ? draft.lost_reason || 'other' : null,
+          lost_reason: draft.status === 'lost' ? draft.lost_reason : null,
           assigned_to: draft.assigned_to || null,
           next_follow_up_at: followUpIso,
         }),
@@ -318,43 +365,73 @@ export default function ProspectsManager({
     }
   }
 
-  function recordContact(row: ProspectRow, channel: 'whatsapp' | 'call' | 'email') {
-    if (!canManage) return
+  async function recordContact(row: ProspectRow, channel: 'whatsapp' | 'call' | 'email') {
+    if (!canManage) return false
 
-    void fetch('/api/admin/prospects', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        prospect_id: row.id,
-        action: 'log_contact',
-        channel,
-      }),
-    })
-      .then((res) => res.json())
-      .then((data) => {
-        if (data?.prospect) mergeProspect(data.prospect as ProspectRow)
-        if (data?.activity) setActivities((rows) => [data.activity as ProspectActivityRow, ...rows])
+    setBusyId(row.id)
+    setError(null)
+    setFlash(null)
+
+    try {
+      const res = await fetch('/api/admin/prospects', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          prospect_id: row.id,
+          action: 'log_contact',
+          channel,
+        }),
       })
-      .catch(() => undefined)
+      const data = await res.json()
+      if (!res.ok || !data?.ok) throw new Error(data?.error || 'Failed to log contact action.')
+
+      if (data?.prospect) mergeProspect(data.prospect as ProspectRow)
+      if (data?.activity) setActivities((rows) => [data.activity as ProspectActivityRow, ...rows])
+
+      const label = channel === 'whatsapp' ? 'WhatsApp' : channel === 'call' ? 'Call' : 'Email'
+      setFlash(`${label} contact initiated for ${row.full_name}.`)
+      return true
+    } catch (e: any) {
+      setError(String(e?.message ?? e ?? 'Failed to log contact action.'))
+      return false
+    } finally {
+      setBusyId(null)
+    }
   }
 
-  function openWhatsapp(row: ProspectRow) {
+  async function openWhatsapp(row: ProspectRow) {
     const digits = normalizeProspectWhatsappDigits(row.phone)
-    if (!digits) return
-    window.open(`https://wa.me/${digits}`, '_blank', 'noopener,noreferrer')
-    recordContact(row, 'whatsapp')
+    if (!digits || busyId === row.id) return
+
+    const popup = window.open('', '_blank')
+    const logged = await recordContact(row, 'whatsapp')
+
+    if (!logged) {
+      popup?.close()
+      return
+    }
+
+    const url = `https://wa.me/${digits}`
+    if (popup) {
+      try {
+        popup.opener = null
+      } catch {}
+      popup.location.href = url
+    } else {
+      window.location.href = url
+    }
   }
 
-  function openCall(row: ProspectRow) {
-    if (!row.phone) return
-    window.location.href = `tel:${row.phone}`
-    recordContact(row, 'call')
+  async function openCall(row: ProspectRow) {
+    if (!row.phone || busyId === row.id) return
+    const logged = await recordContact(row, 'call')
+    if (logged) window.location.href = `tel:${row.phone}`
   }
 
-  function openEmail(row: ProspectRow) {
-    if (!row.email) return
-    window.location.href = `mailto:${row.email}`
-    recordContact(row, 'email')
+  async function openEmail(row: ProspectRow) {
+    if (!row.email || busyId === row.id) return
+    const logged = await recordContact(row, 'email')
+    if (logged) window.location.href = `mailto:${row.email}`
   }
 
   async function importBackfill(file: File | null) {
@@ -574,24 +651,24 @@ export default function ProspectsManager({
                 <div className="flex flex-wrap gap-2 lg:justify-end">
                   <button
                     type="button"
-                    disabled={!row.phone}
-                    onClick={() => openWhatsapp(row)}
+                    disabled={!row.phone || busyId === row.id}
+                    onClick={() => void openWhatsapp(row)}
                     className="rounded-xl border border-green-200 bg-green-50 px-3 py-2 text-sm font-semibold text-green-800 disabled:opacity-40"
                   >
                     WhatsApp
                   </button>
                   <button
                     type="button"
-                    disabled={!row.phone}
-                    onClick={() => openCall(row)}
+                    disabled={!row.phone || busyId === row.id}
+                    onClick={() => void openCall(row)}
                     className="rounded-xl border border-[hsl(var(--border))] px-3 py-2 text-sm font-semibold disabled:opacity-40"
                   >
                     Call
                   </button>
                   <button
                     type="button"
-                    disabled={!row.email}
-                    onClick={() => openEmail(row)}
+                    disabled={!row.email || busyId === row.id}
+                    onClick={() => void openEmail(row)}
                     className="rounded-xl border border-[hsl(var(--border))] px-3 py-2 text-sm font-semibold disabled:opacity-40"
                   >
                     Email
@@ -661,10 +738,14 @@ export default function ProspectsManager({
                     <span className="font-medium">Next follow-up</span>
                     <input
                       type="datetime-local"
-                      value={draft.next_follow_up_at}
+                      value={terminalStatus(draft.status) ? '' : draft.next_follow_up_at}
+                      disabled={terminalStatus(draft.status)}
                       onChange={(e) => updateDraft(row.id, { next_follow_up_at: e.target.value })}
-                      className="w-full rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2"
+                      className="w-full rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400"
                     />
+                    {terminalStatus(draft.status) ? (
+                      <div className="text-xs text-[hsl(var(--muted))]">Cleared automatically for Joined/Lost.</div>
+                    ) : null}
                   </label>
 
                   <div className="flex items-end">
@@ -740,9 +821,14 @@ export default function ProspectsManager({
                         {rowActivities.map((item) => (
                           <div key={item.id} className="rounded-xl border border-[hsl(var(--border))] px-3 py-2 text-sm">
                             <div>{item.summary}</div>
+                            {activityDetail(item, staffMap) ? (
+                              <div className="mt-1 text-xs text-[hsl(var(--muted))]">{activityDetail(item, staffMap)}</div>
+                            ) : null}
                             <div className="mt-1 text-xs text-[hsl(var(--muted))]">
                               {fmtDateTime(item.occurred_at)}
-                              {item.actor_user_id === currentUserId ? ' · You' : ''}
+                              {activityActorLabel(item, currentUserId, staffMap)
+                                ? ` · ${activityActorLabel(item, currentUserId, staffMap)}`
+                                : ''}
                             </div>
                           </div>
                         ))}

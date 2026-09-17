@@ -136,6 +136,25 @@ export async function PATCH(req: NextRequest) {
     update.next_follow_up_at = followUp
   }
 
+  const effectiveStatus = (update.status ?? current.status) as string
+  const effectiveLostReason = Object.prototype.hasOwnProperty.call(update, 'lost_reason')
+    ? update.lost_reason
+    : current.lost_reason
+
+  if (effectiveStatus === 'lost' && !effectiveLostReason) {
+    return json({ ok: false, error: 'LOST_REASON_REQUIRED' }, 400)
+  }
+
+  if (effectiveStatus !== 'lost' && Object.prototype.hasOwnProperty.call(body, 'lost_reason')) {
+    update.lost_reason = null
+  }
+  if (
+    (effectiveStatus === 'joined' || effectiveStatus === 'lost')
+    && (Object.prototype.hasOwnProperty.call(body, 'status') || Object.prototype.hasOwnProperty.call(body, 'next_follow_up_at'))
+  ) {
+    update.next_follow_up_at = null
+  }
+
   if (Object.keys(update).length === 1) {
     return json({ ok: false, error: 'NO_CHANGES' }, 400)
   }
@@ -152,6 +171,9 @@ export async function PATCH(req: NextRequest) {
       const message = String(error.message ?? '')
       if (message.includes('prospects_email_normalized_uidx') || message.includes('prospects_phone_digits_uidx')) {
         return json({ ok: false, error: 'CONTACT_ALREADY_USED_BY_ANOTHER_PROSPECT' }, 409)
+      }
+      if (message.includes('PROSPECT_LOST_REASON_REQUIRED') || message.includes('prospects_lost_requires_reason_chk')) {
+        return json({ ok: false, error: 'LOST_REASON_REQUIRED' }, 400)
       }
       return json({ ok: false, error: message || 'UPDATE_FAILED' }, 400)
     }
@@ -215,45 +237,26 @@ export async function POST(req: NextRequest) {
       return json({ ok: false, error: 'INVALID_CONTACT_CHANNEL' }, 400)
     }
 
-    const now = new Date().toISOString()
-    const summary =
-      channel === 'whatsapp'
-        ? 'WhatsApp contact initiated'
-        : channel === 'call'
-          ? 'Phone call initiated'
-          : 'Email contact initiated'
+    const { data, error } = await admin.rpc('log_prospect_contact', {
+      p_prospect_id: id,
+      p_channel: channel,
+      p_actor_user_id: access.me.id,
+    })
 
-    const { data: activity, error: activityError } = await admin
-      .from('prospect_activities')
-      .insert({
-        prospect_id: id,
-        activity_type: channel,
-        summary,
-        details: {},
-        actor_user_id: access.me.id,
-        occurred_at: now,
-      })
-      .select('*')
-      .single()
-
-    if (activityError) return json({ ok: false, error: activityError.message }, 400)
-
-    const prospectUpdate: Record<string, unknown> = {
-      last_contacted_at: now,
-      updated_by: access.me.id,
+    if (error) {
+      const message = String(error.message ?? '')
+      if (message.includes('PROSPECT_NOT_FOUND')) return json({ ok: false, error: 'PROSPECT_NOT_FOUND' }, 404)
+      if (message.includes('PROSPECT_CONTACT_CHANNEL_INVALID')) {
+        return json({ ok: false, error: 'INVALID_CONTACT_CHANNEL' }, 400)
+      }
+      return json({ ok: false, error: message || 'CONTACT_LOG_FAILED' }, 400)
     }
-    if (prospect.status === 'new') prospectUpdate.status = 'contacted'
 
-    const { data: updated, error: updateError } = await admin
-      .from('prospects')
-      .update(prospectUpdate)
-      .eq('id', id)
-      .select('*')
-      .single()
+    if (!data?.prospect || !data?.activity) {
+      return json({ ok: false, error: 'CONTACT_LOG_FAILED' }, 500)
+    }
 
-    if (updateError) return json({ ok: false, error: updateError.message }, 400)
-
-    return json({ ok: true, activity, prospect: updated })
+    return json({ ok: true, activity: data.activity, prospect: data.prospect })
   }
 
   return json({ ok: false, error: 'UNKNOWN_ACTION' }, 400)
