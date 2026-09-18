@@ -94,6 +94,27 @@ export type ProspectMonthlyArchiveRow = {
   manual_count: number
 }
 
+export type ProspectMemberReconciliationRow = {
+  prospect_id: string
+  reconciliation_state: 'linked' | 'unique_match' | 'ambiguous' | 'unmatched'
+  match_basis: 'linked' | 'email_and_phone' | 'email' | 'phone' | null
+  candidate_count: number
+  member_user_id: string | null
+  member_code: string | null
+  member_full_name: string | null
+  member_email: string | null
+  member_phone: string | null
+  member_created_at: string | null
+  first_membership_start_date: string | null
+  first_membership_created_at: string | null
+  first_paid_membership_start_date: string | null
+  subscription_count: number
+  has_membership_history: boolean
+  has_active_membership: boolean
+  became_member_after_prospect: boolean
+  days_to_first_membership: number | null
+}
+
 export default async function AdminProspectsPage() {
   const me = await getSessionUserCached()
   const nextPath = '/admin/prospects'
@@ -119,12 +140,13 @@ export default async function AdminProspectsPage() {
   let staff: FrontDeskStaffRow[] = []
   let messageTemplates: ProspectMessageTemplateRow[] = []
   let monthlyArchive: ProspectMonthlyArchiveRow[] = []
+  let memberReconciliation: ProspectMemberReconciliationRow[] = []
   let loadError: string | null = null
 
   try {
     const admin = getSupabaseAdminClientCached() as any
 
-    const [prospectsResult, staffResult, templatesResult, monthlyArchiveResult] = await Promise.all([
+    const [prospectsResult, staffResult, templatesResult, monthlyArchiveResult, reconciliationResult] = await Promise.all([
       admin
         .from('prospects')
         .select(
@@ -146,12 +168,14 @@ export default async function AdminProspectsPage() {
         .order('template_key', { ascending: true })
         .order('language', { ascending: true }),
       admin.rpc('prospect_submission_monthly_summary'),
+      admin.rpc('prospect_member_reconciliation'),
     ])
 
     if (prospectsResult.error) throw new Error(prospectsResult.error.message)
     if (staffResult.error) throw new Error(staffResult.error.message)
     if (templatesResult.error) throw new Error(templatesResult.error.message)
     if (monthlyArchiveResult.error) throw new Error(monthlyArchiveResult.error.message)
+    if (reconciliationResult.error) throw new Error(reconciliationResult.error.message)
 
     prospects = ((prospectsResult.data ?? []) as Array<Omit<ProspectRow, 'linked_visitor_trial_date'>>).map(
       (row) => ({ ...row, linked_visitor_trial_date: null }),
@@ -168,6 +192,28 @@ export default async function AdminProspectsPage() {
       gmail_backfill_count: Number(row.gmail_backfill_count ?? 0),
       website_api_count: Number(row.website_api_count ?? 0),
       manual_count: Number(row.manual_count ?? 0),
+    }))
+    memberReconciliation = ((reconciliationResult.data ?? []) as Array<Record<string, unknown>>).map((row) => ({
+      prospect_id: String(row.prospect_id ?? ''),
+      reconciliation_state: String(row.reconciliation_state ?? 'unmatched') as ProspectMemberReconciliationRow['reconciliation_state'],
+      match_basis: row.match_basis ? String(row.match_basis) as ProspectMemberReconciliationRow['match_basis'] : null,
+      candidate_count: Number(row.candidate_count ?? 0),
+      member_user_id: row.member_user_id ? String(row.member_user_id) : null,
+      member_code: row.member_code ? String(row.member_code) : null,
+      member_full_name: row.member_full_name ? String(row.member_full_name) : null,
+      member_email: row.member_email ? String(row.member_email) : null,
+      member_phone: row.member_phone ? String(row.member_phone) : null,
+      member_created_at: row.member_created_at ? String(row.member_created_at) : null,
+      first_membership_start_date: row.first_membership_start_date ? String(row.first_membership_start_date) : null,
+      first_membership_created_at: row.first_membership_created_at ? String(row.first_membership_created_at) : null,
+      first_paid_membership_start_date: row.first_paid_membership_start_date ? String(row.first_paid_membership_start_date) : null,
+      subscription_count: Number(row.subscription_count ?? 0),
+      has_membership_history: Boolean(row.has_membership_history),
+      has_active_membership: Boolean(row.has_active_membership),
+      became_member_after_prospect: Boolean(row.became_member_after_prospect),
+      days_to_first_membership: row.days_to_first_membership === null || row.days_to_first_membership === undefined
+        ? null
+        : Number(row.days_to_first_membership),
     }))
 
     const ids = prospects.map((row) => row.id)
@@ -255,6 +301,7 @@ export default async function AdminProspectsPage() {
             staff={staff}
             initialMessageTemplates={messageTemplates}
             monthlyArchive={monthlyArchive}
+            memberReconciliation={memberReconciliation}
           />
         )}
       </Section>
