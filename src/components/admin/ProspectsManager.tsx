@@ -42,6 +42,32 @@ type ImportSummary = {
   conflicts: number
 }
 
+type WorkQueueFilter =
+  | 'all'
+  | 'overdue'
+  | 'today'
+  | 'new_uncontacted'
+  | 'mine'
+  | 'unassigned'
+  | 'upcoming_trials'
+
+const WORK_QUEUE_LABELS: Record<WorkQueueFilter, string> = {
+  all: 'All prospects',
+  overdue: 'Overdue',
+  today: 'Due today',
+  new_uncontacted: 'New untouched',
+  mine: 'Assigned to me',
+  unassigned: 'Unassigned',
+  upcoming_trials: 'Upcoming trials',
+}
+
+const CAIRO_DATE_FORMATTER = new Intl.DateTimeFormat('en-GB', {
+  timeZone: 'Africa/Cairo',
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+})
+
 const STATUS_LABELS: Record<ProspectStatus, string> = {
   new: 'New',
   contacted: 'Contacted',
@@ -104,6 +130,86 @@ function followUpIsDue(value?: string | null) {
   if (!value) return false
   const ms = new Date(value).getTime()
   return Number.isFinite(ms) && ms <= Date.now()
+}
+
+function cairoDateKey(value: Date | string) {
+  if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)) return value
+  const date = value instanceof Date ? value : new Date(value)
+  if (Number.isNaN(date.getTime())) return null
+  const parts = CAIRO_DATE_FORMATTER.formatToParts(date)
+  const year = parts.find((part) => part.type === 'year')?.value
+  const month = parts.find((part) => part.type === 'month')?.value
+  const day = parts.find((part) => part.type === 'day')?.value
+  return year && month && day ? `${year}-${month}-${day}` : null
+}
+
+function followUpTiming(value: string | null | undefined, todayKey: string) {
+  if (!value) return null
+  const key = cairoDateKey(value)
+  if (!key) return null
+  if (key < todayKey) return 'overdue' as const
+  if (key === todayKey) return 'today' as const
+  return 'future' as const
+}
+
+function isActiveProspect(row: ProspectRow) {
+  return !terminalStatus(row.status)
+}
+
+function isNewUncontacted(row: ProspectRow) {
+  return row.status === 'new' && !row.last_contacted_at
+}
+
+function isUpcomingTrial(row: ProspectRow, todayKey: string) {
+  return row.status === 'trial_booked'
+    && Boolean(row.linked_visitor_trial_date)
+    && String(row.linked_visitor_trial_date) >= todayKey
+}
+
+function matchesWorkQueue(
+  row: ProspectRow,
+  filter: WorkQueueFilter,
+  currentUserId: string,
+  todayKey: string,
+) {
+  if (filter === 'all') return true
+  if (filter === 'overdue') return isActiveProspect(row) && followUpTiming(row.next_follow_up_at, todayKey) === 'overdue'
+  if (filter === 'today') return isActiveProspect(row) && followUpTiming(row.next_follow_up_at, todayKey) === 'today'
+  if (filter === 'new_uncontacted') return isActiveProspect(row) && isNewUncontacted(row)
+  if (filter === 'mine') return isActiveProspect(row) && row.assigned_to === currentUserId
+  if (filter === 'unassigned') return isActiveProspect(row) && !row.assigned_to
+  return isActiveProspect(row) && isUpcomingTrial(row, todayKey)
+}
+
+function workQueueRank(row: ProspectRow, todayKey: string) {
+  if (!isActiveProspect(row)) return 6
+  const timing = followUpTiming(row.next_follow_up_at, todayKey)
+  if (timing === 'overdue') return 0
+  if (timing === 'today') return 1
+  if (isNewUncontacted(row)) return 2
+  if (isUpcomingTrial(row, todayKey)) return 3
+  if (!row.assigned_to) return 4
+  return 5
+}
+
+function compareWorkQueue(a: ProspectRow, b: ProspectRow, todayKey: string) {
+  const rankA = workQueueRank(a, todayKey)
+  const rankB = workQueueRank(b, todayKey)
+  if (rankA !== rankB) return rankA - rankB
+
+  if (rankA <= 1) {
+    return new Date(a.next_follow_up_at ?? 0).getTime() - new Date(b.next_follow_up_at ?? 0).getTime()
+  }
+  if (rankA === 3) {
+    return String(a.linked_visitor_trial_date ?? '').localeCompare(String(b.linked_visitor_trial_date ?? ''))
+  }
+  if (rankA === 4 || rankA === 5) {
+    const nextA = a.next_follow_up_at ? new Date(a.next_follow_up_at).getTime() : Number.POSITIVE_INFINITY
+    const nextB = b.next_follow_up_at ? new Date(b.next_follow_up_at).getTime() : Number.POSITIVE_INFINITY
+    if (nextA !== nextB) return nextA - nextB
+  }
+
+  return new Date(b.last_submission_at).getTime() - new Date(a.last_submission_at).getTime()
 }
 
 function staffName(row?: FrontDeskStaffRow | null) {
@@ -170,6 +276,7 @@ export default function ProspectsManager({
   const [prospects, setProspects] = useState(initialProspects)
   const [activities, setActivities] = useState(initialActivities)
   const [query, setQuery] = useState('')
+  const [workQueueFilter, setWorkQueueFilter] = useState<WorkQueueFilter>('all')
   const [statusFilter, setStatusFilter] = useState<'all' | ProspectStatus>('all')
   const [sourceFilter, setSourceFilter] = useState<'all' | ProspectSubmissionRow['source']>('all')
   const [assigneeFilter, setAssigneeFilter] = useState<'all' | 'unassigned' | string>('all')
@@ -194,6 +301,7 @@ export default function ProspectsManager({
   const [error, setError] = useState<string | null>(null)
   const [importSummary, setImportSummary] = useState<ImportSummary | null>(null)
   const [importBusy, setImportBusy] = useState(false)
+  const todayKey = cairoDateKey(new Date()) ?? ''
 
   const submissionsByProspect = useMemo(() => {
     const map = new Map<string, ProspectSubmissionRow[]>()
@@ -220,16 +328,25 @@ export default function ProspectsManager({
 
   const staffMap = useMemo(() => new Map(staff.map((row) => [row.user_id, row])), [staff])
 
-  const counts = useMemo(() => {
-    const due = prospects.filter((row) => !terminalStatus(row.status) && followUpIsDue(row.next_follow_up_at)).length
+  const queueCounts = useMemo(() => {
     return {
-      new: prospects.filter((row) => row.status === 'new').length,
-      due,
-      active: prospects.filter((row) => ['contacted', 'awaiting_reply', 'trial_completed'].includes(row.status)).length,
-      trial: prospects.filter((row) => row.status === 'trial_booked').length,
-      joined: prospects.filter((row) => row.status === 'joined').length,
+      all: prospects.length,
+      overdue: prospects.filter((row) => matchesWorkQueue(row, 'overdue', currentUserId, todayKey)).length,
+      today: prospects.filter((row) => matchesWorkQueue(row, 'today', currentUserId, todayKey)).length,
+      new_uncontacted: prospects.filter((row) => matchesWorkQueue(row, 'new_uncontacted', currentUserId, todayKey)).length,
+      mine: prospects.filter((row) => matchesWorkQueue(row, 'mine', currentUserId, todayKey)).length,
+      unassigned: prospects.filter((row) => matchesWorkQueue(row, 'unassigned', currentUserId, todayKey)).length,
+      upcoming_trials: prospects.filter((row) => matchesWorkQueue(row, 'upcoming_trials', currentUserId, todayKey)).length,
     }
-  }, [prospects])
+  }, [prospects, currentUserId, todayKey])
+
+  const pipelineCounts = useMemo(() => ({
+    new: prospects.filter((row) => row.status === 'new').length,
+    followUp: prospects.filter((row) => ['contacted', 'awaiting_reply', 'trial_completed'].includes(row.status)).length,
+    trial: prospects.filter((row) => row.status === 'trial_booked').length,
+    joined: prospects.filter((row) => row.status === 'joined').length,
+    lost: prospects.filter((row) => row.status === 'lost').length,
+  }), [prospects])
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()
@@ -238,6 +355,7 @@ export default function ProspectsManager({
       const rows = submissionsByProspect.get(row.id) ?? []
       const sourceMatch = sourceFilter === 'all' || rows.some((item) => item.source === sourceFilter)
       if (!sourceMatch) return false
+      if (!matchesWorkQueue(row, workQueueFilter, currentUserId, todayKey)) return false
       if (statusFilter !== 'all' && row.status !== statusFilter) return false
       if (assigneeFilter === 'unassigned' && row.assigned_to) return false
       if (assigneeFilter !== 'all' && assigneeFilter !== 'unassigned' && row.assigned_to !== assigneeFilter) return false
@@ -263,8 +381,21 @@ export default function ProspectsManager({
         .toLowerCase()
 
       return haystack.includes(q)
-    })
-  }, [prospects, submissionsByProspect, query, statusFilter, sourceFilter, assigneeFilter, followUpOnly])
+    }).sort((a, b) => compareWorkQueue(a, b, todayKey))
+  }, [prospects, submissionsByProspect, query, workQueueFilter, statusFilter, sourceFilter, assigneeFilter, followUpOnly, currentUserId, todayKey])
+
+  function selectWorkQueue(filter: WorkQueueFilter) {
+    setWorkQueueFilter(filter)
+    setQuery('')
+    setStatusFilter('all')
+    setSourceFilter('all')
+    setAssigneeFilter('all')
+    setFollowUpOnly(false)
+  }
+
+  function clearFilters() {
+    selectWorkQueue('all')
+  }
 
   function updateDraft(id: string, patch: Partial<Draft>) {
     setDrafts((current) => ({
@@ -479,12 +610,30 @@ export default function ProspectsManager({
         </div>
       ) : null}
 
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-        <Summary label="New" value={counts.new} />
-        <Summary label="Follow-up due" value={counts.due} />
-        <Summary label="In follow-up" value={counts.active} />
-        <Summary label="Trial booked" value={counts.trial} />
-        <Summary label="Joined" value={counts.joined} />
+      <div className="space-y-3">
+        <div>
+          <h2 className="text-base font-semibold">Daily work queue</h2>
+          <p className="text-sm text-[hsl(var(--muted))]">Select a queue to see who needs attention first.</p>
+        </div>
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-7">
+          {(['all', 'overdue', 'today', 'new_uncontacted', 'mine', 'unassigned', 'upcoming_trials'] as WorkQueueFilter[]).map((filter) => (
+            <QueueSummary
+              key={filter}
+              label={WORK_QUEUE_LABELS[filter]}
+              value={queueCounts[filter]}
+              active={workQueueFilter === filter}
+              urgent={filter === 'overdue' && queueCounts.overdue > 0}
+              onClick={() => selectWorkQueue(filter)}
+            />
+          ))}
+        </div>
+        <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-[hsl(var(--muted))]">
+          <span>New: <strong className="text-[hsl(var(--foreground))]">{pipelineCounts.new}</strong></span>
+          <span>In follow-up: <strong className="text-[hsl(var(--foreground))]">{pipelineCounts.followUp}</strong></span>
+          <span>Trial booked: <strong className="text-[hsl(var(--foreground))]">{pipelineCounts.trial}</strong></span>
+          <span>Joined: <strong className="text-[hsl(var(--foreground))]">{pipelineCounts.joined}</strong></span>
+          <span>Lost: <strong className="text-[hsl(var(--foreground))]">{pipelineCounts.lost}</strong></span>
+        </div>
       </div>
 
       <div className="rounded-2xl border border-[hsl(var(--border))] bg-white p-4 shadow-soft">
@@ -556,8 +705,20 @@ export default function ProspectsManager({
           </label>
         </div>
 
-        <div className="mt-3 text-xs text-[hsl(var(--muted))]">
-          Showing {filtered.length} of {prospects.length} prospects.
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs text-[hsl(var(--muted))]">
+          <span>
+            Queue: <strong className="text-[hsl(var(--foreground))]">{WORK_QUEUE_LABELS[workQueueFilter]}</strong>
+            {' · '}Showing {filtered.length} of {prospects.length} prospects in priority order.
+          </span>
+          {(workQueueFilter !== 'all' || query || statusFilter !== 'all' || sourceFilter !== 'all' || assigneeFilter !== 'all' || followUpOnly) ? (
+            <button
+              type="button"
+              onClick={clearFilters}
+              className="rounded-lg border border-[hsl(var(--border))] px-2.5 py-1 font-semibold text-[hsl(var(--foreground))]"
+            >
+              Clear filters
+            </button>
+          ) : null}
         </div>
       </div>
 
@@ -598,7 +759,9 @@ export default function ProspectsManager({
           const latest = latestSubmission(rowSubmissions)
           const draft = drafts[row.id]
           const isExpanded = !!expanded[row.id]
-          const due = !terminalStatus(row.status) && followUpIsDue(row.next_follow_up_at)
+          const timing = isActiveProspect(row) ? followUpTiming(row.next_follow_up_at, todayKey) : null
+          const newUncontacted = isActiveProspect(row) && isNewUncontacted(row)
+          const upcomingTrial = isActiveProspect(row) && isUpcomingTrial(row, todayKey)
 
           return (
             <article
@@ -617,9 +780,24 @@ export default function ProspectsManager({
                         {sourceLabel(latest.source)}
                       </span>
                     ) : null}
-                    {due ? (
+                    {timing === 'overdue' ? (
                       <span className="rounded-full border border-rose-200 bg-rose-50 px-2 py-0.5 text-xs font-semibold text-rose-800">
-                        Follow-up due
+                        Overdue follow-up
+                      </span>
+                    ) : null}
+                    {timing === 'today' ? (
+                      <span className="rounded-full border border-orange-200 bg-orange-50 px-2 py-0.5 text-xs font-semibold text-orange-800">
+                        Follow-up today
+                      </span>
+                    ) : null}
+                    {newUncontacted ? (
+                      <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-xs font-semibold text-amber-900">
+                        Not contacted
+                      </span>
+                    ) : null}
+                    {upcomingTrial ? (
+                      <span className="rounded-full border border-violet-200 bg-violet-50 px-2 py-0.5 text-xs font-semibold text-violet-800">
+                        Trial {row.linked_visitor_trial_date}
                       </span>
                     ) : null}
                   </div>
@@ -629,6 +807,7 @@ export default function ProspectsManager({
                     {row.email ? <span>{row.email}</span> : null}
                     <span>{rowSubmissions.length} submission{rowSubmissions.length === 1 ? '' : 's'}</span>
                     <span>Last enquiry: {fmtDateTime(row.last_submission_at)}</span>
+                    {row.linked_visitor_trial_date ? <span>Trial date: {row.linked_visitor_trial_date}</span> : null}
                   </div>
 
                   {latest ? (
@@ -859,11 +1038,36 @@ export default function ProspectsManager({
   )
 }
 
-function Summary({ label, value }: { label: string; value: number }) {
+function QueueSummary({
+  label,
+  value,
+  active,
+  urgent,
+  onClick,
+}: {
+  label: string
+  value: number
+  active: boolean
+  urgent: boolean
+  onClick: () => void
+}) {
   return (
-    <div className="rounded-2xl border border-[hsl(var(--border))] bg-white p-4 shadow-soft">
-      <div className="text-xs font-medium uppercase tracking-wide text-[hsl(var(--muted))]">{label}</div>
-      <div className="mt-1 text-2xl font-semibold">{value}</div>
-    </div>
+    <button
+      type="button"
+      aria-pressed={active}
+      onClick={onClick}
+      className={`rounded-2xl border p-3 text-left shadow-soft transition ${
+        active
+          ? 'border-black bg-black text-white'
+          : urgent
+            ? 'border-rose-200 bg-rose-50 text-rose-900'
+            : 'border-[hsl(var(--border))] bg-white hover:border-slate-400'
+      }`}
+    >
+      <div className={`text-xs font-medium uppercase tracking-wide ${active ? 'text-white/70' : 'text-[hsl(var(--muted))]'}`}>
+        {label}
+      </div>
+      <div className="mt-1 text-xl font-semibold">{value}</div>
+    </button>
   )
 }
