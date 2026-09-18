@@ -22,6 +22,7 @@ export type ProspectRow = {
   next_follow_up_at: string | null
   last_contacted_at: string | null
   linked_visitor_trial_id: string | null
+  linked_visitor_trial_date: string | null
   linked_member_id: string | null
   converted_at: string | null
   converted_by: string | null
@@ -104,7 +105,7 @@ export default async function AdminProspectsPage() {
           'id,full_name,email,email_normalized,phone,phone_digits,status,lost_reason,assigned_to,next_follow_up_at,last_contacted_at,linked_visitor_trial_id,linked_member_id,converted_at,converted_by,first_seen_at,last_submission_at,created_at,updated_at',
         )
         .order('last_submission_at', { ascending: false })
-        .limit(500),
+        .limit(1000),
       admin
         .from('profiles')
         .select('user_id,first_name,last_name,email,role')
@@ -116,13 +117,25 @@ export default async function AdminProspectsPage() {
     if (prospectsResult.error) throw new Error(prospectsResult.error.message)
     if (staffResult.error) throw new Error(staffResult.error.message)
 
-    prospects = (prospectsResult.data ?? []) as ProspectRow[]
+    prospects = ((prospectsResult.data ?? []) as Array<Omit<ProspectRow, 'linked_visitor_trial_date'>>).map(
+      (row) => ({ ...row, linked_visitor_trial_date: null }),
+    )
     staff = (staffResult.data ?? []) as FrontDeskStaffRow[]
 
     const ids = prospects.map((row) => row.id)
 
     if (ids.length) {
-      const [submissionsResult, activitiesResult] = await Promise.all([
+      const visitorIds = Array.from(new Set(
+        prospects
+          .map((row) => row.linked_visitor_trial_id)
+          .filter((id): id is string => Boolean(id)),
+      ))
+      const visitorIdBatches: string[][] = []
+      for (let index = 0; index < visitorIds.length; index += 150) {
+        visitorIdBatches.push(visitorIds.slice(index, index + 150))
+      }
+
+      const [submissionsResult, activitiesResult, visitorBatchResults] = await Promise.all([
         admin
           .from('prospect_submissions')
           .select(
@@ -137,13 +150,34 @@ export default async function AdminProspectsPage() {
           .in('prospect_id', ids)
           .order('occurred_at', { ascending: false })
           .limit(5000),
+        Promise.all(
+          visitorIdBatches.map((batch) => admin
+            .from('visitor_trials')
+            .select('id,trial_date')
+            .in('id', batch)
+            .limit(150)),
+        ),
       ])
 
       if (submissionsResult.error) throw new Error(submissionsResult.error.message)
       if (activitiesResult.error) throw new Error(activitiesResult.error.message)
+      const visitorError = visitorBatchResults.find((result: { error: { message: string } | null }) => result.error)?.error
+      if (visitorError) throw new Error(visitorError.message)
 
       submissions = (submissionsResult.data ?? []) as ProspectSubmissionRow[]
       activities = (activitiesResult.data ?? []) as ProspectActivityRow[]
+
+      const trialDateByVisitor = new Map<string, string | null>(
+        visitorBatchResults
+          .flatMap((result: { data: Array<{ id: string; trial_date: string | null }> | null }) => result.data ?? [])
+          .map((row: { id: string; trial_date: string | null }) => [row.id, row.trial_date ?? null]),
+      )
+      prospects = prospects.map((row) => ({
+        ...row,
+        linked_visitor_trial_date: row.linked_visitor_trial_id
+          ? trialDateByVisitor.get(row.linked_visitor_trial_id) ?? null
+          : null,
+      }))
     }
   } catch (error: any) {
     loadError = String(error?.message ?? error ?? 'Failed to load prospects.')
