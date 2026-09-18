@@ -1,6 +1,7 @@
 'use client'
 
 import { useMemo, useState } from 'react'
+import ProspectConversionPanel from '@/components/admin/ProspectConversionPanel'
 import type {
   FrontDeskStaffRow,
   ProspectActivityRow,
@@ -768,7 +769,11 @@ export default function ProspectsManager({
               </div>
 
               {isExpanded ? (
-                <div className="mt-4 grid gap-4 xl:grid-cols-2">
+                <div className="mt-4 space-y-4">
+                  {canManage ? (
+                    <ProspectConversionPanel prospect={row} latestSubmission={latest} />
+                  ) : null}
+                  <div className="grid gap-4 xl:grid-cols-2">
                   <div className="space-y-3">
                     <h3 className="font-semibold">Submissions</h3>
                     {rowSubmissions.length ? (
@@ -836,6 +841,7 @@ export default function ProspectsManager({
                     ) : (
                       <div className="text-sm text-[hsl(var(--muted))]">No activity yet.</div>
                     )}
+                  </div>
                   </div>
                 </div>
               ) : null}
