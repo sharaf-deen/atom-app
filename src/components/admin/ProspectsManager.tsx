@@ -2,9 +2,15 @@
 
 import { useMemo, useState } from 'react'
 import ProspectConversionPanel from '@/components/admin/ProspectConversionPanel'
+import ProspectMessageComposer, {
+  ProspectTemplateAdmin,
+  type MessageComposerRequest,
+} from '@/components/admin/ProspectMessageComposer'
 import type {
   FrontDeskStaffRow,
   ProspectActivityRow,
+  ProspectMessageTemplateRow,
+  ProspectMonthlyArchiveRow,
   ProspectRow,
   ProspectSubmissionRow,
 } from '@/app/admin/prospects/page'
@@ -20,10 +26,13 @@ type Props = {
   currentUserId: string
   canManage: boolean
   canImport: boolean
+  canEditTemplates: boolean
   prospects: ProspectRow[]
   submissions: ProspectSubmissionRow[]
   activities: ProspectActivityRow[]
   staff: FrontDeskStaffRow[]
+  initialMessageTemplates: ProspectMessageTemplateRow[]
+  monthlyArchive: ProspectMonthlyArchiveRow[]
 }
 
 type Draft = {
@@ -66,6 +75,12 @@ const CAIRO_DATE_FORMATTER = new Intl.DateTimeFormat('en-GB', {
   year: 'numeric',
   month: '2-digit',
   day: '2-digit',
+})
+
+const CAIRO_MONTH_FORMATTER = new Intl.DateTimeFormat('en-GB', {
+  timeZone: 'Africa/Cairo',
+  year: 'numeric',
+  month: '2-digit',
 })
 
 const STATUS_LABELS: Record<ProspectStatus, string> = {
@@ -141,6 +156,21 @@ function cairoDateKey(value: Date | string) {
   const month = parts.find((part) => part.type === 'month')?.value
   const day = parts.find((part) => part.type === 'day')?.value
   return year && month && day ? `${year}-${month}-${day}` : null
+}
+
+function cairoMonthKey(value: Date | string) {
+  const date = value instanceof Date ? value : new Date(value)
+  if (Number.isNaN(date.getTime())) return null
+  const parts = CAIRO_MONTH_FORMATTER.formatToParts(date)
+  const year = parts.find((part) => part.type === 'year')?.value
+  const month = parts.find((part) => part.type === 'month')?.value
+  return year && month ? `${year}-${month}` : null
+}
+
+function monthLabel(monthStart: string) {
+  const date = new Date(`${monthStart}T12:00:00`)
+  if (Number.isNaN(date.getTime())) return monthStart
+  return new Intl.DateTimeFormat('en-GB', { month: 'long', timeZone: 'Africa/Cairo' }).format(date)
 }
 
 function followUpTiming(value: string | null | undefined, todayKey: string) {
@@ -268,19 +298,25 @@ export default function ProspectsManager({
   currentUserId,
   canManage,
   canImport,
+  canEditTemplates,
   prospects: initialProspects,
   submissions,
   activities: initialActivities,
   staff,
+  initialMessageTemplates,
+  monthlyArchive,
 }: Props) {
   const [prospects, setProspects] = useState(initialProspects)
   const [activities, setActivities] = useState(initialActivities)
+  const [messageTemplates, setMessageTemplates] = useState(initialMessageTemplates)
+  const [composer, setComposer] = useState<MessageComposerRequest | null>(null)
   const [query, setQuery] = useState('')
   const [workQueueFilter, setWorkQueueFilter] = useState<WorkQueueFilter>('all')
   const [statusFilter, setStatusFilter] = useState<'all' | ProspectStatus>('all')
   const [sourceFilter, setSourceFilter] = useState<'all' | ProspectSubmissionRow['source']>('all')
   const [assigneeFilter, setAssigneeFilter] = useState<'all' | 'unassigned' | string>('all')
   const [followUpOnly, setFollowUpOnly] = useState(false)
+  const [monthFilter, setMonthFilter] = useState<'all' | string>('all')
   const [expanded, setExpanded] = useState<Record<string, boolean>>({})
   const [drafts, setDrafts] = useState<Record<string, Draft>>(() =>
     Object.fromEntries(
@@ -328,6 +364,17 @@ export default function ProspectsManager({
 
   const staffMap = useMemo(() => new Map(staff.map((row) => [row.user_id, row])), [staff])
 
+  const archiveByYear = useMemo(() => {
+    const grouped = new Map<string, ProspectMonthlyArchiveRow[]>()
+    for (const row of monthlyArchive) {
+      const year = row.month_start.slice(0, 4)
+      const current = grouped.get(year) ?? []
+      current.push(row)
+      grouped.set(year, current)
+    }
+    return Array.from(grouped.entries()).sort(([yearA], [yearB]) => yearB.localeCompare(yearA))
+  }, [monthlyArchive])
+
   const queueCounts = useMemo(() => {
     return {
       all: prospects.length,
@@ -355,6 +402,7 @@ export default function ProspectsManager({
       const rows = submissionsByProspect.get(row.id) ?? []
       const sourceMatch = sourceFilter === 'all' || rows.some((item) => item.source === sourceFilter)
       if (!sourceMatch) return false
+      if (monthFilter !== 'all' && !rows.some((item) => cairoMonthKey(item.received_at) === monthFilter)) return false
       if (!matchesWorkQueue(row, workQueueFilter, currentUserId, todayKey)) return false
       if (statusFilter !== 'all' && row.status !== statusFilter) return false
       if (assigneeFilter === 'unassigned' && row.assigned_to) return false
@@ -382,7 +430,7 @@ export default function ProspectsManager({
 
       return haystack.includes(q)
     }).sort((a, b) => compareWorkQueue(a, b, todayKey))
-  }, [prospects, submissionsByProspect, query, workQueueFilter, statusFilter, sourceFilter, assigneeFilter, followUpOnly, currentUserId, todayKey])
+  }, [prospects, submissionsByProspect, query, workQueueFilter, statusFilter, sourceFilter, assigneeFilter, followUpOnly, monthFilter, currentUserId, todayKey])
 
   function selectWorkQueue(filter: WorkQueueFilter) {
     setWorkQueueFilter(filter)
@@ -391,10 +439,20 @@ export default function ProspectsManager({
     setSourceFilter('all')
     setAssigneeFilter('all')
     setFollowUpOnly(false)
+    setMonthFilter('all')
   }
 
   function clearFilters() {
     selectWorkQueue('all')
+  }
+
+  function selectArchiveMonth(month: string) {
+    selectWorkQueue('all')
+    setMonthFilter(month)
+  }
+
+  function mergeMessageTemplate(updated: ProspectMessageTemplateRow) {
+    setMessageTemplates((rows) => rows.map((row) => row.id === updated.id ? updated : row))
   }
 
   function updateDraft(id: string, patch: Partial<Draft>) {
@@ -531,39 +589,44 @@ export default function ProspectsManager({
     }
   }
 
-  async function openWhatsapp(row: ProspectRow) {
-    const digits = normalizeProspectWhatsappDigits(row.phone)
-    if (!digits || busyId === row.id) return
-
-    const popup = window.open('', '_blank')
-    const logged = await recordContact(row, 'whatsapp')
-
-    if (!logged) {
-      popup?.close()
-      return
-    }
-
-    const url = `https://wa.me/${digits}`
-    if (popup) {
-      try {
-        popup.opener = null
-      } catch {}
-      popup.location.href = url
-    } else {
-      window.location.href = url
-    }
-  }
-
   async function openCall(row: ProspectRow) {
     if (!row.phone || busyId === row.id) return
     const logged = await recordContact(row, 'call')
     if (logged) window.location.href = `tel:${row.phone}`
   }
 
-  async function openEmail(row: ProspectRow) {
-    if (!row.email || busyId === row.id) return
-    const logged = await recordContact(row, 'email')
-    if (logged) window.location.href = `mailto:${row.email}`
+  async function initiateComposedMessage(request: MessageComposerRequest, subject: string, message: string) {
+    const { prospect, channel } = request
+    if (busyId === prospect.id) return false
+
+    const digits = channel === 'whatsapp' ? normalizeProspectWhatsappDigits(prospect.phone) : null
+    if (channel === 'whatsapp' && !digits) return false
+    if (channel === 'email' && !prospect.email) return false
+
+    const popup = channel === 'whatsapp' ? window.open('', '_blank') : null
+    const logged = await recordContact(prospect, channel)
+
+    if (!logged) {
+      popup?.close()
+      return false
+    }
+
+    if (channel === 'whatsapp') {
+      const url = `https://wa.me/${digits}?text=${encodeURIComponent(message)}`
+      if (popup) {
+        try {
+          popup.opener = null
+        } catch {}
+        popup.location.href = url
+      } else {
+        window.location.href = url
+      }
+    } else {
+      window.location.href = `mailto:${prospect.email}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(message)}`
+    }
+
+    setComposer(null)
+    return true
   }
 
   async function importBackfill(file: File | null) {
@@ -635,6 +698,48 @@ export default function ProspectsManager({
           <span>Lost: <strong className="text-[hsl(var(--foreground))]">{pipelineCounts.lost}</strong></span>
         </div>
       </div>
+
+      <details className="rounded-2xl border border-[hsl(var(--border))] bg-white p-4 shadow-soft">
+        <summary className="cursor-pointer font-semibold">Submission archive by year and month</summary>
+        <div className="mt-3 space-y-4">
+          <p className="text-sm text-[hsl(var(--muted))]">
+            Counts reflect stored CRM form submissions, including Gmail Backfill and Website Real-Time intake. They are not a Gmail inbox.
+          </p>
+          {archiveByYear.length ? archiveByYear.map(([year, months]) => (
+            <div key={year} className="space-y-2">
+              <h3 className="text-sm font-semibold">{year}</h3>
+              <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                {months.map((month) => {
+                  const key = month.month_start.slice(0, 7)
+                  const active = monthFilter === key
+                  return (
+                    <button
+                      key={month.month_start}
+                      type="button"
+                      aria-pressed={active}
+                      onClick={() => active ? clearFilters() : selectArchiveMonth(key)}
+                      className={`rounded-xl border p-3 text-left text-sm transition ${active ? 'border-black bg-black text-white' : 'border-[hsl(var(--border))] bg-slate-50 hover:border-slate-400'}`}
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <strong>{monthLabel(month.month_start)}</strong>
+                        <span>{month.submissions_count} submissions</span>
+                      </div>
+                      <div className={`mt-1 text-xs ${active ? 'text-white/75' : 'text-[hsl(var(--muted))]'}`}>
+                        {month.unique_prospects_count} prospects · Contact Us {month.contact_us_count} · Visitor {month.visitor_information_count}
+                      </div>
+                      <div className={`mt-1 text-xs ${active ? 'text-white/75' : 'text-[hsl(var(--muted))]'}`}>
+                        Gmail Backfill {month.gmail_backfill_count} · Website Real-Time {month.website_api_count}
+                      </div>
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+          )) : (
+            <div className="text-sm text-[hsl(var(--muted))]">No stored submissions yet.</div>
+          )}
+        </div>
+      </details>
 
       <div className="rounded-2xl border border-[hsl(var(--border))] bg-white p-4 shadow-soft">
         <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
@@ -708,9 +813,10 @@ export default function ProspectsManager({
         <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs text-[hsl(var(--muted))]">
           <span>
             Queue: <strong className="text-[hsl(var(--foreground))]">{WORK_QUEUE_LABELS[workQueueFilter]}</strong>
+            {monthFilter !== 'all' ? <> · Archive: <strong className="text-[hsl(var(--foreground))]">{monthFilter}</strong></> : null}
             {' · '}Showing {filtered.length} of {prospects.length} prospects in priority order.
           </span>
-          {(workQueueFilter !== 'all' || query || statusFilter !== 'all' || sourceFilter !== 'all' || assigneeFilter !== 'all' || followUpOnly) ? (
+          {(workQueueFilter !== 'all' || query || statusFilter !== 'all' || sourceFilter !== 'all' || assigneeFilter !== 'all' || followUpOnly || monthFilter !== 'all') ? (
             <button
               type="button"
               onClick={clearFilters}
@@ -721,6 +827,10 @@ export default function ProspectsManager({
           ) : null}
         </div>
       </div>
+
+      {canEditTemplates ? (
+        <ProspectTemplateAdmin templates={messageTemplates} onUpdated={mergeMessageTemplate} />
+      ) : null}
 
       {canImport ? (
         <details className="rounded-2xl border border-[hsl(var(--border))] bg-white p-4 shadow-soft">
@@ -832,7 +942,7 @@ export default function ProspectsManager({
                   <button
                     type="button"
                     disabled={!row.phone || busyId === row.id}
-                    onClick={() => void openWhatsapp(row)}
+                    onClick={() => setComposer({ prospect: row, latestSubmission: latest, channel: 'whatsapp' })}
                     className="rounded-xl border border-green-200 bg-green-50 px-3 py-2 text-sm font-semibold text-green-800 disabled:opacity-40"
                   >
                     WhatsApp
@@ -848,7 +958,7 @@ export default function ProspectsManager({
                   <button
                     type="button"
                     disabled={!row.email || busyId === row.id}
-                    onClick={() => void openEmail(row)}
+                    onClick={() => setComposer({ prospect: row, latestSubmission: latest, channel: 'email' })}
                     className="rounded-xl border border-[hsl(var(--border))] px-3 py-2 text-sm font-semibold disabled:opacity-40"
                   >
                     Email
@@ -1034,6 +1144,14 @@ export default function ProspectsManager({
           </div>
         ) : null}
       </div>
+
+      <ProspectMessageComposer
+        request={composer}
+        templates={messageTemplates}
+        busy={composer ? busyId === composer.prospect.id : false}
+        onClose={() => setComposer(null)}
+        onInitiate={initiateComposedMessage}
+      />
     </div>
   )
 }

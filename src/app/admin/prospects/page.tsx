@@ -70,6 +70,30 @@ export type FrontDeskStaffRow = {
   role: 'reception' | 'admin' | 'super_admin'
 }
 
+export type ProspectMessageTemplateRow = {
+  id: string
+  channel: 'whatsapp' | 'email'
+  template_key: 'first_contact' | 'follow_up' | 'trial_reminder'
+  language: 'en' | 'ar'
+  label: string
+  subject_template: string | null
+  body_template: string
+  is_active: boolean
+  updated_at: string
+}
+
+export type ProspectMonthlyArchiveRow = {
+  month_start: string
+  submissions_count: number
+  unique_prospects_count: number
+  contact_us_count: number
+  visitor_information_count: number
+  unknown_count: number
+  gmail_backfill_count: number
+  website_api_count: number
+  manual_count: number
+}
+
 export default async function AdminProspectsPage() {
   const me = await getSessionUserCached()
   const nextPath = '/admin/prospects'
@@ -93,12 +117,14 @@ export default async function AdminProspectsPage() {
   let submissions: ProspectSubmissionRow[] = []
   let activities: ProspectActivityRow[] = []
   let staff: FrontDeskStaffRow[] = []
+  let messageTemplates: ProspectMessageTemplateRow[] = []
+  let monthlyArchive: ProspectMonthlyArchiveRow[] = []
   let loadError: string | null = null
 
   try {
     const admin = getSupabaseAdminClientCached() as any
 
-    const [prospectsResult, staffResult] = await Promise.all([
+    const [prospectsResult, staffResult, templatesResult, monthlyArchiveResult] = await Promise.all([
       admin
         .from('prospects')
         .select(
@@ -112,15 +138,37 @@ export default async function AdminProspectsPage() {
         .in('role', ['reception', 'admin', 'super_admin'])
         .order('first_name', { ascending: true })
         .limit(200),
+      admin
+        .from('prospect_message_templates')
+        .select('id,channel,template_key,language,label,subject_template,body_template,is_active,updated_at')
+        .eq('is_active', true)
+        .order('channel', { ascending: true })
+        .order('template_key', { ascending: true })
+        .order('language', { ascending: true }),
+      admin.rpc('prospect_submission_monthly_summary'),
     ])
 
     if (prospectsResult.error) throw new Error(prospectsResult.error.message)
     if (staffResult.error) throw new Error(staffResult.error.message)
+    if (templatesResult.error) throw new Error(templatesResult.error.message)
+    if (monthlyArchiveResult.error) throw new Error(monthlyArchiveResult.error.message)
 
     prospects = ((prospectsResult.data ?? []) as Array<Omit<ProspectRow, 'linked_visitor_trial_date'>>).map(
       (row) => ({ ...row, linked_visitor_trial_date: null }),
     )
     staff = (staffResult.data ?? []) as FrontDeskStaffRow[]
+    messageTemplates = (templatesResult.data ?? []) as ProspectMessageTemplateRow[]
+    monthlyArchive = ((monthlyArchiveResult.data ?? []) as Array<Record<string, unknown>>).map((row) => ({
+      month_start: String(row.month_start ?? ''),
+      submissions_count: Number(row.submissions_count ?? 0),
+      unique_prospects_count: Number(row.unique_prospects_count ?? 0),
+      contact_us_count: Number(row.contact_us_count ?? 0),
+      visitor_information_count: Number(row.visitor_information_count ?? 0),
+      unknown_count: Number(row.unknown_count ?? 0),
+      gmail_backfill_count: Number(row.gmail_backfill_count ?? 0),
+      website_api_count: Number(row.website_api_count ?? 0),
+      manual_count: Number(row.manual_count ?? 0),
+    }))
 
     const ids = prospects.map((row) => row.id)
 
@@ -200,10 +248,13 @@ export default async function AdminProspectsPage() {
             currentUserId={me.id}
             canManage={canManageProspects(me.role)}
             canImport={canImportProspects(me.role)}
+            canEditTemplates={canImportProspects(me.role)}
             prospects={prospects}
             submissions={submissions}
             activities={activities}
             staff={staff}
+            initialMessageTemplates={messageTemplates}
+            monthlyArchive={monthlyArchive}
           />
         )}
       </Section>
