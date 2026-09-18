@@ -6,9 +6,15 @@ import ProspectMessageComposer, {
   ProspectTemplateAdmin,
   type MessageComposerRequest,
 } from '@/components/admin/ProspectMessageComposer'
+import ProspectMemberMatch, {
+  ProspectMemberReconciliationSummary,
+  matchesReconciliationFilter,
+  type ReconciliationFilter,
+} from '@/components/admin/ProspectMemberReconciliation'
 import type {
   FrontDeskStaffRow,
   ProspectActivityRow,
+  ProspectMemberReconciliationRow,
   ProspectMessageTemplateRow,
   ProspectMonthlyArchiveRow,
   ProspectRow,
@@ -33,6 +39,7 @@ type Props = {
   staff: FrontDeskStaffRow[]
   initialMessageTemplates: ProspectMessageTemplateRow[]
   monthlyArchive: ProspectMonthlyArchiveRow[]
+  memberReconciliation: ProspectMemberReconciliationRow[]
 }
 
 type Draft = {
@@ -305,6 +312,7 @@ export default function ProspectsManager({
   staff,
   initialMessageTemplates,
   monthlyArchive,
+  memberReconciliation,
 }: Props) {
   const [prospects, setProspects] = useState(initialProspects)
   const [activities, setActivities] = useState(initialActivities)
@@ -317,6 +325,7 @@ export default function ProspectsManager({
   const [assigneeFilter, setAssigneeFilter] = useState<'all' | 'unassigned' | string>('all')
   const [followUpOnly, setFollowUpOnly] = useState(false)
   const [monthFilter, setMonthFilter] = useState<'all' | string>('all')
+  const [reconciliationFilter, setReconciliationFilter] = useState<ReconciliationFilter>('all')
   const [expanded, setExpanded] = useState<Record<string, boolean>>({})
   const [drafts, setDrafts] = useState<Record<string, Draft>>(() =>
     Object.fromEntries(
@@ -363,6 +372,10 @@ export default function ProspectsManager({
   }, [activities])
 
   const staffMap = useMemo(() => new Map(staff.map((row) => [row.user_id, row])), [staff])
+  const reconciliationByProspect = useMemo(
+    () => new Map(memberReconciliation.map((row) => [row.prospect_id, row])),
+    [memberReconciliation],
+  )
 
   const archiveByYear = useMemo(() => {
     const grouped = new Map<string, ProspectMonthlyArchiveRow[]>()
@@ -403,6 +416,7 @@ export default function ProspectsManager({
       const sourceMatch = sourceFilter === 'all' || rows.some((item) => item.source === sourceFilter)
       if (!sourceMatch) return false
       if (monthFilter !== 'all' && !rows.some((item) => cairoMonthKey(item.received_at) === monthFilter)) return false
+      if (!matchesReconciliationFilter(reconciliationByProspect.get(row.id), reconciliationFilter)) return false
       if (!matchesWorkQueue(row, workQueueFilter, currentUserId, todayKey)) return false
       if (statusFilter !== 'all' && row.status !== statusFilter) return false
       if (assigneeFilter === 'unassigned' && row.assigned_to) return false
@@ -430,7 +444,7 @@ export default function ProspectsManager({
 
       return haystack.includes(q)
     }).sort((a, b) => compareWorkQueue(a, b, todayKey))
-  }, [prospects, submissionsByProspect, query, workQueueFilter, statusFilter, sourceFilter, assigneeFilter, followUpOnly, monthFilter, currentUserId, todayKey])
+  }, [prospects, submissionsByProspect, reconciliationByProspect, query, workQueueFilter, statusFilter, sourceFilter, assigneeFilter, followUpOnly, monthFilter, reconciliationFilter, currentUserId, todayKey])
 
   function selectWorkQueue(filter: WorkQueueFilter) {
     setWorkQueueFilter(filter)
@@ -440,6 +454,7 @@ export default function ProspectsManager({
     setAssigneeFilter('all')
     setFollowUpOnly(false)
     setMonthFilter('all')
+    setReconciliationFilter('all')
   }
 
   function clearFilters() {
@@ -449,6 +464,11 @@ export default function ProspectsManager({
   function selectArchiveMonth(month: string) {
     selectWorkQueue('all')
     setMonthFilter(month)
+  }
+
+  function selectReconciliation(filter: ReconciliationFilter) {
+    selectWorkQueue('all')
+    setReconciliationFilter(filter)
   }
 
   function mergeMessageTemplate(updated: ProspectMessageTemplateRow) {
@@ -699,6 +719,12 @@ export default function ProspectsManager({
         </div>
       </div>
 
+      <ProspectMemberReconciliationSummary
+        rows={memberReconciliation}
+        activeFilter={reconciliationFilter}
+        onSelect={selectReconciliation}
+      />
+
       <details className="rounded-2xl border border-[hsl(var(--border))] bg-white p-4 shadow-soft">
         <summary className="cursor-pointer font-semibold">Submission archive by year and month</summary>
         <div className="mt-3 space-y-4">
@@ -814,9 +840,10 @@ export default function ProspectsManager({
           <span>
             Queue: <strong className="text-[hsl(var(--foreground))]">{WORK_QUEUE_LABELS[workQueueFilter]}</strong>
             {monthFilter !== 'all' ? <> · Archive: <strong className="text-[hsl(var(--foreground))]">{monthFilter}</strong></> : null}
+            {reconciliationFilter !== 'all' ? <> · Member comparison: <strong className="text-[hsl(var(--foreground))]">{reconciliationFilter.replaceAll('_', ' ')}</strong></> : null}
             {' · '}Showing {filtered.length} of {prospects.length} prospects in priority order.
           </span>
-          {(workQueueFilter !== 'all' || query || statusFilter !== 'all' || sourceFilter !== 'all' || assigneeFilter !== 'all' || followUpOnly || monthFilter !== 'all') ? (
+          {(workQueueFilter !== 'all' || query || statusFilter !== 'all' || sourceFilter !== 'all' || assigneeFilter !== 'all' || followUpOnly || monthFilter !== 'all' || reconciliationFilter !== 'all') ? (
             <button
               type="button"
               onClick={clearFilters}
@@ -867,6 +894,7 @@ export default function ProspectsManager({
           const rowSubmissions = submissionsByProspect.get(row.id) ?? []
           const rowActivities = activitiesByProspect.get(row.id) ?? []
           const latest = latestSubmission(rowSubmissions)
+          const reconciliation = reconciliationByProspect.get(row.id) ?? null
           const draft = drafts[row.id]
           const isExpanded = !!expanded[row.id]
           const timing = isActiveProspect(row) ? followUpTiming(row.next_follow_up_at, todayKey) : null
@@ -936,6 +964,12 @@ export default function ProspectsManager({
                       ) : null}
                     </div>
                   ) : null}
+
+                  <ProspectMemberMatch
+                    prospect={row}
+                    reconciliation={reconciliation}
+                    canManage={canManage}
+                  />
                 </div>
 
                 <div className="flex flex-wrap gap-2 lg:justify-end">
