@@ -21,6 +21,10 @@ export type ProspectRow = {
   assigned_to: string | null
   next_follow_up_at: string | null
   last_contacted_at: string | null
+  linked_visitor_trial_id: string | null
+  linked_member_id: string | null
+  converted_at: string | null
+  converted_by: string | null
   first_seen_at: string
   last_submission_at: string
   created_at: string
@@ -97,7 +101,7 @@ export default async function AdminProspectsPage() {
       admin
         .from('prospects')
         .select(
-          'id,full_name,email,email_normalized,phone,phone_digits,status,lost_reason,assigned_to,next_follow_up_at,last_contacted_at,first_seen_at,last_submission_at,created_at,updated_at',
+          'id,full_name,email,email_normalized,phone,phone_digits,status,lost_reason,assigned_to,next_follow_up_at,last_contacted_at,linked_visitor_trial_id,linked_member_id,converted_at,converted_by,first_seen_at,last_submission_at,created_at,updated_at',
         )
         .order('last_submission_at', { ascending: false })
         .limit(500),

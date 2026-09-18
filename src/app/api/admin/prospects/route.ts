@@ -43,6 +43,19 @@ function isoOrNull(value: unknown) {
   return Number.isNaN(date.getTime()) ? undefined : date.toISOString()
 }
 
+
+function dateOnlyOrNull(value: unknown) {
+  const next = String(value ?? '').trim()
+  if (!next) return null
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(next)) return undefined
+  const date = new Date(`${next}T00:00:00Z`)
+  return Number.isNaN(date.getTime()) ? undefined : next
+}
+
+function compactLines(values: Array<string | null | undefined>) {
+  return values.map((value) => String(value ?? '').trim()).filter(Boolean).join('\n').slice(0, 1800)
+}
+
 async function gate(write = false) {
   const me = await getSessionUser()
   if (!me) return { error: json({ ok: false, error: 'NOT_AUTHENTICATED' }, 401) } as const
@@ -209,6 +222,103 @@ export async function POST(req: NextRequest) {
 
   if (prospectError) return json({ ok: false, error: prospectError.message }, 400)
   if (!prospect) return json({ ok: false, error: 'PROSPECT_NOT_FOUND' }, 404)
+
+
+  if (action === 'convert_to_visitor') {
+    const firstName = sanitizeProspectText(body?.first_name, 80)
+    const lastName = sanitizeProspectText(body?.last_name, 80)
+    const trialDate = dateOnlyOrNull(body?.trial_date)
+    if (!firstName) return json({ ok: false, error: 'VISITOR_FIRST_NAME_REQUIRED' }, 400)
+    if (!trialDate) return json({ ok: false, error: 'INVALID_TRIAL_DATE' }, 400)
+
+    const { data: latestSubmission, error: submissionError } = await admin
+      .from('prospect_submissions')
+      .select('source,requested_classes,submitted_level,goals,message,received_at')
+      .eq('prospect_id', id)
+      .order('received_at', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+
+    if (submissionError) return json({ ok: false, error: submissionError.message }, 400)
+
+    const notes = compactLines([
+      'Created from ATOM Prospect CRM.',
+      latestSubmission?.source ? `Source: ${latestSubmission.source}` : null,
+      Array.isArray(latestSubmission?.requested_classes) && latestSubmission.requested_classes.length
+        ? `Classes: ${latestSubmission.requested_classes.join(', ')}`
+        : null,
+      latestSubmission?.submitted_level ? `Level: ${latestSubmission.submitted_level}` : null,
+      Array.isArray(latestSubmission?.goals) && latestSubmission.goals.length
+        ? `Goals: ${latestSubmission.goals.join(', ')}`
+        : null,
+      latestSubmission?.message ? `Message: ${latestSubmission.message}` : null,
+    ])
+
+    const { data, error } = await admin.rpc('prospect_convert_to_visitor', {
+      p_prospect_id: id,
+      p_first_name: firstName,
+      p_last_name: lastName || null,
+      p_trial_date: trialDate,
+      p_notes: notes || null,
+      p_actor_user_id: access.me.id,
+    })
+
+    if (error) {
+      const message = String(error.message ?? '')
+      if (message.includes('PROSPECT_VISITOR_CONTACT_CONFLICT')) {
+        return json({ ok: false, error: 'PROSPECT_VISITOR_CONTACT_CONFLICT', details: 'Email and phone/name resolve to different Visitor records. No automatic link was made.' }, 409)
+      }
+      if (message.includes('PROSPECT_ALREADY_LINKED_TO_DIFFERENT_VISITOR')) {
+        return json({ ok: false, error: 'PROSPECT_ALREADY_LINKED_TO_DIFFERENT_VISITOR' }, 409)
+      }
+      return json({ ok: false, error: message || 'VISITOR_CONVERSION_FAILED' }, 400)
+    }
+
+    return json({ ok: true, ...(data ?? {}) })
+  }
+
+  if (action === 'link_existing_member') {
+    const { data, error } = await admin.rpc('prospect_link_existing_member', {
+      p_prospect_id: id,
+      p_actor_user_id: access.me.id,
+    })
+
+    if (error) {
+      const message = String(error.message ?? '')
+      if (message.includes('PROSPECT_MEMBER_CONTACT_CONFLICT')) {
+        return json({ ok: false, error: 'PROSPECT_MEMBER_CONTACT_CONFLICT', details: 'The prospect contact details resolve to more than one Member. Review manually before linking.' }, 409)
+      }
+      if (message.includes('PROSPECT_ALREADY_LINKED_TO_DIFFERENT_MEMBER')) {
+        return json({ ok: false, error: 'PROSPECT_ALREADY_LINKED_TO_DIFFERENT_MEMBER' }, 409)
+      }
+      return json({ ok: false, error: message || 'MEMBER_LOOKUP_FAILED' }, 400)
+    }
+
+    return json({ ok: true, ...(data ?? {}) })
+  }
+
+  if (action === 'link_member') {
+    const memberUserId = uuidOrNull(body?.member_user_id)
+    if (!memberUserId) return json({ ok: false, error: 'INVALID_MEMBER_USER_ID' }, 400)
+
+    const { data, error } = await admin.rpc('prospect_link_member', {
+      p_prospect_id: id,
+      p_member_user_id: memberUserId,
+      p_actor_user_id: access.me.id,
+    })
+
+    if (error) {
+      const message = String(error.message ?? '')
+      if (message.includes('PROSPECT_ALREADY_LINKED_TO_DIFFERENT_MEMBER') || message.includes('PROSPECT_VISITOR_MEMBER_CONFLICT')) {
+        return json({ ok: false, error: message.includes('VISITOR') ? 'PROSPECT_VISITOR_MEMBER_CONFLICT' : 'PROSPECT_ALREADY_LINKED_TO_DIFFERENT_MEMBER' }, 409)
+      }
+      if (message.includes('MEMBER_NOT_FOUND')) return json({ ok: false, error: 'MEMBER_NOT_FOUND' }, 404)
+      if (message.includes('MEMBER_PROFILE_ROLE_NOT_ELIGIBLE')) return json({ ok: false, error: 'MEMBER_PROFILE_ROLE_NOT_ELIGIBLE', details: 'The matched account is not a Member-type profile and cannot be auto-linked as a converted prospect.' }, 409)
+      return json({ ok: false, error: message || 'MEMBER_LINK_FAILED' }, 400)
+    }
+
+    return json({ ok: true, ...(data ?? {}) })
+  }
 
   if (action === 'note') {
     const note = sanitizeProspectText(body?.note, 2000)
