@@ -13,7 +13,6 @@ import Input from '@/components/ui/Input'
 import Textarea from '@/components/ui/Textarea'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card'
 import { Table } from '@/components/ui/Table'
-import { canAccessPayments } from '@/lib/rbac'
 import { getSessionUserCached, getSupabaseAdminClientCached } from '@/lib/requestCache'
 
 type Method = 'cash' | 'instapay' | 'card' | 'bank_transfer'
@@ -67,6 +66,7 @@ type ApproverRow = {
 
 type BatchRow = {
   id: string
+  superseded_by_batch_id: string | null
   validated_by: string | null
   payment_method: Method
   validation_mode: ValidationMode
@@ -108,6 +108,7 @@ type BatchItemRow = {
   source_kind: 'subscription_payment' | 'external_income'
   source_id: string
   amount_snapshot: number
+  released_at: string | null
   business_date_snapshot: string
   event_at_snapshot: string
   title: string
@@ -126,6 +127,7 @@ type RangeLabelRow = {
 }
 
 const METHODS: Array<Method | 'all'> = ['all', 'cash', 'instapay', 'card', 'bank_transfer']
+const BASELINE = '2026-08-01'
 
 function formatEGP(n: number) {
   const v = Number(n ?? 0)
@@ -284,24 +286,6 @@ function revalidateReconciliationPageSafely(scope: string) {
 }
 
 
-async function assertActorCanWriteValidation(actorId: string, actorRole: string, returnQS: string) {
-  const actionAdmin = getSupabaseAdminClientCached()
-  if (actorRole === 'super_admin') return actionAdmin
-
-  const { data: isApprover } = await actionAdmin
-    .from('payment_validation_approvers')
-    .select('user_id')
-    .eq('user_id', actorId)
-    .eq('is_active', true)
-    .maybeSingle()
-
-  if (!isApprover?.user_id) {
-    redirect(withFlash(returnQS, { error: 'Only active payment approvers can manage validation batches.' }))
-  }
-
-  return actionAdmin
-}
-
 function formatCairoDateTime(iso?: string | null) {
   const raw = String(iso ?? '').trim()
   if (!raw) return '—'
@@ -418,14 +402,14 @@ export default async function AdminPaymentsReconciliationPage({
   const me = await getSessionUserCached()
   if (!me) redirect('/login?next=/admin/payments/reconciliation')
 
-  if (!canAccessPayments(me.role)) {
+  if (me.role !== 'super_admin') {
     return (
       <main className="p-6">
         <h1 className="text-2xl font-bold">Admin · Payments Reconciliation</h1>
         <div className="mt-4 max-w-2xl">
           <AccessDeniedCard
             title="Forbidden"
-            message="Only Admin / Super Admin can access this page."
+            message="Only Super Admin can access this page."
             nextPath="/admin/payments/reconciliation"
             showBackHome
             signedInAs={me.email}
@@ -436,6 +420,10 @@ export default async function AdminPaymentsReconciliationPage({
   }
 
   const methodFilter = safeMethod(sp1(searchParams, 'method'))
+  const scopeFrom = parseIsoDateOnly(sp1(searchParams, 'scope_from')) || BASELINE
+  const scopeTo = parseIsoDateOnly(sp1(searchParams, 'scope_to')) || formatCairoDateKey(new Date().toISOString())
+  const effectiveFrom = scopeFrom < BASELINE ? BASELINE : scopeFrom
+  const invalidRange = effectiveFrom > scopeTo
   const historyStatus = safeHistoryStatus(sp1(searchParams, 'history_status'))
   const historyByRaw = sp1(searchParams, 'history_by')
   const historyFrom = parseIsoDateOnly(sp1(searchParams, 'history_from'))
@@ -449,16 +437,7 @@ export default async function AdminPaymentsReconciliationPage({
   const flashReleased = safeFlash(sp1(searchParams, 'released'))
   const admin = getSupabaseAdminClientCached()
 
-  const { data: approverRow } = me.role === 'super_admin'
-    ? { data: { user_id: me.id } as { user_id: string } | null }
-    : await admin
-        .from('payment_validation_approvers')
-        .select('user_id')
-        .eq('user_id', me.id)
-        .eq('is_active', true)
-        .maybeSingle()
-
-  const canCreateValidations = me.role === 'super_admin' || !!approverRow?.user_id
+  const canCreateValidations = true
 
   const { data: approversRaw, error: approversErr } = await admin
     .from('payment_validation_approver_profiles_v1')
@@ -480,14 +459,6 @@ export default async function AdminPaymentsReconciliationPage({
     is_super_admin: Boolean(row.is_super_admin),
   }))
 
-  const approverByNamedKey = new Map(approvers.filter((row) => row.named_key).map((row) => [row.named_key as NonNullable<ApproverRow['named_key']>, row]))
-  const namedApproverTargets: Array<{ key: NonNullable<ApproverRow['named_key']>; label: string; expectedRole: string; hint: string }> = [
-    { key: 'sharaf_deen', label: 'Sharaf Deen', expectedRole: 'Super Admin', hint: 'Super Admin can validate directly. Keeping this profile active in the approvers list makes the governance list explicit.' },
-    { key: 'shehab', label: 'Shehab', expectedRole: 'Admin approver', hint: 'Should appear as an active admin approver once the known Shehab admin profile is matched.' },
-    { key: 'shawki', label: 'Shawki', expectedRole: 'Admin approver', hint: 'Should appear as an active admin approver once the known Shawki admin profile is matched.' },
-  ]
-
-
   async function createValidationAction(formData: FormData) {
     'use server'
 
@@ -496,7 +467,7 @@ export default async function AdminPaymentsReconciliationPage({
     try {
       const actor = await getSessionUserCached()
       if (!actor) redirect(`/login?next=/admin/payments/reconciliation`)
-      if (!canAccessPayments(actor.role)) redirect(withFlash(returnQS, { error: 'Only Admin / Super Admin can access reconciliation.' }))
+      if (actor.role !== 'super_admin') redirect('/admin/payments')
 
       const paymentMethod = parseMethod(formData.get('payment_method'))
       const validationMode = parseValidationMode(formData.get('validation_mode'))
@@ -509,12 +480,12 @@ export default async function AdminPaymentsReconciliationPage({
 
       if (!paymentMethod) redirect(withFlash(returnQS, { error: 'Invalid payment method.' }))
       if (!validationMode) redirect(withFlash(returnQS, { error: 'Invalid validation mode.' }))
-      if (validationMode === 'daily' && !businessDate) redirect(withFlash(returnQS, { error: 'A valid business date is required. Refresh and try again.' }))
+      if (validationMode !== 'daily' || !businessDate || businessDate < BASELINE) redirect(withFlash(returnQS, { error: 'A valid day from 01/08/2026 is required.' }))
       if (!Number.isFinite(expectedAmount) || expectedAmount < 0) redirect(withFlash(returnQS, { error: 'Expected amount snapshot is missing.' }))
       if (!Number.isFinite(countedAmount) || countedAmount < 0) redirect(withFlash(returnQS, { error: 'Counted amount must be 0 or greater.' }))
       if (!Number.isFinite(lineCount) || lineCount <= 0) redirect(withFlash(returnQS, { error: 'Line count snapshot is missing.' }))
 
-      const actionAdmin = await assertActorCanWriteValidation(actor.id, actor.role, returnQS)
+      const actionAdmin = getSupabaseAdminClientCached()
 
       let data: unknown = null
       let rpcError: { message?: string } | null = null
@@ -523,7 +494,7 @@ export default async function AdminPaymentsReconciliationPage({
         const result = await actionAdmin.rpc('create_payment_validation_batch_v1', {
           p_payment_method: paymentMethod,
           p_validation_mode: validationMode,
-          p_business_date: validationMode === 'daily' ? businessDate : null,
+          p_business_date: businessDate,
           p_expected_amount: expectedAmount,
           p_line_count: lineCount,
           p_counted_amount: countedAmount,
@@ -557,7 +528,7 @@ export default async function AdminPaymentsReconciliationPage({
     const actor = await getSessionUserCached()
     const returnQS = String(formData.get('return_qs') ?? '')
     if (!actor) redirect(`/login?next=/admin/payments/reconciliation`)
-    if (!canAccessPayments(actor.role)) redirect(withFlash(returnQS, { error: 'Only Admin / Super Admin can access reconciliation.' }))
+    if (actor.role !== 'super_admin') redirect('/admin/payments')
 
     const batchId = parseUuid(formData.get('batch_id'))
     const countedAmount = parseMoney(formData.get('counted_amount'))
@@ -566,7 +537,7 @@ export default async function AdminPaymentsReconciliationPage({
     if (!batchId) redirect(withFlash(returnQS, { error: 'Invalid batch id.' }))
     if (!Number.isFinite(countedAmount) || countedAmount < 0) redirect(withFlash(returnQS, { error: 'Counted amount must be 0 or greater.' }))
 
-    const actionAdmin = await assertActorCanWriteValidation(actor.id, actor.role, returnQS)
+    const actionAdmin = getSupabaseAdminClientCached()
 
     const { data, error } = await actionAdmin.rpc('update_payment_validation_batch_v1', {
       p_batch_id: batchId,
@@ -591,12 +562,12 @@ export default async function AdminPaymentsReconciliationPage({
     const actor = await getSessionUserCached()
     const returnQS = String(formData.get('return_qs') ?? '')
     if (!actor) redirect(`/login?next=/admin/payments/reconciliation`)
-    if (!canAccessPayments(actor.role)) redirect(withFlash(returnQS, { error: 'Only Admin / Super Admin can access reconciliation.' }))
+    if (actor.role !== 'super_admin') redirect('/admin/payments')
 
     const batchId = parseUuid(formData.get('batch_id'))
     if (!batchId) redirect(withFlash(returnQS, { error: 'Invalid batch id.' }))
 
-    const actionAdmin = await assertActorCanWriteValidation(actor.id, actor.role, returnQS)
+    const actionAdmin = getSupabaseAdminClientCached()
 
     const { data, error } = await actionAdmin.rpc('delete_payment_validation_batch_v1', {
       p_batch_id: batchId,
@@ -614,6 +585,46 @@ export default async function AdminPaymentsReconciliationPage({
     }))
   }
 
+  async function correctAndRevalidateAction(formData: FormData) {
+    'use server'
+
+    const actor = await getSessionUserCached()
+    if (!actor) redirect('/login?next=/admin/payments/reconciliation')
+    if (actor.role !== 'super_admin') redirect('/admin/payments')
+
+    const returnQS = String(formData.get('return_qs') ?? '')
+    const batchId = parseUuid(formData.get('batch_id'))
+    const sourceId = parseUuid(formData.get('source_id'))
+    const sourceKind = String(formData.get('source_kind') ?? '')
+    const oldAmount = parseMoney(formData.get('old_amount'))
+    const newAmount = parseMoney(formData.get('new_amount'))
+    const countedAmount = parseMoney(formData.get('counted_amount'))
+    const reason = String(formData.get('reason') ?? '').trim()
+
+    if (!batchId || !sourceId || !['subscription_payment', 'external_income'].includes(sourceKind)) {
+      redirect(withFlash(returnQS, { error: 'Invalid payment selection.' }))
+    }
+    if (reason.length < 5 || reason.length > 500 || !Number.isFinite(oldAmount) || !Number.isFinite(newAmount) || newAmount <= 0 || !Number.isFinite(countedAmount) || countedAmount < 0) {
+      redirect(withFlash(returnQS, { error: 'Enter a valid new amount, daily counted total, and a reason (5–500 characters).' }))
+    }
+
+    const actionAdmin = getSupabaseAdminClientCached()
+    const { data, error } = await actionAdmin.rpc('correct_and_revalidate_payment_v1', {
+      p_batch_id: batchId,
+      p_source_kind: sourceKind,
+      p_source_id: sourceId,
+      p_old_amount: oldAmount,
+      p_new_amount: newAmount,
+      p_counted_amount: countedAmount,
+      p_reason: reason,
+      p_actor: actor.id,
+    })
+    if (error) redirect(withFlash(returnQS, { error: safeActionErrorMessage(error, 'Payment could not be corrected.') }))
+    revalidatePath('/admin/payments/reconciliation')
+    revalidatePath('/admin/payments')
+    redirect(withFlash(returnQS, { corrected: '1', focus_batch: String(data) }))
+  }
+
   let groupsQuery = admin
     .from('payment_validation_open_groups_v1')
     .select('payment_method, validation_mode, business_date, period_from, period_to, first_business_date, last_business_date, line_count, expected_amount')
@@ -621,8 +632,11 @@ export default async function AdminPaymentsReconciliationPage({
     .order('business_date', { ascending: false, nullsFirst: false })
 
   if (methodFilter !== 'all') groupsQuery = groupsQuery.eq('payment_method', methodFilter)
+  groupsQuery = groupsQuery.gte('business_date', effectiveFrom).lte('business_date', scopeTo)
 
-  const { data: groupsRaw, error: groupsErr } = await groupsQuery
+  const { data: groupsRaw, error: groupsErr } = invalidRange
+    ? { data: [] as any[], error: null }
+    : await groupsQuery
 
   const openGroups: OpenGroupRow[] = ((groupsRaw ?? []) as any[]).map((row) => ({
     payment_method: row.payment_method as Method,
@@ -643,8 +657,11 @@ export default async function AdminPaymentsReconciliationPage({
     .limit(100)
 
   if (methodFilter !== 'all') openEventsQuery = openEventsQuery.eq('payment_method_norm', methodFilter)
+  openEventsQuery = openEventsQuery.gte('business_date', effectiveFrom).lte('business_date', scopeTo)
 
-  const { data: eventsRaw, error: eventsErr } = await openEventsQuery
+  const { data: eventsRaw, error: eventsErr } = invalidRange
+    ? { data: [] as any[], error: null }
+    : await openEventsQuery
 
   const openEvents: OpenEventRow[] = ((eventsRaw ?? []) as any[]).map((row) => ({
     source_kind: row.source_kind,
@@ -663,9 +680,9 @@ export default async function AdminPaymentsReconciliationPage({
   let historyQuery = admin
     .from('payment_validation_batches')
     .select(
-      'id, payment_method, validation_mode, business_date, period_from, period_to, expected_amount, counted_amount, difference_amount, note, validated_at, validated_by, validator:profiles!payment_validation_batches_validated_by_fkey(user_id,email,first_name,last_name)'
+      'id, superseded_by_batch_id, payment_method, validation_mode, business_date, period_from, period_to, expected_amount, counted_amount, difference_amount, note, validated_at, validated_by, validator:profiles!payment_validation_batches_validated_by_fkey(user_id,email,first_name,last_name)'
     )
-    .is('deleted_at', null)
+    .or('deleted_at.is.null,superseded_by_batch_id.not.is.null')
     .order('validated_at', { ascending: false })
     .limit(200)
 
@@ -675,6 +692,7 @@ export default async function AdminPaymentsReconciliationPage({
 
   const allHistoryRows: BatchRow[] = ((historyRaw ?? []) as any[]).map((row) => ({
     id: String(row.id),
+    superseded_by_batch_id: row.superseded_by_batch_id ? String(row.superseded_by_batch_id) : null,
     validated_by: row.validated_by ? String(row.validated_by) : null,
     payment_method: row.payment_method as Method,
     validation_mode: row.validation_mode as ValidationMode,
@@ -691,6 +709,7 @@ export default async function AdminPaymentsReconciliationPage({
 
   const historyBy = historyByRaw === 'me' ? 'me' : parseUuid(historyByRaw)
   const historyRows = allHistoryRows.filter((row) => {
+    if (row.superseded_by_batch_id && historyStatus !== 'all') return false
     if (historyStatus === 'matched' && row.difference_amount !== 0) return false
     if (historyStatus === 'over' && row.difference_amount <= 0) return false
     if (historyStatus === 'short' && row.difference_amount >= 0) return false
@@ -717,10 +736,16 @@ export default async function AdminPaymentsReconciliationPage({
 
   const focusBatch = focusBatchId ? historyRows.find((row) => row.id === focusBatchId) ?? null : null
 
+  const { data: focusBankMatchRaw, error: focusBankMatchErr } = focusBatch
+    ? await admin.from('reconciliation_bank_matches')
+        .select('id').eq('batch_id', focusBatch.id).is('released_at', null).limit(1)
+    : { data: [], error: null as any }
+  const focusHasActiveBankMatch = Boolean(focusBankMatchRaw?.length)
+
   const { data: focusItemsRaw, error: focusItemsErr } = focusBatch
     ? await admin
         .from('payment_validation_batch_items')
-        .select('id, batch_id, source_kind, source_id, amount_snapshot, business_date_snapshot, event_at_snapshot')
+        .select('id, batch_id, source_kind, source_id, amount_snapshot, business_date_snapshot, event_at_snapshot, released_at')
         .eq('batch_id', focusBatch.id)
         .order('event_at_snapshot', { ascending: false })
     : { data: [], error: null as any }
@@ -767,6 +792,7 @@ export default async function AdminPaymentsReconciliationPage({
       source_kind: row.source_kind === 'subscription_payment' ? 'subscription_payment' : 'external_income',
       source_id: String(row.source_id),
       amount_snapshot: Number(row.amount_snapshot ?? 0),
+      released_at: row.released_at ? String(row.released_at) : null,
       business_date_snapshot: String(row.business_date_snapshot),
       event_at_snapshot: String(row.event_at_snapshot),
       title: meta?.title ?? 'Untitled',
@@ -785,12 +811,13 @@ export default async function AdminPaymentsReconciliationPage({
     totalsByMethod[row.payment_method] += row.expected_amount
   }
 
-  const cashOpen = openGroups.find((row) => row.payment_method === 'cash' && row.validation_mode === 'cash_period') ?? null
   const dailyOpenRows = openGroups.filter((row) => row.validation_mode === 'daily')
-  const createGroups = [cashOpen, ...dailyOpenRows].filter(Boolean) as OpenGroupRow[]
+  const createGroups = dailyOpenRows
 
   const stateParams: Record<string, string> = {}
   if (methodFilter !== 'all') stateParams.method = methodFilter
+  stateParams.scope_from = effectiveFrom
+  stateParams.scope_to = scopeTo
   if (historyStatus !== 'all') stateParams.history_status = historyStatus
   if (historyByRaw) stateParams.history_by = historyByRaw
   if (historyFrom) stateParams.history_from = historyFrom
@@ -801,6 +828,8 @@ export default async function AdminPaymentsReconciliationPage({
   const methodHref = (method: Method | 'all') => {
     const params: Record<string, string> = {}
     if (method !== 'all') params.method = method
+    params.scope_from = effectiveFrom
+    params.scope_to = scopeTo
     if (historyStatus !== 'all') params.history_status = historyStatus
     if (historyByRaw) params.history_by = historyByRaw
     if (historyFrom) params.history_from = historyFrom
@@ -809,7 +838,7 @@ export default async function AdminPaymentsReconciliationPage({
     return `/admin/payments/reconciliation${qs ? `?${qs}` : ''}`
   }
 
-  const historyFilterResetHref = methodFilter === 'all' ? '/admin/payments/reconciliation#history' : `/admin/payments/reconciliation?${buildQS({ method: methodFilter })}#history`
+  const historyFilterResetHref = `/admin/payments/reconciliation?${buildQS({ ...(methodFilter !== 'all' ? { method: methodFilter } : {}), scope_from: effectiveFrom, scope_to: scopeTo })}#history`
 
   const summaryCards: Array<{ label: string; value: string; sub: string; tone: Method | 'all' | 'open_entries' }> = [
     {
@@ -827,7 +856,7 @@ export default async function AdminPaymentsReconciliationPage({
     {
       label: 'Cash',
       value: formatEGP(totalsByMethod.cash),
-      sub: cashOpen ? `Open period · ${cashOpen.line_count} line${cashOpen.line_count === 1 ? '' : 's'}` : 'No open cash period',
+      sub: `${dailyOpenRows.filter((row) => row.payment_method === 'cash').length} daily group(s)`,
       tone: 'cash',
     },
     {
@@ -850,10 +879,11 @@ export default async function AdminPaymentsReconciliationPage({
     },
   ]
 
-  const historyMatchedCount = historyRows.filter((row) => row.difference_amount === 0).length
-  const historyDifferenceCount = historyRows.length - historyMatchedCount
-  const historyOverCount = historyRows.filter((row) => row.difference_amount > 0).length
-  const historyShortCount = historyRows.filter((row) => row.difference_amount < 0).length
+  const currentHistoryRows = historyRows.filter((row) => !row.superseded_by_batch_id)
+  const historyMatchedCount = currentHistoryRows.filter((row) => row.difference_amount === 0).length
+  const historyDifferenceCount = currentHistoryRows.length - historyMatchedCount
+  const historyOverCount = currentHistoryRows.filter((row) => row.difference_amount > 0).length
+  const historyShortCount = currentHistoryRows.filter((row) => row.difference_amount < 0).length
 
   const validatorOptionsMap = new Map<string, { value: string; label: string }>()
   for (const row of approvers) {
@@ -866,7 +896,7 @@ export default async function AdminPaymentsReconciliationPage({
   }
   const validatorOptions = Array.from(validatorOptionsMap.values())
 
-  const dailyValidationSections = (['instapay', 'card', 'bank_transfer'] as Method[])
+  const dailyValidationSections = (['cash', 'instapay', 'card', 'bank_transfer'] as Method[])
     .map((method) => {
       const rows = dailyOpenRows.filter((row) => row.payment_method === method)
       return {
@@ -881,18 +911,7 @@ export default async function AdminPaymentsReconciliationPage({
     })
     .filter((section) => section.rows.length > 0)
 
-  const validateSummaryRows = [
-    cashOpen
-      ? {
-          method: cashOpen.payment_method,
-          title: 'Cash closure',
-          helper: formatRangeLabel(cashOpen),
-          groupCount: 1,
-          lineCount: cashOpen.line_count,
-          expectedAmount: cashOpen.expected_amount,
-        }
-      : null,
-    ...dailyValidationSections.map((section) => ({
+  const validateSummaryRows = dailyValidationSections.map((section) => ({
       method: section.method,
       title: labelMethod(section.method),
       helper:
@@ -902,8 +921,7 @@ export default async function AdminPaymentsReconciliationPage({
       groupCount: section.groupCount,
       lineCount: section.totalLines,
       expectedAmount: section.totalAmount,
-    })),
-  ].filter(Boolean) as Array<{
+    })) as Array<{
     method: Method
     title: string
     helper: string
@@ -919,16 +937,11 @@ export default async function AdminPaymentsReconciliationPage({
       const lineCount = rows.reduce((sum, row) => sum + row.line_count, 0)
       const firstRow = rows[0] ?? null
       const lastRow = rows.length ? rows[rows.length - 1] : null
-      const scopeLabel =
-        method === 'cash'
-          ? firstRow
-            ? formatRangeLabel(firstRow)
-            : 'No open cash period'
-          : rows.length
-            ? rows.length === 1
-              ? formatDateOnly(firstRow?.business_date ?? null)
-              : `${formatDateOnly(lastRow?.business_date ?? null)} → ${formatDateOnly(firstRow?.business_date ?? null)}`
-            : 'No open daily groups'
+      const scopeLabel = rows.length
+        ? rows.length === 1
+          ? formatDateOnly(firstRow?.business_date ?? null)
+          : `${formatDateOnly(lastRow?.business_date ?? null)} → ${formatDateOnly(firstRow?.business_date ?? null)}`
+        : 'No open daily groups'
       return {
         method,
         groupCount: rows.length,
@@ -1023,7 +1036,9 @@ export default async function AdminPaymentsReconciliationPage({
         <div className="text-xs text-[hsl(var(--muted))]">{row.validation_mode === 'cash_period' ? formatRangeLabel(row) : formatDateOnly(row.business_date)}</div>
       </div>
     ),
-    status: <Badge className={differenceBadgeClass(row.difference_amount)}>{differenceStatusLabel(row.difference_amount)}</Badge>,
+    status: row.superseded_by_batch_id
+      ? <Badge className="bg-amber-50 text-amber-800">Superseded</Badge>
+      : <Badge className={differenceBadgeClass(row.difference_amount)}>{differenceStatusLabel(row.difference_amount)}</Badge>,
     expected: <span className="font-semibold">{formatEGP(row.expected_amount)}</span>,
     counted: <span className="font-semibold">{formatEGP(row.counted_amount)}</span>,
     difference: <span className={`font-semibold ${differenceTextClass(row.difference_amount)}`}>{formatEGP(row.difference_amount)}</span>,
@@ -1034,14 +1049,14 @@ export default async function AdminPaymentsReconciliationPage({
       <Link
         prefetch={false}
         className="inline-flex items-center justify-center rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm font-semibold hover:bg-black/[0.03]"
-        href={`/admin/payments/reconciliation?${buildQS({ ...(methodFilter !== 'all' ? { method: methodFilter } : {}), ...(historyStatus !== 'all' ? { history_status: historyStatus } : {}), ...(historyByRaw ? { history_by: historyByRaw } : {}), ...(historyFrom ? { history_from: historyFrom } : {}), ...(historyTo ? { history_to: historyTo } : {}), focus_batch: row.id })}#history-details`}
+        href={`/admin/payments/reconciliation?${buildQS({ ...stateParams, focus_batch: row.id })}#history-details`}
       >
         Details
       </Link>
     ),
   }))
 
-  const hasErrors = groupsErr || eventsErr || historyErr || batchItemsErr || approversErr || focusItemsErr || focusSubEventsErr || focusExternalEventsErr
+  const hasErrors = groupsErr || eventsErr || historyErr || batchItemsErr || approversErr || focusItemsErr || focusSubEventsErr || focusExternalEventsErr || focusBankMatchErr
 
   return (
     <main className="mx-auto max-w-6xl space-y-6 p-4 sm:p-6">
@@ -1057,7 +1072,7 @@ export default async function AdminPaymentsReconciliationPage({
               </div>
               <h1 className="text-2xl font-semibold sm:text-3xl">Admin · Payments Reconciliation</h1>
               <p className="text-sm text-[hsl(var(--muted))] sm:text-base">
-                Validate open income scopes into reconciliation batches without editing the original source records. Cash stays closure-based. Instapay, Card, and Bank transfer stay daily.
+                Validate one Cairo business day at a time, separately for Cash, Instapay, Card and Bank transfer. Payments before 01/08/2026 are treated as already validated historical records.
               </p>
               <div className="text-sm text-[hsl(var(--muted))]">
                 Signed in as <span className="font-medium text-[hsl(var(--fg))]">{me.email || 'unknown'}</span> · {approverHelperText(canCreateValidations, me.role)}
@@ -1106,6 +1121,12 @@ export default async function AdminPaymentsReconciliationPage({
         </InlineAlert>
       ) : null}
 
+      {sp1(searchParams, 'corrected') === '1' ? (
+        <InlineAlert variant="success" title="Payment corrected and scope revalidated">
+          The previous batch and payment snapshot remain in the audit history. Review the new batch and add fresh proof if needed.
+        </InlineAlert>
+      ) : null}
+
       {flashDeleted ? (
         <InlineAlert variant="success" title="Validation deleted">
           Validation batch {flashBatch || 'deleted'} was deleted and {flashReleased || '0'} linked entr{flashReleased === '1' ? 'y was' : 'ies were'} reopened for reconciliation.
@@ -1114,10 +1135,17 @@ export default async function AdminPaymentsReconciliationPage({
 
       <Card>
         <CardHeader>
-          <CardTitle>Method filter</CardTitle>
-          <div className="text-sm text-[hsl(var(--muted))]">Use this only when you want to narrow the view to one payment method.</div>
+          <CardTitle>Choose days to validate</CardTitle>
+          <div className="text-sm text-[hsl(var(--muted))]">Select an inclusive date range; each day and method still requires its own validation. Before 01/08/2026 is historical and already considered validated.</div>
         </CardHeader>
         <CardContent className="space-y-4">
+          <form method="get" action="/admin/payments/reconciliation" className="grid gap-3 sm:grid-cols-[1fr_1fr_auto] sm:items-end">
+            {methodFilter !== 'all' ? <input type="hidden" name="method" value={methodFilter} /> : null}
+            <Input type="date" label="From (Cairo day)" name="scope_from" min={BASELINE} defaultValue={effectiveFrom} required />
+            <Input type="date" label="To (Cairo day)" name="scope_to" min={BASELINE} defaultValue={scopeTo} required />
+            <Button type="submit">Show days</Button>
+          </form>
+          {invalidRange ? <InlineAlert variant="error" title="Invalid period">The start date must not be after the end date.</InlineAlert> : null}
           <div className="flex flex-wrap gap-2">
             {METHODS.map((method) => {
               const active = method === methodFilter
@@ -1157,65 +1185,12 @@ export default async function AdminPaymentsReconciliationPage({
         </div>
       </section>
 
-      <section id="governance" className="grid gap-4 xl:grid-cols-[1.2fr_0.8fr]">
+      <section id="governance">
         <Card>
           <CardHeader>
-            <CardTitle>Active approvers</CardTitle>
-            <div className="text-sm text-[hsl(var(--muted))]">Accounts that can validate batches right now.</div>
+            <CardTitle>Super Admin governance</CardTitle>
+            <div className="text-sm text-[hsl(var(--muted))]">Only Super Admin can view or manage reconciliation, proofs, and bank matching. Historical approvals are retained but do not grant access.</div>
           </CardHeader>
-          <CardContent className="space-y-3">
-            {!approvers.length ? (
-              <div className="rounded-2xl border border-dashed border-[hsl(var(--border))] bg-[hsl(var(--bg))] p-4 text-sm text-[hsl(var(--muted))]">
-                No active approvers are listed yet. Super Admin can still validate directly.
-              </div>
-            ) : null}
-
-            <div className="grid gap-3 md:grid-cols-2">
-              {approvers.map((row) => (
-                <div key={row.user_id} className="rounded-2xl border border-[hsl(var(--border))] bg-white p-4">
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <div className="font-semibold">{approverLabel(row)}</div>
-                      <div className="text-xs text-[hsl(var(--muted))]">{roleLabel(row.role)}{row.email ? ` · ${row.email}` : ''}</div>
-                    </div>
-                    <Badge className={row.is_super_admin ? 'bg-black text-white' : 'bg-emerald-50 text-emerald-700'}>
-                      {row.is_super_admin ? 'Super Admin' : 'Active approver'}
-                    </Badge>
-                  </div>
-                  {row.note ? <div className="mt-3 text-xs text-[hsl(var(--muted))]">{row.note}</div> : null}
-                </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle>Named approver coverage</CardTitle>
-            <div className="text-sm text-[hsl(var(--muted))]">Target operating owners for this workflow.</div>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            {namedApproverTargets.map((target) => {
-              const row = approverByNamedKey.get(target.key)
-              const active = Boolean(row?.user_id)
-              return (
-                <div key={target.key} className="rounded-2xl border border-[hsl(var(--border))] bg-white p-4">
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <div className="font-semibold">{target.label}</div>
-                      <div className="text-xs text-[hsl(var(--muted))]">{target.expectedRole}{row?.email ? ` · ${row.email}` : ''}</div>
-                    </div>
-                    <Badge className={active ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-800'}>
-                      {active ? 'Ready' : 'Pending match'}
-                    </Badge>
-                  </div>
-                  <div className="mt-3 text-xs text-[hsl(var(--muted))]">
-                    {active ? `${approverLabel(row)} is active for validation batches.` : target.hint}
-                  </div>
-                </div>
-              )
-            })}
-          </CardContent>
         </Card>
       </section>
 
@@ -1224,13 +1199,13 @@ export default async function AdminPaymentsReconciliationPage({
           <CardHeader>
             <CardTitle>Validate now</CardTitle>
             <div className="text-sm text-[hsl(var(--muted))]">
-              Same reconciliation logic as before, but grouped to stay operational when many scopes are still open. Cash stays one open closure. Digital methods stay daily inside each method block.
+              Only the days in your selected period are shown. Each method and day is validated on its own.
             </div>
           </CardHeader>
           <CardContent className="space-y-4">
             {!canCreateValidations ? (
               <InlineAlert variant="warning" title="Read-only access">
-                Only active approvers or Super Admin can create validation batches. Admin users who should validate must first be added to <code>payment_validation_approvers</code>.
+                Only Super Admin can create validation batches.
               </InlineAlert>
             ) : null}
 
@@ -1258,94 +1233,6 @@ export default async function AdminPaymentsReconciliationPage({
                   ))}
                 </div>
 
-                {cashOpen ? (
-                  <Card className="overflow-hidden border-black/10">
-                    <div className={`h-1.5 w-full ${methodBarClass('cash')}`} />
-                    <CardHeader>
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <CardTitle>Cash closure</CardTitle>
-                        <Badge className={badgeClassForMethod('cash')}>Cash</Badge>
-                        <Badge className="bg-slate-100 text-slate-700">{formatRangeLabel(cashOpen)}</Badge>
-                      </div>
-                      <div className="text-sm text-[hsl(var(--muted))]">One open cash scope since the last cash validation.</div>
-                    </CardHeader>
-                    <CardContent className="space-y-4">
-                      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-                        <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))]/40 p-3">
-                          <div className="text-xs text-[hsl(var(--muted))]">Expected amount</div>
-                          <div className="mt-1 font-semibold">{formatEGP(cashOpen.expected_amount)}</div>
-                        </div>
-                        <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))]/40 p-3">
-                          <div className="text-xs text-[hsl(var(--muted))]">Open entries</div>
-                          <div className="mt-1 font-semibold">{cashOpen.line_count}</div>
-                        </div>
-                        <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))]/40 p-3">
-                          <div className="text-xs text-[hsl(var(--muted))]">Business scope</div>
-                          <div className="mt-1 text-sm text-[hsl(var(--muted))]">{formatRangeLabel(cashOpen)}</div>
-                        </div>
-                        <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))]/40 p-3">
-                          <div className="text-xs text-[hsl(var(--muted))]">Event window</div>
-                          <div className="mt-1 text-sm text-[hsl(var(--muted))]">{formatCairoDateTime(cashOpen.period_from)} → {formatCairoDateTime(cashOpen.period_to)}</div>
-                        </div>
-                      </div>
-
-                      <form action={createValidationAction} className="grid gap-3 rounded-2xl border border-[hsl(var(--border))] p-4 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.2fr)_auto] lg:items-end">
-                        <input type="hidden" name="return_qs" value={filterQS} />
-                        <input type="hidden" name="payment_method" value={cashOpen.payment_method} />
-                        <input type="hidden" name="validation_mode" value={cashOpen.validation_mode} />
-                        <input type="hidden" name="business_date" value="" />
-                        <input type="hidden" name="expected_amount" value={amountInputValue(cashOpen.expected_amount)} />
-                        <input type="hidden" name="line_count" value={String(cashOpen.line_count)} />
-
-                        <label className="space-y-1 text-sm">
-                          <span className="font-medium">Counted amount</span>
-                          <input
-                            type="number"
-                            step="0.01"
-                            min="0"
-                            name="counted_amount"
-                            defaultValue={amountInputValue(cashOpen.expected_amount)}
-                            required
-                            disabled={!canCreateValidations}
-                            className="w-full rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2"
-                          />
-                        </label>
-
-                        <label className="space-y-1 text-sm">
-                          <span className="font-medium">Note</span>
-                          <textarea
-                            name="note"
-                            rows={2}
-                            placeholder="Optional when counted amount matches expected. Required when there is a difference."
-                            disabled={!canCreateValidations}
-                            className="w-full rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2"
-                          />
-                        </label>
-
-                        <ConfirmSubmitButton
-                          disabled={!canCreateValidations}
-                          confirmTitle="Confirm cash validation"
-                          confirmDescription="This will create a payment validation batch for the current open cash closure."
-                          confirmButtonLabel="Confirm cash validation"
-                          pendingLabel="Validating…"
-                          staticItems={[
-                            { label: 'Scope', value: formatRangeLabel(cashOpen) },
-                            { label: 'Method', value: labelMethod(cashOpen.payment_method) },
-                            { label: 'Expected amount', value: formatEGP(cashOpen.expected_amount) },
-                            { label: 'Entries', value: cashOpen.line_count },
-                          ]}
-                          fieldItems={[
-                            { label: 'Counted amount', name: 'counted_amount', kind: 'egp' },
-                            { label: 'Note', name: 'note', emptyValue: 'No note', maxLength: 140 },
-                          ]}
-                          difference={{ expectedName: 'expected_amount', countedName: 'counted_amount', label: 'Difference' }}
-                        >
-                          Validate cash
-                        </ConfirmSubmitButton>
-                      </form>
-                    </CardContent>
-                  </Card>
-                ) : null}
 
                 {dailyValidationSections.length ? (
                   <div className="grid gap-4 xl:grid-cols-3">
@@ -1546,6 +1433,7 @@ export default async function AdminPaymentsReconciliationPage({
             {focusItemsErr ? <div>Focused batch items failed to load: {focusItemsErr.message}</div> : null}
             {focusSubEventsErr ? <div>Focused subscription items failed to load: {focusSubEventsErr.message}</div> : null}
             {focusExternalEventsErr ? <div>Focused external-income items failed to load: {focusExternalEventsErr.message}</div> : null}
+            {focusBankMatchErr ? <div>Focused bank matches failed to load: {focusBankMatchErr.message}</div> : null}
           </CardContent>
         </Card>
       ) : null}
@@ -1553,7 +1441,7 @@ export default async function AdminPaymentsReconciliationPage({
       <section id="open-scopes" className="space-y-4">
         <div className="space-y-1">
           <h2 className="text-xl font-semibold">Open scopes</h2>
-          <p className="text-sm text-[hsl(var(--muted))]">Same open backlog as before, but summarized first so the page stays readable when the cash period is large or many daily groups are waiting.</p>
+          <p className="text-sm text-[hsl(var(--muted))]">Open entries between {formatDateOnly(effectiveFrom)} and {formatDateOnly(scopeTo)}, grouped by day and payment method.</p>
         </div>
 
         <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
@@ -1573,42 +1461,12 @@ export default async function AdminPaymentsReconciliationPage({
           )}
         </div>
 
-        <div className="grid gap-4 xl:grid-cols-[0.9fr_1.1fr]">
-          <Card>
-            <CardHeader>
-              <CardTitle>Open cash closure</CardTitle>
-              <div className="text-sm text-[hsl(var(--muted))]">Cash remains one open period since the last cash validation.</div>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              {cashOpen ? (
-                <>
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <div className="rounded-2xl border border-[hsl(var(--border))] bg-emerald-50/40 p-3">
-                      <div className="text-xs text-[hsl(var(--muted))]">Business range</div>
-                      <div className="mt-1 font-semibold">{formatRangeLabel(cashOpen)}</div>
-                    </div>
-                    <div className="rounded-2xl border border-[hsl(var(--border))] bg-emerald-50/40 p-3">
-                      <div className="text-xs text-[hsl(var(--muted))]">Expected / entries</div>
-                      <div className="mt-1 font-semibold">{formatEGP(cashOpen.expected_amount)} · {cashOpen.line_count}</div>
-                    </div>
-                  </div>
-                  <details className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))]/30 p-3">
-                    <summary className="cursor-pointer list-none text-sm font-medium">Show cash period window</summary>
-                    <div className="mt-3 text-sm text-[hsl(var(--muted))]">{formatCairoDateTime(cashOpen.period_from)} → {formatCairoDateTime(cashOpen.period_to)}</div>
-                  </details>
-                </>
-              ) : (
-                <div className="rounded-2xl border border-dashed border-[hsl(var(--border))] bg-[hsl(var(--bg))] p-4 text-sm text-[hsl(var(--muted))]">
-                  No open cash period right now for the current filter.
-                </div>
-              )}
-            </CardContent>
-          </Card>
+        <div className="grid gap-4">
 
           <Card>
             <CardHeader>
               <CardTitle>Open daily groups</CardTitle>
-              <div className="text-sm text-[hsl(var(--muted))]">Instapay, Card, and Bank transfer still reconcile daily. The detailed table is collapsed by default to reduce noise.</div>
+              <div className="text-sm text-[hsl(var(--muted))]">Cash, Instapay, Card, and Bank transfer are each reconciled separately for each Cairo business day.</div>
             </CardHeader>
             <CardContent className="space-y-3">
               {!openDailyTableRows.length ? (
@@ -1671,6 +1529,8 @@ export default async function AdminPaymentsReconciliationPage({
           <CardContent className="space-y-4">
             <form method="get" className="grid gap-3 lg:grid-cols-5">
               {methodFilter !== 'all' ? <input type="hidden" name="method" value={methodFilter} /> : null}
+              <input type="hidden" name="scope_from" value={effectiveFrom} />
+              <input type="hidden" name="scope_to" value={scopeTo} />
               <div className="space-y-1">
                 <label htmlFor="history_status" className="text-sm font-medium">Status</label>
                 <select id="history_status" name="history_status" defaultValue={historyStatus} className="w-full rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm">
@@ -1706,7 +1566,8 @@ export default async function AdminPaymentsReconciliationPage({
             <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
               <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))]/30 p-3">
                 <div className="text-xs text-[hsl(var(--muted))]">Filtered batches</div>
-                <div className="mt-1 text-lg font-semibold">{historyRows.length}</div>
+                <div className="mt-1 text-lg font-semibold">{currentHistoryRows.length}</div>
+                <div className="text-xs text-[hsl(var(--muted))]">+ {historyRows.length - currentHistoryRows.length} superseded snapshots in history</div>
               </div>
               <div className="rounded-2xl border border-emerald-200 bg-emerald-50/40 p-3">
                 <div className="text-xs text-[hsl(var(--muted))]">Matched</div>
@@ -1774,6 +1635,11 @@ export default async function AdminPaymentsReconciliationPage({
               <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))]/20 p-3 text-sm text-[hsl(var(--muted))]">
                 Current note: <span className="font-medium text-[hsl(var(--fg))]">{focusBatch.note ?? '—'}</span>
               </div>
+              {focusBatch.superseded_by_batch_id ? (
+                <InlineAlert variant="warning" title="Historical validation superseded">
+                  This snapshot was preserved after a payment correction. <Link href={`/admin/payments/reconciliation?${buildQS({ ...stateParams, focus_batch: focusBatch.superseded_by_batch_id })}#history-details`} className="underline">Open its replacement batch</Link>.
+                </InlineAlert>
+              ) : null}
 
               {!focusItems.length ? (
                 <div className="rounded-2xl border border-dashed border-[hsl(var(--border))] bg-[hsl(var(--bg))] p-4 text-sm text-[hsl(var(--muted))]">
@@ -1792,6 +1658,7 @@ export default async function AdminPaymentsReconciliationPage({
                               <Badge className="bg-slate-100 text-slate-700">{eventSourceLabel({ source_kind: item.source_kind, source_id: item.source_id, member_id: item.member_id, source_key: item.source_key, title: item.title, note: item.note, amount: item.amount_snapshot, payment_method_norm: focusBatch.payment_method, payment_method_raw: null, business_date: item.business_date_snapshot, event_at: item.event_at_snapshot })}</Badge>
                             </div>
                             <div className="font-semibold">{item.title}</div>
+                            {item.released_at ? <div className="text-xs text-amber-800">Original snapshot released on {formatCairoDateTime(item.released_at)}</div> : null}
                             <div className="text-xs text-[hsl(var(--muted))]">Business date {formatDateOnly(item.business_date_snapshot)} · Event {formatCairoDateTime(item.event_at_snapshot)}</div>
                             <div className="text-xs text-[hsl(var(--muted))]">Source id {item.source_id.slice(0, 8)}</div>
                           </div>
@@ -1810,6 +1677,32 @@ export default async function AdminPaymentsReconciliationPage({
                             Open source
                           </Link>
                         </div>
+                        {!focusBatch.superseded_by_batch_id && !item.released_at && !focusBankMatchErr && focusItems.every((entry) => entry.business_date_snapshot >= BASELINE) ? (
+                          <details className="mt-3 rounded-xl border border-amber-200 bg-amber-50/50 p-3">
+                            <summary className="cursor-pointer text-sm font-semibold text-amber-950">Correct this payment and revalidate its scope</summary>
+                            <p className="mt-2 text-xs text-amber-900">The old batch and its proof remain historical. Other payments keep their amounts. Legacy cash closures retain their original range. A new proof or bank match may then be needed.</p>
+                            {focusHasActiveBankMatch ? (
+                              <div className="mt-3 text-sm text-amber-950">Release the bank match with a reason in <Link href="/admin/payments/reconciliation/bank-matching" className="underline">Bank Matching</Link> before correcting this payment.</div>
+                            ) : <form action={correctAndRevalidateAction} className="mt-3 grid gap-3 sm:grid-cols-2">
+                              <input type="hidden" name="return_qs" value={filterQS} />
+                              <input type="hidden" name="batch_id" value={focusBatch.id} />
+                              <input type="hidden" name="source_kind" value={item.source_kind} />
+                              <input type="hidden" name="source_id" value={item.source_id} />
+                              <input type="hidden" name="old_amount" value={amountInputValue(item.amount_snapshot)} />
+                              <Input label="Corrected payment amount" name="new_amount" type="number" step="0.01" min="0.01" defaultValue={amountInputValue(item.amount_snapshot)} required />
+                              <Input label="Recounted scope total" name="counted_amount" type="number" step="0.01" min="0" defaultValue={amountInputValue(focusBatch.counted_amount)} hint={`Previous total: ${formatEGP(focusBatch.counted_amount)}. Enter the new verified total.`} required />
+                              <div className="sm:col-span-2"><Textarea label="Why is this amount being corrected?" name="reason" minLength={5} maxLength={500} required rows={2} /></div>
+                              <div className="sm:col-span-2"><ConfirmSubmitButton
+                                confirmTitle="Correct payment and replace day validation"
+                                confirmDescription="This changes the source payment amount and, for a subscription payment, adjusts its paid and outstanding balances. It supersedes the whole day/method batch while preserving the old batch, item snapshots and proof. An active bank match blocks this action."
+                                confirmButtonLabel="Correct and revalidate"
+                                pendingLabel="Revalidating…"
+                                staticItems={[{ label: 'Payment', value: item.title }, { label: 'Previous amount', value: formatEGP(item.amount_snapshot) }, { label: 'Scope and method', value: `${formatRangeLabel(focusBatch)} · ${labelMethod(focusBatch.payment_method)}` }]}
+                                fieldItems={[{ label: 'New amount', name: 'new_amount', kind: 'egp' }, { label: 'New counted total', name: 'counted_amount', kind: 'egp' }, { label: 'Reason', name: 'reason' }]}
+                              >Correct and revalidate</ConfirmSubmitButton></div>
+                            </form>}
+                          </details>
+                        ) : null}
                       </div>
                     ))}
                   </div>
@@ -1842,7 +1735,7 @@ export default async function AdminPaymentsReconciliationPage({
             ) : null}
 
             <div className="space-y-3">
-              {historyRows.map((row) => {
+              {historyRows.filter((row) => !row.superseded_by_batch_id).map((row) => {
                 const batchLabel = String(row.id).slice(0, 8)
                 const entriesCount = itemsCountByBatchId.get(row.id) ?? 0
                 const differenceTone = differenceTextClass(row.difference_amount)

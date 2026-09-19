@@ -1,10 +1,16 @@
 import Link from 'next/link'
+import { redirect } from 'next/navigation'
+import { getSessionUserCached } from '@/lib/requestCache'
 
-export default function PaymentsReconciliationLayout({
+export default async function PaymentsReconciliationLayout({
   children,
 }: {
   children: React.ReactNode
 }) {
+  const me = await getSessionUserCached()
+  if (!me) redirect('/login?next=/admin/payments/reconciliation')
+  if (me.role !== 'super_admin') redirect('/admin/payments')
+
   return (
     <>
       <div className="mx-auto max-w-6xl px-4 pt-4 sm:px-6 sm:pt-6">

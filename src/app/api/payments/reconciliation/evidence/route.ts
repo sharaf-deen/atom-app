@@ -295,7 +295,7 @@ export async function GET(req: Request) {
     if (!actor.actorId) return json(401, { ok: false, error: 'NOT_AUTHENTICATED' })
     if (actor.error) return json(500, { ok: false, error: 'PROFILE_LOOKUP_FAILED', details: actor.error })
 
-    const canView = actor.role === 'admin' || actor.role === 'super_admin'
+    const canView = actor.role === 'super_admin'
     if (!canView) return json(403, { ok: false, error: 'FORBIDDEN' })
 
     const url = new URL(req.url)
