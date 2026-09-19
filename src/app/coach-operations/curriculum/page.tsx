@@ -34,6 +34,7 @@ type CurriculumTechnique = {
   name: string
   description: string | null
   technical_level: 'beginner' | 'intermediate' | 'advanced'
+  school: 'old_school' | 'new_school' | null
   sort_order: number
   is_active: boolean
 }
@@ -81,7 +82,7 @@ export default async function CoachCurriculumPage() {
       .order('name', { ascending: true }),
     supabase
       .from('coach_curriculum_techniques')
-      .select('id,block_id,name,description,technical_level,sort_order,is_active')
+      .select('id,block_id,name,description,technical_level,school,sort_order,is_active')
       .order('sort_order', { ascending: true })
       .order('name', { ascending: true }),
     supabase
