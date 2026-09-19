@@ -4,7 +4,6 @@ export const revalidate = 0
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import AccessDeniedCard from '@/components/AccessDeniedCard'
-import { canAccessPayments } from '@/lib/rbac'
 import { getSessionUserCached, getSupabaseAdminClientCached } from '@/lib/requestCache'
 
 type BankMethod = 'instapay' | 'card' | 'bank_transfer'
@@ -176,14 +175,14 @@ export default async function BankMatchingPage({
   const me = await getSessionUserCached()
   if (!me) redirect('/login?next=/admin/payments/reconciliation/bank-matching')
 
-  if (!canAccessPayments(me.role)) {
+  if (me.role !== 'super_admin') {
     return (
       <main className="p-6">
         <h1 className="text-2xl font-bold">Bank Statement Matching</h1>
         <div className="mt-4 max-w-2xl">
           <AccessDeniedCard
             title="Forbidden"
-            message="Only Admin / Super Admin can access bank reconciliation matching."
+            message="Only Super Admin can access bank reconciliation matching."
             nextPath="/admin/payments/reconciliation/bank-matching"
             showBackHome
             signedInAs={me.email}
