@@ -19,6 +19,7 @@ type Body = {
   name?: string
   description?: string | null
   technicalLevel?: string | null
+  school?: string | null
   opponentReaction?: string | null
   coachingResponse?: string | null
   sortOrder?: number | string | null
@@ -58,6 +59,10 @@ function normalizeTechnicalLevel(value: unknown): TechnicalLevel | null {
   return normalized === 'beginner' || normalized === 'intermediate' || normalized === 'advanced'
     ? normalized
     : null
+}
+
+function normalizeSchool(value: unknown) {
+  return value === 'old_school' || value === 'new_school' ? value : null
 }
 
 function technicalLevelRank(level: TechnicalLevel) {
@@ -204,7 +209,10 @@ export async function POST(request: Request) {
         if (entity === 'technique') {
           const technicalLevel = normalizeTechnicalLevel(body.technicalLevel)
           if (!technicalLevel) return json({ ok: false, error: 'INVALID_TECHNICAL_LEVEL' }, 400)
+          const school = normalizeSchool(body.school)
+          if (!school) return json({ ok: false, error: 'INVALID_SCHOOL' }, 400)
           row.technical_level = technicalLevel
+          row.school = school
         }
       } else {
         const opponentReaction = normalizeLongText(body.opponentReaction, 1000)
@@ -271,6 +279,8 @@ export async function POST(request: Request) {
     if (entity === 'technique') {
       const technicalLevel = normalizeTechnicalLevel(body.technicalLevel)
       if (!technicalLevel) return json({ ok: false, error: 'INVALID_TECHNICAL_LEVEL' }, 400)
+      const school = normalizeSchool(body.school)
+      if (!school) return json({ ok: false, error: 'INVALID_SCHOOL' }, 400)
 
       const { data: programItemRows, error: programItemError } = await supabase
         .from('coach_training_program_items')
@@ -307,6 +317,7 @@ export async function POST(request: Request) {
       }
 
       patch.technical_level = technicalLevel
+      patch.school = school
     }
   } else {
     const opponentReaction = normalizeLongText(body.opponentReaction, 1000)
