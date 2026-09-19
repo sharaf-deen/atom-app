@@ -509,7 +509,7 @@ export async function GET(req: Request) {
     const actor = await getActor()
     if (!actor.actorId) return json(401, { ok: false, error: 'NOT_AUTHENTICATED' })
     if (actor.error) return json(500, { ok: false, error: 'PROFILE_LOOKUP_FAILED', details: actor.error })
-    if (actor.role !== 'admin' && actor.role !== 'super_admin') return json(403, { ok: false, error: 'FORBIDDEN' })
+    if (actor.role !== 'super_admin') return json(403, { ok: false, error: 'FORBIDDEN' })
 
     const statementId = normalizeUuid(new URL(req.url).searchParams.get('statementId'))
     if (!statementId) return json(400, { ok: false, error: 'INVALID_STATEMENT_ID' })

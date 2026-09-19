@@ -4,7 +4,6 @@ export const revalidate = 0
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import AccessDeniedCard from '@/components/AccessDeniedCard'
-import { canAccessPayments } from '@/lib/rbac'
 import { getSessionUserCached, getSupabaseAdminClientCached } from '@/lib/requestCache'
 
 type Method = 'cash' | 'instapay' | 'card' | 'bank_transfer'
@@ -12,6 +11,7 @@ type EvidenceFilter = 'all' | 'with_evidence' | 'missing'
 
 type BatchRow = {
   id: string
+  superseded_by_batch_id: string | null
   payment_method: Method
   validation_mode: 'cash_period' | 'daily'
   business_date: string | null
@@ -208,14 +208,14 @@ export default async function ReconciliationEvidencePage({
     redirect('/login?next=/admin/payments/reconciliation/evidence')
   }
 
-  if (!canAccessPayments(me.role)) {
+  if (me.role !== 'super_admin') {
     return (
       <main className="p-6">
         <h1 className="text-2xl font-bold">Reconciliation · Evidence / Proof</h1>
         <div className="mt-4 max-w-2xl">
           <AccessDeniedCard
             title="Forbidden"
-            message="Only Admin / Super Admin can access reconciliation evidence."
+            message="Only Super Admin can access reconciliation evidence."
             nextPath="/admin/payments/reconciliation/evidence"
             showBackHome
             signedInAs={me.email}
@@ -237,9 +237,9 @@ export default async function ReconciliationEvidencePage({
   let batchQuery = admin
     .from('payment_validation_batches')
     .select(
-      'id, payment_method, validation_mode, business_date, period_from, period_to, expected_amount, counted_amount, difference_amount, note, validated_at, validated_by, validator:profiles!payment_validation_batches_validated_by_fkey(email,first_name,last_name)'
+      'id, superseded_by_batch_id, payment_method, validation_mode, business_date, period_from, period_to, expected_amount, counted_amount, difference_amount, note, validated_at, validated_by, validator:profiles!payment_validation_batches_validated_by_fkey(email,first_name,last_name)'
     )
-    .is('deleted_at', null)
+    .or('deleted_at.is.null,superseded_by_batch_id.not.is.null')
     .order('validated_at', { ascending: false })
     .limit(200)
 
@@ -251,6 +251,7 @@ export default async function ReconciliationEvidencePage({
 
   const batches: BatchRow[] = ((batchesRaw ?? []) as any[]).map((row) => ({
     id: String(row.id),
+    superseded_by_batch_id: row.superseded_by_batch_id ? String(row.superseded_by_batch_id) : null,
     payment_method: row.payment_method as Method,
     validation_mode: row.validation_mode === 'cash_period' ? 'cash_period' : 'daily',
     business_date: row.business_date ?? null,
@@ -334,7 +335,7 @@ export default async function ReconciliationEvidencePage({
             </h1>
             <p className="text-sm text-[hsl(var(--muted))] sm:text-base">
               Attach immutable references and supporting files to existing
-              reconciliation batches. Evidence does not change payments, batch
+              reconciliation batches, including superseded historical versions. Evidence does not change payments, batch
               amounts, differences, or reconciliation status.
             </p>
           </div>
@@ -478,6 +479,7 @@ export default async function ReconciliationEvidencePage({
                     >
                       {status}
                     </span>
+                    {batch.superseded_by_batch_id ? <span className="rounded-full bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-900">Superseded — original proof retained</span> : null}
                     <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-700">
                       {evidence.length} evidence item{evidence.length === 1 ? '' : 's'}
                     </span>
@@ -579,7 +581,7 @@ export default async function ReconciliationEvidencePage({
                     </div>
                   )}
 
-                  {canWrite ? (
+                  {canWrite && !batch.superseded_by_batch_id ? (
                     <details className="rounded-2xl border border-[hsl(var(--border))] bg-white">
                       <summary className="cursor-pointer px-4 py-3 text-sm font-semibold">
                         + Add evidence
