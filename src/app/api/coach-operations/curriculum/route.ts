@@ -20,6 +20,7 @@ type Body = {
   description?: string | null
   technicalLevel?: string | null
   school?: string | null
+  trainingFormat?: string | null
   opponentReaction?: string | null
   coachingResponse?: string | null
   sortOrder?: number | string | null
@@ -63,6 +64,20 @@ function normalizeTechnicalLevel(value: unknown): TechnicalLevel | null {
 
 function normalizeSchool(value: unknown) {
   return value === 'old_school' || value === 'new_school' ? value : null
+}
+
+type TrainingFormat = 'gi' | 'nogi' | 'both'
+
+function normalizeTrainingFormat(value: unknown): TrainingFormat | null {
+  return value === 'gi' || value === 'nogi' || value === 'both' ? value : null
+}
+
+function formatCompatible(parent: TrainingFormat, child: TrainingFormat) {
+  return parent === 'both' || parent === child
+}
+
+function mentionsClothingGrip(value: string) {
+  return /\b(lapel|sleeve|kimono|fabric|jacket|trouser|collar[- ]sleeve|collar grip|belt grip|gi grip)\b/i.test(value)
 }
 
 function technicalLevelRank(level: TechnicalLevel) {
@@ -211,16 +226,33 @@ export async function POST(request: Request) {
           if (!technicalLevel) return json({ ok: false, error: 'INVALID_TECHNICAL_LEVEL' }, 400)
           const school = normalizeSchool(body.school)
           if (!school) return json({ ok: false, error: 'INVALID_SCHOOL' }, 400)
+          const trainingFormat = normalizeTrainingFormat(body.trainingFormat)
+          if (!trainingFormat) return json({ ok: false, error: 'INVALID_TRAINING_FORMAT' }, 400)
           row.technical_level = technicalLevel
           row.school = school
+          row.training_format = trainingFormat
         }
       } else {
+        const trainingFormat = normalizeTrainingFormat(body.trainingFormat)
+        if (!trainingFormat) return json({ ok: false, error: 'INVALID_TRAINING_FORMAT' }, 400)
+        const { data: parent, error: parentError } = await supabase
+          .from('coach_curriculum_techniques').select('training_format').eq('id', parentId).maybeSingle()
+        if (parentError) return json({ ok: false, error: 'FORMAT_LOOKUP_FAILED', details: parentError.message }, 500)
+        if (!parent) return json({ ok: false, error: 'INVALID_PARENT' }, 400)
+        if (!parent.training_format || !formatCompatible(parent.training_format as TrainingFormat, trainingFormat)) {
+          return json({ ok: false, error: 'SITUATION_FORMAT_MISMATCH' }, 400)
+        }
         const opponentReaction = normalizeLongText(body.opponentReaction, 1000)
         if (!opponentReaction || opponentReaction.length < 2) {
           return json({ ok: false, error: 'OPPONENT_REACTION_REQUIRED' }, 400)
         }
+        const coachingResponse = normalizeLongText(body.coachingResponse, 1500)
+        if (trainingFormat !== 'gi' && mentionsClothingGrip(`${opponentReaction} ${coachingResponse ?? ''}`)) {
+          return json({ ok: false, error: 'CLOTHING_GRIP_REQUIRES_GI' }, 400)
+        }
         row.opponent_reaction = opponentReaction
-        row.coaching_response = normalizeLongText(body.coachingResponse, 1500)
+        row.coaching_response = coachingResponse
+        row.training_format = trainingFormat
       }
     }
 
@@ -233,7 +265,7 @@ export async function POST(request: Request) {
           : error.code === '23503'
             ? 'INVALID_PARENT'
             : error.code === '23514'
-              ? 'INVALID_TECHNICAL_LEVEL'
+              ? 'INVALID_CURRICULUM_FORMAT'
               : 'CREATE_FAILED'
       return json({ ok: false, error: apiError, details: error.message }, status)
     }
@@ -281,6 +313,15 @@ export async function POST(request: Request) {
       if (!technicalLevel) return json({ ok: false, error: 'INVALID_TECHNICAL_LEVEL' }, 400)
       const school = normalizeSchool(body.school)
       if (!school) return json({ ok: false, error: 'INVALID_SCHOOL' }, 400)
+      const trainingFormat = normalizeTrainingFormat(body.trainingFormat)
+      if (!trainingFormat) return json({ ok: false, error: 'INVALID_TRAINING_FORMAT' }, 400)
+
+      const { data: existingSituations, error: situationsError } = await supabase
+        .from('coach_curriculum_situations').select('training_format').eq('technique_id', id)
+      if (situationsError) return json({ ok: false, error: 'FORMAT_LOOKUP_FAILED', details: situationsError.message }, 500)
+      if ((existingSituations ?? []).some((item) => !item.training_format || !formatCompatible(trainingFormat, item.training_format as TrainingFormat))) {
+        return json({ ok: false, error: 'TECHNIQUE_FORMAT_IN_USE' }, 409)
+      }
 
       const { data: programItemRows, error: programItemError } = await supabase
         .from('coach_training_program_items')
@@ -318,14 +359,32 @@ export async function POST(request: Request) {
 
       patch.technical_level = technicalLevel
       patch.school = school
+      patch.training_format = trainingFormat
     }
   } else {
+    const trainingFormat = normalizeTrainingFormat(body.trainingFormat)
+    if (!trainingFormat) return json({ ok: false, error: 'INVALID_TRAINING_FORMAT' }, 400)
+    const { data: existing, error: existingError } = await supabase
+      .from('coach_curriculum_situations').select('technique_id').eq('id', id).maybeSingle()
+    if (existingError) return json({ ok: false, error: 'FORMAT_LOOKUP_FAILED', details: existingError.message }, 500)
+    if (!existing) return json({ ok: false, error: 'NOT_FOUND' }, 404)
+    const { data: parent, error: parentError } = await supabase
+      .from('coach_curriculum_techniques').select('training_format').eq('id', existing.technique_id).maybeSingle()
+    if (parentError) return json({ ok: false, error: 'FORMAT_LOOKUP_FAILED', details: parentError.message }, 500)
+    if (!parent?.training_format || !formatCompatible(parent.training_format as TrainingFormat, trainingFormat)) {
+      return json({ ok: false, error: 'SITUATION_FORMAT_MISMATCH' }, 400)
+    }
     const opponentReaction = normalizeLongText(body.opponentReaction, 1000)
     if (!opponentReaction || opponentReaction.length < 2) {
       return json({ ok: false, error: 'OPPONENT_REACTION_REQUIRED' }, 400)
     }
+    const coachingResponse = normalizeLongText(body.coachingResponse, 1500)
+    if (trainingFormat !== 'gi' && mentionsClothingGrip(`${opponentReaction} ${coachingResponse ?? ''}`)) {
+      return json({ ok: false, error: 'CLOTHING_GRIP_REQUIRES_GI' }, 400)
+    }
     patch.opponent_reaction = opponentReaction
-    patch.coaching_response = normalizeLongText(body.coachingResponse, 1500)
+    patch.coaching_response = coachingResponse
+    patch.training_format = trainingFormat
   }
 
   const { data, error } = await supabase.from(table).update(patch).eq('id', id).select('*').maybeSingle()
@@ -334,7 +393,7 @@ export async function POST(request: Request) {
     return json(
       {
         ok: false,
-        error: error.code === '23505' ? 'DUPLICATE_NAME' : error.code === '23514' ? 'INVALID_TECHNICAL_LEVEL' : 'UPDATE_FAILED',
+        error: error.code === '23505' ? 'DUPLICATE_NAME' : error.code === '23514' ? 'INVALID_CURRICULUM_FORMAT' : 'UPDATE_FAILED',
         details: error.message,
       },
       status,
