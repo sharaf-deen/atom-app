@@ -10,6 +10,19 @@ import Textarea from '@/components/ui/Textarea'
 
 type TechnicalLevel = 'beginner' | 'intermediate' | 'advanced'
 type School = 'old_school' | 'new_school'
+type TrainingFormat = 'gi' | 'nogi' | 'both'
+type FormatFilter = 'all' | 'gi' | 'nogi'
+
+function formatLabel(value: TrainingFormat | null) {
+  if (value === 'gi') return 'Gi'
+  if (value === 'nogi') return 'NoGi'
+  if (value === 'both') return 'Gi & NoGi'
+  return 'Format to review'
+}
+
+function matchesFormat(value: TrainingFormat | null, filter: FormatFilter) {
+  return filter === 'all' || value === 'both' || value === filter
+}
 
 type CurriculumType = {
   id: string
@@ -36,6 +49,7 @@ type CurriculumTechnique = {
   description: string | null
   technical_level: TechnicalLevel
   school: School | null
+  training_format: TrainingFormat | null
   sort_order: number
   is_active: boolean
 }
@@ -46,6 +60,7 @@ type CurriculumSituation = {
   name: string
   opponent_reaction: string
   coaching_response: string | null
+  training_format: TrainingFormat | null
   sort_order: number
   is_active: boolean
 }
@@ -154,6 +169,8 @@ export default function CurriculumManager({
   const [description, setDescription] = React.useState('')
   const [technicalLevel, setTechnicalLevel] = React.useState<TechnicalLevel>('beginner')
   const [school, setSchool] = React.useState<School | ''>('')
+  const [trainingFormat, setTrainingFormat] = React.useState<TrainingFormat | ''>('')
+  const [formatFilter, setFormatFilter] = React.useState<FormatFilter>('all')
   const [opponentReaction, setOpponentReaction] = React.useState('')
   const [coachingResponse, setCoachingResponse] = React.useState('')
   const [sortOrder, setSortOrder] = React.useState('100')
@@ -178,6 +195,12 @@ export default function CurriculumManager({
     setDescription('')
     setTechnicalLevel('beginner')
     setSchool('')
+    if (entity === 'situation') {
+      const parentFormat = techniques.find((item) => item.id === parentId)?.training_format
+      setTrainingFormat(parentFormat === 'gi' || parentFormat === 'nogi' ? parentFormat : '')
+    } else {
+      setTrainingFormat('')
+    }
     setOpponentReaction('')
     setCoachingResponse('')
     setSortOrder('100')
@@ -190,6 +213,7 @@ export default function CurriculumManager({
     setDescription(itemDescription(entity, item))
     setTechnicalLevel(entity === 'technique' ? techniqueLevel(item) : 'beginner')
     setSchool(entity === 'technique' ? techniqueSchool(item) : '')
+    setTrainingFormat('training_format' in item ? item.training_format ?? '' : '')
     setOpponentReaction(situationReaction(item))
     setCoachingResponse(situationResponse(item))
     setSortOrder(String(item.sort_order ?? 100))
@@ -218,6 +242,10 @@ export default function CurriculumManager({
       setError('Choose Old School or New School for this technique.')
       return
     }
+    if ((formTarget.entity === 'technique' || formTarget.entity === 'situation') && !trainingFormat) {
+      setError('Choose Gi, NoGi or both.')
+      return
+    }
 
     setPending(true)
     try {
@@ -233,6 +261,7 @@ export default function CurriculumManager({
           description,
           technicalLevel: formTarget.entity === 'technique' ? technicalLevel : undefined,
           school: formTarget.entity === 'technique' ? school : undefined,
+          trainingFormat: formTarget.entity === 'technique' || formTarget.entity === 'situation' ? trainingFormat : undefined,
           opponentReaction,
           coachingResponse,
           sortOrder,
@@ -244,6 +273,10 @@ export default function CurriculumManager({
         if (data.error === 'OPPONENT_REACTION_REQUIRED') throw new Error('Opponent reaction is required.')
         if (data.error === 'INVALID_TECHNICAL_LEVEL') throw new Error('Choose Beginner, Intermediate or Advanced.')
         if (data.error === 'INVALID_SCHOOL') throw new Error('Choose Old School or New School.')
+        if (data.error === 'INVALID_TRAINING_FORMAT') throw new Error('Choose Gi, NoGi or both.')
+        if (data.error === 'SITUATION_FORMAT_MISMATCH') throw new Error('This situation format is not available for the parent technique.')
+        if (data.error === 'TECHNIQUE_FORMAT_IN_USE') throw new Error('Review the existing situations before changing this technique format.')
+        if (data.error === 'CLOTHING_GRIP_REQUIRES_GI') throw new Error('Gi clothing grips belong in a Gi-only situation. Write a separate NoGi reaction without clothing grips.')
         if (data.error === 'TECHNIQUE_LEVEL_IN_USE') throw new Error(data.details || 'This technique is assigned to a lower-level program.')
         throw new Error(data.details || data.error || 'Failed to save curriculum item.')
       }
@@ -360,6 +393,21 @@ export default function CurriculumManager({
         ) : null}
       </div>
 
+      <div className="flex flex-wrap items-center gap-2" aria-label="Filter curriculum by training format">
+        <span className="mr-1 text-sm font-medium">Training format:</span>
+        {(['all', 'gi', 'nogi'] as const).map((value) => (
+          <button
+            key={value}
+            type="button"
+            onClick={() => setFormatFilter(value)}
+            aria-pressed={formatFilter === value}
+            className={`rounded-full border px-3 py-1.5 text-sm font-semibold ${formatFilter === value ? 'border-black bg-black text-white' : 'border-[hsl(var(--border))] bg-white text-black'}`}
+          >
+            {value === 'all' ? 'All' : value === 'gi' ? 'Gi' : 'NoGi'}
+          </button>
+        ))}
+      </div>
+
       {message ? (
         <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
           {message}
@@ -444,10 +492,39 @@ export default function CurriculumManager({
                   <option value="new_school">New School</option>
                 </select>
                 <span className="mt-1 block text-xs text-[hsl(var(--muted))]">
-                  Existing techniques stay unclassified until a coach reviews them.
+                  Existing school labels stay unclassified until the Head Coach or Super Admin reviews them.
                 </span>
               </label>
             </div>
+          ) : null}
+
+          {formTarget.entity === 'technique' || formTarget.entity === 'situation' ? (
+            <label className="mt-4 block">
+              <span className="mb-1.5 block text-sm font-semibold text-black">Training format</span>
+              <select
+                value={trainingFormat}
+                onChange={(event) => setTrainingFormat(event.target.value as TrainingFormat | '')}
+                required
+                className="min-h-[44px] w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3.5 py-2.5 text-sm text-black shadow-soft outline-none focus-visible:ring-2 focus-visible:ring-ring sm:max-w-xs"
+              >
+                <option value="">Choose a format</option>
+                {(['gi', 'nogi', 'both'] as const)
+                  .filter((value) => {
+                    if (formTarget.entity !== 'situation') return true
+                    const parentId = formTarget.mode === 'create'
+                      ? formTarget.parentId
+                      : (formTarget.item as CurriculumSituation).technique_id
+                    const parentFormat = techniques.find((item) => item.id === parentId)?.training_format
+                    return parentFormat === 'both' || parentFormat === value
+                  })
+                  .map((value) => <option key={value} value={value}>{formatLabel(value)}</option>)}
+              </select>
+              {formTarget.entity === 'situation' ? (
+                <span className="mt-1 block text-xs text-[hsl(var(--muted))]">
+                  Gi and NoGi can have separate opponent reactions and coaching notes. NoGi notes use body or wrist control, without clothing grips.
+                </span>
+              ) : null}
+            </label>
           ) : null}
 
           {formTarget.entity === 'situation' ? (
@@ -531,6 +608,7 @@ export default function CurriculumManager({
                         canManage={canManage}
                         techniques={techniques}
                         situations={situations}
+                        formatFilter={formatFilter}
                         openCreate={openCreate}
                         openEdit={openEdit}
                         setToggleTarget={setToggleTarget}
@@ -598,6 +676,7 @@ function BlockTree({
   canDeletePermanent,
   techniques,
   situations,
+  formatFilter,
   openCreate,
   openEdit,
   setToggleTarget,
@@ -608,17 +687,20 @@ function BlockTree({
   canDeletePermanent: boolean
   techniques: CurriculumTechnique[]
   situations: CurriculumSituation[]
+  formatFilter: FormatFilter
   openCreate: (entity: Entity, parentId?: string, parentLabel?: string) => void
   openEdit: (entity: Entity, item: AnyItem) => void
   setToggleTarget: (target: ToggleTarget) => void
   setDeleteTarget: (target: DeleteTarget) => void
 }) {
   const blockTechniques = techniques.filter(
-    (technique) => technique.block_id === block.id && (canManage || technique.is_active),
+    (technique) => technique.block_id === block.id && (canManage || technique.is_active)
+      && matchesFormat(technique.training_format, formatFilter),
   )
   const techniqueIds = new Set(blockTechniques.map((technique) => technique.id))
   const blockSituationCount = situations.filter(
-    (situation) => techniqueIds.has(situation.technique_id) && (canManage || situation.is_active),
+    (situation) => techniqueIds.has(situation.technique_id) && (canManage || situation.is_active)
+      && matchesFormat(situation.training_format, formatFilter),
   ).length
 
   return (
@@ -666,7 +748,7 @@ function BlockTree({
         ) : null}
 
         {blockTechniques.length === 0 ? (
-          <EmptyState label="No techniques in this block yet." compact />
+          <EmptyState label={formatFilter === 'all' ? 'No techniques in this block yet.' : `No ${formatFilter === 'gi' ? 'Gi' : 'NoGi'} techniques in this block.`} compact />
         ) : (
           <div className="space-y-2">
             {blockTechniques.map((technique) => (
@@ -675,6 +757,7 @@ function BlockTree({
                 technique={technique}
                 canManage={canManage}
                 situations={situations}
+                formatFilter={formatFilter}
                 openCreate={openCreate}
                 openEdit={openEdit}
                 setToggleTarget={setToggleTarget}
@@ -694,6 +777,7 @@ function TechniqueTree({
   canManage,
   canDeletePermanent,
   situations,
+  formatFilter,
   openCreate,
   openEdit,
   setToggleTarget,
@@ -703,13 +787,15 @@ function TechniqueTree({
   canManage: boolean
   canDeletePermanent: boolean
   situations: CurriculumSituation[]
+  formatFilter: FormatFilter
   openCreate: (entity: Entity, parentId?: string, parentLabel?: string) => void
   openEdit: (entity: Entity, item: AnyItem) => void
   setToggleTarget: (target: ToggleTarget) => void
   setDeleteTarget: (target: DeleteTarget) => void
 }) {
   const techniqueSituations = situations.filter(
-    (situation) => situation.technique_id === technique.id && (canManage || situation.is_active),
+    (situation) => situation.technique_id === technique.id && (canManage || situation.is_active)
+      && matchesFormat(situation.training_format, formatFilter),
   )
   const activeSituationCount = techniqueSituations.filter((situation) => situation.is_active).length
 
@@ -730,6 +816,9 @@ function TechniqueTree({
               </span>
               <span className={`inline-flex rounded-full border px-2 py-0.5 text-[11px] font-semibold ${technique.school === 'new_school' ? 'border-indigo-200 bg-indigo-50 text-indigo-800' : 'border-slate-200 bg-slate-50 text-slate-700'}`}>
                 {technique.school === 'new_school' ? 'New School' : technique.school === 'old_school' ? 'Old School' : 'School to classify'}
+              </span>
+              <span className="inline-flex rounded-full border border-sky-200 bg-sky-50 px-2 py-0.5 text-[11px] font-semibold text-sky-800">
+                {formatLabel(technique.training_format)}
               </span>
               <StatusBadge active={technique.is_active} />
             </div>
@@ -777,6 +866,9 @@ function TechniqueTree({
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
                       <div className="font-medium">{situation.name}</div>
+                      <span className="rounded-full border border-sky-200 bg-sky-50 px-2 py-0.5 text-[11px] font-semibold text-sky-800">
+                        {formatLabel(situation.training_format)}
+                      </span>
                       <StatusBadge active={situation.is_active} />
                     </div>
                     <div className="mt-2 text-xs font-semibold uppercase tracking-wide text-[hsl(var(--muted))]">Opponent reaction</div>

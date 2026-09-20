@@ -35,6 +35,7 @@ type CurriculumTechnique = {
   description: string | null
   technical_level: 'beginner' | 'intermediate' | 'advanced'
   school: 'old_school' | 'new_school' | null
+  training_format: 'gi' | 'nogi' | 'both' | null
   sort_order: number
   is_active: boolean
 }
@@ -45,6 +46,7 @@ type CurriculumSituation = {
   name: string
   opponent_reaction: string
   coaching_response: string | null
+  training_format: 'gi' | 'nogi' | 'both' | null
   sort_order: number
   is_active: boolean
 }
@@ -82,12 +84,12 @@ export default async function CoachCurriculumPage() {
       .order('name', { ascending: true }),
     supabase
       .from('coach_curriculum_techniques')
-      .select('id,block_id,name,description,technical_level,school,sort_order,is_active')
+      .select('id,block_id,name,description,technical_level,school,training_format,sort_order,is_active')
       .order('sort_order', { ascending: true })
       .order('name', { ascending: true }),
     supabase
       .from('coach_curriculum_situations')
-      .select('id,technique_id,name,opponent_reaction,coaching_response,sort_order,is_active')
+      .select('id,technique_id,name,opponent_reaction,coaching_response,training_format,sort_order,is_active')
       .order('sort_order', { ascending: true })
       .order('name', { ascending: true }),
   ])
