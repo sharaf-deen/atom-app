@@ -11,7 +11,7 @@ import { createSupabaseServerActionClient } from '@/lib/supabaseServer'
 
 type ProgramStatus = 'draft' | 'published' | 'archived'
 type TechnicalLevel = 'beginner' | 'intermediate' | 'advanced'
-type Operation = 'save' | 'set_status' | 'delete_permanent'
+type Operation = 'save' | 'set_status' | 'delete_impact' | 'delete_permanent'
 
 type Body = {
   operation?: Operation
@@ -91,12 +91,38 @@ export async function POST(request: Request) {
   }
 
   const operation = body.operation
-  if (!operation || !['save', 'set_status', 'delete_permanent'].includes(operation)) {
+  if (!operation || !['save', 'set_status', 'delete_impact', 'delete_permanent'].includes(operation)) {
     return json({ ok: false, error: 'INVALID_OPERATION' }, 400)
   }
 
   const supabase = createSupabaseServerActionClient()
   const now = new Date().toISOString()
+
+  if (operation === 'delete_impact') {
+    if (me.role !== 'super_admin') {
+      return json({ ok: false, error: 'FORBIDDEN' }, 403)
+    }
+
+    const id = String(body.id ?? '').trim()
+    if (!UUID_RE.test(id)) return json({ ok: false, error: 'INVALID_ID' }, 400)
+
+    const { data, error } = await supabase.rpc('coach_training_program_delete_impact', {
+      p_program_id: id,
+    })
+
+    if (error) {
+      return json({ ok: false, error: 'DELETE_IMPACT_CHECK_FAILED', details: error.message }, 500)
+    }
+
+    const result = data && typeof data === 'object' ? (data as Record<string, any>) : {}
+    if (result.ok !== true) {
+      const apiError = String(result.error || 'DELETE_IMPACT_CHECK_FAILED')
+      const status = apiError === 'NOT_FOUND' ? 404 : apiError === 'FORBIDDEN' ? 403 : apiError === 'NOT_AUTHENTICATED' ? 401 : 409
+      return json({ ok: false, error: apiError, details: result.details }, status)
+    }
+
+    return json({ ok: true, impact: result })
+  }
 
   if (operation === 'delete_permanent') {
     if (me.role !== 'super_admin') {
@@ -130,7 +156,11 @@ export async function POST(request: Request) {
 
     revalidatePath('/coach-operations/programs')
     revalidatePath('/coach-operations/curriculum')
-    return json({ ok: true, deleted: { id } })
+    return json({
+      ok: true,
+      deleted: { id },
+      deleted_manual_draft_logs: Number(result.deleted_manual_draft_logs ?? 0),
+    })
   }
 
   if (operation === 'set_status') {

@@ -16,6 +16,7 @@ type Props = {
   cancelLabel?: string
   tone?: 'default' | 'destructive'
   pending?: boolean
+  confirmDisabled?: boolean
   summaryItems?: ConfirmActionSummaryItem[]
   warning?: string
   onCancel: () => void
@@ -39,6 +40,7 @@ export default function ConfirmActionModal({
   cancelLabel = 'Cancel',
   tone = 'default',
   pending = false,
+  confirmDisabled = false,
   summaryItems = [],
   warning = 'Please review the summary before confirming.',
   onCancel,
@@ -100,7 +102,7 @@ export default function ConfirmActionModal({
           </button>
           <button
             type="button"
-            disabled={pending}
+            disabled={pending || confirmDisabled}
             onClick={onConfirm}
             className={`${buttonBaseClass} ${confirmButtonClass(tone)}`}
           >
