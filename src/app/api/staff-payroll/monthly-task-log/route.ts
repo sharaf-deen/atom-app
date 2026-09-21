@@ -335,14 +335,15 @@ export async function POST(req: Request) {
       let quantity = quantityInput
       let actualHours = hoursInput
 
+      if (!actualHours) {
+        return json(400, {
+          ok: false,
+          error: 'HOURS_REQUIRED',
+          details: 'Actual hours are required for every payroll task.',
+        })
+      }
+
       if (unit === 'hour') {
-        if (!actualHours) {
-          return json(400, {
-            ok: false,
-            error: 'HOURS_REQUIRED',
-            details: 'Hour-based tasks require actual hours.',
-          })
-        }
         quantity = actualHours
       } else if (!quantity) {
         return json(400, {

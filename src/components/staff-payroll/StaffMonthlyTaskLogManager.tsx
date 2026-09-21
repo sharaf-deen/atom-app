@@ -106,7 +106,7 @@ function formatNumber(value: number | null | undefined) {
 
 function errorLabel(code: string) {
   if (!code) return 'Unable to save monthly task log.'
-  if (code === 'HOURS_REQUIRED') return 'Actual hours are required for hour-based tasks.'
+  if (code === 'HOURS_REQUIRED') return 'Actual hours are required for every payroll task.'
   if (code === 'QUANTITY_REQUIRED') return 'A quantity greater than zero is required.'
   if (code === 'TASK_ALREADY_LOGGED_FOR_MONTH') return 'This task is already logged for this staff member and month.'
   if (code === 'INACTIVE_TASK_CANNOT_BE_ADDED') return 'Inactive tasks cannot be added to a new month.'
@@ -146,6 +146,7 @@ export default function StaffMonthlyTaskLogManager({
   const canModify = canWrite && !monthLocked
   const activeLogs = logs.filter((log) => !log.voided_at)
   const voidedLogs = logs.filter((log) => Boolean(log.voided_at))
+  const incompleteLogs = activeLogs.filter((log) => log.actual_hours == null)
   const loggedTaskIds = new Set(activeLogs.map((log) => log.task_id))
   const defaultTaskIds = new Set(
     defaultAssignees
@@ -350,7 +351,7 @@ export default function StaffMonthlyTaskLogManager({
           ) : null}
 
           <label className="text-sm font-medium">
-            Actual hours {task.unit === 'hour' ? '(required)' : '(optional)'}
+            Actual hours (required)
             <input
               type="number"
               min="0.01"
@@ -358,9 +359,13 @@ export default function StaffMonthlyTaskLogManager({
               value={actualHours}
               onChange={(event) => setActualHours(event.target.value)}
               className="mt-1 w-full rounded-xl border border-black/10 bg-white px-3 py-2 text-sm"
-              placeholder={task.unit === 'hour' ? 'e.g. 6' : 'Total time spent'}
+              placeholder="Total time actually worked"
             />
           </label>
+        </div>
+
+        <div className="mt-2 text-xs text-[hsl(var(--muted))]">
+          Quantity records the work volume. Salary uses actual hours × the task importance multiplier.
         </div>
 
         {task.estimated_time_label ? (
@@ -385,7 +390,11 @@ export default function StaffMonthlyTaskLogManager({
           <button
             type="button"
             onClick={saveLog}
-            disabled={pending || (task.unit === 'hour' && !actualHours.trim())}
+            disabled={
+              pending ||
+              !actualHours.trim() ||
+              (task.unit !== 'hour' && !quantity.trim())
+            }
             className="rounded-xl bg-black px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40"
           >
             {pending ? 'Saving…' : isEditing ? 'Save changes' : 'Add to month'}
@@ -425,6 +434,17 @@ export default function StaffMonthlyTaskLogManager({
         </div>
       ) : null}
 
+      {incompleteLogs.length ? (
+        <div className="rounded-2xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950">
+          <div className="font-semibold">
+            {incompleteLogs.length} existing task {incompleteLogs.length === 1 ? 'entry needs' : 'entries need'} actual hours
+          </div>
+          <div className="mt-1 text-xs">
+            These older entries remain visible, but payroll cannot be approved until each one is corrected or removed from the active log.
+          </div>
+        </div>
+      ) : null}
+
       <section className="space-y-3">
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div>
@@ -447,7 +467,15 @@ export default function StaffMonthlyTaskLogManager({
               const quantity = Number(log.work_quantity ?? 0)
 
               return (
-                <article key={log.id} className="rounded-3xl border border-black/10 bg-white p-4">
+                <article
+                  key={log.id}
+                  className={
+                    'rounded-3xl border bg-white p-4 ' +
+                    (log.actual_hours == null
+                      ? 'border-amber-300'
+                      : 'border-black/10')
+                  }
+                >
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-2">
@@ -482,8 +510,8 @@ export default function StaffMonthlyTaskLogManager({
                     </div>
                     <div>
                       <div className="text-xs text-[hsl(var(--muted))]">Actual hours</div>
-                      <div className="font-semibold">
-                        {log.actual_hours == null ? '—' : `${formatNumber(log.actual_hours)} h`}
+                      <div className={log.actual_hours == null ? 'font-semibold text-amber-800' : 'font-semibold'}>
+                        {log.actual_hours == null ? 'Required' : `${formatNumber(log.actual_hours)} h`}
                       </div>
                     </div>
                     <div>

@@ -568,7 +568,7 @@ export default function StaffPayrollCalculationManager({
             </div>
             <h2 className="mt-1 text-xl font-bold">Staff rates</h2>
             <p className="mt-1 max-w-3xl text-sm text-[hsl(var(--muted))]">
-              Fixed monthly base is optional. Task compensation uses weighted hours × the staff member&apos;s weighted-hour rate.
+              Fixed monthly base is optional. Task compensation uses actual hours × task importance × the staff member&apos;s weighted-hour rate. Task quantity is operational information only and never generates salary by itself.
               These are current settings; the monthly calculation snapshots their values when recalculated.
             </p>
           </div>
