@@ -155,6 +155,17 @@ type DeleteTarget = {
   title: string
 }
 
+type DeleteImpact = {
+  deletable: boolean
+  total_logs: number
+  manual_draft_logs: number
+  completed_logs: number
+  linked_logs: number
+  session_assignments: number
+  incident_links: number
+  payroll_links: number
+}
+
 function todayIso() {
   const now = new Date()
   const y = now.getFullYear()
@@ -259,6 +270,8 @@ export default function TrainingProgramsManager({
   const [error, setError] = React.useState<string | null>(null)
   const [statusTarget, setStatusTarget] = React.useState<StatusTarget | null>(null)
   const [deleteTarget, setDeleteTarget] = React.useState<DeleteTarget | null>(null)
+  const [deleteImpact, setDeleteImpact] = React.useState<DeleteImpact | null>(null)
+  const [deleteImpactLoading, setDeleteImpactLoading] = React.useState(false)
 
   const activeTypes = types.filter((row) => row.is_active)
   const activeBlocks = blocks.filter((row) => row.is_active)
@@ -554,7 +567,7 @@ export default function TrainingProgramsManager({
   }
 
   async function confirmPermanentDelete() {
-    if (!deleteTarget || !canDeletePermanent) return
+    if (!deleteTarget || !canDeletePermanent || !deleteImpact?.deletable) return
     setPending(true)
     resetFeedback()
     try {
@@ -568,13 +581,44 @@ export default function TrainingProgramsManager({
         throw new Error(data.details || data.error || 'Permanent delete was blocked.')
       }
 
-      setMessage(`${deleteTarget.title} permanently deleted.`)
+      const deletedDrafts = Number(data.deleted_manual_draft_logs ?? 0)
+      setMessage(
+        deletedDrafts > 0
+          ? `${deleteTarget.title} and ${deletedDrafts} unlinked draft test log${deletedDrafts === 1 ? '' : 's'} permanently deleted.`
+          : `${deleteTarget.title} permanently deleted.`,
+      )
       setDeleteTarget(null)
+      setDeleteImpact(null)
       router.refresh()
     } catch (cause: any) {
       setError(String(cause?.message || cause))
     } finally {
       setPending(false)
+    }
+  }
+
+  async function openPermanentDelete(program: Program) {
+    if (!canDeletePermanent) return
+    resetFeedback()
+    setDeleteTarget({ id: program.id, title: program.title })
+    setDeleteImpact(null)
+    setDeleteImpactLoading(true)
+    try {
+      const response = await fetch('/api/coach-operations/programs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ operation: 'delete_impact', id: program.id }),
+      })
+      const data = await readJson(response)
+      if (!response.ok || data.ok !== true || !data.impact) {
+        throw new Error(data.details || data.error || 'Unable to inspect program dependencies.')
+      }
+      setDeleteImpact(data.impact as DeleteImpact)
+    } catch (cause: any) {
+      setDeleteTarget(null)
+      setError(String(cause?.message || cause))
+    } finally {
+      setDeleteImpactLoading(false)
     }
   }
 
@@ -967,7 +1011,7 @@ export default function TrainingProgramsManager({
                             variant="ghost"
                             size="sm"
                             className="text-rose-700 hover:bg-rose-50 hover:text-rose-800"
-                            onClick={() => setDeleteTarget({ id: program.id, title: program.title })}
+                            onClick={() => openPermanentDelete(program)}
                           >
                             <Trash2 className="h-4 w-4" /> Delete permanently
                           </Button>
@@ -1016,14 +1060,39 @@ export default function TrainingProgramsManager({
       <ConfirmActionModal
         open={Boolean(deleteTarget)}
         title="Permanently delete this test program?"
-        description="ATOM will delete the program only if it has never been assigned to a scheduled session and has no training-session history."
-        confirmLabel="Delete permanently"
-        pendingLabel="Deleting…"
+        description={
+          deleteImpactLoading
+            ? 'ATOM is checking every Training Log and scheduled-session dependency.'
+            : deleteImpact?.deletable
+              ? 'This program has no real dated-session history. Unlinked draft test logs listed below will be removed with it.'
+              : 'Deletion is blocked because this program has protected operational history. Keep it archived instead.'
+        }
+        confirmLabel={deleteImpact?.deletable ? 'Delete test data' : 'Deletion blocked'}
+        pendingLabel={deleteImpactLoading ? 'Checking…' : 'Deleting…'}
         tone="destructive"
-        pending={pending}
-        summaryItems={deleteTarget ? [{ label: 'Program', value: deleteTarget.title }] : []}
-        warning="Permanent deletion cannot be undone. Program curriculum items will be removed with the unused program. Use Archive for real history."
-        onCancel={() => !pending && setDeleteTarget(null)}
+        pending={pending || deleteImpactLoading}
+        confirmDisabled={!deleteImpact?.deletable}
+        summaryItems={deleteTarget ? [
+          { label: 'Program', value: deleteTarget.title },
+          ...(deleteImpact ? [
+            { label: 'Manual draft tests', value: deleteImpact.manual_draft_logs },
+            { label: 'Completed logs', value: deleteImpact.completed_logs },
+            { label: 'Dated-session logs', value: deleteImpact.linked_logs },
+            { label: 'Session assignments', value: deleteImpact.session_assignments },
+            { label: 'Incident links', value: deleteImpact.incident_links },
+            { label: 'Payroll links', value: deleteImpact.payroll_links },
+          ] : []),
+        ] : []}
+        warning={
+          deleteImpact?.deletable
+            ? 'Permanent deletion cannot be undone. Only unlinked draft test logs and planning data will be removed.'
+            : 'Completed logs, dated-session assignments, incidents and payroll evidence are never deleted by this action.'
+        }
+        onCancel={() => {
+          if (pending || deleteImpactLoading) return
+          setDeleteTarget(null)
+          setDeleteImpact(null)
+        }}
         onConfirm={confirmPermanentDelete}
       />
     </div>
