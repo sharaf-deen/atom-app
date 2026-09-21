@@ -83,6 +83,37 @@ function timeDurationHours(start: unknown, end: unknown) {
   return Math.round(((endSec - startSec) / 3600) * 100) / 100
 }
 
+function readyPreview(candidates: any[]) {
+  const ready = candidates.filter((candidate) => candidate.status === 'ready')
+  const skippedStatuses = [
+    'needs_mapping',
+    'needs_confirmation',
+    'missing_duration',
+    'manual_conflict',
+  ]
+
+  return {
+    ready_count: ready.length,
+    ready_hours: Math.round(
+      ready.reduce(
+        (sum, candidate) => sum + Number(candidate.duration_hours ?? 0),
+        0
+      ) * 100
+    ) / 100,
+    staff_count: new Set(ready.map((candidate) => candidate.staff_user_id)).size,
+    task_count: new Set(ready.map((candidate) => candidate.payroll_task_id)).size,
+    primary_count: ready.filter(
+      (candidate) => candidate.assignment_role === 'primary_coach'
+    ).length,
+    assistant_count: ready.filter(
+      (candidate) => candidate.assignment_role === 'assistant_coach'
+    ).length,
+    skipped_count: candidates.filter((candidate) =>
+      skippedStatuses.includes(candidate.status)
+    ).length,
+  }
+}
+
 async function getActor() {
   const supabase = createSupabaseServerActionClient()
   const { data: auth, error: authErr } = await supabase.auth.getUser()
@@ -417,6 +448,7 @@ async function buildMonthModel(admin: any, monthStart: string) {
       release_reason: row.release_reason ? String(row.release_reason) : null,
     })),
     summary,
+    ready_preview: readyPreview(candidates),
   }
 }
 
@@ -676,19 +708,56 @@ export async function POST(req: Request) {
       return json(200, { ok: true })
     }
 
-    if (action === 'import') {
+    if (action === 'import' || action === 'import_all_ready') {
       const monthStart = normalizeMonthStart(body?.monthStart)
       if (!monthStart) return json(400, { ok: false, error: 'INVALID_MONTH' })
       if (monthStart > currentCairoMonthStart()) return json(400, { ok: false, error: 'FUTURE_MONTH_NOT_ALLOWED' })
-      if (!Array.isArray(body?.items) || body.items.length < 1 || body.items.length > 500) {
-        return json(400, { ok: false, error: 'INVALID_IMPORT_ITEMS' })
+
+      let items: Array<{
+        session_id: string
+        staff_user_id: string
+        duration_hours: number | null
+      }>
+      let serverPreview: ReturnType<typeof readyPreview> | null = null
+
+      if (action === 'import_all_ready') {
+        const model = await buildMonthModel(admin, monthStart)
+        if (model.month_locked) {
+          return json(409, { ok: false, error: 'PAYROLL_MONTH_LOCKED' })
+        }
+
+        serverPreview = model.ready_preview
+        items = model.candidates
+          .filter((candidate: any) => candidate.status === 'ready')
+          .map((candidate: any) => ({
+            session_id: normalizeUuid(candidate.session_id),
+            staff_user_id: normalizeUuid(candidate.staff_user_id),
+            duration_hours: parsePositiveHours(candidate.duration_hours),
+          }))
+
+        if (items.length === 0) {
+          return json(200, {
+            ok: true,
+            result: {
+              ok: true,
+              imported_count: 0,
+              monthly_task_log_ids: [],
+            },
+            preview: serverPreview,
+          })
+        }
+      } else {
+        if (!Array.isArray(body?.items) || body.items.length < 1 || body.items.length > 500) {
+          return json(400, { ok: false, error: 'INVALID_IMPORT_ITEMS' })
+        }
+
+        items = body.items.map((item: any) => ({
+          session_id: normalizeUuid(item?.sessionId),
+          staff_user_id: normalizeUuid(item?.staffUserId),
+          duration_hours: parsePositiveHours(item?.durationHours),
+        }))
       }
 
-      const items = body.items.map((item: any) => ({
-        session_id: normalizeUuid(item?.sessionId),
-        staff_user_id: normalizeUuid(item?.staffUserId),
-        duration_hours: parsePositiveHours(item?.durationHours),
-      }))
       if (items.some((item: any) => !item.session_id || !item.staff_user_id || item.duration_hours == null)) {
         return json(400, { ok: false, error: 'INVALID_IMPORT_ITEMS' })
       }
@@ -720,8 +789,10 @@ export async function POST(req: Request) {
         action: 'staff_payroll_coaching_sessions_imported',
         action_details: {
           month_start: monthStart,
+          import_mode: action === 'import_all_ready' ? 'all_ready_server_scan' : 'reviewed_selection',
           requested_count: items.length,
           imported_count: Number(data?.imported_count ?? items.length),
+          server_preview: serverPreview,
           monthly_task_log_ids: data?.monthly_task_log_ids ?? [],
           note_scope: 'Confirmed coaching sessions aggregated into schedule-sourced Monthly Tasks.',
         },
@@ -729,7 +800,7 @@ export async function POST(req: Request) {
       revalidatePath('/admin/staff-payroll/coaching-import')
       revalidatePath('/admin/staff-payroll/monthly-tasks')
       revalidatePath('/admin/staff-payroll/calculation')
-      return json(200, { ok: true, result: data })
+      return json(200, { ok: true, result: data, preview: serverPreview })
     }
 
     return json(400, { ok: false, error: 'UNKNOWN_ACTION' })

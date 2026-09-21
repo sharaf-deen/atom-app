@@ -81,6 +81,16 @@ type Candidate = {
   } | null
 }
 
+type ReadyPreview = {
+  ready_count: number
+  ready_hours: number
+  staff_count: number
+  task_count: number
+  primary_count: number
+  assistant_count: number
+  skipped_count: number
+}
+
 type Model = {
   month_start: string
   month_locked: boolean
@@ -90,6 +100,7 @@ type Model = {
   tasks: PayrollTask[]
   candidates: Candidate[]
   summary: Record<string, number>
+  ready_preview: ReadyPreview
 }
 
 type Props = {
@@ -204,6 +215,7 @@ export default function StaffPayrollCoachingImportManager({ initialMonth, canWri
   const [mappingDrafts, setMappingDrafts] = React.useState<Record<string, MappingDraft>>({})
   const [confirmingKey, setConfirmingKey] = React.useState<string | null>(null)
   const [confirmReason, setConfirmReason] = React.useState('')
+  const [showReadyPreview, setShowReadyPreview] = React.useState(false)
 
   const currentMonth = React.useMemo(() => {
     const parts = new Intl.DateTimeFormat('en-US', {
@@ -230,13 +242,12 @@ export default function StaffPayrollCoachingImportManager({ initialMonth, canWri
       setModel(nextModel)
 
       const nextDurations: Record<string, string> = {}
-      const nextSelected = new Set<string>()
       for (const candidate of nextModel.candidates) {
         if (candidate.duration_hours != null) nextDurations[candidate.key] = String(candidate.duration_hours)
-        if (candidate.status === 'ready') nextSelected.add(candidate.key)
       }
       setDurations(nextDurations)
-      setSelected(nextSelected)
+      setSelected(new Set())
+      setShowReadyPreview(false)
 
       const nextMappings: Record<string, MappingDraft> = {}
       for (const template of nextModel.templates) {
@@ -264,6 +275,7 @@ export default function StaffPayrollCoachingImportManager({ initialMonth, canWri
     if (!/^\d{4}-\d{2}$/.test(value)) return
     setMonth(value)
     setSuccess(null)
+    setShowReadyPreview(false)
     router.replace(`/admin/staff-payroll/coaching-import?month=${encodeURIComponent(value)}`)
   }
 
@@ -404,12 +416,51 @@ export default function StaffPayrollCoachingImportManager({ initialMonth, canWri
     }
   }
 
+  async function importAllReady() {
+    if (!model || model.ready_preview.ready_count < 1) return
+
+    setPending(true)
+    setError(null)
+    setSuccess(null)
+    try {
+      const payload = await post({
+        action: 'import_all_ready',
+        monthStart: `${month}-01`,
+      })
+      const count = Number(payload?.result?.imported_count ?? 0)
+      setSuccess(
+        count > 0
+          ? `${count} ready coaching session${count === 1 ? '' : 's'} imported after a fresh server check.`
+          : 'No coaching session was still ready when the server rechecked the month.'
+      )
+      setShowReadyPreview(false)
+      await load()
+      router.refresh()
+    } catch (e: any) {
+      setError(errorLabel(e?.message ?? 'COACHING_IMPORT_FAILED'))
+    } finally {
+      setPending(false)
+    }
+  }
+
+  function selectAllReady() {
+    if (!model) return
+    setSelected(
+      new Set(
+        model.candidates
+          .filter((candidate) => candidate.status === 'ready')
+          .map((candidate) => candidate.key)
+      )
+    )
+  }
+
   const mappingTemplates = React.useMemo(
     () => (model?.templates ?? []).filter((template) => template.occurs_in_month),
     [model]
   )
 
   const selectedCount = selected.size
+  const readyPreview = model?.ready_preview
 
   return (
     <div className="space-y-5">
@@ -575,16 +626,111 @@ export default function StaffPayrollCoachingImportManager({ initialMonth, canWri
                 </p>
               </div>
               {canWrite && !model.month_locked ? (
-                <button
-                  type="button"
-                  onClick={importSelected}
-                  disabled={pending || selectedCount === 0}
-                  className="rounded-xl bg-black px-4 py-2 text-sm font-semibold text-white disabled:opacity-40"
-                >
-                  {pending ? 'Working…' : `Import selected (${selectedCount})`}
-                </button>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowReadyPreview(true)}
+                    disabled={pending || !readyPreview?.ready_count}
+                    className="rounded-xl bg-black px-4 py-2 text-sm font-semibold text-white disabled:opacity-40"
+                  >
+                    Review all ready ({readyPreview?.ready_count ?? 0})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={importSelected}
+                    disabled={pending || selectedCount === 0}
+                    className="rounded-xl border border-black/10 bg-white px-4 py-2 text-sm font-semibold disabled:opacity-40"
+                  >
+                    {pending ? 'Working…' : `Import selected (${selectedCount})`}
+                  </button>
+                </div>
               ) : null}
             </div>
+
+            {showReadyPreview && readyPreview ? (
+              <div className="mt-4 rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-emerald-950">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                  <div>
+                    <div className="text-sm font-bold">Ready coaching import preview</div>
+                    <div className="mt-1 text-xs">
+                      The server will scan {monthLabel(month)} again and import only sessions that are still mapped, evidenced, timed and conflict-free.
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowReadyPreview(false)}
+                    disabled={pending}
+                    className="self-start rounded-lg border border-emerald-300 bg-white px-3 py-1.5 text-xs font-semibold"
+                  >
+                    Close
+                  </button>
+                </div>
+
+                <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-7">
+                  {[
+                    ['Sessions', readyPreview.ready_count],
+                    ['Hours', numberLabel(readyPreview.ready_hours)],
+                    ['Staff', readyPreview.staff_count],
+                    ['Tasks', readyPreview.task_count],
+                    ['Primary', readyPreview.primary_count],
+                    ['Assistants', readyPreview.assistant_count],
+                    ['Skipped', readyPreview.skipped_count],
+                  ].map(([label, value]) => (
+                    <div key={String(label)} className="rounded-xl border border-emerald-200 bg-white p-3">
+                      <div className="text-[11px] text-emerald-900/70">{label}</div>
+                      <div className="mt-1 text-lg font-bold">{value}</div>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="mt-3 text-xs">
+                  Skipped items remain unchanged for manual review. Existing manual or adjusted Monthly Tasks are never overwritten.
+                </div>
+
+                <div className="mt-4 flex flex-wrap justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowReadyPreview(false)}
+                    disabled={pending}
+                    className="rounded-xl border border-emerald-300 bg-white px-4 py-2 text-sm font-semibold"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={importAllReady}
+                    disabled={pending || readyPreview.ready_count < 1}
+                    className="rounded-xl bg-emerald-900 px-4 py-2 text-sm font-semibold text-white disabled:opacity-40"
+                  >
+                    {pending ? 'Rechecking…' : `Import all ready (${readyPreview.ready_count})`}
+                  </button>
+                </div>
+              </div>
+            ) : null}
+
+            {canWrite && !model.month_locked && (model.summary.ready ?? 0) > 0 ? (
+              <div className="mt-4 flex flex-wrap items-center gap-2 text-xs">
+                <button
+                  type="button"
+                  onClick={selectAllReady}
+                  disabled={pending}
+                  className="rounded-lg border border-black/10 px-3 py-1.5 font-semibold"
+                >
+                  Select all ready
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSelected(new Set())}
+                  disabled={pending || selectedCount === 0}
+                  className="rounded-lg border border-black/10 px-3 py-1.5 font-semibold disabled:opacity-40"
+                >
+                  Clear selection
+                </button>
+                <span className="text-[hsl(var(--muted))]">
+                  Use selected import when you need a subset or a duration override.
+                </span>
+              </div>
+            ) : null}
 
             <div className="mt-4 space-y-3">
               {model.candidates.length === 0 ? (
