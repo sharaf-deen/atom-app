@@ -290,6 +290,7 @@ export default async function StaffPayrollMonthlyTasksPage({
   }))
 
   const activeLogs = logs.filter((log) => !log.voided_at)
+  const missingHoursCount = activeLogs.filter((log) => log.actual_hours == null).length
   const totalHours = activeLogs.reduce(
     (sum, log) => sum + Number(log.actual_hours ?? 0),
     0
@@ -312,7 +313,7 @@ export default async function StaffPayrollMonthlyTasksPage({
           <div className="max-w-3xl">
             <div className="flex flex-wrap items-center gap-2">
               <span className="rounded-full bg-black px-3 py-1 text-xs font-semibold text-white">
-                Staff Payroll 1B
+                Staff Payroll 2B
               </span>
               <span
                 className={
@@ -329,10 +330,10 @@ export default async function StaffPayrollMonthlyTasksPage({
             <h1 className="mt-3 text-2xl font-bold sm:text-3xl">Monthly Task Log</h1>
             <p className="mt-2 text-sm text-[hsl(var(--muted))] sm:text-base">
               Record the work actually performed by each staff member for a month.
-              The default period is the previous month, ready for the future payroll calculation.
+              Every active task requires actual hours before it can enter an approved payroll.
             </p>
             <p className="mt-2 text-xs text-[hsl(var(--muted))]">
-              This page records work only. Salary calculation, approval and payments are handled separately.
+              Quantity records activity volume. Compensation is always calculated from actual hours and the task importance multiplier.
             </p>
           </div>
         </div>
@@ -404,6 +405,11 @@ export default async function StaffPayrollMonthlyTasksPage({
             <div className="rounded-2xl border border-black/10 bg-white p-4">
               <div className="text-xs text-[hsl(var(--muted))]">Actual hours</div>
               <div className="mt-1 text-2xl font-bold">{formatNumber(totalHours)} h</div>
+              <div className={missingHoursCount ? 'mt-1 text-xs font-medium text-amber-700' : 'mt-1 text-xs text-emerald-700'}>
+                {missingHoursCount
+                  ? `${missingHoursCount} task ${missingHoursCount === 1 ? 'entry needs' : 'entries need'} hours`
+                  : 'All active tasks complete'}
+              </div>
             </div>
             <div className="rounded-2xl border border-violet-200 bg-violet-50 p-4">
               <div className="text-xs text-violet-900/70">Weighted hours</div>
@@ -418,9 +424,9 @@ export default async function StaffPayrollMonthlyTasksPage({
           </section>
 
           <div className="rounded-2xl border border-violet-200 bg-violet-50 p-3 text-sm text-violet-950">
-            <div className="font-semibold">Weighted hours are informational in 1B.</div>
+            <div className="font-semibold">How payroll time is calculated</div>
             <div className="mt-1 text-xs">
-              They equal actual hours × the importance multiplier snapshot. They are not yet a salary amount.
+              Weighted hours equal actual hours × the task importance multiplier. Quantity does not generate compensation by itself.
             </div>
           </div>
 
