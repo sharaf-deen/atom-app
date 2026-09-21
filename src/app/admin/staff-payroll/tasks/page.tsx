@@ -256,6 +256,10 @@ export default async function StaffPayrollTasksPage() {
               while real default assignments are linked explicitly to staff
               profiles.
             </p>
+
+            <p className="mt-2 text-xs text-[hsl(var(--muted))]">
+              A task unit measures activity volume only. Every monthly task still requires actual hours for compensation.
+            </p>
           </div>
 
           <div className="flex flex-wrap gap-2">

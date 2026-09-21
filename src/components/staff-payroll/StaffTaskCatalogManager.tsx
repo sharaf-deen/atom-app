@@ -333,6 +333,10 @@ function TaskFields({
         </label>
       </div>
 
+      <div className="rounded-xl border border-sky-200 bg-sky-50 px-3 py-2 text-xs text-sky-950">
+        The unit records work volume (for example, classes or meetings). Actual hours remain required in the monthly log and are the basis for salary calculation.
+      </div>
+
       <div className="grid gap-4 lg:grid-cols-3">
         <label>
           <FieldLabel>Estimated time label</FieldLabel>
