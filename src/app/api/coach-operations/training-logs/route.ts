@@ -101,6 +101,22 @@ export async function POST(request: Request) {
     const id = String(body.id ?? '').trim()
     if (!UUID_RE.test(id)) return json({ ok: false, error: 'INVALID_ID' }, 400)
 
+    const { data: existing, error: existingError } = await supabase
+      .from('coach_training_session_logs')
+      .select('id,training_session_id,status')
+      .eq('id', id)
+      .maybeSingle()
+
+    if (existingError) return json({ ok: false, error: 'LOG_LOOKUP_FAILED', details: existingError.message }, 500)
+    if (!existing || existing.status !== 'completed') return json({ ok: false, error: 'NOT_FOUND_OR_NOT_COMPLETED' }, 404)
+    if (!existing.training_session_id) {
+      return json({
+        ok: false,
+        error: 'LEGACY_LOG_READ_ONLY',
+        details: 'Manual legacy Training Logs are preserved as read-only history and cannot be reopened.',
+      }, 409)
+    }
+
     const { data, error } = await supabase
       .from('coach_training_session_logs')
       .update({ status: 'draft', reopened_by: me.id, reopened_at: now, updated_at: now })
@@ -128,9 +144,16 @@ export async function POST(request: Request) {
   let linkedSessionName: string | null = null
   let linkedAssignmentRole: 'primary_coach' | 'assistant_coach' | null = null
 
-  if (trainingSessionId && !UUID_RE.test(trainingSessionId)) return json({ ok: false, error: 'INVALID_TRAINING_SESSION' }, 400)
+  if (!trainingSessionId) {
+    return json({
+      ok: false,
+      error: 'SESSION_LINK_REQUIRED',
+      details: 'Every new or edited Training Log must be linked to an assigned dated session.',
+    }, 400)
+  }
+  if (!UUID_RE.test(trainingSessionId)) return json({ ok: false, error: 'INVALID_TRAINING_SESSION' }, 400)
 
-  if (trainingSessionId) {
+  {
     const [sessionResult, assignmentResult, programAssignmentResult] = await Promise.all([
       supabase
         .from('schedule_training_sessions')
@@ -157,11 +180,11 @@ export async function POST(request: Request) {
     if (!sessionResult.data) return json({ ok: false, error: 'SCHEDULED_SESSION_NOT_FOUND' }, 404)
     if (sessionResult.data.status === 'cancelled') return json({ ok: false, error: 'SCHEDULED_SESSION_CANCELLED' }, 409)
     if (!assignmentResult.data) return json({ ok: false, error: 'NOT_ASSIGNED_TO_SESSION' }, 403)
-    if (!canManage && assignmentResult.data.assignment_role !== 'primary_coach') {
+    if (assignmentResult.data.assignment_role !== 'primary_coach' && (!canManage || !id)) {
       return json({
         ok: false,
         error: 'RESPONSIBLE_COACH_REQUIRED',
-        details: 'Only the Responsible / Primary Coach can edit the technical content of this scheduled session.',
+        details: 'Only the Responsible / Primary Coach can create the technical Training Log for this scheduled session.',
       }, 403)
     }
     if (!programAssignmentResult.data) {
@@ -320,29 +343,31 @@ export async function POST(request: Request) {
     if (!existing) return json({ ok: false, error: 'NOT_FOUND' }, 404)
     if (existing.status !== 'draft') return json({ ok: false, error: 'LOG_COMPLETED_REOPEN_FIRST' }, 409)
     if (!canManage && existing.coach_user_id !== me.id) return json({ ok: false, error: 'FORBIDDEN' }, 403)
-    if (existing.training_session_id && existing.training_session_id !== (trainingSessionId || null)) {
+    if (!existing.training_session_id) {
+      return json({
+        ok: false,
+        error: 'LEGACY_LOG_READ_ONLY',
+        details: 'Manual legacy Training Logs are preserved as read-only history and cannot be edited or linked retroactively.',
+      }, 409)
+    }
+    if (existing.training_session_id !== trainingSessionId) {
       return json({ ok: false, error: 'SESSION_LINK_IMMUTABLE', details: 'A linked Scheduled Session cannot be changed or removed from an existing Training Log.' }, 409)
     }
-    if (!existing.training_session_id && trainingSessionId && existing.coach_user_id !== me.id) {
-      return json({ ok: false, error: 'SESSION_LINK_REQUIRES_REPORTING_COACH' }, 403)
-    }
 
-    if (trainingSessionId) {
-      const { data: duplicate, error: duplicateError } = await supabase
-        .from('coach_training_session_logs')
-        .select('id')
-        .eq('training_session_id', trainingSessionId)
-        .neq('id', sessionLogId)
-        .maybeSingle()
-      if (duplicateError) return json({ ok: false, error: 'SESSION_LOG_DUPLICATE_LOOKUP_FAILED', details: duplicateError.message }, 500)
-      if (duplicate) return json({ ok: false, error: 'SESSION_ALREADY_LOGGED', details: 'This Scheduled Session already has a linked Training Log.' }, 409)
-    }
+    const { data: duplicate, error: duplicateError } = await supabase
+      .from('coach_training_session_logs')
+      .select('id')
+      .eq('training_session_id', trainingSessionId)
+      .neq('id', sessionLogId)
+      .maybeSingle()
+    if (duplicateError) return json({ ok: false, error: 'SESSION_LOG_DUPLICATE_LOOKUP_FAILED', details: duplicateError.message }, 500)
+    if (duplicate) return json({ ok: false, error: 'SESSION_ALREADY_LOGGED', details: 'This Scheduled Session already has a linked Training Log.' }, 409)
 
     const { error: updateError } = await supabase
       .from('coach_training_session_logs')
       .update({
         program_id: programId,
-        training_session_id: trainingSessionId || null,
+        training_session_id: trainingSessionId,
         session_assignment_role_snapshot: linkedAssignmentRole,
         program_title_snapshot: program.title,
         target_group_snapshot: linkedSessionName ?? program.target_group,
@@ -355,22 +380,20 @@ export async function POST(request: Request) {
 
     if (updateError) return json({ ok: false, error: 'LOG_UPDATE_FAILED', details: updateError.message }, 500)
   } else {
-    if (trainingSessionId) {
-      const { data: duplicate, error: duplicateError } = await supabase
-        .from('coach_training_session_logs')
-        .select('id')
-        .eq('training_session_id', trainingSessionId)
-        .maybeSingle()
-      if (duplicateError) return json({ ok: false, error: 'SESSION_LOG_DUPLICATE_LOOKUP_FAILED', details: duplicateError.message }, 500)
-      if (duplicate) return json({ ok: false, error: 'SESSION_ALREADY_LOGGED', details: 'This Scheduled Session already has a linked Training Log.' }, 409)
-    }
+    const { data: duplicate, error: duplicateError } = await supabase
+      .from('coach_training_session_logs')
+      .select('id')
+      .eq('training_session_id', trainingSessionId)
+      .maybeSingle()
+    if (duplicateError) return json({ ok: false, error: 'SESSION_LOG_DUPLICATE_LOOKUP_FAILED', details: duplicateError.message }, 500)
+    if (duplicate) return json({ ok: false, error: 'SESSION_ALREADY_LOGGED', details: 'This Scheduled Session already has a linked Training Log.' }, 409)
 
     const coachName = String(me.full_name || me.email || 'ATOM Coach').trim().slice(0, 180)
     const { data: created, error: createError } = await supabase
       .from('coach_training_session_logs')
       .insert({
         program_id: programId,
-        training_session_id: trainingSessionId || null,
+        training_session_id: trainingSessionId,
         session_assignment_role_snapshot: linkedAssignmentRole,
         program_title_snapshot: program.title,
         target_group_snapshot: linkedSessionName ?? program.target_group,
