@@ -323,7 +323,7 @@ export default async function StaffPayrollOverviewPage({
             : `${remainingCoachingReviews} assignment${remainingCoachingReviews === 1 ? '' : 's'} to review`,
       tone: coachingTone,
       href: `/admin/staff-payroll/coaching-import?month=${selectedMonth}`,
-      action: 'Review coaching',
+      action: canWrite ? 'Review & sync coaching' : 'Review coaching',
       icon: GraduationCap,
     },
     {
