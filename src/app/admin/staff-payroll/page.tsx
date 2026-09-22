@@ -177,8 +177,10 @@ export default async function StaffPayrollOverviewPage({
       .eq('month_start', monthStart)
       .is('voided_at', null),
     admin
-      .from('staff_compensation_profiles')
-      .select('staff_user_id'),
+      .from('staff_compensation_rate_periods')
+      .select('staff_user_id')
+      .lte('effective_from', monthStart)
+      .or(`effective_until.is.null,effective_until.gt.${monthStart}`),
     admin
       .from('staff_payroll_monthly_snapshots')
       .select(
@@ -345,6 +347,19 @@ export default async function StaffPayrollOverviewPage({
     },
     {
       number: 4,
+      title: 'Compensation Rates',
+      description: `${configuredStaff.size} staff members have a rate period applicable to ${monthLabel(selectedMonth)}.`,
+      status:
+        missingLiveCompensation > 0
+          ? `${missingLiveCompensation} staff rate${missingLiveCompensation === 1 ? '' : 's'} missing`
+          : 'Applicable rates ready',
+      tone: missingLiveCompensation > 0 ? 'warning' : 'ready',
+      href: '/admin/staff-payroll/rates',
+      action: canWrite ? 'Manage rate periods' : 'Review rate periods',
+      icon: Banknote,
+    },
+    {
+      number: 5,
       title: 'Salary Calculation',
       description: snapshot
         ? `${snapshot.staff_count} staff · ${money(approvedTotal)} total payroll.`
@@ -361,7 +376,7 @@ export default async function StaffPayrollOverviewPage({
       icon: Calculator,
     },
     {
-      number: 5,
+      number: 6,
       title: 'Payments',
       description:
         snapshot?.status === 'approved'
@@ -389,7 +404,7 @@ export default async function StaffPayrollOverviewPage({
           <div className="max-w-3xl">
             <div className="flex flex-wrap items-center gap-2">
               <span className="rounded-full bg-black px-3 py-1 text-xs font-semibold text-white">
-                Staff Payroll 2A
+                Staff Payroll 2D
               </span>
               <span
                 className={

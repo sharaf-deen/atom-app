@@ -119,8 +119,10 @@ export default async function StaffPayrollCalculationPage({
       .order('first_name', { ascending: true })
       .order('last_name', { ascending: true }),
     admin
-      .from('staff_compensation_profiles')
-      .select('staff_user_id,fixed_monthly_base,weighted_hour_rate,bonus_eligible,updated_at')
+      .from('staff_compensation_rate_periods')
+      .select('id,staff_user_id,effective_from,effective_until,fixed_monthly_base,weighted_hour_rate,bonus_eligible,updated_at,staff_compensation_task_rates(task_id)')
+      .lte('effective_from', monthStart)
+      .or(`effective_until.is.null,effective_until.gt.${monthStart}`)
       .order('updated_at', { ascending: false }),
     admin
       .from('staff_payroll_monthly_snapshots')
@@ -155,6 +157,8 @@ export default async function StaffPayrollCalculationPage({
 
   const migrationMissing =
     loadError.includes('staff_compensation_profiles') ||
+    loadError.includes('staff_compensation_rate_periods') ||
+    loadError.includes('compensation_rate_period_id') ||
     loadError.includes('staff_payroll_monthly_snapshots') ||
     loadError.includes('staff_payroll_monthly_calculations') ||
     loadError.includes('staff_payroll_approval_versions') ||
@@ -167,7 +171,7 @@ export default async function StaffPayrollCalculationPage({
     calculationsResult = await admin
       .from('staff_payroll_monthly_calculations')
       .select(
-        'id,snapshot_id,month_start,staff_user_id,staff_name_snapshot,staff_role_snapshot,compensation_configured,fixed_monthly_base,weighted_hour_rate,bonus_eligible,active_task_count,missing_hours_task_count,actual_hours,weighted_hours,task_compensation,guaranteed_compensation,bonus_weight_share_percent,performance_bonus,calculated_salary,updated_at'
+        'id,snapshot_id,month_start,staff_user_id,staff_name_snapshot,staff_role_snapshot,compensation_configured,compensation_rate_period_id,compensation_effective_from,compensation_effective_until,fixed_monthly_base,weighted_hour_rate,bonus_eligible,active_task_count,missing_hours_task_count,actual_hours,weighted_hours,task_compensation,guaranteed_compensation,bonus_weight_share_percent,performance_bonus,calculated_salary,task_rate_breakdown,updated_at'
       )
       .eq('snapshot_id', snapshotResult.data.id)
       .order('staff_name_snapshot', { ascending: true })
@@ -185,11 +189,17 @@ export default async function StaffPayrollCalculationPage({
 
   const compensationProfiles = ((compensationResult.data ?? []) as any[]).map(
     (row) => ({
+      id: String(row.id),
       staff_user_id: String(row.staff_user_id),
+      effective_from: String(row.effective_from),
+      effective_until: row.effective_until ? String(row.effective_until) : null,
       fixed_monthly_base: Number(row.fixed_monthly_base ?? 0),
       weighted_hour_rate: Number(row.weighted_hour_rate ?? 0),
       bonus_eligible: Boolean(row.bonus_eligible),
       updated_at: row.updated_at ? String(row.updated_at) : null,
+      task_override_count: Array.isArray(row.staff_compensation_task_rates)
+        ? row.staff_compensation_task_rates.length
+        : 0,
     })
   )
 
@@ -284,6 +294,15 @@ export default async function StaffPayrollCalculationPage({
       ? String(row.staff_role_snapshot)
       : null,
     compensation_configured: Boolean(row.compensation_configured),
+    compensation_rate_period_id: row.compensation_rate_period_id
+      ? String(row.compensation_rate_period_id)
+      : null,
+    compensation_effective_from: row.compensation_effective_from
+      ? String(row.compensation_effective_from)
+      : null,
+    compensation_effective_until: row.compensation_effective_until
+      ? String(row.compensation_effective_until)
+      : null,
     fixed_monthly_base: Number(row.fixed_monthly_base ?? 0),
     weighted_hour_rate: Number(row.weighted_hour_rate ?? 0),
     bonus_eligible: Boolean(row.bonus_eligible),
@@ -296,6 +315,9 @@ export default async function StaffPayrollCalculationPage({
     bonus_weight_share_percent: Number(row.bonus_weight_share_percent ?? 0),
     performance_bonus: Number(row.performance_bonus ?? 0),
     calculated_salary: Number(row.calculated_salary ?? 0),
+    task_rate_breakdown: Array.isArray(row.task_rate_breakdown)
+      ? row.task_rate_breakdown
+      : [],
     updated_at: String(row.updated_at),
   }))
 

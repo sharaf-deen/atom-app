@@ -344,7 +344,7 @@ export async function generateStaffPayrollStatementPdfBytes(
   keyValue('Fixed monthly base:', money(snapshot.compensation.fixed_monthly_base), col1, value1, y)
   keyValue('Actual hours:', number(snapshot.compensation.actual_hours), col2, value2, y)
   y -= 16
-  keyValue('Weighted-hour rate:', money(snapshot.compensation.weighted_hour_rate), col1, value1, y)
+  keyValue('Default weighted-hour rate:', money(snapshot.compensation.weighted_hour_rate), col1, value1, y)
   keyValue('Weighted hours:', number(snapshot.compensation.weighted_hours), col2, value2, y)
   y -= 16
   keyValue('Task compensation:', money(snapshot.compensation.task_compensation), col1, value1, y)
