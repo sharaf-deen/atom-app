@@ -1,4 +1,4 @@
-// Staff Payroll 2C — Safe Coaching Auto-Sync
+// Staff Payroll 2E — QR Evidence Reconciliation
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
@@ -79,7 +79,7 @@ export default async function StaffPayrollCoachingImportPage({
           <div className="max-w-4xl">
             <div className="flex flex-wrap items-center gap-2">
               <span className="rounded-full bg-black px-3 py-1 text-xs font-semibold text-white">
-                Staff Payroll 2C
+                Staff Payroll 2E
               </span>
               <span
                 className={
@@ -89,15 +89,15 @@ export default async function StaffPayrollCoachingImportPage({
                     : 'bg-sky-50 text-sky-800')
                 }
               >
-                {canWrite ? 'Super Admin · Review / Sync / Import' : 'Admin · read-only'}
+                {canWrite ? 'Super Admin · Reconcile / Sync / Import' : 'Admin · read-only'}
               </span>
             </div>
-            <h1 className="mt-3 text-2xl font-bold sm:text-3xl">Safe Coaching Auto-Sync</h1>
+            <h1 className="mt-3 text-2xl font-bold sm:text-3xl">QR Evidence Reconciliation</h1>
             <p className="mt-2 text-sm text-[hsl(var(--muted))] sm:text-base">
-              Preview and import every ready coaching assignment in one server-verified batch, without paying from the schedule alone.
+              Review unlinked or ambiguous staff QR scans, attach them to the correct assigned session, then use the reconciled evidence in Payroll.
             </p>
             <p className="mt-2 text-xs text-[hsl(var(--muted))]">
-              Missing mappings, missing evidence, missing durations and manual conflicts remain untouched for review.
+              Every reconciliation requires a reason and an immutable audit record. No Late, On time or Absent judgment is created.
             </p>
           </div>
         </div>
