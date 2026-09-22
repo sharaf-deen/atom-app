@@ -22,6 +22,7 @@ export function buildPayrollSourceHashes(input: {
   logs: any[]
   compensationProfiles: any[]
   staffProfiles: any[]
+  adjustments?: any[]
 }) {
   const payments = sortByKey(input.payments, (row) => String(row.id ?? '')).map((row) => ({
     id: String(row.id ?? ''),
@@ -89,10 +90,26 @@ export function buildPayrollSourceHashes(input: {
     role: row.role == null ? null : String(row.role),
   }))
 
+  const adjustments = sortByKey(
+    input.adjustments ?? [],
+    (row) => String(row.id ?? '')
+  ).map((row) => ({
+    id: String(row.id ?? ''),
+    month_start: String(row.month_start ?? ''),
+    staff_user_id: String(row.staff_user_id ?? ''),
+    adjustment_type: String(row.adjustment_type ?? ''),
+    amount: normalizeNumber(row.amount),
+    reason: String(row.reason ?? ''),
+    status: String(row.status ?? ''),
+    created_at: row.created_at == null ? null : String(row.created_at),
+    voided_at: row.voided_at == null ? null : String(row.voided_at),
+    void_reason: row.void_reason == null ? null : String(row.void_reason),
+  }))
+
   return {
     financial_source_hash: stableHash({ payments, refunds, expenses }),
     task_source_hash: stableHash(logs),
-    compensation_source_hash: stableHash(compensation),
+    compensation_source_hash: stableHash({ compensation, adjustments }),
     staff_source_hash: stableHash(staff),
   }
 }
@@ -114,6 +131,10 @@ const SNAPSHOT_CORE_KEYS = [
   'guaranteed_payroll',
   'available_result_after_guaranteed_payroll',
   'performance_bonus_pool',
+  'salary_before_adjustments_total',
+  'manual_bonus_total',
+  'manual_deduction_total',
+  'net_manual_adjustment_total',
   'calculated_payroll_total',
   'staff_count',
   'missing_hours_task_count',
@@ -158,7 +179,22 @@ export function buildPayrollCalculationsHash(rows: any[]) {
     guaranteed_compensation: normalizeNumber(row.guaranteed_compensation),
     bonus_weight_share_percent: normalizeNumber(row.bonus_weight_share_percent),
     performance_bonus: normalizeNumber(row.performance_bonus),
+    salary_before_adjustments: normalizeNumber(row.salary_before_adjustments),
+    manual_bonus: normalizeNumber(row.manual_bonus),
+    manual_deduction: normalizeNumber(row.manual_deduction),
+    net_manual_adjustment: normalizeNumber(row.net_manual_adjustment),
     calculated_salary: normalizeNumber(row.calculated_salary),
+    adjustment_breakdown: sortByKey(
+      Array.isArray(row.adjustment_breakdown) ? row.adjustment_breakdown : [],
+      (item) => String(item.adjustment_id ?? '')
+    ).map((item) => ({
+      adjustment_id: String(item.adjustment_id ?? ''),
+      adjustment_type: String(item.adjustment_type ?? ''),
+      amount: normalizeNumber(item.amount),
+      reason: String(item.reason ?? ''),
+      created_at: item.created_at == null ? null : String(item.created_at),
+      created_by_name_snapshot: String(item.created_by_name_snapshot ?? ''),
+    })),
     task_rate_breakdown: sortByKey(
       Array.isArray(row.task_rate_breakdown) ? row.task_rate_breakdown : [],
       (item) => String(item.task_log_id ?? item.task_id ?? '')

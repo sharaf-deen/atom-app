@@ -120,7 +120,7 @@ export async function GET(
     const { data: calculation, error: calculationError } = await admin
       .from('staff_payroll_approval_calculations')
       .select(
-        'id,approval_version_id,snapshot_id,month_start,staff_user_id,staff_name_snapshot,staff_role_snapshot,fixed_monthly_base,weighted_hour_rate,actual_hours,weighted_hours,task_compensation,performance_bonus,calculated_salary'
+        'id,approval_version_id,snapshot_id,month_start,staff_user_id,staff_name_snapshot,staff_role_snapshot,fixed_monthly_base,weighted_hour_rate,actual_hours,weighted_hours,task_compensation,performance_bonus,salary_before_adjustments,manual_bonus,manual_deduction,net_manual_adjustment,calculated_salary,adjustment_breakdown'
       )
       .eq('id', calculationId)
       .maybeSingle()
@@ -211,6 +211,20 @@ export async function GET(
         ? 'Historical version · reopened'
         : 'Historical approval version'
 
+    const manualBonus = Number(calculation.manual_bonus ?? 0)
+    const manualDeduction = Number(calculation.manual_deduction ?? 0)
+    const adjustmentBreakdown = Array.isArray(calculation.adjustment_breakdown)
+      ? calculation.adjustment_breakdown
+      : []
+    const storedSalaryBefore = Number(calculation.salary_before_adjustments ?? 0)
+    const salaryBeforeAdjustments =
+      storedSalaryBefore === 0 &&
+      manualBonus === 0 &&
+      manualDeduction === 0 &&
+      !adjustmentBreakdown.length
+        ? salary
+        : storedSalaryBefore
+
     const statement: StaffPayrollStatementSnapshot = {
       generated_at: new Date().toISOString(),
       month_start: String(calculation.month_start),
@@ -233,6 +247,11 @@ export async function GET(
         weighted_hours: Number(calculation.weighted_hours ?? 0),
         task_compensation: Number(calculation.task_compensation ?? 0),
         performance_bonus: Number(calculation.performance_bonus ?? 0),
+        salary_before_adjustments: salaryBeforeAdjustments,
+        manual_bonus: manualBonus,
+        manual_deduction: manualDeduction,
+        net_manual_adjustment: Number(calculation.net_manual_adjustment ?? 0),
+        adjustment_breakdown: adjustmentBreakdown,
         approved_salary: salary,
       },
       payments,
