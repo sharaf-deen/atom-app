@@ -40,6 +40,18 @@ export type StaffPayrollStatementSnapshot = {
     weighted_hours: number
     task_compensation: number
     performance_bonus: number
+    salary_before_adjustments: number
+    manual_bonus: number
+    manual_deduction: number
+    net_manual_adjustment: number
+    adjustment_breakdown: Array<{
+      adjustment_id: string
+      adjustment_type: 'bonus' | 'deduction'
+      amount: number
+      reason: string
+      created_at: string
+      created_by_name_snapshot: string
+    }>
     approved_salary: number
   }
   payments: StaffPayrollStatementPayment[]
@@ -349,12 +361,39 @@ export async function generateStaffPayrollStatementPdfBytes(
   y -= 16
   keyValue('Task compensation:', money(snapshot.compensation.task_compensation), col1, value1, y)
   keyValue('Performance bonus:', money(snapshot.compensation.performance_bonus), col2, value2, y)
+  y -= 16
+  keyValue('Before adjustments:', money(snapshot.compensation.salary_before_adjustments), col1, value1, y)
+  keyValue('Manual bonuses:', money(snapshot.compensation.manual_bonus), col2, value2, y)
+  y -= 16
+  keyValue('Manual deductions:', money(snapshot.compensation.manual_deduction), col1, value1, y)
+  keyValue(
+    'Net adjustment:',
+    `${snapshot.compensation.net_manual_adjustment >= 0 ? '+' : '-'} ${money(Math.abs(snapshot.compensation.net_manual_adjustment))}`,
+    col2,
+    value2,
+    y
+  )
   y -= 30
 
   page.drawRectangle({ x: margin, y: y - 7, width: contentWidth, height: 36, color: rgb(0.92, 0.97, 0.94) })
   draw('APPROVED SALARY', margin + 10, y + 7, 11, true, green)
   draw(money(snapshot.compensation.approved_salary), pageSize[0] - margin - 150, y + 7, 13, true, green)
   y -= 48
+
+  sectionTitle('Bonuses & deductions')
+  if (!snapshot.compensation.adjustment_breakdown.length) {
+    draw('No manual monthly adjustments.', margin, y, 9, false, muted)
+    y -= 22
+  } else {
+    for (const adjustment of snapshot.compensation.adjustment_breakdown) {
+      ensureSpace(34)
+      const sign = adjustment.adjustment_type === 'bonus' ? '+' : '-'
+      const label = adjustment.adjustment_type === 'bonus' ? 'Bonus' : 'Deduction'
+      draw(`${label}: ${sign} ${money(adjustment.amount)}`, margin, y, 9, true)
+      const used = drawWrapped(adjustment.reason, margin + 145, y, contentWidth - 145, 8, 10, false, muted)
+      y -= Math.max(22, used + 6)
+    }
+  }
 
   sectionTitle('Payment status')
   const status = statusLabel(snapshot.totals.payment_status)

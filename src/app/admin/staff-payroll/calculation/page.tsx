@@ -127,7 +127,7 @@ export default async function StaffPayrollCalculationPage({
     admin
       .from('staff_payroll_monthly_snapshots')
       .select(
-        'id,month_start,status,eligible_revenue_scope,bonus_pool_percent,membership_revenue,membership_payment_count,paid_membership_refunds,paid_membership_refund_count,net_membership_revenue,eligible_operating_expenses,eligible_expense_count,excluded_payroll_expenses,excluded_payroll_expense_count,operating_result_before_payroll,guaranteed_payroll,available_result_after_guaranteed_payroll,performance_bonus_pool,calculated_payroll_total,staff_count,missing_hours_task_count,unconfigured_staff_count,calculated_at,source_data_as_of,approval_version_no,approved_at,approved_by,last_reopened_at,last_reopened_by,last_reopen_reason,financial_source_hash,task_source_hash,compensation_source_hash,staff_source_hash,draft_snapshot_hash,draft_calculation_hash'
+        'id,month_start,status,eligible_revenue_scope,bonus_pool_percent,membership_revenue,membership_payment_count,paid_membership_refunds,paid_membership_refund_count,net_membership_revenue,eligible_operating_expenses,eligible_expense_count,excluded_payroll_expenses,excluded_payroll_expense_count,operating_result_before_payroll,guaranteed_payroll,available_result_after_guaranteed_payroll,performance_bonus_pool,salary_before_adjustments_total,manual_bonus_total,manual_deduction_total,net_manual_adjustment_total,calculated_payroll_total,staff_count,missing_hours_task_count,unconfigured_staff_count,calculated_at,source_data_as_of,approval_version_no,approved_at,approved_by,last_reopened_at,last_reopened_by,last_reopen_reason,financial_source_hash,task_source_hash,compensation_source_hash,staff_source_hash,draft_snapshot_hash,draft_calculation_hash'
       )
       .eq('month_start', monthStart)
       .maybeSingle(),
@@ -161,6 +161,7 @@ export default async function StaffPayrollCalculationPage({
     loadError.includes('compensation_rate_period_id') ||
     loadError.includes('staff_payroll_monthly_snapshots') ||
     loadError.includes('staff_payroll_monthly_calculations') ||
+    loadError.includes('salary_before_adjustments') ||
     loadError.includes('staff_payroll_approval_versions') ||
     loadError.includes('staff_payroll_reopen_events') ||
     loadError.includes('financial_source_hash') ||
@@ -171,7 +172,7 @@ export default async function StaffPayrollCalculationPage({
     calculationsResult = await admin
       .from('staff_payroll_monthly_calculations')
       .select(
-        'id,snapshot_id,month_start,staff_user_id,staff_name_snapshot,staff_role_snapshot,compensation_configured,compensation_rate_period_id,compensation_effective_from,compensation_effective_until,fixed_monthly_base,weighted_hour_rate,bonus_eligible,active_task_count,missing_hours_task_count,actual_hours,weighted_hours,task_compensation,guaranteed_compensation,bonus_weight_share_percent,performance_bonus,calculated_salary,task_rate_breakdown,updated_at'
+        'id,snapshot_id,month_start,staff_user_id,staff_name_snapshot,staff_role_snapshot,compensation_configured,compensation_rate_period_id,compensation_effective_from,compensation_effective_until,fixed_monthly_base,weighted_hour_rate,bonus_eligible,active_task_count,missing_hours_task_count,actual_hours,weighted_hours,task_compensation,guaranteed_compensation,bonus_weight_share_percent,performance_bonus,salary_before_adjustments,manual_bonus,manual_deduction,net_manual_adjustment,calculated_salary,adjustment_breakdown,task_rate_breakdown,updated_at'
       )
       .eq('snapshot_id', snapshotResult.data.id)
       .order('staff_name_snapshot', { ascending: true })
@@ -245,6 +246,19 @@ export default async function StaffPayrollCalculationPage({
         performance_bonus_pool: Number(
           snapshotResult.data.performance_bonus_pool ?? 0
         ),
+        salary_before_adjustments_total:
+          Number(snapshotResult.data.salary_before_adjustments_total ?? 0) === 0 &&
+          Number(snapshotResult.data.manual_bonus_total ?? 0) === 0 &&
+          Number(snapshotResult.data.manual_deduction_total ?? 0) === 0
+            ? Number(snapshotResult.data.calculated_payroll_total ?? 0)
+            : Number(snapshotResult.data.salary_before_adjustments_total ?? 0),
+        manual_bonus_total: Number(snapshotResult.data.manual_bonus_total ?? 0),
+        manual_deduction_total: Number(
+          snapshotResult.data.manual_deduction_total ?? 0
+        ),
+        net_manual_adjustment_total: Number(
+          snapshotResult.data.net_manual_adjustment_total ?? 0
+        ),
         calculated_payroll_total: Number(
           snapshotResult.data.calculated_payroll_total ?? 0
         ),
@@ -284,7 +298,20 @@ export default async function StaffPayrollCalculationPage({
       }
     : null
 
-  const calculations = ((calculationsResult.data ?? []) as any[]).map((row) => ({
+  const calculations = ((calculationsResult.data ?? []) as any[]).map((row) => {
+    const calculatedSalary = Number(row.calculated_salary ?? 0)
+    const manualBonus = Number(row.manual_bonus ?? 0)
+    const manualDeduction = Number(row.manual_deduction ?? 0)
+    const adjustmentBreakdown = Array.isArray(row.adjustment_breakdown)
+      ? row.adjustment_breakdown
+      : []
+    const storedSalaryBefore = Number(row.salary_before_adjustments ?? 0)
+    const salaryBeforeAdjustments =
+      storedSalaryBefore === 0 && manualBonus === 0 && manualDeduction === 0 && !adjustmentBreakdown.length
+        ? calculatedSalary
+        : storedSalaryBefore
+
+    return {
     id: String(row.id),
     snapshot_id: String(row.snapshot_id),
     month_start: String(row.month_start),
@@ -314,12 +341,18 @@ export default async function StaffPayrollCalculationPage({
     guaranteed_compensation: Number(row.guaranteed_compensation ?? 0),
     bonus_weight_share_percent: Number(row.bonus_weight_share_percent ?? 0),
     performance_bonus: Number(row.performance_bonus ?? 0),
-    calculated_salary: Number(row.calculated_salary ?? 0),
+    salary_before_adjustments: salaryBeforeAdjustments,
+    manual_bonus: manualBonus,
+    manual_deduction: manualDeduction,
+    net_manual_adjustment: Number(row.net_manual_adjustment ?? 0),
+    calculated_salary: calculatedSalary,
+    adjustment_breakdown: adjustmentBreakdown,
     task_rate_breakdown: Array.isArray(row.task_rate_breakdown)
       ? row.task_rate_breakdown
       : [],
     updated_at: String(row.updated_at),
-  }))
+  }
+  })
 
   const approvalVersions = ((approvalVersionsResult.data ?? []) as any[]).map(
     (row) => ({

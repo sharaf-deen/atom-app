@@ -154,6 +154,8 @@ function looksLikeMigrationMissing(message: string) {
     lower.includes('compensation_rate_period_id') ||
     lower.includes('staff_payroll_monthly_snapshots') ||
     lower.includes('staff_payroll_monthly_calculations') ||
+    lower.includes('staff_payroll_monthly_adjustments') ||
+    lower.includes('salary_before_adjustments') ||
     lower.includes('financial_source_hash') ||
     lower.includes('task_source_hash') ||
     lower.includes('draft_snapshot_hash') ||
@@ -181,7 +183,19 @@ type DraftStaffRow = {
   guaranteed_compensation: number
   bonus_weight_share_percent: number
   performance_bonus: number
+  salary_before_adjustments: number
+  manual_bonus: number
+  manual_deduction: number
+  net_manual_adjustment: number
   calculated_salary: number
+  adjustment_breakdown: Array<{
+    adjustment_id: string
+    adjustment_type: 'bonus' | 'deduction'
+    amount: number
+    reason: string
+    created_at: string
+    created_by_name_snapshot: string
+  }>
   task_rate_breakdown: Array<{
     task_log_id: string
     task_id: string
@@ -360,6 +374,7 @@ export async function POST(req: Request) {
         logsResult,
         compensationResult,
         staffResult,
+        adjustmentsResult,
       ] = await Promise.all([
         admin
           .from('subscription_payments')
@@ -401,6 +416,12 @@ export async function POST(req: Request) {
           .select('user_id,email,first_name,last_name,role')
           .in('role', [...STAFF_ROLES])
           .limit(10000),
+        admin
+          .from('staff_payroll_monthly_adjustments')
+          .select('id,month_start,staff_user_id,adjustment_type,amount,reason,status,created_at,created_by_name_snapshot')
+          .eq('month_start', monthStart)
+          .eq('status', 'active')
+          .limit(10000),
       ])
 
       const sourceError =
@@ -410,6 +431,7 @@ export async function POST(req: Request) {
         logsResult.error?.message ||
         compensationResult.error?.message ||
         staffResult.error?.message ||
+        adjustmentsResult.error?.message ||
         ''
 
       if (sourceError) {
@@ -430,6 +452,7 @@ export async function POST(req: Request) {
       const logs = (logsResult.data ?? []) as any[]
       const compensationProfiles = (compensationResult.data ?? []) as any[]
       const staffProfiles = (staffResult.data ?? []) as any[]
+      const adjustments = (adjustmentsResult.data ?? []) as any[]
 
       const sourceHashes = buildPayrollSourceHashes({
         payments,
@@ -438,6 +461,7 @@ export async function POST(req: Request) {
         logs,
         compensationProfiles,
         staffProfiles,
+        adjustments,
       })
 
       const membershipRevenue = round2(
@@ -560,6 +584,10 @@ export async function POST(req: Request) {
         const staffUserId = String(profile.staff_user_id ?? '')
         if (staffUserId && staffMap.has(staffUserId)) staffIds.add(staffUserId)
       }
+      for (const adjustment of adjustments) {
+        const staffUserId = String(adjustment.staff_user_id ?? '')
+        if (staffUserId && staffMap.has(staffUserId)) staffIds.add(staffUserId)
+      }
 
       const draftRows: DraftStaffRow[] = []
 
@@ -619,7 +647,12 @@ export async function POST(req: Request) {
           guaranteed_compensation: guaranteedCompensation,
           bonus_weight_share_percent: 0,
           performance_bonus: 0,
+          salary_before_adjustments: guaranteedCompensation,
+          manual_bonus: 0,
+          manual_deduction: 0,
+          net_manual_adjustment: 0,
           calculated_salary: guaranteedCompensation,
+          adjustment_breakdown: [],
           task_rate_breakdown: stats.taskRateBreakdown,
         })
       }
@@ -642,6 +675,71 @@ export async function POST(req: Request) {
           (bonusPoolPercent / 100)
       )
       const performanceBonusPool = allocateBonus(draftRows, potentialBonusPool)
+      const adjustmentsByStaff = new Map<string, any[]>()
+      for (const adjustment of adjustments) {
+        const staffUserId = String(adjustment.staff_user_id ?? '')
+        const list = adjustmentsByStaff.get(staffUserId) ?? []
+        list.push(adjustment)
+        adjustmentsByStaff.set(staffUserId, list)
+      }
+
+      for (const row of draftRows) {
+        const staffAdjustments = adjustmentsByStaff.get(row.staff_user_id) ?? []
+        row.salary_before_adjustments = round2(row.calculated_salary)
+        row.manual_bonus = round2(
+          staffAdjustments
+            .filter((adjustment) => adjustment.adjustment_type === 'bonus')
+            .reduce((sum, adjustment) => sum + Number(adjustment.amount ?? 0), 0)
+        )
+        row.manual_deduction = round2(
+          staffAdjustments
+            .filter((adjustment) => adjustment.adjustment_type === 'deduction')
+            .reduce((sum, adjustment) => sum + Number(adjustment.amount ?? 0), 0)
+        )
+        row.net_manual_adjustment = round2(row.manual_bonus - row.manual_deduction)
+        row.calculated_salary = round2(
+          row.salary_before_adjustments + row.net_manual_adjustment
+        )
+        row.adjustment_breakdown = staffAdjustments
+          .map((adjustment) => ({
+            adjustment_id: String(adjustment.id ?? ''),
+            adjustment_type: String(adjustment.adjustment_type) as 'bonus' | 'deduction',
+            amount: round2(Number(adjustment.amount ?? 0)),
+            reason: String(adjustment.reason ?? ''),
+            created_at: String(adjustment.created_at ?? ''),
+            created_by_name_snapshot: String(
+              adjustment.created_by_name_snapshot ?? 'Super Admin'
+            ),
+          }))
+          .sort((a, b) => a.adjustment_id.localeCompare(b.adjustment_id))
+      }
+
+      const negativeSalaryRows = draftRows.filter((row) => row.calculated_salary < 0)
+      if (negativeSalaryRows.length) {
+        return json(409, {
+          ok: false,
+          error: 'DEDUCTIONS_EXCEED_SALARY',
+          details: `Deductions exceed salary before adjustments for: ${negativeSalaryRows
+            .map((row) => row.staff_name_snapshot)
+            .join(', ')}. Reduce or void the deduction before recalculating.`,
+        })
+      }
+
+      const salaryBeforeAdjustmentsTotal = round2(
+        draftRows.reduce(
+          (sum, row) => sum + Number(row.salary_before_adjustments || 0),
+          0
+        )
+      )
+      const manualBonusTotal = round2(
+        draftRows.reduce((sum, row) => sum + Number(row.manual_bonus || 0), 0)
+      )
+      const manualDeductionTotal = round2(
+        draftRows.reduce((sum, row) => sum + Number(row.manual_deduction || 0), 0)
+      )
+      const netManualAdjustmentTotal = round2(
+        manualBonusTotal - manualDeductionTotal
+      )
       const calculatedPayrollTotal = round2(
         draftRows.reduce(
           (sum, row) => sum + Number(row.calculated_salary || 0),
@@ -676,6 +774,10 @@ export async function POST(req: Request) {
         available_result_after_guaranteed_payroll:
           availableResultAfterGuaranteedPayroll,
         performance_bonus_pool: performanceBonusPool,
+        salary_before_adjustments_total: salaryBeforeAdjustmentsTotal,
+        manual_bonus_total: manualBonusTotal,
+        manual_deduction_total: manualDeductionTotal,
+        net_manual_adjustment_total: netManualAdjustmentTotal,
         calculated_payroll_total: calculatedPayrollTotal,
         staff_count: draftRows.length,
         missing_hours_task_count: missingHoursTaskCount,
@@ -795,6 +897,10 @@ export async function POST(req: Request) {
             availableResultAfterGuaranteedPayroll,
           bonus_pool_percent: bonusPoolPercent,
           performance_bonus_pool: performanceBonusPool,
+          salary_before_adjustments_total: salaryBeforeAdjustmentsTotal,
+          manual_bonus_total: manualBonusTotal,
+          manual_deduction_total: manualDeductionTotal,
+          net_manual_adjustment_total: netManualAdjustmentTotal,
           calculated_payroll_total: calculatedPayrollTotal,
           staff_count: draftRows.length,
           missing_hours_task_count: missingHoursTaskCount,
