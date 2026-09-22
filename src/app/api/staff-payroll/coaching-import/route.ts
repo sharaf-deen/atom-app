@@ -1,4 +1,4 @@
-// Staff Payroll 1G — Automatic Coaching Import
+// Staff Payroll 2E — QR Evidence Reconciliation + Coaching Import
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
@@ -159,7 +159,17 @@ async function buildMonthModel(admin: any, monthStart: string) {
   const monthEnd = nextMonthStart(monthStart)
   const lock = await monthLocked(admin, monthStart)
 
-  const [sessionsResult, templatesResult, tasksResult, mappingsResult, confirmationsResult, importsResult, logsResult] =
+  const [
+    sessionsResult,
+    templatesResult,
+    tasksResult,
+    mappingsResult,
+    confirmationsResult,
+    importsResult,
+    logsResult,
+    unresolvedQrResult,
+    reconciliationsResult,
+  ] =
     await Promise.all([
       admin
         .from('schedule_training_sessions')
@@ -197,6 +207,17 @@ async function buildMonthModel(admin: any, monthStart: string) {
         .select('id,month_start,staff_user_id,task_id,task_name_snapshot,source,work_quantity,actual_hours,voided_at')
         .eq('month_start', monthStart)
         .is('voided_at', null),
+      admin
+        .from('coach_staff_attendance')
+        .select('id,staff_user_id,staff_name_snapshot,staff_role_snapshot,attendance_date,checked_in_at,source,device_tag,session_match_status,session_match_candidate_count')
+        .gte('attendance_date', monthStart)
+        .lt('attendance_date', monthEnd)
+        .in('session_match_status', ['unlinked', 'ambiguous'])
+        .order('checked_in_at', { ascending: true }),
+      admin
+        .from('staff_payroll_qr_reconciliations')
+        .select('id,attendance_id,training_session_id,reason,reconciled_at,reconciled_by,previous_match_status,arrival_delta_minutes')
+        .eq('month_start', monthStart),
     ])
 
   const firstError =
@@ -206,7 +227,9 @@ async function buildMonthModel(admin: any, monthStart: string) {
     mappingsResult.error ||
     confirmationsResult.error ||
     importsResult.error ||
-    logsResult.error
+    logsResult.error ||
+    unresolvedQrResult.error ||
+    reconciliationsResult.error
   if (firstError) throw firstError
 
   const sessions = (sessionsResult.data ?? []) as any[]
@@ -248,14 +271,22 @@ async function buildMonthModel(admin: any, monthStart: string) {
   const confirmations = (confirmationsResult.data ?? []) as any[]
   const imports = (importsResult.data ?? []) as any[]
   const monthlyLogs = (logsResult.data ?? []) as any[]
+  const unresolvedQrRows = (unresolvedQrResult.data ?? []) as any[]
+  const reconciliations = (reconciliationsResult.data ?? []) as any[]
 
   const sessionMap = new Map(sessions.map((row) => [String(row.id), row]))
   const mappingMap = new Map(
     mappings.filter((row) => row.is_active).map((row) => [String(row.class_template_id), row])
   )
   const taskMap = new Map(tasks.map((row) => [String(row.id), row]))
-  const qrKeys = new Set(
-    qrRows.map((row) => `${String(row.training_session_id)}:${String(row.staff_user_id)}`)
+  const qrMap = new Map(
+    qrRows.map((row) => [
+      `${String(row.training_session_id)}:${String(row.staff_user_id)}`,
+      row,
+    ])
+  )
+  const reconciliationByAttendance = new Map(
+    reconciliations.map((row) => [String(row.attendance_id), row])
   )
   const logKeys = new Set(
     trainingLogs.map((row) => `${String(row.training_session_id)}:${String(row.coach_user_id)}`)
@@ -282,7 +313,8 @@ async function buildMonthModel(admin: any, monthStart: string) {
       const key = `${String(session.id)}:${String(assignment.staff_user_id)}`
       const mapping = mappingMap.get(String(session.class_template_id)) ?? null
       const task = mapping ? taskMap.get(String(mapping.payroll_task_id)) ?? null : null
-      const hasQr = qrKeys.has(key)
+      const qrRow = qrMap.get(key) ?? null
+      const hasQr = Boolean(qrRow)
       const hasLog = logKeys.has(key)
       const confirmation = activeConfirmations.get(key) ?? null
       const imported = activeImports.get(key) ?? null
@@ -336,6 +368,20 @@ async function buildMonthModel(admin: any, monthStart: string) {
         payroll_task_name: task ? String(task.name) : imported?.task_name_snapshot ? String(imported.task_name_snapshot) : null,
         evidence_type: evidenceType,
         has_qr: hasQr,
+        qr_reconciliation: qrRow
+          ? (() => {
+              const reconciliation = reconciliationByAttendance.get(String(qrRow.id)) ?? null
+              return reconciliation
+                ? {
+                    id: String(reconciliation.id),
+                    reason: String(reconciliation.reason),
+                    reconciled_at: String(reconciliation.reconciled_at),
+                    previous_match_status: String(reconciliation.previous_match_status),
+                    arrival_delta_minutes: Number(reconciliation.arrival_delta_minutes),
+                  }
+                : null
+            })()
+          : null,
         has_completed_log: hasLog,
         manual_confirmation: confirmation
           ? {
@@ -371,6 +417,43 @@ async function buildMonthModel(admin: any, monthStart: string) {
       }
     })
     .filter(Boolean)
+
+  const qr_review = unresolvedQrRows.map((row) => {
+    const eligibleSessions = assignments
+      .filter((assignment) => String(assignment.staff_user_id) === String(row.staff_user_id))
+      .map((assignment) => {
+        const session = sessionMap.get(String(assignment.training_session_id))
+        if (!session || String(session.session_date) !== String(row.attendance_date)) return null
+        const key = `${String(session.id)}:${String(row.staff_user_id)}`
+        const hasExistingQr = qrMap.has(key)
+        const alreadyImported = activeImports.has(key)
+        if (hasExistingQr || alreadyImported) return null
+        return {
+          session_id: String(session.id),
+          session_date: String(session.session_date),
+          session_name: String(session.name_snapshot),
+          start_time: String(session.start_time),
+          end_time: session.end_time ? String(session.end_time) : null,
+          mat: session.mat_snapshot ? String(session.mat_snapshot) : null,
+          assignment_role: String(assignment.assignment_role),
+        }
+      })
+      .filter(Boolean)
+
+    return {
+      attendance_id: String(row.id),
+      staff_user_id: String(row.staff_user_id),
+      staff_name: String(row.staff_name_snapshot),
+      staff_role: String(row.staff_role_snapshot),
+      attendance_date: String(row.attendance_date),
+      checked_in_at: String(row.checked_in_at),
+      source: String(row.source),
+      device_tag: row.device_tag ? String(row.device_tag) : null,
+      match_status: String(row.session_match_status),
+      candidate_count: Number(row.session_match_candidate_count ?? 0),
+      eligible_sessions: eligibleSessions,
+    }
+  })
 
   const templateIdsInMonth = new Set(sessions.map((row) => String(row.class_template_id)))
   const templateRows = templates
@@ -435,6 +518,13 @@ async function buildMonthModel(admin: any, monthStart: string) {
       importance_multiplier: Number(row.importance_multiplier ?? 1),
     })),
     candidates,
+    qr_review,
+    qr_reconciliation_summary: {
+      pending_count: qr_review.length,
+      ambiguous_count: qr_review.filter((row) => row.match_status === 'ambiguous').length,
+      unlinked_count: qr_review.filter((row) => row.match_status === 'unlinked').length,
+      reconciled_count: reconciliations.length,
+    },
     imports: imports.map((row) => ({
       id: String(row.id),
       training_session_id: String(row.training_session_id),
@@ -498,6 +588,71 @@ export async function POST(req: Request) {
 
     const body = await req.json().catch(() => ({} as any))
     const action = cleanString(body?.action, 60)
+
+    if (action === 'reconcile_qr') {
+      const monthStart = normalizeMonthStart(body?.monthStart)
+      const attendanceId = normalizeUuid(body?.attendanceId)
+      const sessionId = normalizeUuid(body?.sessionId)
+      const reason = cleanString(body?.reason, 500)
+      if (!monthStart) return json(400, { ok: false, error: 'INVALID_MONTH' })
+      if (monthStart > currentCairoMonthStart()) {
+        return json(400, { ok: false, error: 'FUTURE_MONTH_NOT_ALLOWED' })
+      }
+      if (!attendanceId || !sessionId) {
+        return json(400, { ok: false, error: 'INVALID_QR_RECONCILIATION_TARGET' })
+      }
+      if (reason.length < 3) {
+        return json(400, { ok: false, error: 'QR_RECONCILIATION_REASON_REQUIRED' })
+      }
+
+      const lock = await monthLocked(admin, monthStart)
+      if (lock.locked) return json(409, { ok: false, error: 'PAYROLL_MONTH_LOCKED' })
+
+      const { data, error } = await (actor.supabase as any).rpc(
+        'staff_payroll_reconcile_qr_attendance',
+        {
+          p_attendance_id: attendanceId,
+          p_training_session_id: sessionId,
+          p_reason: reason,
+        }
+      )
+      if (error) {
+        const message = error.message ?? String(error)
+        const known = [
+          'QR_ATTENDANCE_NOT_FOUND',
+          'QR_ATTENDANCE_NOT_RECONCILABLE',
+          'QR_ATTENDANCE_ALREADY_RECONCILED',
+          'SESSION_NOT_ELIGIBLE',
+          'ACTIVE_ASSIGNMENT_REQUIRED',
+          'SESSION_QR_EVIDENCE_ALREADY_EXISTS',
+          'COACHING_SESSION_ALREADY_IMPORTED',
+          'STAFF_PAYROLL_MONTH_LOCKED',
+          'QR_RECONCILIATION_REASON_REQUIRED',
+        ].find((code) => message.includes(code))
+        return json(known === 'QR_ATTENDANCE_NOT_FOUND' ? 404 : known ? 409 : 500, {
+          ok: false,
+          error: known ?? 'QR_RECONCILIATION_FAILED',
+          details: message,
+        })
+      }
+
+      await safeAudit(admin, {
+        actor_user_id: actor.actorId,
+        action: 'staff_payroll_qr_evidence_reconciled',
+        action_details: {
+          month_start: monthStart,
+          attendance_id: attendanceId,
+          training_session_id: sessionId,
+          reconciliation_id: data?.reconciliation_id ?? null,
+          reason,
+          note_scope: 'Manual QR evidence reconciliation only; no punctuality or absence judgment.',
+        },
+      })
+      revalidatePath('/admin/staff-payroll/coaching-import')
+      revalidatePath('/admin/staff-payroll/monthly-tasks')
+      revalidatePath('/admin/staff-payroll/calculation')
+      return json(200, { ok: true, reconciliation: data })
+    }
 
     if (action === 'save_mapping') {
       const classTemplateId = normalizeUuid(body?.classTemplateId)
