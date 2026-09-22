@@ -55,6 +55,13 @@ type Candidate = {
   payroll_task_name: string | null
   evidence_type: string | null
   has_qr: boolean
+  qr_reconciliation: {
+    id: string
+    reason: string
+    reconciled_at: string
+    previous_match_status: string
+    arrival_delta_minutes: number
+  } | null
   has_completed_log: boolean
   manual_confirmation: {
     id: string
@@ -81,6 +88,37 @@ type Candidate = {
   } | null
 }
 
+type QrReviewSession = {
+  session_id: string
+  session_date: string
+  session_name: string
+  start_time: string
+  end_time: string | null
+  mat: string | null
+  assignment_role: string
+}
+
+type QrReviewItem = {
+  attendance_id: string
+  staff_user_id: string
+  staff_name: string
+  staff_role: string
+  attendance_date: string
+  checked_in_at: string
+  source: string
+  device_tag: string | null
+  match_status: 'unlinked' | 'ambiguous'
+  candidate_count: number
+  eligible_sessions: QrReviewSession[]
+}
+
+type QrReconciliationSummary = {
+  pending_count: number
+  ambiguous_count: number
+  unlinked_count: number
+  reconciled_count: number
+}
+
 type ReadyPreview = {
   ready_count: number
   ready_hours: number
@@ -99,6 +137,8 @@ type Model = {
   templates: ScheduleTemplate[]
   tasks: PayrollTask[]
   candidates: Candidate[]
+  qr_review: QrReviewItem[]
+  qr_reconciliation_summary: QrReconciliationSummary
   summary: Record<string, number>
   ready_preview: ReadyPreview
 }
@@ -111,6 +151,11 @@ type Props = {
 type MappingDraft = {
   taskId: string
   duration: string
+}
+
+type QrReconciliationDraft = {
+  sessionId: string
+  reason: string
 }
 
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
@@ -138,6 +183,19 @@ function dateLabel(value: string) {
 function timeLabel(value: string | null) {
   if (!value) return '—'
   return value.slice(0, 5)
+}
+
+function cairoDateTimeLabel(value: string) {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+  return new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Africa/Cairo',
+    day: '2-digit',
+    month: 'short',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  }).format(date)
 }
 
 function numberLabel(value: number | null) {
@@ -197,6 +255,15 @@ function errorLabel(code: string) {
       return 'One of the selected sessions no longer has an active payroll mapping.'
     case 'MIGRATION_REQUIRED':
       return 'Required database changes are not available yet. Deploy the latest database changes first.'
+    case 'QR_ATTENDANCE_NOT_RECONCILABLE':
+    case 'QR_ATTENDANCE_ALREADY_RECONCILED':
+      return 'This QR scan was already linked or is no longer available for reconciliation.'
+    case 'SESSION_QR_EVIDENCE_ALREADY_EXISTS':
+      return 'This coach and session already have QR evidence.'
+    case 'ACTIVE_ASSIGNMENT_REQUIRED':
+      return 'The coach is no longer actively assigned to that session.'
+    case 'QR_RECONCILIATION_REASON_REQUIRED':
+      return 'A reconciliation reason of at least 3 characters is required.'
     default:
       return code.replaceAll('_', ' ').toLowerCase().replace(/^./, (c) => c.toUpperCase())
   }
@@ -213,6 +280,7 @@ export default function StaffPayrollCoachingImportManager({ initialMonth, canWri
   const [selected, setSelected] = React.useState<Set<string>>(new Set())
   const [durations, setDurations] = React.useState<Record<string, string>>({})
   const [mappingDrafts, setMappingDrafts] = React.useState<Record<string, MappingDraft>>({})
+  const [qrDrafts, setQrDrafts] = React.useState<Record<string, QrReconciliationDraft>>({})
   const [confirmingKey, setConfirmingKey] = React.useState<string | null>(null)
   const [confirmReason, setConfirmReason] = React.useState('')
   const [showReadyPreview, setShowReadyPreview] = React.useState(false)
@@ -248,6 +316,12 @@ export default function StaffPayrollCoachingImportManager({ initialMonth, canWri
       setDurations(nextDurations)
       setSelected(new Set())
       setShowReadyPreview(false)
+
+      const nextQrDrafts: Record<string, QrReconciliationDraft> = {}
+      for (const item of nextModel.qr_review) {
+        nextQrDrafts[item.attendance_id] = { sessionId: '', reason: '' }
+      }
+      setQrDrafts(nextQrDrafts)
 
       const nextMappings: Record<string, MappingDraft> = {}
       for (const template of nextModel.templates) {
@@ -312,6 +386,38 @@ export default function StaffPayrollCoachingImportManager({ initialMonth, canWri
       await load()
     } catch (e: any) {
       setError(errorLabel(e?.message ?? 'MAPPING_SAVE_FAILED'))
+    } finally {
+      setPending(false)
+    }
+  }
+
+  async function reconcileQr(item: QrReviewItem) {
+    const draft = qrDrafts[item.attendance_id]
+    if (!draft?.sessionId) {
+      setError('Select the assigned scheduled session for this QR scan.')
+      return
+    }
+    if (draft.reason.trim().length < 3) {
+      setError('A short reconciliation reason is required.')
+      return
+    }
+
+    setPending(true)
+    setError(null)
+    setSuccess(null)
+    try {
+      await post({
+        action: 'reconcile_qr',
+        monthStart: `${month}-01`,
+        attendanceId: item.attendance_id,
+        sessionId: draft.sessionId,
+        reason: draft.reason.trim(),
+      })
+      setSuccess(`QR evidence reconciled for ${item.staff_name}. The assigned session can now enter Payroll review.`)
+      await load()
+      router.refresh()
+    } catch (e: any) {
+      setError(errorLabel(e?.message ?? 'QR_RECONCILIATION_FAILED'))
     } finally {
       setPending(false)
     }
@@ -506,6 +612,124 @@ export default function StaffPayrollCoachingImportManager({ initialMonth, canWri
               </div>
             </div>
           ) : null}
+
+          <section className="rounded-2xl border border-black/10 bg-white p-4 sm:p-5">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <h2 className="text-lg font-bold">QR Evidence Reconciliation</h2>
+                  <span className="rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-[11px] font-semibold text-amber-900">
+                    {model.qr_reconciliation_summary.pending_count} pending
+                  </span>
+                </div>
+                <p className="mt-1 max-w-3xl text-xs text-[hsl(var(--muted))]">
+                  Link only unlinked or ambiguous staff QR scans to a real assigned session on the same day. This creates factual Payroll evidence; it does not decide On time, Late or Absent.
+                </p>
+              </div>
+              {!canWrite ? <span className="text-xs font-semibold text-sky-700">Admin · read-only</span> : null}
+            </div>
+
+            <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
+              {[
+                ['Unlinked', model.qr_reconciliation_summary.unlinked_count],
+                ['Ambiguous', model.qr_reconciliation_summary.ambiguous_count],
+                ['Pending', model.qr_reconciliation_summary.pending_count],
+                ['Reconciled', model.qr_reconciliation_summary.reconciled_count],
+              ].map(([label, value]) => (
+                <div key={String(label)} className="rounded-xl border border-black/10 bg-black/[0.015] p-3">
+                  <div className="text-[11px] text-[hsl(var(--muted))]">{label}</div>
+                  <div className="mt-1 text-xl font-bold">{value}</div>
+                </div>
+              ))}
+            </div>
+
+            <div className="mt-4 space-y-3">
+              {model.qr_review.length === 0 ? (
+                <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-900">
+                  No unlinked or ambiguous staff QR scans require Payroll review for {monthLabel(month)}.
+                </div>
+              ) : model.qr_review.map((item) => {
+                const draft = qrDrafts[item.attendance_id] ?? { sessionId: '', reason: '' }
+                const canReconcile = canWrite && !model.month_locked && item.eligible_sessions.length > 0
+                return (
+                  <div key={item.attendance_id} className="rounded-2xl border border-black/10 p-4">
+                    <div className="flex flex-col gap-4 lg:grid lg:grid-cols-[1.15fr_1.35fr_1fr_auto] lg:items-end">
+                      <div>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="text-sm font-semibold">{item.staff_name}</span>
+                          <span className={
+                            'rounded-full border px-2 py-0.5 text-[11px] font-semibold ' +
+                            (item.match_status === 'ambiguous'
+                              ? 'border-orange-200 bg-orange-50 text-orange-900'
+                              : 'border-amber-200 bg-amber-50 text-amber-900')
+                          }>
+                            {item.match_status === 'ambiguous' ? 'Ambiguous scan' : 'Unlinked scan'}
+                          </span>
+                        </div>
+                        <div className="mt-2 text-xs text-[hsl(var(--muted))]">
+                          QR: <strong className="text-black">{cairoDateTimeLabel(item.checked_in_at)}</strong>
+                          {item.match_status === 'ambiguous' ? ` · ${item.candidate_count} automatic candidates` : ''}
+                          {item.device_tag ? ` · ${item.device_tag}` : ''}
+                        </div>
+                      </div>
+
+                      <label className="text-xs font-medium">
+                        Assigned session on {dateLabel(item.attendance_date)}
+                        <select
+                          value={draft.sessionId}
+                          onChange={(event) => setQrDrafts((prev) => ({
+                            ...prev,
+                            [item.attendance_id]: { ...draft, sessionId: event.target.value },
+                          }))}
+                          disabled={!canReconcile || pending}
+                          className="mt-1 w-full rounded-xl border border-black/10 bg-white px-3 py-2 text-sm disabled:opacity-60"
+                        >
+                          <option value="">Select assigned session</option>
+                          {item.eligible_sessions.map((session) => (
+                            <option key={session.session_id} value={session.session_id}>
+                              {timeLabel(session.start_time)} · {session.session_name}{session.mat ? ` · ${session.mat}` : ''} · {roleLabel(session.assignment_role)}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+
+                      <label className="text-xs font-medium">
+                        Reconciliation reason
+                        <input
+                          value={draft.reason}
+                          onChange={(event) => setQrDrafts((prev) => ({
+                            ...prev,
+                            [item.attendance_id]: { ...draft, reason: event.target.value },
+                          }))}
+                          maxLength={500}
+                          disabled={!canReconcile || pending}
+                          placeholder="e.g. Verified assigned class"
+                          className="mt-1 w-full rounded-xl border border-black/10 bg-white px-3 py-2 text-sm disabled:opacity-60"
+                        />
+                      </label>
+
+                      {canWrite && !model.month_locked ? (
+                        <button
+                          type="button"
+                          onClick={() => reconcileQr(item)}
+                          disabled={pending || !draft.sessionId || draft.reason.trim().length < 3 || !canReconcile}
+                          className="rounded-xl bg-black px-4 py-2 text-sm font-semibold text-white disabled:opacity-40"
+                        >
+                          Reconcile
+                        </button>
+                      ) : null}
+                    </div>
+
+                    {item.eligible_sessions.length === 0 ? (
+                      <div className="mt-3 rounded-xl border border-rose-200 bg-rose-50 p-3 text-xs text-rose-900">
+                        No eligible assigned session is available for this coach on this date. Keep the scan unchanged and review the schedule assignment.
+                      </div>
+                    ) : null}
+                  </div>
+                )
+              })}
+            </div>
+          </section>
 
           <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
             {[
@@ -776,7 +1000,7 @@ export default function StaffPayrollCoachingImportManager({ initialMonth, canWri
                           {candidate.mat ? ` · ${candidate.mat}` : ''}
                         </div>
                         <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-[hsl(var(--muted))]">
-                          <span>Evidence: <strong className="text-black">{evidenceLabel(candidate.evidence_type)}</strong></span>
+                          <span>Evidence: <strong className="text-black">{candidate.qr_reconciliation ? 'QR reconciled' : evidenceLabel(candidate.evidence_type)}</strong></span>
                           <span>Payroll Task: <strong className="text-black">{candidate.payroll_task_name ?? 'Not mapped'}</strong></span>
                           {candidate.imported ? (
                             <span>Imported: <strong className="text-black">{numberLabel(candidate.imported.duration_hours)} h</strong></span>
@@ -802,6 +1026,12 @@ export default function StaffPayrollCoachingImportManager({ initialMonth, canWri
                                 Revoke
                               </button>
                             ) : null}
+                          </div>
+                        ) : null}
+
+                        {candidate.qr_reconciliation ? (
+                          <div className="mt-3 rounded-xl border border-sky-200 bg-sky-50 p-3 text-xs text-sky-950">
+                            Reconciled QR evidence: {candidate.qr_reconciliation.reason} · factual arrival delta {candidate.qr_reconciliation.arrival_delta_minutes >= 0 ? '+' : ''}{candidate.qr_reconciliation.arrival_delta_minutes} min. No punctuality label is applied.
                           </div>
                         ) : null}
 
