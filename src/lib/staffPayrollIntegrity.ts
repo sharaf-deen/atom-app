@@ -58,13 +58,27 @@ export function buildPayrollSourceHashes(input: {
 
   const compensation = sortByKey(
     input.compensationProfiles,
-    (row) => String(row.staff_user_id ?? '')
+    (row) => `${String(row.staff_user_id ?? '')}:${String(row.effective_from ?? '')}`
   ).map((row) => ({
+    id: String(row.id ?? ''),
     staff_user_id: String(row.staff_user_id ?? ''),
+    effective_from: String(row.effective_from ?? ''),
+    effective_until: row.effective_until == null ? null : String(row.effective_until),
     fixed_monthly_base: normalizeNumber(row.fixed_monthly_base),
     weighted_hour_rate: normalizeNumber(row.weighted_hour_rate),
     bonus_eligible: Boolean(row.bonus_eligible),
     updated_at: row.updated_at == null ? null : String(row.updated_at),
+    task_rates: sortByKey(
+      Array.isArray(row.staff_compensation_task_rates)
+        ? row.staff_compensation_task_rates
+        : [],
+      (taskRate) => String(taskRate.task_id ?? '')
+    ).map((taskRate) => ({
+      id: String(taskRate.id ?? ''),
+      task_id: String(taskRate.task_id ?? ''),
+      weighted_hour_rate: normalizeNumber(taskRate.weighted_hour_rate),
+      updated_at: taskRate.updated_at == null ? null : String(taskRate.updated_at),
+    })),
   }))
 
   const staff = sortByKey(input.staffProfiles, (row) => String(row.user_id ?? '')).map((row) => ({
@@ -121,6 +135,18 @@ export function buildPayrollCalculationsHash(rows: any[]) {
     staff_name_snapshot: String(row.staff_name_snapshot ?? ''),
     staff_role_snapshot: row.staff_role_snapshot == null ? null : String(row.staff_role_snapshot),
     compensation_configured: Boolean(row.compensation_configured),
+    compensation_rate_period_id:
+      row.compensation_rate_period_id == null
+        ? null
+        : String(row.compensation_rate_period_id),
+    compensation_effective_from:
+      row.compensation_effective_from == null
+        ? null
+        : String(row.compensation_effective_from),
+    compensation_effective_until:
+      row.compensation_effective_until == null
+        ? null
+        : String(row.compensation_effective_until),
     fixed_monthly_base: normalizeNumber(row.fixed_monthly_base),
     weighted_hour_rate: normalizeNumber(row.weighted_hour_rate),
     bonus_eligible: Boolean(row.bonus_eligible),
@@ -133,6 +159,20 @@ export function buildPayrollCalculationsHash(rows: any[]) {
     bonus_weight_share_percent: normalizeNumber(row.bonus_weight_share_percent),
     performance_bonus: normalizeNumber(row.performance_bonus),
     calculated_salary: normalizeNumber(row.calculated_salary),
+    task_rate_breakdown: sortByKey(
+      Array.isArray(row.task_rate_breakdown) ? row.task_rate_breakdown : [],
+      (item) => String(item.task_log_id ?? item.task_id ?? '')
+    ).map((item) => ({
+      task_log_id: String(item.task_log_id ?? ''),
+      task_id: String(item.task_id ?? ''),
+      task_name: String(item.task_name ?? ''),
+      actual_hours: normalizeNumber(item.actual_hours),
+      importance_multiplier: normalizeNumber(item.importance_multiplier),
+      weighted_hours: normalizeNumber(item.weighted_hours),
+      applied_rate: normalizeNumber(item.applied_rate),
+      rate_source: String(item.rate_source ?? ''),
+      amount: normalizeNumber(item.amount),
+    })),
   }))
 
   return stableHash(normalized)
