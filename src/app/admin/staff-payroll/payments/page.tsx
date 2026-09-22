@@ -158,12 +158,25 @@ export default async function StaffPayrollPaymentsPage({
   if (!migrationMissing && currentVersion?.id) {
     calculationsResult = await admin
       .from('staff_payroll_approval_calculations')
-      .select('id,approval_version_id,snapshot_id,month_start,staff_user_id,staff_name_snapshot,staff_role_snapshot,fixed_monthly_base,weighted_hour_rate,actual_hours,weighted_hours,task_compensation,performance_bonus,calculated_salary')
+      .select('id,approval_version_id,snapshot_id,month_start,staff_user_id,staff_name_snapshot,staff_role_snapshot,fixed_monthly_base,weighted_hour_rate,actual_hours,weighted_hours,task_compensation,performance_bonus,salary_before_adjustments,manual_bonus,manual_deduction,net_manual_adjustment,calculated_salary,adjustment_breakdown')
       .eq('approval_version_id', currentVersion.id)
       .order('staff_name_snapshot', { ascending: true })
   }
 
-  const calculations = ((calculationsResult.data ?? []) as any[]).map((row) => ({
+  const calculations = ((calculationsResult.data ?? []) as any[]).map((row) => {
+    const calculatedSalary = Number(row.calculated_salary ?? 0)
+    const manualBonus = Number(row.manual_bonus ?? 0)
+    const manualDeduction = Number(row.manual_deduction ?? 0)
+    const adjustmentBreakdown = Array.isArray(row.adjustment_breakdown)
+      ? row.adjustment_breakdown
+      : []
+    const storedSalaryBefore = Number(row.salary_before_adjustments ?? 0)
+    const salaryBeforeAdjustments =
+      storedSalaryBefore === 0 && manualBonus === 0 && manualDeduction === 0 && !adjustmentBreakdown.length
+        ? calculatedSalary
+        : storedSalaryBefore
+
+    return {
     id: String(row.id),
     approval_version_id: String(row.approval_version_id),
     snapshot_id: String(row.snapshot_id),
@@ -177,8 +190,14 @@ export default async function StaffPayrollPaymentsPage({
     weighted_hours: Number(row.weighted_hours ?? 0),
     task_compensation: Number(row.task_compensation ?? 0),
     performance_bonus: Number(row.performance_bonus ?? 0),
-    calculated_salary: Number(row.calculated_salary ?? 0),
-  }))
+    salary_before_adjustments: salaryBeforeAdjustments,
+    manual_bonus: manualBonus,
+    manual_deduction: manualDeduction,
+    net_manual_adjustment: Number(row.net_manual_adjustment ?? 0),
+    calculated_salary: calculatedSalary,
+    adjustment_breakdown: adjustmentBreakdown,
+  }
+  })
 
   const payments = ((paymentsResult.data ?? []) as any[]).map((row) => ({
     id: String(row.id),

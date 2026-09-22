@@ -38,7 +38,19 @@ type ApprovalCalculation = {
   weighted_hours: number
   task_compensation: number
   performance_bonus: number
+  salary_before_adjustments: number
+  manual_bonus: number
+  manual_deduction: number
+  net_manual_adjustment: number
   calculated_salary: number
+  adjustment_breakdown: Array<{
+    adjustment_id: string
+    adjustment_type: 'bonus' | 'deduction'
+    amount: number
+    reason: string
+    created_at: string
+    created_by_name_snapshot: string
+  }>
 }
 
 type SalaryPayment = {
@@ -513,7 +525,10 @@ export default function StaffPayrollPaymentsManager({
                         </span>
                       </div>
                       <div className="mt-2 text-xs text-[hsl(var(--muted))]">
-                        {number(calculation.weighted_hours)} weighted hours · Task compensation {money(calculation.task_compensation)} · Bonus {money(calculation.performance_bonus)}
+                        {number(calculation.weighted_hours)} weighted hours · Task compensation {money(calculation.task_compensation)} · Performance bonus {money(calculation.performance_bonus)}
+                      </div>
+                      <div className="mt-1 text-xs text-[hsl(var(--muted))]">
+                        Salary before adjustments {money(calculation.salary_before_adjustments)} · Monthly bonuses + {money(calculation.manual_bonus)} · Deductions − {money(calculation.manual_deduction)}
                       </div>
                     </div>
 
@@ -542,6 +557,22 @@ export default function StaffPayrollPaymentsManager({
                       </div>
                     </div>
                   </div>
+
+                  {calculation.adjustment_breakdown.length ? (
+                    <details className="mt-4 rounded-2xl border border-black/10 p-3">
+                      <summary className="cursor-pointer text-xs font-semibold">
+                        Approved bonuses & deductions · net {calculation.net_manual_adjustment >= 0 ? '+' : '−'} {money(Math.abs(calculation.net_manual_adjustment))}
+                      </summary>
+                      <div className="mt-3 space-y-2">
+                        {calculation.adjustment_breakdown.map((item) => (
+                          <div key={item.adjustment_id} className="flex flex-col gap-1 rounded-xl bg-black/[0.025] p-2 text-xs sm:flex-row sm:items-center sm:justify-between">
+                            <div><span className="font-medium">{item.reason}</span><span className="text-[hsl(var(--muted))]"> · {item.adjustment_type === 'bonus' ? 'Bonus' : 'Deduction'}</span></div>
+                            <div className={item.adjustment_type === 'bonus' ? 'font-semibold text-emerald-800' : 'font-semibold text-rose-800'}>{item.adjustment_type === 'bonus' ? '+' : '−'} {money(item.amount)}</div>
+                          </div>
+                        ))}
+                      </div>
+                    </details>
+                  ) : null}
 
                   {staffPayments.length ? (
                     <div className="mt-4 space-y-2">

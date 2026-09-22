@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import {
   Banknote,
+  BadgeDollarSign,
   BookOpenCheck,
   Calculator,
   CheckCircle2,
@@ -150,6 +151,7 @@ export default async function StaffPayrollOverviewPage({
     mappingResult,
     logsResult,
     compensationResult,
+    adjustmentsResult,
     snapshotResult,
     importsResult,
     sessionsResult,
@@ -181,6 +183,11 @@ export default async function StaffPayrollOverviewPage({
       .select('staff_user_id')
       .lte('effective_from', monthStart)
       .or(`effective_until.is.null,effective_until.gt.${monthStart}`),
+    admin
+      .from('staff_payroll_monthly_adjustments')
+      .select('adjustment_type,amount,status')
+      .eq('month_start', monthStart)
+      .eq('status', 'active'),
     admin
       .from('staff_payroll_monthly_snapshots')
       .select(
@@ -224,6 +231,7 @@ export default async function StaffPayrollOverviewPage({
     mappingResult.error?.message ||
     logsResult.error?.message ||
     compensationResult.error?.message ||
+    adjustmentsResult.error?.message ||
     snapshotResult.error?.message ||
     importsResult.error?.message ||
     sessionsResult.error?.message ||
@@ -279,6 +287,17 @@ export default async function StaffPayrollOverviewPage({
     0
   )
   const remainingDue = Math.max(0, approvedTotal - paidTotal)
+  const activeAdjustments = (adjustmentsResult.data ?? []) as Array<{
+    adjustment_type: 'bonus' | 'deduction'
+    amount: number
+    status: string
+  }>
+  const adjustmentBonusTotal = activeAdjustments
+    .filter((row) => row.adjustment_type === 'bonus')
+    .reduce((sum, row) => sum + Number(row.amount ?? 0), 0)
+  const adjustmentDeductionTotal = activeAdjustments
+    .filter((row) => row.adjustment_type === 'deduction')
+    .reduce((sum, row) => sum + Number(row.amount ?? 0), 0)
 
   const taskTone = (taskResult.count ?? 0) > 0 ? 'ready' : 'warning'
   const coachingTone =
@@ -360,6 +379,21 @@ export default async function StaffPayrollOverviewPage({
     },
     {
       number: 5,
+      title: 'Bonuses & Deductions',
+      description: `${activeAdjustments.length} active adjustments · + ${money(adjustmentBonusTotal)} bonuses · − ${money(adjustmentDeductionTotal)} deductions.`,
+      status:
+        snapshot?.status === 'approved'
+          ? 'Adjustments approved & locked'
+          : activeAdjustments.length
+            ? 'Adjustments ready for recalculation'
+            : 'No manual adjustments',
+      tone: snapshot?.status === 'approved' ? 'ready' : 'neutral',
+      href: `/admin/staff-payroll/adjustments?month=${selectedMonth}`,
+      action: canWrite ? 'Manage adjustments' : 'Review adjustments',
+      icon: BadgeDollarSign,
+    },
+    {
+      number: 6,
       title: 'Salary Calculation',
       description: snapshot
         ? `${snapshot.staff_count} staff · ${money(approvedTotal)} total payroll.`
@@ -376,7 +410,7 @@ export default async function StaffPayrollOverviewPage({
       icon: Calculator,
     },
     {
-      number: 6,
+      number: 7,
       title: 'Payments',
       description:
         snapshot?.status === 'approved'
@@ -404,7 +438,7 @@ export default async function StaffPayrollOverviewPage({
           <div className="max-w-3xl">
             <div className="flex flex-wrap items-center gap-2">
               <span className="rounded-full bg-black px-3 py-1 text-xs font-semibold text-white">
-                Staff Payroll 2D
+                Staff Payroll 2F
               </span>
               <span
                 className={

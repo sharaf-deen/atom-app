@@ -43,6 +43,10 @@ type Snapshot = {
   guaranteed_payroll: number
   available_result_after_guaranteed_payroll: number
   performance_bonus_pool: number
+  salary_before_adjustments_total: number
+  manual_bonus_total: number
+  manual_deduction_total: number
+  net_manual_adjustment_total: number
   calculated_payroll_total: number
   staff_count: number
   missing_hours_task_count: number
@@ -80,7 +84,19 @@ type Calculation = {
   guaranteed_compensation: number
   bonus_weight_share_percent: number
   performance_bonus: number
+  salary_before_adjustments: number
+  manual_bonus: number
+  manual_deduction: number
+  net_manual_adjustment: number
   calculated_salary: number
+  adjustment_breakdown: Array<{
+    adjustment_id: string
+    adjustment_type: 'bonus' | 'deduction'
+    amount: number
+    reason: string
+    created_at: string
+    created_by_name_snapshot: string
+  }>
   task_rate_breakdown: Array<{
     task_log_id: string
     task_id: string
@@ -668,6 +684,31 @@ export default function StaffPayrollCalculationManager({
 
           <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <div className="rounded-2xl border border-black/10 bg-white p-4">
+              <div className="text-xs text-[hsl(var(--muted))]">Salary before manual adjustments</div>
+              <div className="mt-1 text-xl font-bold">{money(snapshot.salary_before_adjustments_total)}</div>
+              <div className="mt-1 text-xs text-[hsl(var(--muted))]">Base + tasks + performance bonus</div>
+            </div>
+            <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4">
+              <div className="text-xs text-emerald-900/70">Monthly bonuses</div>
+              <div className="mt-1 text-xl font-bold text-emerald-950">+ {money(snapshot.manual_bonus_total)}</div>
+            </div>
+            <div className="rounded-2xl border border-rose-200 bg-rose-50 p-4">
+              <div className="text-xs text-rose-900/70">Monthly deductions</div>
+              <div className="mt-1 text-xl font-bold text-rose-950">− {money(snapshot.manual_deduction_total)}</div>
+            </div>
+            <div className="rounded-2xl border border-black/10 bg-white p-4">
+              <div className="text-xs text-[hsl(var(--muted))]">Net manual adjustment</div>
+              <div className="mt-1 text-xl font-bold">
+                {snapshot.net_manual_adjustment_total >= 0 ? '+' : '−'} {money(Math.abs(snapshot.net_manual_adjustment_total))}
+              </div>
+              <Link href={`/admin/staff-payroll/adjustments?month=${monthStart.slice(0, 7)}`} className="mt-2 inline-block text-xs font-semibold underline">
+                Review bonuses & deductions
+              </Link>
+            </div>
+          </section>
+
+          <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <div className="rounded-2xl border border-black/10 bg-white p-4">
               <div className="text-xs text-[hsl(var(--muted))]">Guaranteed payroll</div>
               <div className="mt-1 text-xl font-bold">{money(snapshot.guaranteed_payroll)}</div>
               <div className="mt-1 text-xs text-[hsl(var(--muted))]">Fixed base + task compensation</div>
@@ -737,7 +778,7 @@ export default function StaffPayrollCalculationManager({
               <div className="text-xs font-semibold uppercase tracking-[0.12em] text-[hsl(var(--muted))]">Staff calculation</div>
               <h2 className="mt-1 text-xl font-bold">Salary preview</h2>
               <p className="mt-1 text-sm text-[hsl(var(--muted))]">
-                Performance bonus is distributed by each eligible staff member&apos;s share of weighted hours.
+                Performance bonus is distributed by weighted-hours share, then active monthly bonuses and deductions are applied to produce the final salary.
               </p>
             </div>
 
@@ -779,7 +820,7 @@ export default function StaffPayrollCalculationManager({
                       </div>
                     </div>
 
-                    <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+                    <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
                       <div className="rounded-xl bg-black/[0.025] p-3">
                         <div className="text-[11px] text-[hsl(var(--muted))]">Fixed base</div>
                         <div className="mt-1 text-sm font-semibold">{money(row.fixed_monthly_base)}</div>
@@ -799,11 +840,39 @@ export default function StaffPayrollCalculationManager({
                           {row.bonus_eligible ? `${number(row.bonus_weight_share_percent)}% share` : 'Not bonus eligible'}
                         </div>
                       </div>
+                      <div className="rounded-xl bg-black/[0.025] p-3">
+                        <div className="text-[11px] text-[hsl(var(--muted))]">Before adjustments</div>
+                        <div className="mt-1 text-sm font-semibold">{money(row.salary_before_adjustments)}</div>
+                        <div className="mt-0.5 text-[10px] text-[hsl(var(--muted))]">
+                          + {money(row.manual_bonus)} · − {money(row.manual_deduction)}
+                        </div>
+                      </div>
                       <div className="rounded-xl bg-emerald-50 p-3">
                         <div className="text-[11px] text-emerald-900/70">{isApproved ? 'Approved salary' : 'Total draft salary'}</div>
                         <div className="mt-1 text-sm font-bold text-emerald-950">{money(row.calculated_salary)}</div>
                       </div>
                     </div>
+
+                    {row.adjustment_breakdown.length ? (
+                      <details className="mt-3 rounded-xl border border-black/10 p-3">
+                        <summary className="cursor-pointer text-xs font-semibold">
+                          Monthly adjustments · {row.adjustment_breakdown.length} line{row.adjustment_breakdown.length === 1 ? '' : 's'} · net {row.net_manual_adjustment >= 0 ? '+' : '−'} {money(Math.abs(row.net_manual_adjustment))}
+                        </summary>
+                        <div className="mt-3 space-y-2">
+                          {row.adjustment_breakdown.map((item) => (
+                            <div key={item.adjustment_id} className="grid gap-1 rounded-lg bg-black/[0.025] p-2 text-xs sm:grid-cols-[1fr_auto] sm:items-center">
+                              <div>
+                                <div className="font-medium">{item.reason}</div>
+                                <div className="text-[hsl(var(--muted))]">{item.adjustment_type === 'bonus' ? 'Bonus' : 'Deduction'} · recorded by {item.created_by_name_snapshot}</div>
+                              </div>
+                              <div className={item.adjustment_type === 'bonus' ? 'font-semibold text-emerald-800 sm:text-right' : 'font-semibold text-rose-800 sm:text-right'}>
+                                {item.adjustment_type === 'bonus' ? '+' : '−'} {money(item.amount)}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </details>
+                    ) : null}
 
                     {row.task_rate_breakdown.length ? (
                       <details className="mt-3 rounded-xl border border-black/10 p-3">
