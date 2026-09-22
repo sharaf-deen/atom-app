@@ -1,6 +1,7 @@
 'use client'
 
 import * as React from 'react'
+import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 
 type StaffProfile = {
@@ -12,11 +13,15 @@ type StaffProfile = {
 }
 
 type CompensationProfile = {
+  id: string
   staff_user_id: string
+  effective_from: string
+  effective_until: string | null
   fixed_monthly_base: number
   weighted_hour_rate: number
   bonus_eligible: boolean
   updated_at: string | null
+  task_override_count: number
 }
 
 type Snapshot = {
@@ -61,6 +66,9 @@ type Calculation = {
   staff_name_snapshot: string
   staff_role_snapshot: string | null
   compensation_configured: boolean
+  compensation_rate_period_id: string | null
+  compensation_effective_from: string | null
+  compensation_effective_until: string | null
   fixed_monthly_base: number
   weighted_hour_rate: number
   bonus_eligible: boolean
@@ -73,6 +81,17 @@ type Calculation = {
   bonus_weight_share_percent: number
   performance_bonus: number
   calculated_salary: number
+  task_rate_breakdown: Array<{
+    task_log_id: string
+    task_id: string
+    task_name: string
+    actual_hours: number
+    importance_multiplier: number
+    weighted_hours: number
+    applied_rate: number
+    rate_source: 'default' | 'task_override'
+    amount: number
+  }>
   updated_at: string
 }
 
@@ -98,12 +117,6 @@ type ReopenEvent = {
   reopened_by: string | null
   reopened_by_name_snapshot: string
   reason: string
-}
-
-type ProfileDraft = {
-  fixedMonthlyBase: string
-  weightedHourRate: string
-  bonusEligible: boolean
 }
 
 type Props = {
@@ -170,6 +183,11 @@ function monthLabel(monthStart: string) {
   }).format(date)
 }
 
+function previousMonthLabel(monthStart: string) {
+  const [year, month] = monthStart.slice(0, 7).split('-').map(Number)
+  return monthLabel(new Date(Date.UTC(year, month - 2, 1)).toISOString().slice(0, 10))
+}
+
 function dateTimeLabel(value: string) {
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return value
@@ -196,19 +214,6 @@ export default function StaffPayrollCalculationManager({
     [compensationProfiles]
   )
 
-  const [profileDrafts, setProfileDrafts] = React.useState<Record<string, ProfileDraft>>(() => {
-    const result: Record<string, ProfileDraft> = {}
-    for (const staff of staffProfiles) {
-      const configured = compensationMap.get(staff.user_id)
-      result[staff.user_id] = {
-        fixedMonthlyBase: String(configured?.fixed_monthly_base ?? 0),
-        weightedHourRate: String(configured?.weighted_hour_rate ?? 0),
-        bonusEligible: configured?.bonus_eligible ?? true,
-      }
-    }
-    return result
-  })
-
   const [bonusPoolPercent, setBonusPoolPercent] = React.useState(
     String(snapshot?.bonus_pool_percent ?? 0)
   )
@@ -229,35 +234,8 @@ export default function StaffPayrollCalculationManager({
     snapshot!.integrity_ready
 
   React.useEffect(() => {
-    const result: Record<string, ProfileDraft> = {}
-    for (const staff of staffProfiles) {
-      const configured = compensationMap.get(staff.user_id)
-      result[staff.user_id] = {
-        fixedMonthlyBase: String(configured?.fixed_monthly_base ?? 0),
-        weightedHourRate: String(configured?.weighted_hour_rate ?? 0),
-        bonusEligible: configured?.bonus_eligible ?? true,
-      }
-    }
-    setProfileDrafts(result)
-  }, [staffProfiles, compensationMap])
-
-  React.useEffect(() => {
     setBonusPoolPercent(String(snapshot?.bonus_pool_percent ?? 0))
   }, [snapshot?.bonus_pool_percent, monthStart])
-
-  function updateDraft(staffUserId: string, patch: Partial<ProfileDraft>) {
-    setProfileDrafts((current) => ({
-      ...current,
-      [staffUserId]: {
-        ...(current[staffUserId] ?? {
-          fixedMonthlyBase: '0',
-          weightedHourRate: '0',
-          bonusEligible: true,
-        }),
-        ...patch,
-      },
-    }))
-  }
 
   async function post(body: any) {
     const response = await fetch('/api/staff-payroll/calculation', {
@@ -335,35 +313,6 @@ export default function StaffPayrollCalculationManager({
       router.refresh()
     } catch (caught: any) {
       setError(caught?.message ?? 'Failed to reopen payroll.')
-    } finally {
-      setPendingKey(null)
-    }
-  }
-
-  async function saveProfile(staffUserId: string) {
-    const draft = profileDrafts[staffUserId]
-    if (!draft) return
-
-    setPendingKey(`profile:${staffUserId}`)
-    setMessage(null)
-    setError(null)
-
-    try {
-      await post({
-        action: 'save_compensation_profile',
-        staffUserId,
-        fixedMonthlyBase: draft.fixedMonthlyBase,
-        weightedHourRate: draft.weightedHourRate,
-        bonusEligible: draft.bonusEligible,
-      })
-      setMessage(
-        isApproved
-          ? 'Compensation settings saved for future/reopened drafts. The approved payroll remains unchanged.'
-          : 'Compensation settings saved. Recalculate the month to apply them to the draft.'
-      )
-      router.refresh()
-    } catch (caught: any) {
-      setError(caught?.message ?? 'Failed to save compensation settings.')
     } finally {
       setPendingKey(null)
     }
@@ -564,25 +513,21 @@ export default function StaffPayrollCalculationManager({
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div>
             <div className="text-xs font-semibold uppercase tracking-[0.12em] text-[hsl(var(--muted))]">
-              Compensation settings
+              Effective rates · {monthLabel(monthStart)}
             </div>
-            <h2 className="mt-1 text-xl font-bold">Staff rates</h2>
+            <h2 className="mt-1 text-xl font-bold">Applicable compensation periods</h2>
             <p className="mt-1 max-w-3xl text-sm text-[hsl(var(--muted))]">
-              Fixed monthly base is optional. Task compensation uses actual hours × task importance × the staff member&apos;s weighted-hour rate. Task quantity is operational information only and never generates salary by itself.
-              These are current settings; the monthly calculation snapshots their values when recalculated.
+              Task compensation uses actual hours × task importance × the applicable default or task-specific rate. The period and every applied task rate are snapshotted when this month is recalculated.
             </p>
           </div>
+          <Link href="/admin/staff-payroll/rates" className="rounded-xl border border-black/10 px-4 py-2 text-sm font-semibold hover:bg-black/[0.03]">
+            {canWrite ? 'Manage rate periods' : 'Review rate periods'}
+          </Link>
         </div>
 
         <div className="mt-4 grid gap-3 lg:grid-cols-2">
           {staffProfiles.map((staff) => {
             const configured = compensationMap.get(staff.user_id)
-            const draft = profileDrafts[staff.user_id] ?? {
-              fixedMonthlyBase: '0',
-              weightedHourRate: '0',
-              bonusEligible: true,
-            }
-            const pending = pendingKey === `profile:${staff.user_id}`
 
             return (
               <div key={staff.user_id} className="rounded-2xl border border-black/10 p-4">
@@ -603,62 +548,27 @@ export default function StaffPayrollCalculationManager({
                   </span>
                 </div>
 
-                <div className="mt-3 grid gap-3 sm:grid-cols-2">
-                  <label className="text-xs font-medium">
-                    Fixed monthly base (EGP)
-                    <input
-                      type="number"
-                      min="0"
-                      step="0.01"
-                      value={draft.fixedMonthlyBase}
-                      disabled={!canWrite || pending}
-                      onChange={(event) =>
-                        updateDraft(staff.user_id, { fixedMonthlyBase: event.target.value })
-                      }
-                      className="mt-1 w-full rounded-xl border border-black/10 bg-white px-3 py-2 text-sm disabled:bg-black/[0.03]"
-                    />
-                  </label>
-
-                  <label className="text-xs font-medium">
-                    Weighted-hour rate (EGP)
-                    <input
-                      type="number"
-                      min="0"
-                      step="0.01"
-                      value={draft.weightedHourRate}
-                      disabled={!canWrite || pending}
-                      onChange={(event) =>
-                        updateDraft(staff.user_id, { weightedHourRate: event.target.value })
-                      }
-                      className="mt-1 w-full rounded-xl border border-black/10 bg-white px-3 py-2 text-sm disabled:bg-black/[0.03]"
-                    />
-                  </label>
-                </div>
-
-                <label className="mt-3 flex items-center gap-2 text-sm">
-                  <input
-                    type="checkbox"
-                    checked={draft.bonusEligible}
-                    disabled={!canWrite || pending}
-                    onChange={(event) =>
-                      updateDraft(staff.user_id, { bonusEligible: event.target.checked })
-                    }
-                  />
-                  Eligible for performance bonus distribution
-                </label>
-
-                {canWrite ? (
-                  <div className="mt-3 flex justify-end">
-                    <button
-                      type="button"
-                      onClick={() => saveProfile(staff.user_id)}
-                      disabled={Boolean(pendingKey)}
-                      className="rounded-xl bg-black px-3 py-2 text-xs font-semibold text-white disabled:opacity-50"
-                    >
-                      {pending ? 'Saving…' : 'Save settings'}
-                    </button>
+                {configured ? (
+                  <>
+                    <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                      <div className="rounded-xl bg-black/[0.025] p-3">
+                        <div className="text-[11px] text-[hsl(var(--muted))]">Fixed monthly base</div>
+                        <div className="mt-1 text-sm font-semibold">{money(configured.fixed_monthly_base)}</div>
+                      </div>
+                      <div className="rounded-xl bg-black/[0.025] p-3">
+                        <div className="text-[11px] text-[hsl(var(--muted))]">Default weighted-hour rate</div>
+                        <div className="mt-1 text-sm font-semibold">{money(configured.weighted_hour_rate)} / h</div>
+                      </div>
+                    </div>
+                    <div className="mt-2 text-xs text-[hsl(var(--muted))]">
+                      Effective {monthLabel(configured.effective_from)} → {configured.effective_until ? previousMonthLabel(configured.effective_until) : 'open-ended'} · {configured.task_override_count} task override{configured.task_override_count === 1 ? '' : 's'} · {configured.bonus_eligible ? 'bonus eligible' : 'not bonus eligible'}
+                    </div>
+                  </>
+                ) : (
+                  <div className="mt-3 rounded-xl bg-amber-50 p-3 text-xs text-amber-950">
+                    No rate period covers this payroll month. Calculation will flag this staff member as unconfigured.
                   </div>
-                ) : null}
+                )}
               </div>
             )
           })}
@@ -844,7 +754,7 @@ export default function StaffPayrollCalculationManager({
                           </span>
                           {!row.compensation_configured ? (
                             <span className="rounded-full bg-amber-50 px-2 py-1 text-[11px] font-semibold text-amber-900">
-                              Rate not configured
+                              Rate not configured for month
                             </span>
                           ) : null}
                           {row.missing_hours_task_count > 0 ? (
@@ -856,6 +766,11 @@ export default function StaffPayrollCalculationManager({
                         <div className="mt-1 text-xs text-[hsl(var(--muted))]">
                           {row.active_task_count} tasks · {number(row.actual_hours)} actual h · {number(row.weighted_hours)} weighted h
                         </div>
+                        {row.compensation_effective_from ? (
+                          <div className="mt-1 text-xs text-[hsl(var(--muted))]">
+                            Applied rate period: {monthLabel(row.compensation_effective_from)} → {row.compensation_effective_until ? previousMonthLabel(row.compensation_effective_until) : 'open-ended'}
+                          </div>
+                        ) : null}
                       </div>
 
                       <div className="text-left lg:text-right">
@@ -870,7 +785,7 @@ export default function StaffPayrollCalculationManager({
                         <div className="mt-1 text-sm font-semibold">{money(row.fixed_monthly_base)}</div>
                       </div>
                       <div className="rounded-xl bg-black/[0.025] p-3">
-                        <div className="text-[11px] text-[hsl(var(--muted))]">Weighted-hour rate</div>
+                        <div className="text-[11px] text-[hsl(var(--muted))]">Default weighted-hour rate</div>
                         <div className="mt-1 text-sm font-semibold">{money(row.weighted_hour_rate)} / h</div>
                       </div>
                       <div className="rounded-xl bg-black/[0.025] p-3">
@@ -889,6 +804,32 @@ export default function StaffPayrollCalculationManager({
                         <div className="mt-1 text-sm font-bold text-emerald-950">{money(row.calculated_salary)}</div>
                       </div>
                     </div>
+
+                    {row.task_rate_breakdown.length ? (
+                      <details className="mt-3 rounded-xl border border-black/10 p-3">
+                        <summary className="cursor-pointer text-xs font-semibold">
+                          Applied task rates · {row.task_rate_breakdown.length} line{row.task_rate_breakdown.length === 1 ? '' : 's'}
+                        </summary>
+                        <div className="mt-3 space-y-2">
+                          {row.task_rate_breakdown.map((item) => (
+                            <div key={item.task_log_id} className="grid gap-1 rounded-lg bg-black/[0.025] p-2 text-xs sm:grid-cols-[1fr_auto] sm:items-center">
+                              <div>
+                                <div className="font-medium">{item.task_name}</div>
+                                <div className="text-[hsl(var(--muted))]">
+                                  {number(item.actual_hours)} actual h × {number(item.importance_multiplier)} importance = {number(item.weighted_hours)} weighted h
+                                </div>
+                              </div>
+                              <div className="sm:text-right">
+                                <div className="font-semibold">{money(item.amount)}</div>
+                                <div className="text-[hsl(var(--muted))]">
+                                  {money(item.applied_rate)} / h · {item.rate_source === 'task_override' ? 'task override' : 'default rate'}
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </details>
+                    ) : null}
                   </article>
                 ))}
               </div>

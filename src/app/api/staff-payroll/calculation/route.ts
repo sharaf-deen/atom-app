@@ -23,7 +23,6 @@ const STAFF_ROLES = [
   'super_admin',
 ] as const
 
-const STAFF_ROLE_SET = new Set<string>(STAFF_ROLES)
 const PAYROLL_EXPENSE_CATEGORY_KEYS = new Set([
   'coaches',
   'reception',
@@ -51,13 +50,6 @@ function makeAdminClient() {
 function cleanString(value: unknown, max = 2000) {
   if (typeof value !== 'string') return ''
   return value.trim().slice(0, max)
-}
-
-function normalizeUuid(value: unknown) {
-  const raw = cleanString(value, 80)
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(raw)
-    ? raw
-    : ''
 }
 
 function round2(value: number) {
@@ -157,6 +149,9 @@ function looksLikeMigrationMissing(message: string) {
   const lower = message.toLowerCase()
   return (
     lower.includes('staff_compensation_profiles') ||
+    lower.includes('staff_compensation_rate_periods') ||
+    lower.includes('staff_compensation_task_rates') ||
+    lower.includes('compensation_rate_period_id') ||
     lower.includes('staff_payroll_monthly_snapshots') ||
     lower.includes('staff_payroll_monthly_calculations') ||
     lower.includes('financial_source_hash') ||
@@ -172,6 +167,9 @@ type DraftStaffRow = {
   staff_name_snapshot: string
   staff_role_snapshot: string | null
   compensation_configured: boolean
+  compensation_rate_period_id: string | null
+  compensation_effective_from: string | null
+  compensation_effective_until: string | null
   fixed_monthly_base: number
   weighted_hour_rate: number
   bonus_eligible: boolean
@@ -184,6 +182,17 @@ type DraftStaffRow = {
   bonus_weight_share_percent: number
   performance_bonus: number
   calculated_salary: number
+  task_rate_breakdown: Array<{
+    task_log_id: string
+    task_id: string
+    task_name: string
+    actual_hours: number
+    importance_multiplier: number
+    weighted_hours: number
+    applied_rate: number
+    rate_source: 'default' | 'task_override'
+    amount: number
+  }>
 }
 
 function allocateBonus(rows: DraftStaffRow[], targetPool: number) {
@@ -278,121 +287,11 @@ export async function POST(req: Request) {
     const action = cleanString(body?.action, 60)
 
     if (action === 'save_compensation_profile') {
-      const staffUserId = normalizeUuid(body?.staffUserId ?? body?.staff_user_id)
-      const fixedMonthlyBase = parseMoney(
-        body?.fixedMonthlyBase ?? body?.fixed_monthly_base
-      )
-      const weightedHourRate = parseMoney(
-        body?.weightedHourRate ?? body?.weighted_hour_rate
-      )
-      const bonusEligible = Boolean(body?.bonusEligible ?? body?.bonus_eligible)
-
-      if (!staffUserId) {
-        return json(400, { ok: false, error: 'INVALID_STAFF_USER' })
-      }
-      if (fixedMonthlyBase === null) {
-        return json(400, { ok: false, error: 'INVALID_FIXED_MONTHLY_BASE' })
-      }
-      if (weightedHourRate === null) {
-        return json(400, { ok: false, error: 'INVALID_WEIGHTED_HOUR_RATE' })
-      }
-
-      const { data: staff, error: staffError } = await admin
-        .from('profiles')
-        .select('user_id,role,email,first_name,last_name')
-        .eq('user_id', staffUserId)
-        .maybeSingle()
-
-      if (staffError) {
-        return json(500, {
-          ok: false,
-          error: 'STAFF_LOOKUP_FAILED',
-          details: staffError.message,
-        })
-      }
-
-      if (!staff?.user_id || !STAFF_ROLE_SET.has(String(staff.role ?? ''))) {
-        return json(400, { ok: false, error: 'STAFF_PROFILE_NOT_ELIGIBLE' })
-      }
-
-      const { data: existing, error: existingError } = await admin
-        .from('staff_compensation_profiles')
-        .select('staff_user_id,fixed_monthly_base,weighted_hour_rate,bonus_eligible')
-        .eq('staff_user_id', staffUserId)
-        .maybeSingle()
-
-      if (existingError) {
-        const message = existingError.message ?? String(existingError)
-        if (looksLikeMigrationMissing(message)) {
-          return json(500, {
-            ok: false,
-            error: 'MIGRATION_REQUIRED',
-            details: 'Required database changes are not available yet. Deploy the latest database changes, then try again.',
-          })
-        }
-        return json(500, {
-          ok: false,
-          error: 'COMPENSATION_PROFILE_LOOKUP_FAILED',
-          details: message,
-        })
-      }
-
-      let saveError: any = null
-
-      if (existing?.staff_user_id) {
-        const result = await admin
-          .from('staff_compensation_profiles')
-          .update({
-            fixed_monthly_base: fixedMonthlyBase,
-            weighted_hour_rate: weightedHourRate,
-            bonus_eligible: bonusEligible,
-            updated_by: actor.actorId,
-          })
-          .eq('staff_user_id', staffUserId)
-        saveError = result.error
-      } else {
-        const result = await admin.from('staff_compensation_profiles').insert({
-          staff_user_id: staffUserId,
-          fixed_monthly_base: fixedMonthlyBase,
-          weighted_hour_rate: weightedHourRate,
-          bonus_eligible: bonusEligible,
-          created_by: actor.actorId,
-          updated_by: actor.actorId,
-        })
-        saveError = result.error
-      }
-
-      if (saveError) {
-        const message = saveError.message ?? String(saveError)
-        return json(500, {
-          ok: false,
-          error: looksLikeMigrationMissing(message)
-            ? 'MIGRATION_REQUIRED'
-            : 'COMPENSATION_PROFILE_SAVE_FAILED',
-          details: looksLikeMigrationMissing(message)
-            ? 'Required database changes are not available yet. Deploy the latest database changes, then try again.'
-            : message,
-        })
-      }
-
-      await safeAudit(admin, {
-        actor_user_id: actor.actorId,
-        target_user_id: staffUserId,
-        action: 'staff_payroll_compensation_profile_saved',
-        action_details: {
-          staff_user_id: staffUserId,
-          staff_name: staffName(staff),
-          fixed_monthly_base: fixedMonthlyBase,
-          weighted_hour_rate: weightedHourRate,
-          bonus_eligible: bonusEligible,
-          previous: existing ?? null,
-          note_scope:
-            'Compensation configuration only. No payroll approval or payment was created.',
-        },
+      return json(410, {
+        ok: false,
+        error: 'EFFECTIVE_RATE_PERIOD_REQUIRED',
+        details: 'Use Compensation Rates to create an effective-dated rate period.',
       })
-
-      revalidatePath('/admin/staff-payroll/calculation')
-      return json(200, { ok: true })
     }
 
     if (action === 'refresh_draft') {
@@ -490,10 +389,12 @@ export async function POST(req: Request) {
           .is('voided_at', null)
           .limit(100000),
         admin
-          .from('staff_compensation_profiles')
+          .from('staff_compensation_rate_periods')
           .select(
-            'staff_user_id,fixed_monthly_base,weighted_hour_rate,bonus_eligible,updated_at'
+            'id,staff_user_id,effective_from,effective_until,fixed_monthly_base,weighted_hour_rate,bonus_eligible,updated_at,staff_compensation_task_rates(id,task_id,weighted_hour_rate,updated_at)'
           )
+          .lte('effective_from', monthStart)
+          .or(`effective_until.is.null,effective_until.gt.${monthStart}`)
           .limit(10000),
         admin
           .from('profiles')
@@ -590,6 +491,8 @@ export async function POST(req: Request) {
         missingHoursTaskCount: number
         actualHours: number
         weightedHours: number
+        taskCompensation: number
+        taskRateBreakdown: DraftStaffRow['task_rate_breakdown']
       }
 
       const statsMap = new Map<string, Stats>()
@@ -602,6 +505,8 @@ export async function POST(req: Request) {
           missingHoursTaskCount: 0,
           actualHours: 0,
           weightedHours: 0,
+          taskCompensation: 0,
+          taskRateBreakdown: [],
         }
 
         stats.activeTaskCount += 1
@@ -614,6 +519,38 @@ export async function POST(req: Request) {
 
         const weighted = Number(log.weighted_hours ?? 0)
         if (Number.isFinite(weighted)) stats.weightedHours += weighted
+
+        const compensation = compensationMap.get(staffUserId)
+        const overrides = Array.isArray(compensation?.staff_compensation_task_rates)
+          ? compensation.staff_compensation_task_rates
+          : []
+        const taskId = String(log.task_id ?? '')
+        const override = overrides.find(
+          (rate: any) => String(rate.task_id ?? '') === taskId
+        )
+        const defaultRate = Number(compensation?.weighted_hour_rate ?? 0)
+        const appliedRate = round2(
+          Number(override?.weighted_hour_rate ?? defaultRate)
+        )
+        const actualHours = round2(Number(log.actual_hours ?? 0))
+        const importanceMultiplier = round2(
+          Number(log.importance_multiplier_snapshot ?? 0)
+        )
+        const weightedHours = round2(Number(log.weighted_hours ?? 0))
+        const amount = round2(weightedHours * appliedRate)
+
+        stats.taskCompensation += amount
+        stats.taskRateBreakdown.push({
+          task_log_id: String(log.id ?? ''),
+          task_id: taskId,
+          task_name: String(log.task_name_snapshot ?? 'Task'),
+          actual_hours: actualHours,
+          importance_multiplier: importanceMultiplier,
+          weighted_hours: weightedHours,
+          applied_rate: appliedRate,
+          rate_source: override ? 'task_override' : 'default',
+          amount,
+        })
         statsMap.set(staffUserId, stats)
       }
 
@@ -637,6 +574,8 @@ export async function POST(req: Request) {
           missingHoursTaskCount: 0,
           actualHours: 0,
           weightedHours: 0,
+          taskCompensation: 0,
+          taskRateBreakdown: [],
         }
 
         const fixedMonthlyBase = configured
@@ -650,7 +589,7 @@ export async function POST(req: Request) {
           : false
         const actualHours = round2(stats.actualHours)
         const weightedHours = round2(stats.weightedHours)
-        const taskCompensation = round2(weightedHours * weightedHourRate)
+        const taskCompensation = round2(stats.taskCompensation)
         const guaranteedCompensation = round2(
           fixedMonthlyBase + taskCompensation
         )
@@ -660,6 +599,15 @@ export async function POST(req: Request) {
           staff_name_snapshot: staffName(profile),
           staff_role_snapshot: profile.role ? String(profile.role) : null,
           compensation_configured: configured,
+          compensation_rate_period_id: configured
+            ? String(compensation.id)
+            : null,
+          compensation_effective_from: configured
+            ? String(compensation.effective_from)
+            : null,
+          compensation_effective_until: configured && compensation.effective_until
+            ? String(compensation.effective_until)
+            : null,
           fixed_monthly_base: fixedMonthlyBase,
           weighted_hour_rate: weightedHourRate,
           bonus_eligible: bonusEligible,
@@ -672,6 +620,7 @@ export async function POST(req: Request) {
           bonus_weight_share_percent: 0,
           performance_bonus: 0,
           calculated_salary: guaranteedCompensation,
+          task_rate_breakdown: stats.taskRateBreakdown,
         })
       }
 

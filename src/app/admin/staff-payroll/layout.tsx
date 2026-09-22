@@ -34,6 +34,12 @@ export default function StaffPayrollLayout({
             Salary Calculation
           </Link>
           <Link
+            href="/admin/staff-payroll/rates"
+            className="rounded-xl border border-black/10 px-3 py-2 text-sm font-semibold hover:bg-black/[0.03]"
+          >
+            Compensation Rates
+          </Link>
+          <Link
             href="/admin/staff-payroll/payments"
             className="rounded-xl border border-black/10 px-3 py-2 text-sm font-semibold hover:bg-black/[0.03]"
           >

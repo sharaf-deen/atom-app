@@ -94,6 +94,8 @@ function migrationMissing(message: string) {
   const lower = message.toLowerCase()
   return (
     lower.includes('staff_payroll_approval_versions') ||
+    lower.includes('staff_compensation_rate_periods') ||
+    lower.includes('compensation_rate_period_id') ||
     lower.includes('staff_payroll_reopen_events') ||
     lower.includes('financial_source_hash') ||
     lower.includes('staff_payroll_approve_snapshot') ||
@@ -283,8 +285,10 @@ export async function POST(req: Request) {
           .is('voided_at', null)
           .limit(100000),
         admin
-          .from('staff_compensation_profiles')
-          .select('staff_user_id,fixed_monthly_base,weighted_hour_rate,bonus_eligible,updated_at')
+          .from('staff_compensation_rate_periods')
+          .select('id,staff_user_id,effective_from,effective_until,fixed_monthly_base,weighted_hour_rate,bonus_eligible,updated_at,staff_compensation_task_rates(id,task_id,weighted_hour_rate,updated_at)')
+          .lte('effective_from', monthStart)
+          .or(`effective_until.is.null,effective_until.gt.${monthStart}`)
           .limit(10000),
         admin
           .from('profiles')
@@ -294,7 +298,7 @@ export async function POST(req: Request) {
         admin
           .from('staff_payroll_monthly_calculations')
           .select(
-            'staff_user_id,staff_name_snapshot,staff_role_snapshot,compensation_configured,fixed_monthly_base,weighted_hour_rate,bonus_eligible,active_task_count,missing_hours_task_count,actual_hours,weighted_hours,task_compensation,guaranteed_compensation,bonus_weight_share_percent,performance_bonus,calculated_salary'
+            'staff_user_id,staff_name_snapshot,staff_role_snapshot,compensation_configured,compensation_rate_period_id,compensation_effective_from,compensation_effective_until,fixed_monthly_base,weighted_hour_rate,bonus_eligible,active_task_count,missing_hours_task_count,actual_hours,weighted_hours,task_compensation,guaranteed_compensation,bonus_weight_share_percent,performance_bonus,calculated_salary,task_rate_breakdown'
           )
           .eq('snapshot_id', snapshotId)
           .limit(10000),
