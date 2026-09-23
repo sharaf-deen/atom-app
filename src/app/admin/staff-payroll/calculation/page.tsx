@@ -127,7 +127,7 @@ export default async function StaffPayrollCalculationPage({
     admin
       .from('staff_payroll_monthly_snapshots')
       .select(
-        'id,month_start,status,eligible_revenue_scope,bonus_pool_percent,membership_revenue,membership_payment_count,paid_membership_refunds,paid_membership_refund_count,net_membership_revenue,eligible_operating_expenses,eligible_expense_count,excluded_payroll_expenses,excluded_payroll_expense_count,operating_result_before_payroll,guaranteed_payroll,available_result_after_guaranteed_payroll,performance_bonus_pool,salary_before_adjustments_total,manual_bonus_total,manual_deduction_total,net_manual_adjustment_total,calculated_payroll_total,staff_count,missing_hours_task_count,unconfigured_staff_count,calculated_at,source_data_as_of,approval_version_no,approved_at,approved_by,last_reopened_at,last_reopened_by,last_reopen_reason,financial_source_hash,task_source_hash,compensation_source_hash,staff_source_hash,draft_snapshot_hash,draft_calculation_hash'
+        'id,month_start,status,eligible_revenue_scope,rate_model,bonus_pool_percent,safety_reserve_percent,safety_reserve_amount,membership_revenue,membership_payment_count,paid_membership_refunds,paid_membership_refund_count,net_membership_revenue,eligible_operating_expenses,eligible_expense_count,excluded_payroll_expenses,excluded_payroll_expense_count,operating_result_before_payroll,guaranteed_payroll,minimum_task_payroll,available_result_after_guaranteed_payroll,performance_bonus_pool,dynamic_task_supplement_pool,salary_before_adjustments_total,manual_bonus_total,manual_deduction_total,net_manual_adjustment_total,calculated_payroll_total,staff_count,missing_hours_task_count,unconfigured_staff_count,calculated_at,source_data_as_of,approval_version_no,approved_at,approved_by,last_reopened_at,last_reopened_by,last_reopen_reason,financial_source_hash,task_source_hash,compensation_source_hash,staff_source_hash,draft_snapshot_hash,draft_calculation_hash'
       )
       .eq('month_start', monthStart)
       .maybeSingle(),
@@ -161,6 +161,8 @@ export default async function StaffPayrollCalculationPage({
     loadError.includes('compensation_rate_period_id') ||
     loadError.includes('staff_payroll_monthly_snapshots') ||
     loadError.includes('staff_payroll_monthly_calculations') ||
+    loadError.includes('minimum_task_compensation') ||
+    loadError.includes('rate_model') ||
     loadError.includes('salary_before_adjustments') ||
     loadError.includes('staff_payroll_approval_versions') ||
     loadError.includes('staff_payroll_reopen_events') ||
@@ -172,7 +174,7 @@ export default async function StaffPayrollCalculationPage({
     calculationsResult = await admin
       .from('staff_payroll_monthly_calculations')
       .select(
-        'id,snapshot_id,month_start,staff_user_id,staff_name_snapshot,staff_role_snapshot,compensation_configured,compensation_rate_period_id,compensation_effective_from,compensation_effective_until,fixed_monthly_base,weighted_hour_rate,bonus_eligible,active_task_count,missing_hours_task_count,actual_hours,weighted_hours,task_compensation,guaranteed_compensation,bonus_weight_share_percent,performance_bonus,salary_before_adjustments,manual_bonus,manual_deduction,net_manual_adjustment,calculated_salary,adjustment_breakdown,task_rate_breakdown,updated_at'
+        'id,snapshot_id,month_start,staff_user_id,staff_name_snapshot,staff_role_snapshot,compensation_configured,compensation_rate_period_id,compensation_effective_from,compensation_effective_until,fixed_monthly_base,weighted_hour_rate,bonus_eligible,active_task_count,missing_hours_task_count,actual_hours,weighted_hours,task_compensation,minimum_task_compensation,dynamic_task_supplement,dynamic_weight_share_percent,guaranteed_compensation,bonus_weight_share_percent,performance_bonus,salary_before_adjustments,manual_bonus,manual_deduction,net_manual_adjustment,calculated_salary,adjustment_breakdown,task_rate_breakdown,updated_at'
       )
       .eq('snapshot_id', snapshotResult.data.id)
       .order('staff_name_snapshot', { ascending: true })
@@ -212,7 +214,10 @@ export default async function StaffPayrollCalculationPage({
         eligible_revenue_scope: String(
           snapshotResult.data.eligible_revenue_scope ?? 'membership_only'
         ),
+        rate_model: String(snapshotResult.data.rate_model ?? 'legacy_performance_bonus'),
         bonus_pool_percent: Number(snapshotResult.data.bonus_pool_percent ?? 0),
+        safety_reserve_percent: Number(snapshotResult.data.safety_reserve_percent ?? 0),
+        safety_reserve_amount: Number(snapshotResult.data.safety_reserve_amount ?? 0),
         membership_revenue: Number(snapshotResult.data.membership_revenue ?? 0),
         membership_payment_count: Number(
           snapshotResult.data.membership_payment_count ?? 0
@@ -240,12 +245,14 @@ export default async function StaffPayrollCalculationPage({
           snapshotResult.data.operating_result_before_payroll ?? 0
         ),
         guaranteed_payroll: Number(snapshotResult.data.guaranteed_payroll ?? 0),
+        minimum_task_payroll: Number(snapshotResult.data.minimum_task_payroll ?? 0),
         available_result_after_guaranteed_payroll: Number(
           snapshotResult.data.available_result_after_guaranteed_payroll ?? 0
         ),
         performance_bonus_pool: Number(
           snapshotResult.data.performance_bonus_pool ?? 0
         ),
+        dynamic_task_supplement_pool: Number(snapshotResult.data.dynamic_task_supplement_pool ?? 0),
         salary_before_adjustments_total:
           Number(snapshotResult.data.salary_before_adjustments_total ?? 0) === 0 &&
           Number(snapshotResult.data.manual_bonus_total ?? 0) === 0 &&
@@ -338,6 +345,9 @@ export default async function StaffPayrollCalculationPage({
     actual_hours: Number(row.actual_hours ?? 0),
     weighted_hours: Number(row.weighted_hours ?? 0),
     task_compensation: Number(row.task_compensation ?? 0),
+    minimum_task_compensation: Number(row.minimum_task_compensation ?? row.task_compensation ?? 0),
+    dynamic_task_supplement: Number(row.dynamic_task_supplement ?? 0),
+    dynamic_weight_share_percent: Number(row.dynamic_weight_share_percent ?? 0),
     guaranteed_compensation: Number(row.guaranteed_compensation ?? 0),
     bonus_weight_share_percent: Number(row.bonus_weight_share_percent ?? 0),
     performance_bonus: Number(row.performance_bonus ?? 0),

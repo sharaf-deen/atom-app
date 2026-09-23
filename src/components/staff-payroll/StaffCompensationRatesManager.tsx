@@ -278,7 +278,7 @@ export default function StaffCompensationRatesManager({
 
           <label className="mt-4 flex items-center gap-2 text-sm">
             <input type="checkbox" checked={form.bonusEligible} disabled={pending} onChange={(event) => setForm((current) => ({ ...current, bonusEligible: event.target.checked }))} />
-            Eligible for performance bonus distribution
+            Eligible for dynamic task supplement distribution
           </label>
 
           <div className="mt-5 rounded-2xl border border-black/10 p-3">
@@ -347,7 +347,7 @@ export default function StaffCompensationRatesManager({
                 <div className="mt-3 grid gap-2 sm:grid-cols-3">
                   <div className="rounded-xl bg-black/[0.025] p-3"><div className="text-[11px] text-[hsl(var(--muted))]">Fixed monthly base</div><div className="mt-1 font-semibold">{money(period.fixed_monthly_base)}</div></div>
                   <div className="rounded-xl bg-black/[0.025] p-3"><div className="text-[11px] text-[hsl(var(--muted))]">Default weighted-hour rate</div><div className="mt-1 font-semibold">{money(period.weighted_hour_rate)} / h</div></div>
-                  <div className="rounded-xl bg-black/[0.025] p-3"><div className="text-[11px] text-[hsl(var(--muted))]">Performance bonus</div><div className="mt-1 font-semibold">{period.bonus_eligible ? 'Eligible' : 'Not eligible'}</div></div>
+                  <div className="rounded-xl bg-black/[0.025] p-3"><div className="text-[11px] text-[hsl(var(--muted))]">Dynamic supplement</div><div className="mt-1 font-semibold">{period.bonus_eligible ? 'Eligible' : 'Not eligible'}</div></div>
                 </div>
 
                 {period.task_rates.length ? <div className="mt-3 rounded-xl border border-black/10 p-3"><div className="text-xs font-semibold">{period.task_rates.length} task override{period.task_rates.length === 1 ? '' : 's'}</div><div className="mt-2 flex flex-wrap gap-2">{period.task_rates.map((rate) => <span key={rate.task_id} className="rounded-full bg-violet-50 px-2.5 py-1 text-[11px] text-violet-950">{taskMap.get(rate.task_id)?.name ?? 'Task'} · {money(rate.weighted_hour_rate)}/h</span>)}</div></div> : null}

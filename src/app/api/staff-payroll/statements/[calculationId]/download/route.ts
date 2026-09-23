@@ -120,7 +120,7 @@ export async function GET(
     const { data: calculation, error: calculationError } = await admin
       .from('staff_payroll_approval_calculations')
       .select(
-        'id,approval_version_id,snapshot_id,month_start,staff_user_id,staff_name_snapshot,staff_role_snapshot,fixed_monthly_base,weighted_hour_rate,actual_hours,weighted_hours,task_compensation,performance_bonus,salary_before_adjustments,manual_bonus,manual_deduction,net_manual_adjustment,calculated_salary,adjustment_breakdown'
+        'id,approval_version_id,snapshot_id,month_start,staff_user_id,staff_name_snapshot,staff_role_snapshot,fixed_monthly_base,weighted_hour_rate,actual_hours,weighted_hours,task_compensation,performance_bonus,dynamic_task_supplement,salary_before_adjustments,manual_bonus,manual_deduction,net_manual_adjustment,calculated_salary,adjustment_breakdown'
       )
       .eq('id', calculationId)
       .maybeSingle()
@@ -149,7 +149,7 @@ export async function GET(
         .order('recorded_at', { ascending: true }),
       admin
         .from('staff_payroll_monthly_snapshots')
-        .select('id,status,approval_version_no')
+        .select('id,status,approval_version_no,rate_model')
         .eq('id', calculation.snapshot_id)
         .maybeSingle(),
       admin
@@ -247,6 +247,8 @@ export async function GET(
         weighted_hours: Number(calculation.weighted_hours ?? 0),
         task_compensation: Number(calculation.task_compensation ?? 0),
         performance_bonus: Number(calculation.performance_bonus ?? 0),
+        dynamic_task_supplement: Number(calculation.dynamic_task_supplement ?? 0),
+        rate_model: String(snapshotResult.data?.rate_model ?? 'legacy_performance_bonus'),
         salary_before_adjustments: salaryBeforeAdjustments,
         manual_bonus: manualBonus,
         manual_deduction: manualDeduction,

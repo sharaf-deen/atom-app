@@ -158,7 +158,7 @@ export default async function StaffPayrollPaymentsPage({
   if (!migrationMissing && currentVersion?.id) {
     calculationsResult = await admin
       .from('staff_payroll_approval_calculations')
-      .select('id,approval_version_id,snapshot_id,month_start,staff_user_id,staff_name_snapshot,staff_role_snapshot,fixed_monthly_base,weighted_hour_rate,actual_hours,weighted_hours,task_compensation,performance_bonus,salary_before_adjustments,manual_bonus,manual_deduction,net_manual_adjustment,calculated_salary,adjustment_breakdown')
+      .select('id,approval_version_id,snapshot_id,month_start,staff_user_id,staff_name_snapshot,staff_role_snapshot,fixed_monthly_base,weighted_hour_rate,actual_hours,weighted_hours,task_compensation,performance_bonus,dynamic_task_supplement,salary_before_adjustments,manual_bonus,manual_deduction,net_manual_adjustment,calculated_salary,adjustment_breakdown')
       .eq('approval_version_id', currentVersion.id)
       .order('staff_name_snapshot', { ascending: true })
   }
@@ -190,6 +190,7 @@ export default async function StaffPayrollPaymentsPage({
     weighted_hours: Number(row.weighted_hours ?? 0),
     task_compensation: Number(row.task_compensation ?? 0),
     performance_bonus: Number(row.performance_bonus ?? 0),
+    dynamic_task_supplement: Number(row.dynamic_task_supplement ?? 0),
     salary_before_adjustments: salaryBeforeAdjustments,
     manual_bonus: manualBonus,
     manual_deduction: manualDeduction,
