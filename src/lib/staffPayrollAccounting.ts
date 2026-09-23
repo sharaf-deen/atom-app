@@ -25,6 +25,7 @@ export type StaffPayrollAccountingRow = {
   weighted_hours: number
   task_compensation: number
   performance_bonus: number
+  dynamic_task_supplement: number
   salary_before_adjustments: number
   manual_bonus: number
   manual_deduction: number
@@ -42,12 +43,14 @@ export type StaffPayrollAccountingReport = {
   approved_at: string | null
   approved_by_name: string | null
   approval_note: string | null
+  rate_model: string
   rows: StaffPayrollAccountingRow[]
   payments: StaffPayrollAccountingPayment[]
   totals: {
     staff_count: number
     salary_before_adjustments: number
     performance_bonus: number
+    dynamic_task_supplement: number
     manual_bonus: number
     manual_deduction: number
     final_salary: number
@@ -73,12 +76,14 @@ function emptyReport(monthStart: string, snapshotStatus: string | null): StaffPa
     approved_at: null,
     approved_by_name: null,
     approval_note: null,
+    rate_model: 'legacy_performance_bonus',
     rows: [],
     payments: [],
     totals: {
       staff_count: 0,
       salary_before_adjustments: 0,
       performance_bonus: 0,
+      dynamic_task_supplement: 0,
       manual_bonus: 0,
       manual_deduction: 0,
       final_salary: 0,
@@ -97,7 +102,7 @@ export async function loadStaffPayrollAccountingReport(
 ): Promise<StaffPayrollAccountingReport> {
   const snapshotResult = await admin
     .from('staff_payroll_monthly_snapshots')
-    .select('id,status,approval_version_no')
+    .select('id,status,approval_version_no,rate_model')
     .eq('month_start', monthStart)
     .maybeSingle()
 
@@ -123,7 +128,7 @@ export async function loadStaffPayrollAccountingReport(
     admin
       .from('staff_payroll_approval_calculations')
       .select(
-        'id,staff_user_id,staff_name_snapshot,staff_role_snapshot,fixed_monthly_base,actual_hours,weighted_hours,task_compensation,performance_bonus,salary_before_adjustments,manual_bonus,manual_deduction,calculated_salary,adjustment_breakdown'
+        'id,staff_user_id,staff_name_snapshot,staff_role_snapshot,fixed_monthly_base,actual_hours,weighted_hours,task_compensation,performance_bonus,dynamic_task_supplement,salary_before_adjustments,manual_bonus,manual_deduction,calculated_salary,adjustment_breakdown'
       )
       .eq('approval_version_id', version.id)
       .order('staff_name_snapshot', { ascending: true }),
@@ -205,6 +210,7 @@ export async function loadStaffPayrollAccountingReport(
         weighted_hours: amount(row.weighted_hours),
         task_compensation: amount(row.task_compensation),
         performance_bonus: amount(row.performance_bonus),
+        dynamic_task_supplement: amount(row.dynamic_task_supplement),
         salary_before_adjustments: salaryBeforeAdjustments,
         manual_bonus: manualBonus,
         manual_deduction: manualDeduction,
@@ -234,12 +240,14 @@ export async function loadStaffPayrollAccountingReport(
     approved_at: version.approved_at ? String(version.approved_at) : null,
     approved_by_name: String(version.approved_by_name_snapshot ?? 'Super Admin'),
     approval_note: version.approval_note ? String(version.approval_note) : null,
+    rate_model: String(snapshot.rate_model ?? 'legacy_performance_bonus'),
     rows,
     payments,
     totals: {
       staff_count: rows.length,
       salary_before_adjustments: sumRows((row) => row.salary_before_adjustments),
       performance_bonus: sumRows((row) => row.performance_bonus),
+      dynamic_task_supplement: sumRows((row) => row.dynamic_task_supplement),
       manual_bonus: sumRows((row) => row.manual_bonus),
       manual_deduction: sumRows((row) => row.manual_deduction),
       final_salary: sumRows((row) => row.final_salary),

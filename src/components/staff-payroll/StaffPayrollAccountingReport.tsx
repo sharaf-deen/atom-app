@@ -203,7 +203,7 @@ export default function StaffPayrollAccountingReport({
                     <th className="px-3 py-3 text-right font-semibold">Hours</th>
                     <th className="px-3 py-3 text-right font-semibold">Fixed base</th>
                     <th className="px-3 py-3 text-right font-semibold">Tasks</th>
-                    <th className="px-3 py-3 text-right font-semibold">Performance bonus</th>
+                    <th className="px-3 py-3 text-right font-semibold">{report.rate_model === 'dynamic_task_rates' ? 'Dynamic supplement' : 'Performance bonus'}</th>
                     <th className="px-3 py-3 text-right font-semibold">Manual bonus</th>
                     <th className="px-3 py-3 text-right font-semibold">Deduction</th>
                     <th className="px-3 py-3 text-right font-semibold">Final salary</th>
@@ -222,7 +222,7 @@ export default function StaffPayrollAccountingReport({
                       <td className="px-3 py-3 text-right tabular-nums">{hours(row.actual_hours)}</td>
                       <td className="px-3 py-3 text-right tabular-nums">{money(row.fixed_monthly_base)}</td>
                       <td className="px-3 py-3 text-right tabular-nums">{money(row.task_compensation)}</td>
-                      <td className="px-3 py-3 text-right tabular-nums">{money(row.performance_bonus)}</td>
+                      <td className="px-3 py-3 text-right tabular-nums">{money(report.rate_model === 'dynamic_task_rates' ? row.dynamic_task_supplement : row.performance_bonus)}</td>
                       <td className="px-3 py-3 text-right tabular-nums text-emerald-700">+{money(row.manual_bonus)}</td>
                       <td className="px-3 py-3 text-right tabular-nums text-rose-700">−{money(row.manual_deduction)}</td>
                       <td className="px-3 py-3 text-right font-semibold tabular-nums">{money(row.final_salary)}</td>
@@ -239,7 +239,7 @@ export default function StaffPayrollAccountingReport({
                 <tfoot className="border-t border-black/10 bg-black/[0.025] font-semibold">
                   <tr>
                     <td className="px-3 py-3" colSpan={4}>Monthly totals</td>
-                    <td className="px-3 py-3 text-right tabular-nums">{money(report.totals.performance_bonus)}</td>
+                    <td className="px-3 py-3 text-right tabular-nums">{money(report.rate_model === 'dynamic_task_rates' ? report.totals.dynamic_task_supplement : report.totals.performance_bonus)}</td>
                     <td className="px-3 py-3 text-right tabular-nums text-emerald-700">+{money(report.totals.manual_bonus)}</td>
                     <td className="px-3 py-3 text-right tabular-nums text-rose-700">−{money(report.totals.manual_deduction)}</td>
                     <td className="px-3 py-3 text-right tabular-nums">{money(report.totals.final_salary)}</td>

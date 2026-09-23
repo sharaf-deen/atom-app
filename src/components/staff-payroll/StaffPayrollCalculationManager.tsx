@@ -29,7 +29,10 @@ type Snapshot = {
   month_start: string
   status: string
   eligible_revenue_scope: string
+  rate_model: string
   bonus_pool_percent: number
+  safety_reserve_percent: number
+  safety_reserve_amount: number
   membership_revenue: number
   membership_payment_count: number
   paid_membership_refunds: number
@@ -41,8 +44,10 @@ type Snapshot = {
   excluded_payroll_expense_count: number
   operating_result_before_payroll: number
   guaranteed_payroll: number
+  minimum_task_payroll: number
   available_result_after_guaranteed_payroll: number
   performance_bonus_pool: number
+  dynamic_task_supplement_pool: number
   salary_before_adjustments_total: number
   manual_bonus_total: number
   manual_deduction_total: number
@@ -81,6 +86,9 @@ type Calculation = {
   actual_hours: number
   weighted_hours: number
   task_compensation: number
+  minimum_task_compensation: number
+  dynamic_task_supplement: number
+  dynamic_weight_share_percent: number
   guaranteed_compensation: number
   bonus_weight_share_percent: number
   performance_bonus: number
@@ -105,7 +113,13 @@ type Calculation = {
     importance_multiplier: number
     weighted_hours: number
     applied_rate: number
-    rate_source: 'default' | 'task_override'
+    rate_source: 'default' | 'task_override' | 'catalog_minimum' | 'employee_rate' | 'employee_task_override'
+    catalog_minimum_hourly_rate?: number
+    employee_floor_hourly_rate?: number
+    guaranteed_hourly_rate?: number
+    minimum_amount?: number
+    dynamic_supplement?: number
+    effective_hourly_rate?: number
     amount: number
   }>
   updated_at: string
@@ -233,6 +247,9 @@ export default function StaffPayrollCalculationManager({
   const [bonusPoolPercent, setBonusPoolPercent] = React.useState(
     String(snapshot?.bonus_pool_percent ?? 0)
   )
+  const [safetyReservePercent, setSafetyReservePercent] = React.useState(
+    String(snapshot?.safety_reserve_percent ?? 20)
+  )
   const [pendingKey, setPendingKey] = React.useState<string | null>(null)
   const [message, setMessage] = React.useState<string | null>(null)
   const [error, setError] = React.useState<string | null>(null)
@@ -251,7 +268,8 @@ export default function StaffPayrollCalculationManager({
 
   React.useEffect(() => {
     setBonusPoolPercent(String(snapshot?.bonus_pool_percent ?? 0))
-  }, [snapshot?.bonus_pool_percent, monthStart])
+    setSafetyReservePercent(String(snapshot?.safety_reserve_percent ?? 20))
+  }, [snapshot?.bonus_pool_percent, snapshot?.safety_reserve_percent, monthStart])
 
   async function post(body: any) {
     const response = await fetch('/api/staff-payroll/calculation', {
@@ -349,6 +367,7 @@ export default function StaffPayrollCalculationManager({
         action: 'refresh_draft',
         monthStart,
         bonusPoolPercent,
+        safetyReservePercent,
       })
       setMessage(`${monthLabel(monthStart)} payroll draft recalculated.`)
       router.refresh()
@@ -577,7 +596,7 @@ export default function StaffPayrollCalculationManager({
                       </div>
                     </div>
                     <div className="mt-2 text-xs text-[hsl(var(--muted))]">
-                      Effective {monthLabel(configured.effective_from)} → {configured.effective_until ? previousMonthLabel(configured.effective_until) : 'open-ended'} · {configured.task_override_count} task override{configured.task_override_count === 1 ? '' : 's'} · {configured.bonus_eligible ? 'bonus eligible' : 'not bonus eligible'}
+                      Effective {monthLabel(configured.effective_from)} → {configured.effective_until ? previousMonthLabel(configured.effective_until) : 'open-ended'} · {configured.task_override_count} task override{configured.task_override_count === 1 ? '' : 's'} · {configured.bonus_eligible ? 'dynamic supplement eligible' : 'not supplement eligible'}
                     </div>
                   </>
                 ) : (
@@ -600,13 +619,13 @@ export default function StaffPayrollCalculationManager({
             <h2 className="mt-1 text-xl font-bold">Draft calculation</h2>
             <p className="mt-1 max-w-3xl text-sm text-[hsl(var(--muted))]">
               Membership revenue − paid membership refunds − eligible operating expenses = operating result before payroll.
-              Guaranteed payroll is then deducted before any performance bonus is created.
+              Guaranteed task floors and fixed bases are deducted first. The protected remainder can create a dynamic task supplement.
             </p>
           </div>
 
           <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
             <label className="text-xs font-medium">
-              Performance bonus pool
+              Dynamic supplement share
               <div className="mt-1 flex items-center gap-2">
                 <input
                   type="number"
@@ -618,6 +637,13 @@ export default function StaffPayrollCalculationManager({
                   onChange={(event) => setBonusPoolPercent(event.target.value)}
                   className="w-28 rounded-xl border border-black/10 bg-white px-3 py-2 text-sm disabled:bg-black/[0.03]"
                 />
+                <span className="text-sm font-semibold">%</span>
+              </div>
+            </label>
+            <label className="text-xs font-medium">
+              Safety reserve
+              <div className="mt-1 flex items-center gap-2">
+                <input type="number" min="0" max="100" step="0.01" value={safetyReservePercent} disabled={!canWrite || pendingKey === 'refresh' || isApproved} onChange={(event) => setSafetyReservePercent(event.target.value)} className="w-28 rounded-xl border border-black/10 bg-white px-3 py-2 text-sm disabled:bg-black/[0.03]" />
                 <span className="text-sm font-semibold">%</span>
               </div>
             </label>
@@ -651,7 +677,7 @@ export default function StaffPayrollCalculationManager({
         <section className="rounded-3xl border border-dashed border-black/15 bg-white p-8 text-center">
           <div className="text-lg font-semibold">No payroll draft calculated yet</div>
           <div className="mt-2 text-sm text-[hsl(var(--muted))]">
-            Configure staff rates, choose the bonus percentage and calculate the {monthLabel(monthStart)} draft.
+            Configure staff and task rates, choose the reserve and dynamic share, then calculate the {monthLabel(monthStart)} draft.
           </div>
         </section>
       ) : (
@@ -686,7 +712,7 @@ export default function StaffPayrollCalculationManager({
             <div className="rounded-2xl border border-black/10 bg-white p-4">
               <div className="text-xs text-[hsl(var(--muted))]">Salary before manual adjustments</div>
               <div className="mt-1 text-xl font-bold">{money(snapshot.salary_before_adjustments_total)}</div>
-              <div className="mt-1 text-xs text-[hsl(var(--muted))]">Base + tasks + performance bonus</div>
+              <div className="mt-1 text-xs text-[hsl(var(--muted))]">Base + task minimums + dynamic supplement</div>
             </div>
             <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4">
               <div className="text-xs text-emerald-900/70">Monthly bonuses</div>
@@ -709,9 +735,9 @@ export default function StaffPayrollCalculationManager({
 
           <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <div className="rounded-2xl border border-black/10 bg-white p-4">
-              <div className="text-xs text-[hsl(var(--muted))]">Guaranteed payroll</div>
+              <div className="text-xs text-[hsl(var(--muted))]">Guaranteed payroll floor</div>
               <div className="mt-1 text-xl font-bold">{money(snapshot.guaranteed_payroll)}</div>
-              <div className="mt-1 text-xs text-[hsl(var(--muted))]">Fixed base + task compensation</div>
+              <div className="mt-1 text-xs text-[hsl(var(--muted))]">Fixed base + guaranteed task minimums ({money(snapshot.minimum_task_payroll)})</div>
             </div>
 
             <div className="rounded-2xl border border-black/10 bg-white p-4">
@@ -720,9 +746,9 @@ export default function StaffPayrollCalculationManager({
             </div>
 
             <div className="rounded-2xl border border-violet-200 bg-violet-50 p-4">
-              <div className="text-xs text-violet-900/70">Performance bonus pool</div>
-              <div className="mt-1 text-xl font-bold text-violet-950">{money(snapshot.performance_bonus_pool)}</div>
-              <div className="mt-1 text-xs text-violet-900/70">{number(snapshot.bonus_pool_percent)}% of positive available result</div>
+              <div className="text-xs text-violet-900/70">{snapshot.rate_model === 'dynamic_task_rates' ? 'Dynamic task supplement' : 'Legacy performance bonus'}</div>
+              <div className="mt-1 text-xl font-bold text-violet-950">{money(snapshot.rate_model === 'dynamic_task_rates' ? snapshot.dynamic_task_supplement_pool : snapshot.performance_bonus_pool)}</div>
+              <div className="mt-1 text-xs text-violet-900/70">{snapshot.rate_model === 'dynamic_task_rates' ? `${number(snapshot.bonus_pool_percent)}% after ${number(snapshot.safety_reserve_percent)}% reserve (${money(snapshot.safety_reserve_amount)})` : `${number(snapshot.bonus_pool_percent)}% of positive available result`}</div>
             </div>
 
             <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4">
@@ -778,7 +804,7 @@ export default function StaffPayrollCalculationManager({
               <div className="text-xs font-semibold uppercase tracking-[0.12em] text-[hsl(var(--muted))]">Staff calculation</div>
               <h2 className="mt-1 text-xl font-bold">Salary preview</h2>
               <p className="mt-1 text-sm text-[hsl(var(--muted))]">
-                Performance bonus is distributed by weighted-hours share, then active monthly bonuses and deductions are applied to produce the final salary.
+                The dynamic supplement is distributed by weighted-hours impact and included in each task amount. Manual bonuses and deductions are applied afterward.
               </p>
             </div>
 
@@ -834,10 +860,10 @@ export default function StaffPayrollCalculationManager({
                         <div className="mt-1 text-sm font-semibold">{money(row.task_compensation)}</div>
                       </div>
                       <div className="rounded-xl bg-violet-50 p-3">
-                        <div className="text-[11px] text-violet-900/70">Performance bonus</div>
-                        <div className="mt-1 text-sm font-semibold text-violet-950">{money(row.performance_bonus)}</div>
+                        <div className="text-[11px] text-violet-900/70">{snapshot.rate_model === 'dynamic_task_rates' ? 'Dynamic task supplement' : 'Legacy performance bonus'}</div>
+                        <div className="mt-1 text-sm font-semibold text-violet-950">{money(snapshot.rate_model === 'dynamic_task_rates' ? row.dynamic_task_supplement : row.performance_bonus)}</div>
                         <div className="mt-0.5 text-[10px] text-violet-900/70">
-                          {row.bonus_eligible ? `${number(row.bonus_weight_share_percent)}% share` : 'Not bonus eligible'}
+                          {row.bonus_eligible ? `${number(row.dynamic_weight_share_percent)}% share` : 'Not supplement eligible'}
                         </div>
                       </div>
                       <div className="rounded-xl bg-black/[0.025] p-3">
@@ -891,7 +917,7 @@ export default function StaffPayrollCalculationManager({
                               <div className="sm:text-right">
                                 <div className="font-semibold">{money(item.amount)}</div>
                                 <div className="text-[hsl(var(--muted))]">
-                                  {money(item.applied_rate)} / h · {item.rate_source === 'task_override' ? 'task override' : 'default rate'}
+                                  Floor {money(item.guaranteed_hourly_rate ?? item.applied_rate)} / h · dynamic +{money(item.dynamic_supplement ?? 0)} · effective {money(item.effective_hourly_rate ?? item.applied_rate)} / h
                                 </div>
                               </div>
                             </div>

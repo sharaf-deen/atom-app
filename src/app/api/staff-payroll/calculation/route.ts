@@ -155,6 +155,8 @@ function looksLikeMigrationMissing(message: string) {
     lower.includes('staff_payroll_monthly_snapshots') ||
     lower.includes('staff_payroll_monthly_calculations') ||
     lower.includes('staff_payroll_monthly_adjustments') ||
+    lower.includes('staff_payroll_task_minimum_rate_periods') ||
+    lower.includes('minimum_task_compensation') ||
     lower.includes('salary_before_adjustments') ||
     lower.includes('financial_source_hash') ||
     lower.includes('task_source_hash') ||
@@ -180,6 +182,9 @@ type DraftStaffRow = {
   actual_hours: number
   weighted_hours: number
   task_compensation: number
+  minimum_task_compensation: number
+  dynamic_task_supplement: number
+  dynamic_weight_share_percent: number
   guaranteed_compensation: number
   bonus_weight_share_percent: number
   performance_bonus: number
@@ -204,12 +209,19 @@ type DraftStaffRow = {
     importance_multiplier: number
     weighted_hours: number
     applied_rate: number
-    rate_source: 'default' | 'task_override'
+    rate_source: 'catalog_minimum' | 'employee_rate' | 'employee_task_override'
+    task_minimum_rate_period_id: string
+    catalog_minimum_hourly_rate: number
+    employee_floor_hourly_rate: number
+    guaranteed_hourly_rate: number
+    minimum_amount: number
+    dynamic_supplement: number
+    effective_hourly_rate: number
     amount: number
   }>
 }
 
-function allocateBonus(rows: DraftStaffRow[], targetPool: number) {
+function allocateDynamicSupplement(rows: DraftStaffRow[], targetPool: number) {
   const eligible = rows
     .map((row, index) => ({ row, index }))
     .filter(({ row }) => row.bonus_eligible && row.weighted_hours > 0)
@@ -221,6 +233,8 @@ function allocateBonus(rows: DraftStaffRow[], targetPool: number) {
     for (const row of rows) {
       row.bonus_weight_share_percent = 0
       row.performance_bonus = 0
+      row.dynamic_weight_share_percent = 0
+      row.dynamic_task_supplement = 0
       row.calculated_salary = round2(row.guaranteed_compensation)
     }
     return 0
@@ -254,12 +268,30 @@ function allocateBonus(rows: DraftStaffRow[], targetPool: number) {
       row.bonus_eligible && row.weighted_hours > 0
         ? round2((row.weighted_hours / totalWeight) * 100)
         : 0
-    row.performance_bonus = round2((byIndex.get(index) ?? 0) / 100)
-    row.calculated_salary = round2(row.guaranteed_compensation + row.performance_bonus)
+    row.dynamic_weight_share_percent = row.bonus_weight_share_percent
+    row.performance_bonus = 0
+    row.dynamic_task_supplement = round2((byIndex.get(index) ?? 0) / 100)
+    row.task_compensation = round2(row.minimum_task_compensation + row.dynamic_task_supplement)
+    row.guaranteed_compensation = round2(row.fixed_monthly_base + row.task_compensation)
+    row.calculated_salary = row.guaranteed_compensation
+
+    const eligibleLines = row.task_rate_breakdown.filter((line) => line.weighted_hours > 0)
+    const lineWeight = eligibleLines.reduce((sum, line) => sum + line.weighted_hours, 0)
+    let remainingCents = byIndex.get(index) ?? 0
+    for (let lineIndex = 0; lineIndex < eligibleLines.length; lineIndex += 1) {
+      const line = eligibleLines[lineIndex]
+      const cents = lineIndex === eligibleLines.length - 1
+        ? remainingCents
+        : Math.min(remainingCents, Math.floor(((byIndex.get(index) ?? 0) * line.weighted_hours) / lineWeight))
+      remainingCents -= cents
+      line.dynamic_supplement = round2(cents / 100)
+      line.amount = round2(line.minimum_amount + line.dynamic_supplement)
+      line.effective_hourly_rate = line.actual_hours > 0 ? round2(line.amount / line.actual_hours) : line.guaranteed_hourly_rate
+    }
   }
 
   return round2(
-    rows.reduce((sum, row) => sum + Number(row.performance_bonus || 0), 0)
+    rows.reduce((sum, row) => sum + Number(row.dynamic_task_supplement || 0), 0)
   )
 }
 
@@ -313,6 +345,9 @@ export async function POST(req: Request) {
       const bonusPoolPercent = parsePercent(
         body?.bonusPoolPercent ?? body?.bonus_pool_percent
       )
+      const safetyReservePercent = parsePercent(
+        body?.safetyReservePercent ?? body?.safety_reserve_percent ?? 20
+      )
 
       if (!monthStart) return json(400, { ok: false, error: 'INVALID_MONTH' })
       if (monthStart < PAYROLL_BASELINE_MONTH) {
@@ -331,6 +366,9 @@ export async function POST(req: Request) {
       }
       if (bonusPoolPercent === null) {
         return json(400, { ok: false, error: 'INVALID_BONUS_POOL_PERCENT' })
+      }
+      if (safetyReservePercent === null) {
+        return json(400, { ok: false, error: 'INVALID_SAFETY_RESERVE_PERCENT' })
       }
 
       const { data: existingSnapshot, error: existingSnapshotError } = await admin
@@ -375,6 +413,7 @@ export async function POST(req: Request) {
         compensationResult,
         staffResult,
         adjustmentsResult,
+        taskMinimumRatesResult,
       ] = await Promise.all([
         admin
           .from('subscription_payments')
@@ -422,6 +461,12 @@ export async function POST(req: Request) {
           .eq('month_start', monthStart)
           .eq('status', 'active')
           .limit(10000),
+        admin
+          .from('staff_payroll_task_minimum_rate_periods')
+          .select('id,task_id,effective_from,effective_until,minimum_hourly_rate,updated_at')
+          .lte('effective_from', monthStart)
+          .or(`effective_until.is.null,effective_until.gt.${monthStart}`)
+          .limit(10000),
       ])
 
       const sourceError =
@@ -432,6 +477,7 @@ export async function POST(req: Request) {
         compensationResult.error?.message ||
         staffResult.error?.message ||
         adjustmentsResult.error?.message ||
+        taskMinimumRatesResult.error?.message ||
         ''
 
       if (sourceError) {
@@ -453,6 +499,7 @@ export async function POST(req: Request) {
       const compensationProfiles = (compensationResult.data ?? []) as any[]
       const staffProfiles = (staffResult.data ?? []) as any[]
       const adjustments = (adjustmentsResult.data ?? []) as any[]
+      const taskMinimumRates = (taskMinimumRatesResult.data ?? []) as any[]
 
       const sourceHashes = buildPayrollSourceHashes({
         payments,
@@ -462,7 +509,14 @@ export async function POST(req: Request) {
         compensationProfiles,
         staffProfiles,
         adjustments,
+        taskMinimumRates,
       })
+
+      const taskMinimumRateMap = new Map(taskMinimumRates.map((row) => [String(row.task_id), row]))
+      const missingMinimumTaskIds = [...new Set(logs.map((row) => String(row.task_id ?? '')).filter((taskId) => taskId && !taskMinimumRateMap.has(taskId)))]
+      if (missingMinimumTaskIds.length) {
+        return json(409, { ok: false, error: 'TASK_MINIMUM_RATES_MISSING', details: `${missingMinimumTaskIds.length} logged task rate(s) are missing for this month. Configure Dynamic Task Rates first.` })
+      }
 
       const membershipRevenue = round2(
         payments.reduce((sum, row) => sum + Number(row.amount ?? 0), 0)
@@ -561,7 +615,11 @@ export async function POST(req: Request) {
           Number(log.importance_multiplier_snapshot ?? 0)
         )
         const weightedHours = round2(Number(log.weighted_hours ?? 0))
-        const amount = round2(weightedHours * appliedRate)
+        const minimumPeriod = taskMinimumRateMap.get(taskId)
+        const catalogMinimumHourlyRate = round2(Number(minimumPeriod?.minimum_hourly_rate ?? 0))
+        const employeeFloorHourlyRate = round2(appliedRate * importanceMultiplier)
+        const guaranteedHourlyRate = Math.max(catalogMinimumHourlyRate, employeeFloorHourlyRate)
+        const amount = round2(actualHours * guaranteedHourlyRate)
 
         stats.taskCompensation += amount
         stats.taskRateBreakdown.push({
@@ -572,7 +630,14 @@ export async function POST(req: Request) {
           importance_multiplier: importanceMultiplier,
           weighted_hours: weightedHours,
           applied_rate: appliedRate,
-          rate_source: override ? 'task_override' : 'default',
+          rate_source: guaranteedHourlyRate === catalogMinimumHourlyRate && catalogMinimumHourlyRate >= employeeFloorHourlyRate ? 'catalog_minimum' : override ? 'employee_task_override' : 'employee_rate',
+          task_minimum_rate_period_id: String(minimumPeriod?.id ?? ''),
+          catalog_minimum_hourly_rate: catalogMinimumHourlyRate,
+          employee_floor_hourly_rate: employeeFloorHourlyRate,
+          guaranteed_hourly_rate: guaranteedHourlyRate,
+          minimum_amount: amount,
+          dynamic_supplement: 0,
+          effective_hourly_rate: guaranteedHourlyRate,
           amount,
         })
         statsMap.set(staffUserId, stats)
@@ -644,6 +709,9 @@ export async function POST(req: Request) {
           actual_hours: actualHours,
           weighted_hours: weightedHours,
           task_compensation: taskCompensation,
+          minimum_task_compensation: taskCompensation,
+          dynamic_task_supplement: 0,
+          dynamic_weight_share_percent: 0,
           guaranteed_compensation: guaranteedCompensation,
           bonus_weight_share_percent: 0,
           performance_bonus: 0,
@@ -670,11 +738,13 @@ export async function POST(req: Request) {
       const availableResultAfterGuaranteedPayroll = round2(
         operatingResultBeforePayroll - guaranteedPayroll
       )
+      const manualBonusCommitment = round2(adjustments.filter((adjustment) => adjustment.adjustment_type === 'bonus').reduce((sum, adjustment) => sum + Number(adjustment.amount ?? 0), 0))
+      const safetyReserveAmount = round2(Math.max(0, operatingResultBeforePayroll) * (safetyReservePercent / 100))
       const potentialBonusPool = round2(
-        Math.max(0, availableResultAfterGuaranteedPayroll) *
+        Math.max(0, availableResultAfterGuaranteedPayroll - manualBonusCommitment - safetyReserveAmount) *
           (bonusPoolPercent / 100)
       )
-      const performanceBonusPool = allocateBonus(draftRows, potentialBonusPool)
+      const dynamicTaskSupplementPool = allocateDynamicSupplement(draftRows, potentialBonusPool)
       const adjustmentsByStaff = new Map<string, any[]>()
       for (const adjustment of adjustments) {
         const staffUserId = String(adjustment.staff_user_id ?? '')
@@ -759,7 +829,10 @@ export async function POST(req: Request) {
         month_start: monthStart,
         status: 'draft',
         eligible_revenue_scope: 'membership_only',
+        rate_model: 'dynamic_task_rates',
         bonus_pool_percent: bonusPoolPercent,
+        safety_reserve_percent: safetyReservePercent,
+        safety_reserve_amount: safetyReserveAmount,
         membership_revenue: membershipRevenue,
         membership_payment_count: payments.length,
         paid_membership_refunds: paidMembershipRefunds,
@@ -771,9 +844,11 @@ export async function POST(req: Request) {
         excluded_payroll_expense_count: excludedPayrollExpenseCount,
         operating_result_before_payroll: operatingResultBeforePayroll,
         guaranteed_payroll: guaranteedPayroll,
+        minimum_task_payroll: round2(draftRows.reduce((sum, row) => sum + row.minimum_task_compensation, 0)),
         available_result_after_guaranteed_payroll:
           availableResultAfterGuaranteedPayroll,
-        performance_bonus_pool: performanceBonusPool,
+        performance_bonus_pool: 0,
+        dynamic_task_supplement_pool: dynamicTaskSupplementPool,
         salary_before_adjustments_total: salaryBeforeAdjustmentsTotal,
         manual_bonus_total: manualBonusTotal,
         manual_deduction_total: manualDeductionTotal,
@@ -896,7 +971,9 @@ export async function POST(req: Request) {
           available_result_after_guaranteed_payroll:
             availableResultAfterGuaranteedPayroll,
           bonus_pool_percent: bonusPoolPercent,
-          performance_bonus_pool: performanceBonusPool,
+          safety_reserve_percent: safetyReservePercent,
+          safety_reserve_amount: safetyReserveAmount,
+          dynamic_task_supplement_pool: dynamicTaskSupplementPool,
           salary_before_adjustments_total: salaryBeforeAdjustmentsTotal,
           manual_bonus_total: manualBonusTotal,
           manual_deduction_total: manualDeductionTotal,
