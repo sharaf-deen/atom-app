@@ -96,6 +96,8 @@ function migrationMissing(message: string) {
     lower.includes('staff_payroll_approval_versions') ||
     lower.includes('staff_compensation_rate_periods') ||
     lower.includes('staff_payroll_monthly_adjustments') ||
+    lower.includes('staff_payroll_task_minimum_rate_periods') ||
+    lower.includes('minimum_task_compensation') ||
     lower.includes('salary_before_adjustments') ||
     lower.includes('compensation_rate_period_id') ||
     lower.includes('staff_payroll_reopen_events') ||
@@ -182,7 +184,7 @@ export async function POST(req: Request) {
       const { data: snapshot, error: snapshotError } = await admin
         .from('staff_payroll_monthly_snapshots')
         .select(
-          'id,month_start,status,approval_version_no,eligible_revenue_scope,bonus_pool_percent,membership_revenue,membership_payment_count,paid_membership_refunds,paid_membership_refund_count,net_membership_revenue,eligible_operating_expenses,eligible_expense_count,excluded_payroll_expenses,excluded_payroll_expense_count,operating_result_before_payroll,guaranteed_payroll,available_result_after_guaranteed_payroll,performance_bonus_pool,salary_before_adjustments_total,manual_bonus_total,manual_deduction_total,net_manual_adjustment_total,calculated_payroll_total,staff_count,missing_hours_task_count,unconfigured_staff_count,financial_source_hash,task_source_hash,compensation_source_hash,staff_source_hash,draft_snapshot_hash,draft_calculation_hash'
+          'id,month_start,status,approval_version_no,eligible_revenue_scope,rate_model,bonus_pool_percent,safety_reserve_percent,safety_reserve_amount,membership_revenue,membership_payment_count,paid_membership_refunds,paid_membership_refund_count,net_membership_revenue,eligible_operating_expenses,eligible_expense_count,excluded_payroll_expenses,excluded_payroll_expense_count,operating_result_before_payroll,guaranteed_payroll,minimum_task_payroll,available_result_after_guaranteed_payroll,performance_bonus_pool,dynamic_task_supplement_pool,salary_before_adjustments_total,manual_bonus_total,manual_deduction_total,net_manual_adjustment_total,calculated_payroll_total,staff_count,missing_hours_task_count,unconfigured_staff_count,financial_source_hash,task_source_hash,compensation_source_hash,staff_source_hash,draft_snapshot_hash,draft_calculation_hash'
         )
         .eq('id', snapshotId)
         .maybeSingle()
@@ -258,6 +260,7 @@ export async function POST(req: Request) {
         compensationResult,
         staffResult,
         adjustmentsResult,
+        taskMinimumRatesResult,
         calculationsResult,
       ] = await Promise.all([
         admin
@@ -305,9 +308,15 @@ export async function POST(req: Request) {
           .eq('status', 'active')
           .limit(10000),
         admin
+          .from('staff_payroll_task_minimum_rate_periods')
+          .select('id,task_id,effective_from,effective_until,minimum_hourly_rate,updated_at')
+          .lte('effective_from', monthStart)
+          .or(`effective_until.is.null,effective_until.gt.${monthStart}`)
+          .limit(10000),
+        admin
           .from('staff_payroll_monthly_calculations')
           .select(
-            'staff_user_id,staff_name_snapshot,staff_role_snapshot,compensation_configured,compensation_rate_period_id,compensation_effective_from,compensation_effective_until,fixed_monthly_base,weighted_hour_rate,bonus_eligible,active_task_count,missing_hours_task_count,actual_hours,weighted_hours,task_compensation,guaranteed_compensation,bonus_weight_share_percent,performance_bonus,salary_before_adjustments,manual_bonus,manual_deduction,net_manual_adjustment,calculated_salary,adjustment_breakdown,task_rate_breakdown'
+            'staff_user_id,staff_name_snapshot,staff_role_snapshot,compensation_configured,compensation_rate_period_id,compensation_effective_from,compensation_effective_until,fixed_monthly_base,weighted_hour_rate,bonus_eligible,active_task_count,missing_hours_task_count,actual_hours,weighted_hours,task_compensation,minimum_task_compensation,dynamic_task_supplement,dynamic_weight_share_percent,guaranteed_compensation,bonus_weight_share_percent,performance_bonus,salary_before_adjustments,manual_bonus,manual_deduction,net_manual_adjustment,calculated_salary,adjustment_breakdown,task_rate_breakdown'
           )
           .eq('snapshot_id', snapshotId)
           .limit(10000),
@@ -321,6 +330,7 @@ export async function POST(req: Request) {
         compensationResult.error?.message ||
         staffResult.error?.message ||
         adjustmentsResult.error?.message ||
+        taskMinimumRatesResult.error?.message ||
         calculationsResult.error?.message ||
         ''
 
@@ -342,6 +352,7 @@ export async function POST(req: Request) {
         compensationProfiles: (compensationResult.data ?? []) as any[],
         staffProfiles: (staffResult.data ?? []) as any[],
         adjustments: (adjustmentsResult.data ?? []) as any[],
+        taskMinimumRates: (taskMinimumRatesResult.data ?? []) as any[],
       })
 
       const currentSnapshotHash = buildPayrollSnapshotHash(snapshot as any)

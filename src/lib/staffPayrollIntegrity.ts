@@ -23,6 +23,7 @@ export function buildPayrollSourceHashes(input: {
   compensationProfiles: any[]
   staffProfiles: any[]
   adjustments?: any[]
+  taskMinimumRates?: any[]
 }) {
   const payments = sortByKey(input.payments, (row) => String(row.id ?? '')).map((row) => ({
     id: String(row.id ?? ''),
@@ -106,10 +107,22 @@ export function buildPayrollSourceHashes(input: {
     void_reason: row.void_reason == null ? null : String(row.void_reason),
   }))
 
+  const taskMinimumRates = sortByKey(
+    input.taskMinimumRates ?? [],
+    (row) => `${String(row.task_id ?? '')}:${String(row.effective_from ?? '')}`
+  ).map((row) => ({
+    id: String(row.id ?? ''),
+    task_id: String(row.task_id ?? ''),
+    effective_from: String(row.effective_from ?? ''),
+    effective_until: row.effective_until == null ? null : String(row.effective_until),
+    minimum_hourly_rate: normalizeNumber(row.minimum_hourly_rate),
+    updated_at: row.updated_at == null ? null : String(row.updated_at),
+  }))
+
   return {
     financial_source_hash: stableHash({ payments, refunds, expenses }),
     task_source_hash: stableHash(logs),
-    compensation_source_hash: stableHash({ compensation, adjustments }),
+    compensation_source_hash: stableHash({ compensation, adjustments, task_minimum_rates: taskMinimumRates }),
     staff_source_hash: stableHash(staff),
   }
 }
@@ -117,7 +130,10 @@ export function buildPayrollSourceHashes(input: {
 const SNAPSHOT_CORE_KEYS = [
   'month_start',
   'eligible_revenue_scope',
+  'rate_model',
   'bonus_pool_percent',
+  'safety_reserve_percent',
+  'safety_reserve_amount',
   'membership_revenue',
   'membership_payment_count',
   'paid_membership_refunds',
@@ -129,8 +145,10 @@ const SNAPSHOT_CORE_KEYS = [
   'excluded_payroll_expense_count',
   'operating_result_before_payroll',
   'guaranteed_payroll',
+  'minimum_task_payroll',
   'available_result_after_guaranteed_payroll',
   'performance_bonus_pool',
+  'dynamic_task_supplement_pool',
   'salary_before_adjustments_total',
   'manual_bonus_total',
   'manual_deduction_total',
@@ -176,6 +194,9 @@ export function buildPayrollCalculationsHash(rows: any[]) {
     actual_hours: normalizeNumber(row.actual_hours),
     weighted_hours: normalizeNumber(row.weighted_hours),
     task_compensation: normalizeNumber(row.task_compensation),
+    minimum_task_compensation: normalizeNumber(row.minimum_task_compensation),
+    dynamic_task_supplement: normalizeNumber(row.dynamic_task_supplement),
+    dynamic_weight_share_percent: normalizeNumber(row.dynamic_weight_share_percent),
     guaranteed_compensation: normalizeNumber(row.guaranteed_compensation),
     bonus_weight_share_percent: normalizeNumber(row.bonus_weight_share_percent),
     performance_bonus: normalizeNumber(row.performance_bonus),
@@ -207,6 +228,13 @@ export function buildPayrollCalculationsHash(rows: any[]) {
       weighted_hours: normalizeNumber(item.weighted_hours),
       applied_rate: normalizeNumber(item.applied_rate),
       rate_source: String(item.rate_source ?? ''),
+      task_minimum_rate_period_id: String(item.task_minimum_rate_period_id ?? ''),
+      catalog_minimum_hourly_rate: normalizeNumber(item.catalog_minimum_hourly_rate),
+      employee_floor_hourly_rate: normalizeNumber(item.employee_floor_hourly_rate),
+      guaranteed_hourly_rate: normalizeNumber(item.guaranteed_hourly_rate),
+      minimum_amount: normalizeNumber(item.minimum_amount),
+      dynamic_supplement: normalizeNumber(item.dynamic_supplement),
+      effective_hourly_rate: normalizeNumber(item.effective_hourly_rate),
       amount: normalizeNumber(item.amount),
     })),
   }))

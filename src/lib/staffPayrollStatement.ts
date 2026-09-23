@@ -40,6 +40,8 @@ export type StaffPayrollStatementSnapshot = {
     weighted_hours: number
     task_compensation: number
     performance_bonus: number
+    dynamic_task_supplement: number
+    rate_model: string
     salary_before_adjustments: number
     manual_bonus: number
     manual_deduction: number
@@ -360,7 +362,7 @@ export async function generateStaffPayrollStatementPdfBytes(
   keyValue('Weighted hours:', number(snapshot.compensation.weighted_hours), col2, value2, y)
   y -= 16
   keyValue('Task compensation:', money(snapshot.compensation.task_compensation), col1, value1, y)
-  keyValue('Performance bonus:', money(snapshot.compensation.performance_bonus), col2, value2, y)
+  keyValue(snapshot.compensation.rate_model === 'dynamic_task_rates' ? 'Dynamic task supplement:' : 'Performance bonus:', money(snapshot.compensation.rate_model === 'dynamic_task_rates' ? snapshot.compensation.dynamic_task_supplement : snapshot.compensation.performance_bonus), col2, value2, y)
   y -= 16
   keyValue('Before adjustments:', money(snapshot.compensation.salary_before_adjustments), col1, value1, y)
   keyValue('Manual bonuses:', money(snapshot.compensation.manual_bonus), col2, value2, y)
