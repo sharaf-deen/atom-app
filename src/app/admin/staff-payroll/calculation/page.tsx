@@ -127,7 +127,7 @@ export default async function StaffPayrollCalculationPage({
     admin
       .from('staff_payroll_monthly_snapshots')
       .select(
-        'id,month_start,status,eligible_revenue_scope,rate_model,bonus_pool_percent,safety_reserve_percent,safety_reserve_amount,membership_revenue,membership_payment_count,paid_membership_refunds,paid_membership_refund_count,net_membership_revenue,eligible_operating_expenses,eligible_expense_count,excluded_payroll_expenses,excluded_payroll_expense_count,operating_result_before_payroll,guaranteed_payroll,minimum_task_payroll,available_result_after_guaranteed_payroll,performance_bonus_pool,dynamic_task_supplement_pool,salary_before_adjustments_total,manual_bonus_total,manual_deduction_total,net_manual_adjustment_total,calculated_payroll_total,staff_count,missing_hours_task_count,unconfigured_staff_count,calculated_at,source_data_as_of,approval_version_no,approved_at,approved_by,last_reopened_at,last_reopened_by,last_reopen_reason,financial_source_hash,task_source_hash,compensation_source_hash,staff_source_hash,draft_snapshot_hash,draft_calculation_hash'
+        'id,month_start,status,eligible_revenue_scope,rate_model,bonus_pool_percent,variable_payroll_percent,safety_reserve_percent,safety_reserve_amount,membership_revenue,membership_payment_count,paid_membership_refunds,paid_membership_refund_count,net_membership_revenue,eligible_operating_expenses,eligible_expense_count,excluded_payroll_expenses,excluded_payroll_expense_count,operating_result_before_payroll,guaranteed_payroll,fixed_base_payroll,minimum_task_payroll,available_result_after_guaranteed_payroll,performance_bonus_pool,dynamic_task_supplement_pool,variable_payroll_pool,variable_pool_weighted_hours,variable_weighted_hour_value,salary_before_adjustments_total,manual_bonus_total,manual_deduction_total,net_manual_adjustment_total,calculated_payroll_total,staff_count,missing_hours_task_count,unconfigured_staff_count,calculated_at,source_data_as_of,approval_version_no,approved_at,approved_by,last_reopened_at,last_reopened_by,last_reopen_reason,financial_source_hash,task_source_hash,compensation_source_hash,staff_source_hash,draft_snapshot_hash,draft_calculation_hash'
       )
       .eq('month_start', monthStart)
       .maybeSingle(),
@@ -163,6 +163,7 @@ export default async function StaffPayrollCalculationPage({
     loadError.includes('staff_payroll_monthly_calculations') ||
     loadError.includes('minimum_task_compensation') ||
     loadError.includes('rate_model') ||
+    loadError.includes('variable_payroll_percent') ||
     loadError.includes('salary_before_adjustments') ||
     loadError.includes('staff_payroll_approval_versions') ||
     loadError.includes('staff_payroll_reopen_events') ||
@@ -216,6 +217,7 @@ export default async function StaffPayrollCalculationPage({
         ),
         rate_model: String(snapshotResult.data.rate_model ?? 'legacy_performance_bonus'),
         bonus_pool_percent: Number(snapshotResult.data.bonus_pool_percent ?? 0),
+        variable_payroll_percent: Number(snapshotResult.data.variable_payroll_percent ?? snapshotResult.data.bonus_pool_percent ?? 0),
         safety_reserve_percent: Number(snapshotResult.data.safety_reserve_percent ?? 0),
         safety_reserve_amount: Number(snapshotResult.data.safety_reserve_amount ?? 0),
         membership_revenue: Number(snapshotResult.data.membership_revenue ?? 0),
@@ -245,6 +247,7 @@ export default async function StaffPayrollCalculationPage({
           snapshotResult.data.operating_result_before_payroll ?? 0
         ),
         guaranteed_payroll: Number(snapshotResult.data.guaranteed_payroll ?? 0),
+        fixed_base_payroll: Number(snapshotResult.data.fixed_base_payroll ?? snapshotResult.data.guaranteed_payroll ?? 0),
         minimum_task_payroll: Number(snapshotResult.data.minimum_task_payroll ?? 0),
         available_result_after_guaranteed_payroll: Number(
           snapshotResult.data.available_result_after_guaranteed_payroll ?? 0
@@ -253,6 +256,9 @@ export default async function StaffPayrollCalculationPage({
           snapshotResult.data.performance_bonus_pool ?? 0
         ),
         dynamic_task_supplement_pool: Number(snapshotResult.data.dynamic_task_supplement_pool ?? 0),
+        variable_payroll_pool: Number(snapshotResult.data.variable_payroll_pool ?? snapshotResult.data.dynamic_task_supplement_pool ?? 0),
+        variable_pool_weighted_hours: Number(snapshotResult.data.variable_pool_weighted_hours ?? 0),
+        variable_weighted_hour_value: Number(snapshotResult.data.variable_weighted_hour_value ?? 0),
         salary_before_adjustments_total:
           Number(snapshotResult.data.salary_before_adjustments_total ?? 0) === 0 &&
           Number(snapshotResult.data.manual_bonus_total ?? 0) === 0 &&

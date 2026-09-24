@@ -48,6 +48,7 @@ export type StaffPayrollAccountingReport = {
   payments: StaffPayrollAccountingPayment[]
   totals: {
     staff_count: number
+    task_compensation: number
     salary_before_adjustments: number
     performance_bonus: number
     dynamic_task_supplement: number
@@ -81,6 +82,7 @@ function emptyReport(monthStart: string, snapshotStatus: string | null): StaffPa
     payments: [],
     totals: {
       staff_count: 0,
+      task_compensation: 0,
       salary_before_adjustments: 0,
       performance_bonus: 0,
       dynamic_task_supplement: 0,
@@ -245,6 +247,7 @@ export async function loadStaffPayrollAccountingReport(
     payments,
     totals: {
       staff_count: rows.length,
+      task_compensation: sumRows((row) => row.task_compensation),
       salary_before_adjustments: sumRows((row) => row.salary_before_adjustments),
       performance_bonus: sumRows((row) => row.performance_bonus),
       dynamic_task_supplement: sumRows((row) => row.dynamic_task_supplement),

@@ -234,7 +234,7 @@ export default function StaffCompensationRatesManager({
             <div className="text-xs font-semibold uppercase tracking-[0.12em] text-[hsl(var(--muted))]">Staff Payroll 2D</div>
             <h1 className="mt-1 text-2xl font-bold">Effective compensation rates</h1>
             <p className="mt-2 max-w-3xl text-sm text-[hsl(var(--muted))]">
-              Each period starts on the first day of a payroll month. A newer period automatically closes the previous one. Quantity remains operational only: salary uses actual hours × task importance × the applicable weighted-hour rate.
+              Each period starts on the first day of a payroll month. A newer period automatically closes the previous one. In 2I, the fixed base is guaranteed and eligibility controls access to the variable task pool; legacy hourly rates remain available for approved 2H history.
             </p>
           </div>
           {canWrite ? (
@@ -278,7 +278,7 @@ export default function StaffCompensationRatesManager({
 
           <label className="mt-4 flex items-center gap-2 text-sm">
             <input type="checkbox" checked={form.bonusEligible} disabled={pending} onChange={(event) => setForm((current) => ({ ...current, bonusEligible: event.target.checked }))} />
-            Eligible for dynamic task supplement distribution
+            Eligible for variable payroll pool distribution
           </label>
 
           <div className="mt-5 rounded-2xl border border-black/10 p-3">
