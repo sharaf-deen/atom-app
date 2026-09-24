@@ -42,6 +42,7 @@ export type StaffPayrollStatementSnapshot = {
     performance_bonus: number
     dynamic_task_supplement: number
     rate_model: string
+    variable_weighted_hour_value: number
     salary_before_adjustments: number
     manual_bonus: number
     manual_deduction: number
@@ -358,11 +359,11 @@ export async function generateStaffPayrollStatementPdfBytes(
   keyValue('Fixed monthly base:', money(snapshot.compensation.fixed_monthly_base), col1, value1, y)
   keyValue('Actual hours:', number(snapshot.compensation.actual_hours), col2, value2, y)
   y -= 16
-  keyValue('Default weighted-hour rate:', money(snapshot.compensation.weighted_hour_rate), col1, value1, y)
+  keyValue(snapshot.compensation.rate_model === 'variable_payroll_pool' ? 'Pool value / weighted h:' : 'Default weighted-hour rate:', money(snapshot.compensation.rate_model === 'variable_payroll_pool' ? snapshot.compensation.variable_weighted_hour_value : snapshot.compensation.weighted_hour_rate), col1, value1, y)
   keyValue('Weighted hours:', number(snapshot.compensation.weighted_hours), col2, value2, y)
   y -= 16
-  keyValue('Task compensation:', money(snapshot.compensation.task_compensation), col1, value1, y)
-  keyValue(snapshot.compensation.rate_model === 'dynamic_task_rates' ? 'Dynamic task supplement:' : 'Performance bonus:', money(snapshot.compensation.rate_model === 'dynamic_task_rates' ? snapshot.compensation.dynamic_task_supplement : snapshot.compensation.performance_bonus), col2, value2, y)
+  keyValue(snapshot.compensation.rate_model === 'variable_payroll_pool' ? 'Variable task pay:' : 'Task compensation:', money(snapshot.compensation.task_compensation), col1, value1, y)
+  keyValue(snapshot.compensation.rate_model === 'variable_payroll_pool' ? 'Rate model:' : snapshot.compensation.rate_model === 'dynamic_task_rates' ? 'Dynamic task supplement:' : 'Performance bonus:', snapshot.compensation.rate_model === 'variable_payroll_pool' ? 'Variable payroll pool' : money(snapshot.compensation.rate_model === 'dynamic_task_rates' ? snapshot.compensation.dynamic_task_supplement : snapshot.compensation.performance_bonus), col2, value2, y)
   y -= 16
   keyValue('Before adjustments:', money(snapshot.compensation.salary_before_adjustments), col1, value1, y)
   keyValue('Manual bonuses:', money(snapshot.compensation.manual_bonus), col2, value2, y)
