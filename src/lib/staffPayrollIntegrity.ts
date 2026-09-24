@@ -165,6 +165,20 @@ export function buildPayrollSnapshotHash(snapshot: Record<string, any>) {
     const value = snapshot[key]
     core[key] = typeof value === 'number' ? normalizeNumber(value) : value ?? null
   }
+
+  // Keep hashes for already-approved legacy/2H snapshots byte-for-byte stable.
+  // The 2I fields become immutable only for the new variable-pool model.
+  if (snapshot.rate_model === 'variable_payroll_pool') {
+    for (const key of [
+      'variable_payroll_percent',
+      'fixed_base_payroll',
+      'variable_payroll_pool',
+      'variable_pool_weighted_hours',
+      'variable_weighted_hour_value',
+    ] as const) {
+      core[key] = normalizeNumber(snapshot[key])
+    }
+  }
   return stableHash(core)
 }
 

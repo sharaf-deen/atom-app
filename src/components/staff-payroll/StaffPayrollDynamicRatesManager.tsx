@@ -32,7 +32,7 @@ export default function StaffPayrollDynamicRatesManager({ canWrite, tasks, perio
   }
 
   return <div className="space-y-5">
-    <header><div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-black/50"><TrendingUp className="h-4 w-4" /> Payroll 2H</div><h1 className="mt-2 text-2xl font-bold sm:text-3xl">Dynamic Task Rates & Guaranteed Minimums</h1><p className="mt-2 max-w-3xl text-sm text-black/60">Set the guaranteed hourly floor for every task. Monthly performance can add a dynamic supplement, but can never reduce this floor.</p></header>
+    <header><div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-black/50"><TrendingUp className="h-4 w-4" /> Payroll 2H history</div><h1 className="mt-2 text-2xl font-bold sm:text-3xl">Legacy Dynamic Task Rates</h1><p className="mt-2 max-w-3xl text-sm text-black/60">These effective-dated floors remain available for approved 2H history. New 2I payroll drafts use the variable payroll pool and no longer require a minimum rate for every task.</p></header>
     <section className="grid gap-3 sm:grid-cols-4">
       <div className="rounded-2xl border bg-white p-4"><div className="text-xs text-black/50">History used</div><div className="mt-1 text-xl font-bold">{history.months} month{history.months === 1 ? '' : 's'}</div></div>
       <div className="rounded-2xl border bg-white p-4"><div className="text-xs text-black/50">Avg. operating result</div><div className="mt-1 text-lg font-bold">{money(history.average_operating_result)}</div></div>

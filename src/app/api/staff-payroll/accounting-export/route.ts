@@ -165,7 +165,7 @@ export async function GET(req: Request) {
         'Weighted Hours',
         'Fixed Monthly Base EGP',
         'Task Compensation EGP',
-        'Dynamic Task Supplement EGP',
+        'Dynamic / Variable Task Pay EGP',
         'Performance Bonus EGP',
         'Salary Before Adjustments EGP',
         'Manual Bonus EGP',

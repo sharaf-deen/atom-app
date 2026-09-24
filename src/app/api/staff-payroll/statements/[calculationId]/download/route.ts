@@ -149,7 +149,7 @@ export async function GET(
         .order('recorded_at', { ascending: true }),
       admin
         .from('staff_payroll_monthly_snapshots')
-        .select('id,status,approval_version_no,rate_model')
+        .select('id,status,approval_version_no,rate_model,variable_weighted_hour_value')
         .eq('id', calculation.snapshot_id)
         .maybeSingle(),
       admin
@@ -249,6 +249,7 @@ export async function GET(
         performance_bonus: Number(calculation.performance_bonus ?? 0),
         dynamic_task_supplement: Number(calculation.dynamic_task_supplement ?? 0),
         rate_model: String(snapshotResult.data?.rate_model ?? 'legacy_performance_bonus'),
+        variable_weighted_hour_value: Number(snapshotResult.data?.variable_weighted_hour_value ?? 0),
         salary_before_adjustments: salaryBeforeAdjustments,
         manual_bonus: manualBonus,
         manual_deduction: manualDeduction,

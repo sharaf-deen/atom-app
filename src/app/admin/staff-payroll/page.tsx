@@ -366,15 +366,15 @@ export default async function StaffPayrollOverviewPage({
     },
     {
       number: 4,
-      title: 'Compensation Rates',
-      description: `${configuredStaff.size} staff members have a rate period applicable to ${monthLabel(selectedMonth)}.`,
+      title: 'Bases & Eligibility',
+      description: `${configuredStaff.size} staff members have a base and pool-eligibility period applicable to ${monthLabel(selectedMonth)}.`,
       status:
         missingLiveCompensation > 0
           ? `${missingLiveCompensation} staff rate${missingLiveCompensation === 1 ? '' : 's'} missing`
-          : 'Applicable rates ready',
+          : 'Bases & eligibility ready',
       tone: missingLiveCompensation > 0 ? 'warning' : 'ready',
       href: '/admin/staff-payroll/rates',
-      action: canWrite ? 'Manage rate periods' : 'Review rate periods',
+      action: canWrite ? 'Manage bases' : 'Review bases',
       icon: Banknote,
     },
     {
@@ -438,7 +438,7 @@ export default async function StaffPayrollOverviewPage({
           <div className="max-w-3xl">
             <div className="flex flex-wrap items-center gap-2">
               <span className="rounded-full bg-black px-3 py-1 text-xs font-semibold text-white">
-                Staff Payroll 2F
+                Staff Payroll 2I
               </span>
               <span
                 className={

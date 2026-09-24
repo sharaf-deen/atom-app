@@ -526,7 +526,7 @@ export default function StaffPayrollPaymentsManager({
                         </span>
                       </div>
                       <div className="mt-2 text-xs text-[hsl(var(--muted))]">
-                        {number(calculation.weighted_hours)} weighted hours · Task compensation {money(calculation.task_compensation)} · Dynamic supplement {money(calculation.dynamic_task_supplement)}{calculation.performance_bonus ? ` · Legacy bonus ${money(calculation.performance_bonus)}` : ''}
+                        {number(calculation.weighted_hours)} weighted hours · Task pay {money(calculation.task_compensation)}{Math.abs(calculation.dynamic_task_supplement - calculation.task_compensation) > 0.009 ? ` · Dynamic supplement ${money(calculation.dynamic_task_supplement)}` : ''}{calculation.performance_bonus ? ` · Legacy bonus ${money(calculation.performance_bonus)}` : ''}
                       </div>
                       <div className="mt-1 text-xs text-[hsl(var(--muted))]">
                         Salary before adjustments {money(calculation.salary_before_adjustments)} · Monthly bonuses + {money(calculation.manual_bonus)} · Deductions − {money(calculation.manual_deduction)}
