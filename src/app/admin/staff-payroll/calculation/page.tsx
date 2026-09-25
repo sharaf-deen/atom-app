@@ -1,4 +1,4 @@
-// Staff Payroll 1D — Financial Snapshot, Salary Calculation & Approval
+// Staff Payroll 2I — Financial Snapshot, Salary Calculation & Approval
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
@@ -19,6 +19,12 @@ const STAFF_ROLES = [
 
 function getOne(value: string | string[] | undefined) {
   return Array.isArray(value) ? value[0] : value
+}
+
+function parsePercent(value: string | undefined) {
+  if (value === undefined || value.trim() === '') return undefined
+  const parsed = Number(value)
+  return Number.isFinite(parsed) && parsed >= 0 && parsed <= 100 ? parsed : undefined
 }
 
 function cairoYearMonth() {
@@ -104,6 +110,9 @@ export default async function StaffPayrollCalculationPage({
 
   const selectedMonth = normalizeClosedMonth(getOne(searchParams?.month))
   const monthStart = `${selectedMonth}-01`
+  const initialVariablePayrollPercent = parsePercent(getOne(searchParams?.variable))
+  const initialSafetyReservePercent = parsePercent(getOne(searchParams?.reserve))
+  const scenarioPrefill = getOne(searchParams?.from) === 'simulator'
 
   const [
     staffResult,
@@ -482,6 +491,9 @@ export default async function StaffPayrollCalculationPage({
           approvalVersions={approvalVersions}
           reopenEvents={reopenEvents}
           canWrite={canWrite}
+          initialVariablePayrollPercent={initialVariablePayrollPercent}
+          initialSafetyReservePercent={initialSafetyReservePercent}
+          scenarioPrefill={scenarioPrefill}
         />
       ) : null}
     </main>

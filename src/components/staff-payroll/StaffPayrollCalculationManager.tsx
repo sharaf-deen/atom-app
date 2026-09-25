@@ -163,6 +163,9 @@ type Props = {
   approvalVersions: ApprovalVersion[]
   reopenEvents: ReopenEvent[]
   canWrite: boolean
+  initialVariablePayrollPercent?: number
+  initialSafetyReservePercent?: number
+  scenarioPrefill?: boolean
 }
 
 function money(value: number) {
@@ -242,6 +245,9 @@ export default function StaffPayrollCalculationManager({
   approvalVersions,
   reopenEvents,
   canWrite,
+  initialVariablePayrollPercent,
+  initialSafetyReservePercent,
+  scenarioPrefill = false,
 }: Props) {
   const router = useRouter()
   const compensationMap = React.useMemo(
@@ -250,10 +256,10 @@ export default function StaffPayrollCalculationManager({
   )
 
   const [variablePayrollPercent, setVariablePayrollPercent] = React.useState(
-    String(snapshot?.variable_payroll_percent ?? snapshot?.bonus_pool_percent ?? 30)
+    String(initialVariablePayrollPercent ?? snapshot?.variable_payroll_percent ?? snapshot?.bonus_pool_percent ?? 30)
   )
   const [safetyReservePercent, setSafetyReservePercent] = React.useState(
-    String(snapshot?.safety_reserve_percent ?? 20)
+    String(initialSafetyReservePercent ?? snapshot?.safety_reserve_percent ?? 20)
   )
   const [pendingKey, setPendingKey] = React.useState<string | null>(null)
   const [message, setMessage] = React.useState<string | null>(null)
@@ -273,9 +279,9 @@ export default function StaffPayrollCalculationManager({
     snapshot!.integrity_ready
 
   React.useEffect(() => {
-    setVariablePayrollPercent(String(snapshot?.variable_payroll_percent ?? snapshot?.bonus_pool_percent ?? 30))
-    setSafetyReservePercent(String(snapshot?.safety_reserve_percent ?? 20))
-  }, [snapshot?.bonus_pool_percent, snapshot?.variable_payroll_percent, snapshot?.safety_reserve_percent, monthStart])
+    setVariablePayrollPercent(String(initialVariablePayrollPercent ?? snapshot?.variable_payroll_percent ?? snapshot?.bonus_pool_percent ?? 30))
+    setSafetyReservePercent(String(initialSafetyReservePercent ?? snapshot?.safety_reserve_percent ?? 20))
+  }, [initialVariablePayrollPercent, initialSafetyReservePercent, snapshot?.bonus_pool_percent, snapshot?.variable_payroll_percent, snapshot?.safety_reserve_percent, monthStart])
 
   async function post(body: any) {
     const response = await fetch('/api/staff-payroll/calculation', {
@@ -392,6 +398,13 @@ export default function StaffPayrollCalculationManager({
           <div className="mt-1 text-xs">
             Admin can review compensation settings and monthly calculations. Only Super Admin can change rates or recalculate a payroll draft.
           </div>
+        </div>
+      ) : null}
+
+      {scenarioPrefill ? (
+        <div className="rounded-2xl border border-violet-200 bg-violet-50 p-3 text-sm text-violet-950">
+          <div className="font-semibold">Simulator percentages loaded</div>
+          <div className="mt-1 text-xs">No payroll data has been changed. Review the percentages below, then click Recalculate draft explicitly to write a new official draft.</div>
         </div>
       ) : null}
 
