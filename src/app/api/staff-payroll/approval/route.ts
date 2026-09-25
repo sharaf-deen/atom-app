@@ -134,6 +134,9 @@ function rpcErrorDetails(message: string) {
   if (message.includes('STAFF_PAYROLL_ACTIVE_PAYMENTS_BLOCK_REOPEN')) {
     return 'This payroll has active salary payments. Reverse all active payments first, then reopen if a payroll correction is still required.'
   }
+  if (message.includes('STAFF_PAYROLL_PAYMENT_CLOSEOUT_BLOCK_REOPEN')) {
+    return 'This payroll payment cycle is closed. Reopen the payment closeout first, then reverse any active salary payments before reopening the payroll approval.'
+  }
   return message
 }
 

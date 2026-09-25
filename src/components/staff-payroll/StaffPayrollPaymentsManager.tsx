@@ -77,6 +77,26 @@ type SalaryPayment = {
   reversal_reason: string | null
 }
 
+type PaymentCloseout = {
+  id: string
+  approval_version_id: string
+  snapshot_id: string
+  month_start: string
+  approval_version_no: number
+  approved_payroll_total: number
+  payable_salary_total: number
+  active_payment_total: number
+  active_payment_count: number
+  staff_count: number
+  status: string
+  closeout_note: string | null
+  closed_at: string
+  closed_by_name_snapshot: string
+  reopened_at: string | null
+  reopened_by_name_snapshot: string | null
+  reopen_reason: string | null
+}
+
 type Props = {
   monthStart: string
   snapshot: Snapshot | null
@@ -84,6 +104,7 @@ type Props = {
   versions: ApprovalVersion[]
   calculations: ApprovalCalculation[]
   payments: SalaryPayment[]
+  closeouts: PaymentCloseout[]
   canWrite: boolean
 }
 
@@ -212,6 +233,7 @@ export default function StaffPayrollPaymentsManager({
   versions,
   calculations,
   payments,
+  closeouts,
   canWrite,
 }: Props) {
   const router = useRouter()
@@ -228,6 +250,18 @@ export default function StaffPayrollPaymentsManager({
   const activeCurrentPayments = React.useMemo(
     () => currentPayments.filter((payment) => payment.status === 'active'),
     [currentPayments]
+  )
+
+  const currentCloseout = React.useMemo(
+    () =>
+      currentVersion
+        ? closeouts.find(
+            (closeout) =>
+              closeout.approval_version_id === currentVersion.id &&
+              closeout.status === 'closed'
+          ) ?? null
+        : null,
+    [closeouts, currentVersion]
   )
 
   const paidByCalculation = React.useMemo(() => {
@@ -267,6 +301,14 @@ export default function StaffPayrollPaymentsManager({
     }
   }, [calculations, paidByCalculation, currentVersion])
 
+  const closeoutReady = Boolean(
+    currentVersion &&
+      calculations.length > 0 &&
+      totals.remaining <= 0.005 &&
+      totals.partial === 0 &&
+      totals.unpaid === 0
+  )
+
   const [drafts, setDrafts] = React.useState<Record<string, PaymentDraft>>(() => {
     const result: Record<string, PaymentDraft> = {}
     for (const calculation of calculations) {
@@ -288,6 +330,9 @@ export default function StaffPayrollPaymentsManager({
   const [error, setError] = React.useState<string | null>(null)
   const [reversingPaymentId, setReversingPaymentId] = React.useState<string | null>(null)
   const [reversalReason, setReversalReason] = React.useState('')
+  const [closeoutNote, setCloseoutNote] = React.useState('')
+  const [reopeningCloseoutId, setReopeningCloseoutId] = React.useState<string | null>(null)
+  const [closeoutReopenReason, setCloseoutReopenReason] = React.useState('')
 
   React.useEffect(() => {
     const result: Record<string, PaymentDraft> = {}
@@ -323,6 +368,19 @@ export default function StaffPayrollPaymentsManager({
 
   async function post(body: any) {
     const response = await fetch('/api/staff-payroll/payments', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+    const payload = await response.json().catch(() => null)
+    if (!response.ok || !payload?.ok) {
+      throw new Error(payload?.details || payload?.error || `HTTP_${response.status}`)
+    }
+    return payload
+  }
+
+  async function postCloseout(body: any) {
+    const response = await fetch('/api/staff-payroll/payment-closeout', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
@@ -411,6 +469,72 @@ export default function StaffPayrollPaymentsManager({
     }
   }
 
+  async function closePaymentCycle() {
+    if (!currentVersion) return
+
+    if (calculations.length < 1) {
+      setError('There are no approved staff salaries to close.')
+      return
+    }
+
+    if (totals.remaining > 0.005 || totals.partial > 0 || totals.unpaid > 0) {
+      setError('Every salary must be fully paid before payment closeout.')
+      return
+    }
+
+    setPendingKey('closeout')
+    setMessage(null)
+    setError(null)
+
+    try {
+      const payload = await postCloseout({
+        action: 'close',
+        approvalVersionId: currentVersion.id,
+        note: closeoutNote.trim() || null,
+      })
+
+      setMessage(
+        `Payment cycle closed for Approval Version ${currentVersion.version_no}. ${money(Number(payload.paidTotal ?? totals.paid))} is locked in the payment ledger.`
+      )
+      setCloseoutNote('')
+      router.refresh()
+    } catch (caught: any) {
+      setError(caught?.message ?? 'Failed to close the payment cycle.')
+    } finally {
+      setPendingKey(null)
+    }
+  }
+
+  async function reopenPaymentCloseout(closeout: PaymentCloseout) {
+    const reason = closeoutReopenReason.trim()
+    if (reason.length < 3) {
+      setError('A reason is required to reopen the payment closeout.')
+      return
+    }
+
+    setPendingKey(`reopen-closeout:${closeout.id}`)
+    setMessage(null)
+    setError(null)
+
+    try {
+      await postCloseout({
+        action: 'reopen',
+        closeoutId: closeout.id,
+        reason,
+      })
+      setMessage(
+        `Payment closeout for Approval Version ${closeout.approval_version_no} was reopened. Payment corrections are available again.`
+      )
+      setReopeningCloseoutId(null)
+      setCloseoutReopenReason('')
+      router.refresh()
+    } catch (caught: any) {
+      setError(caught?.message ?? 'Failed to reopen the payment closeout.')
+    } finally {
+      setPendingKey(null)
+    }
+  }
+
   return (
     <div className="space-y-5">
       <section className="rounded-2xl border border-black/10 bg-white p-4">
@@ -487,10 +611,146 @@ export default function StaffPayrollPaymentsManager({
             </div>
           </section>
 
+          {currentCloseout ? (
+            <section className="rounded-3xl border border-emerald-200 bg-emerald-50 p-4 sm:p-5">
+              <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                <div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="rounded-full bg-emerald-700 px-2.5 py-1 text-[11px] font-bold text-white">
+                      Payment cycle closed
+                    </span>
+                    <span className="text-xs font-semibold text-emerald-900">
+                      Approval Version {currentCloseout.approval_version_no}
+                    </span>
+                  </div>
+                  <h2 className="mt-2 text-lg font-bold text-emerald-950">Monthly payment closeout</h2>
+                  <p className="mt-1 max-w-3xl text-sm text-emerald-950/80">
+                    All approved salaries were settled and the salary-payment ledger is now locked. Recording or reversing payments requires an explicit closeout reopen first.
+                  </p>
+                  <div className="mt-3 grid gap-2 text-xs text-emerald-950/80 sm:grid-cols-2 lg:grid-cols-4">
+                    <div><span className="font-semibold">Paid total:</span> {money(currentCloseout.active_payment_total)}</div>
+                    <div><span className="font-semibold">Payments:</span> {currentCloseout.active_payment_count}</div>
+                    <div><span className="font-semibold">Staff:</span> {currentCloseout.staff_count}</div>
+                    <div><span className="font-semibold">Closed:</span> {dateTimeLabel(currentCloseout.closed_at)}</div>
+                  </div>
+                  <div className="mt-2 text-xs text-emerald-950/80">
+                    Closed by {currentCloseout.closed_by_name_snapshot}
+                    {currentCloseout.closeout_note ? ` · Note: ${currentCloseout.closeout_note}` : ''}
+                  </div>
+                </div>
+
+                {canWrite ? (
+                  reopeningCloseoutId === currentCloseout.id ? (
+                    <div className="w-full max-w-md rounded-2xl border border-emerald-300 bg-white p-3 lg:w-96">
+                      <div className="text-xs font-semibold">Reopen payment closeout</div>
+                      <p className="mt-1 text-xs text-[hsl(var(--muted))]">
+                        This unlocks payment corrections only. The payroll approval remains locked.
+                      </p>
+                      <textarea
+                        value={closeoutReopenReason}
+                        onChange={(event) => setCloseoutReopenReason(event.target.value)}
+                        rows={3}
+                        maxLength={1000}
+                        placeholder="Mandatory reason…"
+                        className="mt-3 w-full rounded-xl border border-black/10 bg-white px-3 py-2 text-sm"
+                      />
+                      <div className="mt-2 flex justify-end gap-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setReopeningCloseoutId(null)
+                            setCloseoutReopenReason('')
+                          }}
+                          disabled={pendingKey === `reopen-closeout:${currentCloseout.id}`}
+                          className="rounded-xl border border-black/10 px-3 py-2 text-xs font-semibold disabled:opacity-50"
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => reopenPaymentCloseout(currentCloseout)}
+                          disabled={
+                            pendingKey === `reopen-closeout:${currentCloseout.id}` ||
+                            closeoutReopenReason.trim().length < 3
+                          }
+                          className="rounded-xl border border-amber-700 bg-amber-700 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50"
+                        >
+                          {pendingKey === `reopen-closeout:${currentCloseout.id}`
+                            ? 'Reopening…'
+                            : 'Confirm reopen'}
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setReopeningCloseoutId(currentCloseout.id)
+                        setCloseoutReopenReason('')
+                        setError(null)
+                      }}
+                      className="rounded-xl border border-amber-700 bg-white px-4 py-2 text-sm font-semibold text-amber-800 hover:bg-amber-50"
+                    >
+                      Reopen payment closeout
+                    </button>
+                  )
+                ) : null}
+              </div>
+            </section>
+          ) : closeoutReady ? (
+            <section className="rounded-3xl border border-black/10 bg-white p-4 sm:p-5">
+              <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                <div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-[11px] font-bold text-emerald-800">
+                      Ready to close
+                    </span>
+                    <span className="text-xs text-[hsl(var(--muted))]">All approved salaries are fully paid</span>
+                  </div>
+                  <h2 className="mt-2 text-lg font-bold">Payment closeout</h2>
+                  <p className="mt-1 max-w-3xl text-sm text-[hsl(var(--muted))]">
+                    Closing freezes the payment ledger for Approval Version {currentVersion.version_no}. It does not change the approved payroll calculation.
+                  </p>
+                </div>
+
+                {canWrite ? (
+                  <div className="w-full max-w-md lg:w-96">
+                    <label className="text-xs font-medium">
+                      Closeout note
+                      <textarea
+                        value={closeoutNote}
+                        onChange={(event) => setCloseoutNote(event.target.value)}
+                        rows={2}
+                        maxLength={2000}
+                        placeholder="Optional"
+                        className="mt-1 w-full rounded-xl border border-black/10 bg-white px-3 py-2 text-sm"
+                      />
+                    </label>
+                    <button
+                      type="button"
+                      onClick={closePaymentCycle}
+                      disabled={pendingKey === 'closeout'}
+                      className="mt-2 w-full rounded-xl border border-black bg-black px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+                    >
+                      {pendingKey === 'closeout' ? 'Closing…' : 'Close payment cycle'}
+                    </button>
+                  </div>
+                ) : null}
+              </div>
+            </section>
+          ) : (
+            <section className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950">
+              <div className="font-semibold">Payment closeout pending</div>
+              <div className="mt-1 text-xs">
+                Closeout becomes available only after every approved salary is fully settled. Remaining: {money(totals.remaining)} · {totals.partial} partial · {totals.unpaid} unpaid.
+              </div>
+            </section>
+          )}
+
           {!canWrite ? (
             <div className="rounded-2xl border border-sky-200 bg-sky-50 p-3 text-sm text-sky-950">
               <div className="font-semibold">Read-only access</div>
-              <div className="mt-1 text-xs">Admin can view payroll and download salary statements only. Only Super Admin can change salary settings, calculate/approve payroll, or record/reverse salary payments.</div>
+              <div className="mt-1 text-xs">Admin can view payroll, payment closeout history and salary statements only. Only Super Admin can change salary settings, calculate/approve payroll, record/reverse salary payments, or close/reopen the payment cycle.</div>
             </div>
           ) : null}
 
@@ -606,7 +866,7 @@ export default function StaffPayrollPaymentsManager({
                               ) : null}
                             </div>
 
-                            {canWrite && payment.status === 'active' ? (
+                            {canWrite && !currentCloseout && payment.status === 'active' ? (
                               reversingPaymentId === payment.id ? (
                                 <div className="w-full max-w-sm space-y-2 sm:w-80">
                                   <textarea
@@ -658,7 +918,7 @@ export default function StaffPayrollPaymentsManager({
                     </div>
                   ) : null}
 
-                  {canWrite && remaining > 0.005 && draft ? (
+                  {canWrite && !currentCloseout && remaining > 0.005 && draft ? (
                     <div className="mt-4 rounded-2xl border border-black/10 bg-black/[0.015] p-3">
                       <div className="text-xs font-semibold uppercase tracking-wide text-[hsl(var(--muted))]">Record salary payment</div>
                       <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
@@ -733,6 +993,82 @@ export default function StaffPayrollPaymentsManager({
           </section>
         </>
       )}
+
+      {closeouts.length ? (
+        <section className="rounded-3xl border border-black/10 bg-white p-4 sm:p-5">
+          <div>
+            <h2 className="text-lg font-bold">Payment closeout history</h2>
+            <p className="mt-1 text-sm text-[hsl(var(--muted))]">
+              Closeout and exceptional reopen events are preserved for every approval version.
+            </p>
+          </div>
+
+          <div className="mt-4 space-y-3">
+            {closeouts.map((closeout) => (
+              <div
+                key={closeout.id}
+                className={
+                  'rounded-2xl border p-4 ' +
+                  (closeout.status === 'closed'
+                    ? 'border-emerald-200 bg-emerald-50/60'
+                    : 'border-amber-200 bg-amber-50/60')
+                }
+              >
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                  <div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="font-bold">Approval Version {closeout.approval_version_no}</span>
+                      <span
+                        className={
+                          'rounded-full px-2 py-0.5 text-[10px] font-bold ' +
+                          (closeout.status === 'closed'
+                            ? 'bg-emerald-700 text-white'
+                            : 'bg-amber-700 text-white')
+                        }
+                      >
+                        {closeout.status === 'closed' ? 'Closed' : 'Reopened'}
+                      </span>
+                    </div>
+                    <div className="mt-1 text-xs text-[hsl(var(--muted))]">
+                      Closed {dateTimeLabel(closeout.closed_at)} by {closeout.closed_by_name_snapshot}
+                    </div>
+                    {closeout.closeout_note ? (
+                      <div className="mt-2 text-xs">Closeout note: {closeout.closeout_note}</div>
+                    ) : null}
+                  </div>
+
+                  <div className="grid grid-cols-3 gap-4 text-left text-xs sm:text-right">
+                    <div>
+                      <div className="text-[hsl(var(--muted))]">Paid total</div>
+                      <div className="font-semibold">{money(closeout.active_payment_total)}</div>
+                    </div>
+                    <div>
+                      <div className="text-[hsl(var(--muted))]">Payments</div>
+                      <div className="font-semibold">{closeout.active_payment_count}</div>
+                    </div>
+                    <div>
+                      <div className="text-[hsl(var(--muted))]">Staff</div>
+                      <div className="font-semibold">{closeout.staff_count}</div>
+                    </div>
+                  </div>
+                </div>
+
+                {closeout.status === 'reopened' ? (
+                  <div className="mt-3 rounded-xl border border-amber-200 bg-white p-3 text-xs text-amber-950">
+                    <div className="font-semibold">
+                      Reopened {dateTimeLabel(closeout.reopened_at)}
+                      {closeout.reopened_by_name_snapshot
+                        ? ` by ${closeout.reopened_by_name_snapshot}`
+                        : ''}
+                    </div>
+                    <div className="mt-1">Reason: {closeout.reopen_reason || '—'}</div>
+                  </div>
+                ) : null}
+              </div>
+            ))}
+          </div>
+        </section>
+      ) : null}
 
       <section className="rounded-3xl border border-black/10 bg-white p-4 sm:p-5">
         <div>

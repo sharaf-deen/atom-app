@@ -103,6 +103,9 @@ function rpcErrorDetails(message: string) {
   if (message.includes('STAFF_PAYROLL_PAYMENT_NOT_CURRENT_APPROVAL')) {
     return 'Payments can only be recorded against the currently approved payroll version.'
   }
+  if (message.includes('STAFF_PAYROLL_PAYMENT_CLOSEOUT_LOCKED')) {
+    return 'This payroll payment cycle is closed. Reopen the payment closeout before recording or reversing salary payments.'
+  }
   if (message.includes('STAFF_PAYROLL_PAYMENT_EXCEEDS_REMAINING')) {
     return 'Payment exceeds the remaining salary due.'
   }
