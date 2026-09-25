@@ -1,4 +1,4 @@
-// Staff Payroll 1E — Salary Payments & Payment Tracking
+// Staff Payroll 2K — Salary Payments, Payment Closeout & Audit History
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
@@ -96,7 +96,7 @@ export default async function StaffPayrollPaymentsPage({
   const selectedMonth = normalizeClosedMonth(getOne(searchParams?.month))
   const monthStart = `${selectedMonth}-01`
 
-  const [snapshotResult, versionsResult, paymentsResult] = await Promise.all([
+  const [snapshotResult, versionsResult, paymentsResult, closeoutsResult] = await Promise.all([
     admin
       .from('staff_payroll_monthly_snapshots')
       .select('id,month_start,status,approval_version_no,approved_at,calculated_payroll_total,staff_count')
@@ -112,16 +112,23 @@ export default async function StaffPayrollPaymentsPage({
       .select('id,approval_version_id,approval_calculation_id,snapshot_id,month_start,approval_version_no,staff_user_id,staff_name_snapshot,approved_salary_amount,amount,payment_method,payment_date,reference,note,status,recorded_at,recorded_by_name_snapshot,reversed_at,reversed_by_name_snapshot,reversal_reason')
       .eq('month_start', monthStart)
       .order('recorded_at', { ascending: false }),
+    admin
+      .from('staff_payroll_payment_closeouts')
+      .select('id,approval_version_id,snapshot_id,month_start,approval_version_no,approved_payroll_total,payable_salary_total,active_payment_total,active_payment_count,staff_count,status,closeout_note,closed_at,closed_by_name_snapshot,reopened_at,reopened_by_name_snapshot,reopen_reason')
+      .eq('month_start', monthStart)
+      .order('closed_at', { ascending: false }),
   ])
 
   const loadError =
     snapshotResult.error?.message ||
     versionsResult.error?.message ||
     paymentsResult.error?.message ||
+    closeoutsResult.error?.message ||
     ''
 
   const migrationMissing =
     loadError.includes('staff_payroll_salary_payments') ||
+    loadError.includes('staff_payroll_payment_closeouts') ||
     loadError.toLowerCase().includes('does not exist')
 
   const snapshot = snapshotResult.data
@@ -225,6 +232,28 @@ export default async function StaffPayrollPaymentsPage({
     reversal_reason: row.reversal_reason ? String(row.reversal_reason) : null,
   }))
 
+  const closeouts = ((closeoutsResult.data ?? []) as any[]).map((row) => ({
+    id: String(row.id),
+    approval_version_id: String(row.approval_version_id),
+    snapshot_id: String(row.snapshot_id),
+    month_start: String(row.month_start),
+    approval_version_no: Number(row.approval_version_no ?? 0),
+    approved_payroll_total: Number(row.approved_payroll_total ?? 0),
+    payable_salary_total: Number(row.payable_salary_total ?? 0),
+    active_payment_total: Number(row.active_payment_total ?? 0),
+    active_payment_count: Number(row.active_payment_count ?? 0),
+    staff_count: Number(row.staff_count ?? 0),
+    status: String(row.status ?? 'closed'),
+    closeout_note: row.closeout_note ? String(row.closeout_note) : null,
+    closed_at: String(row.closed_at),
+    closed_by_name_snapshot: String(row.closed_by_name_snapshot ?? 'Super Admin'),
+    reopened_at: row.reopened_at ? String(row.reopened_at) : null,
+    reopened_by_name_snapshot: row.reopened_by_name_snapshot
+      ? String(row.reopened_by_name_snapshot)
+      : null,
+    reopen_reason: row.reopen_reason ? String(row.reopen_reason) : null,
+  }))
+
   const calculationError = calculationsResult.error?.message || ''
 
   return (
@@ -234,7 +263,7 @@ export default async function StaffPayrollPaymentsPage({
           <div>
             <div className="flex flex-wrap items-center gap-2">
               <span className="rounded-full bg-black px-3 py-1 text-xs font-semibold text-white">
-                Staff Payroll 1E
+                Staff Payroll 2K
               </span>
               <span
                 className={
@@ -244,15 +273,15 @@ export default async function StaffPayrollPaymentsPage({
                     : 'bg-sky-50 text-sky-800')
                 }
               >
-                {canWrite ? 'Super Admin · payment control' : 'Admin · read-only'}
+                {canWrite ? 'Super Admin · payment & closeout control' : 'Admin · read-only'}
               </span>
             </div>
 
             <h1 className="mt-3 text-2xl font-bold sm:text-3xl">
-              Salary Payments & Payment Tracking
+              Salary Payments & Payment Closeout
             </h1>
             <p className="mt-2 max-w-3xl text-sm text-[hsl(var(--muted))] sm:text-base">
-              Record real salary payments against the immutable approved payroll version. Multiple payments are supported and incorrect entries are reversed, never deleted.
+              Record real salary payments against the immutable approved payroll version, then close the payment cycle once every salary is fully settled. Closed cycles are locked and can only be reopened by Super Admin with an audit reason.
             </p>
           </div>
         </div>
@@ -281,6 +310,7 @@ export default async function StaffPayrollPaymentsPage({
           versions={versions}
           calculations={calculations}
           payments={payments}
+          closeouts={closeouts}
           canWrite={canWrite}
         />
       ) : null}
