@@ -16,6 +16,12 @@ export default function StaffPayrollLayout({
             Overview
           </Link>
           <Link
+            href="/admin/staff-payroll/dashboard"
+            className="rounded-xl border border-black/10 px-3 py-2 text-sm font-semibold hover:bg-black/[0.03]"
+          >
+            Dashboard
+          </Link>
+          <Link
             href="/admin/staff-payroll/monthly-tasks"
             className="rounded-xl border border-black/10 px-3 py-2 text-sm font-semibold hover:bg-black/[0.03]"
           >
