@@ -275,6 +275,11 @@ export default async function AdminPage() {
       <Section className="space-y-4">
         <h2 className="text-lg font-semibold">Quick actions</h2>
         <div className="flex flex-wrap gap-2">
+          {me.role === 'super_admin' ? (
+            <Button asChild variant="outline" href="/head-coach/promotion-desk">
+              Promotion Desk
+            </Button>
+          ) : null}
           <Button asChild variant="outline" href="/admin/crm">
             CRM
           </Button>
