@@ -277,7 +277,6 @@ async function saveTrainingProfileAction(formData: FormData) {
   if (upsert.error) {
     throw new Error(upsert.error.message)
   }
-
   revalidatePath(nextPath)
   redirect(nextPath)
 }
@@ -660,7 +659,9 @@ export default async function AthleteProfileSection({ memberUserId, targetRole, 
   const competitionRows = competitions ?? []
   const coachOptions = (coachOptionsRes as { data?: CoachOption[] } | null)?.data ?? []
   const referenceCoach = coachOptions.find((option) => option.user_id === (training?.reference_coach_user_id ?? null)) ?? null
-  const currentBelt = beltRows[0]?.belt_code ?? null
+  const stripeCount = Math.max(0, Number(training?.stripes ?? 0))
+  const hasImplicitWhiteBelt = beltRows.length === 0 && stripeCount > 0
+  const currentBelt = beltRows[0]?.belt_code ?? (hasImplicitWhiteBelt ? 'white' : null)
   const currentYear = new Date().getUTCFullYear()
   const podiumsThisYear = competitionRows.filter((row) => {
     const year = Number(String(row.competition_date || '').slice(0, 4))
@@ -692,9 +693,9 @@ export default async function AthleteProfileSection({ memberUserId, targetRole, 
         </div>
         <div className="flex flex-wrap gap-2">
           <TinyBadge>{training?.program_level ? titleCase(training.program_level) : 'Program pending'}</TinyBadge>
-          <TinyBadge>{`Stripes ${Math.max(0, Number(training?.stripes ?? 0))}`}</TinyBadge>
+          <TinyBadge>{`Stripes ${stripeCount}`}</TinyBadge>
           <TinyBadge>{specialtyLabel(training?.specialty ?? null)}</TinyBadge>
-          <TinyBadge tone={currentBelt ? 'success' : 'neutral'}>{currentBelt ? `${beltLabel(currentBelt)} belt` : 'No belt yet'}</TinyBadge>
+          <TinyBadge tone={currentBelt ? 'success' : 'neutral'}>{currentBelt ? `${beltLabel(currentBelt)} belt · ${stripeCount} stripe${stripeCount === 1 ? '' : 's'}` : 'No belt yet'}</TinyBadge>
           <TinyBadge tone={podiumsThisYear >= 3 ? 'success' : podiumsThisYear > 0 ? 'warning' : 'neutral'}>
             {podiumsThisYear} podium(s) in {currentYear}
           </TinyBadge>
@@ -709,7 +710,7 @@ export default async function AthleteProfileSection({ memberUserId, targetRole, 
           </div>
           <div className="mt-3 text-lg font-semibold tracking-tight">{training?.program_level ? titleCase(training.program_level) : 'Not set yet'}</div>
           <div className="mt-1 text-sm text-[hsl(var(--muted))]">
-            {training ? `${specialtyLabel(training.specialty)} · ${Math.max(0, Number(training.stripes ?? 0))} stripe(s)` : 'No program level saved yet.'}
+            {training ? `${specialtyLabel(training.specialty)} · ${stripeCount} stripe(s)` : 'No program level saved yet.'}
           </div>
         </div>
 
@@ -718,9 +719,13 @@ export default async function AthleteProfileSection({ memberUserId, targetRole, 
             <Award size={16} />
             Current belt
           </div>
-          <div className="mt-3 text-lg font-semibold tracking-tight">{currentBelt ? beltLabel(currentBelt) : 'Not set yet'}</div>
+          <div className="mt-3 text-lg font-semibold tracking-tight">{currentBelt ? `${beltLabel(currentBelt)} · ${stripeCount} stripe${stripeCount === 1 ? '' : 's'}` : 'Not set yet'}</div>
           <div className="mt-1 text-sm text-[hsl(var(--muted))]">
-            {beltRows[0]?.promoted_at ? `Promoted ${fmtDate(beltRows[0].promoted_at)}` : 'No promotion history yet.'}
+            {beltRows[0]?.promoted_at
+              ? `Promoted ${fmtDate(beltRows[0].promoted_at)}`
+              : hasImplicitWhiteBelt
+                ? 'Initial White belt inferred from the athlete profile; no belt-promotion history is created.'
+                : 'No promotion history yet.'}
           </div>
         </div>
 
@@ -787,7 +792,7 @@ export default async function AthleteProfileSection({ memberUserId, targetRole, 
                       name="stripes"
                       min={0}
                       max={4}
-                      defaultValue={Math.max(0, Number(training?.stripes ?? 0))}
+                      defaultValue={stripeCount}
                       className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none transition focus:border-black"
                     />
                   </label>
@@ -1029,7 +1034,9 @@ export default async function AthleteProfileSection({ memberUserId, targetRole, 
 
           {beltRows.length === 0 ? (
             <div className="mt-4 rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] px-4 py-3 text-sm text-[hsl(var(--muted))]">
-              No belt promotion history yet.
+              {hasImplicitWhiteBelt
+                ? `No belt promotion history yet. Current level is treated as White belt with ${stripeCount} stripe${stripeCount === 1 ? '' : 's'} based on the athlete profile.`
+                : 'No belt promotion history yet.'}
             </div>
           ) : (
             <div className="mt-4 grid gap-3">
