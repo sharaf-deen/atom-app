@@ -87,10 +87,16 @@ function memberMatches(row: BeltPromotionRosterRow, query: string) {
   return terms.every((term) => haystack.includes(term))
 }
 
+function effectiveCurrentBelt(row: BeltPromotionRosterRow) {
+  const explicit = String(row.current_belt ?? '').trim().toLowerCase()
+  if (explicit) return explicit
+  return normalizeStripes(row.stripes) > 0 ? 'white' : null
+}
+
 function allowedBeltTargets(row: BeltPromotionRosterRow) {
   const ageGroup = ageGroupFromDate(row.date_of_birth)
   const track = beltTrackForAgeGroup(ageGroup)
-  const current = row.current_belt ?? null
+  const current = effectiveCurrentBelt(row)
   const currentIndex = current ? track.indexOf(current as any) : -1
 
   if (currentIndex >= 0) return track.slice(currentIndex + 1)
@@ -257,7 +263,7 @@ async function applyPromotionAction(formData: FormData) {
       effective_date: promotedAt,
       previous_program_level: member.program_level ?? null,
       next_program_level: member.program_level ?? null,
-      previous_belt_code: member.current_belt ?? null,
+      previous_belt_code: effectiveCurrentBelt(member),
       next_belt_code: newBelt,
       previous_stripes: currentStripes,
       next_stripes: 0,
@@ -324,6 +330,9 @@ export default async function PromotionDeskPage({
 
   const beltTargets = selectedMember ? allowedBeltTargets(selectedMember) : []
   const currentStripes = selectedMember ? normalizeStripes(selectedMember.stripes) : 0
+  const effectiveSelectedBelt = selectedMember ? effectiveCurrentBelt(selectedMember) : null
+  const selectedBeltIsImplicitWhite =
+    !!selectedMember && !selectedMember.current_belt && effectiveSelectedBelt === 'white'
   const stripeTargets = [1, 2, 3, 4].filter((stripe) => stripe > currentStripes)
 
   return (
@@ -398,6 +407,8 @@ export default async function PromotionDeskPage({
           <div className="mt-4 grid gap-2">
             {results.length ? results.map((row) => {
               const name = fullName(row.first_name, row.last_name, row.email)
+              const rowStripes = normalizeStripes(row.stripes)
+              const rowBelt = effectiveCurrentBelt(row)
               return (
                 <Link
                   key={row.user_id}
@@ -411,7 +422,7 @@ export default async function PromotionDeskPage({
                     </div>
                   </div>
                   <div className="text-sm font-semibold">
-                    {row.current_belt ? titleCase(row.current_belt) : 'No belt'} · {normalizeStripes(row.stripes)} stripe{normalizeStripes(row.stripes) === 1 ? '' : 's'}
+                    {rowBelt ? titleCase(rowBelt) : 'No belt'} · {rowStripes} stripe{rowStripes === 1 ? '' : 's'}
                   </div>
                 </Link>
               )
@@ -436,8 +447,14 @@ export default async function PromotionDeskPage({
           <div className="mt-5 grid gap-3 sm:grid-cols-3">
             <div className="rounded-2xl bg-black/[0.025] p-4">
               <div className="text-xs text-[hsl(var(--muted))]">Current belt</div>
-              <div className="mt-1 text-lg font-bold">{selectedMember.current_belt ? titleCase(selectedMember.current_belt) : 'Not recorded'}</div>
-              <div className="mt-1 text-xs text-[hsl(var(--muted))]">{selectedMember.current_belt_promoted_at ? `Since ${fmtDate(selectedMember.current_belt_promoted_at)}` : 'No promotion date recorded'}</div>
+              <div className="mt-1 text-lg font-bold">{effectiveSelectedBelt ? titleCase(effectiveSelectedBelt) : 'Not recorded'}</div>
+              <div className="mt-1 text-xs text-[hsl(var(--muted))]">
+                {selectedMember.current_belt_promoted_at
+                  ? `Since ${fmtDate(selectedMember.current_belt_promoted_at)}`
+                  : selectedBeltIsImplicitWhite
+                    ? 'Initial White belt inferred from stripes; no belt-promotion history.'
+                    : 'No promotion date recorded'}
+              </div>
             </div>
             <div className="rounded-2xl bg-black/[0.025] p-4">
               <div className="text-xs text-[hsl(var(--muted))]">Current stripes</div>
