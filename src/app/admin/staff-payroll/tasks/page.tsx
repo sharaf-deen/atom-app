@@ -223,7 +223,7 @@ export default async function StaffPayrollTasksPage() {
           <div className="max-w-3xl">
             <div className="flex flex-wrap items-center gap-2">
               <span className="rounded-full bg-black px-3 py-1 text-xs font-semibold text-white">
-                Staff Payroll 1A
+                Staff Payroll 2N.1
               </span>
               <span
                 className={
@@ -251,10 +251,10 @@ export default async function StaffPayrollTasksPage() {
             </p>
 
             <p className="mt-2 text-xs text-[hsl(var(--muted))]">
-              The initial catalog contains the 59 tasks from the ATOM planning
-              sheet. Their source assignment names are kept as planning hints,
-              while real default assignments are linked explicitly to staff
-              profiles.
+              The catalog combines the original 59 ATOM planning tasks with 29
+              operational extensions introduced in Staff Payroll 2N. Source
+              assignment names remain planning hints, while real default
+              assignments are linked explicitly to staff profiles.
             </p>
 
             <p className="mt-2 text-xs text-[hsl(var(--muted))]">
@@ -329,13 +329,15 @@ export default async function StaffPayrollTasksPage() {
 
           <div className="rounded-2xl border border-violet-200 bg-violet-50 p-3 text-sm text-violet-950">
             <div className="font-semibold">
-              Compensation weights are intentionally neutral at launch.
+              Compensation weights are active.
             </div>
             <div className="mt-1 text-xs">
-              The source planning sheet does not define task-value
-              coefficients, so imported tasks start at Standard ×1.00. Super
-              Admin can classify importance here before the monthly salary
-              payroll calculation is run.
+              Task importance now uses the Staff Payroll weighting model:
+              Standard ×1.00, Important ×1.15, Responsibility ×1.35, High
+              responsibility ×1.60 and Critical / Direction ×2.00. Standard
+              remains intentional for routine work. Historical Monthly Task
+              rows keep the coefficient snapshotted when they were logged;
+              new entries use the task&apos;s current importance.
             </div>
           </div>
 
