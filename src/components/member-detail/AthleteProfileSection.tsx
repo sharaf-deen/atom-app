@@ -1,11 +1,13 @@
+import Link from 'next/link'
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 import type { ReactNode } from 'react'
-import { Award, Dumbbell, FileText, Medal, Save, ShieldCheck, Trash2, Trophy, Upload } from 'lucide-react'
+import { Award, Dumbbell, FileText, Medal, Save, ShieldCheck, Trash2, Trophy } from 'lucide-react'
 import { createSupabaseAdminClient } from '@/lib/supabaseAdmin'
 import { createSupabaseRSC } from '@/lib/supabaseServer'
 import { getSessionUser, type Role } from '@/lib/session'
 import { ATHLETE_SPECIALTY_OPTIONS, type AthleteSpecialty, specialtyLabel } from '@/lib/athleteProgress'
+import UnifiedProgressionHistory from '@/components/member-detail/UnifiedProgressionHistory'
 
 type TrainingProfileRow = {
   member_user_id: string
@@ -72,9 +74,6 @@ type Props = {
 }
 
 const PROGRAM_OPTIONS = ['beginner', 'intermediate', 'advanced', 'competitor'] as const satisfies readonly ProgramLevel[]
-const KID_BELTS = ['white', 'grey', 'yellow', 'orange', 'green'] as const
-const ADULT_BELTS = ['white', 'blue', 'purple', 'brown', 'black'] as const
-const ALL_BELTS = Array.from(new Set([...KID_BELTS, ...ADULT_BELTS]))
 const RESULT_OPTIONS = ['gold', 'silver', 'bronze', 'other'] as const satisfies readonly CompetitionResult[]
 const CERTIFICATE_MAX_BYTES = 8 * 1024 * 1024
 
@@ -145,9 +144,6 @@ function isProgramLevel(value: string): value is ProgramLevel {
   return (PROGRAM_OPTIONS as readonly string[]).includes(value)
 }
 
-function isBeltCode(value: string) {
-  return (ALL_BELTS as readonly string[]).includes(value)
-}
 
 function isCompetitionResult(value: string): value is CompetitionResult {
   return (RESULT_OPTIONS as readonly string[]).includes(value)
@@ -240,16 +236,14 @@ async function saveTrainingProfileAction(formData: FormData) {
   const memberUserId = String(formData.get('memberUserId') || '')
   const targetRoleRaw = String(formData.get('targetRole') || '')
   const programLevelRaw = String(formData.get('program_level') || '').trim().toLowerCase()
-  const stripesRaw = String(formData.get('stripes') || '0').trim()
   const specialtyRaw = String(formData.get('specialty') || '').trim().toLowerCase()
   const referenceCoachUserIdRaw = String(formData.get('reference_coach_user_id') || '').trim()
   const notes = String(formData.get('notes') || '').trim() || null
 
-  const stripes = Number.parseInt(stripesRaw || '0', 10)
   const specialty = specialtyRaw ? specialtyRaw : null
   const referenceCoachUserId = referenceCoachUserIdRaw && isUuid(referenceCoachUserIdRaw) ? referenceCoachUserIdRaw : null
 
-  if (!me || !memberUserId || !targetRoleRaw || !isProgramLevel(programLevelRaw) || !Number.isInteger(stripes) || stripes < 0 || stripes > 4 || (specialty && !isAthleteSpecialty(specialty))) {
+  if (!me || !memberUserId || !targetRoleRaw || !isProgramLevel(programLevelRaw) || (specialty && !isAthleteSpecialty(specialty))) {
     redirect(nextPath)
   }
 
@@ -259,107 +253,21 @@ async function saveTrainingProfileAction(formData: FormData) {
   }
 
   const admin = createSupabaseAdminClient()
-  const upsert = await admin
-    .from('member_training_profiles')
-    .upsert(
-      {
-        member_user_id: memberUserId,
-        program_level: programLevelRaw,
-        stripes,
-        specialty,
-        reference_coach_user_id: referenceCoachUserId,
-        notes,
-        updated_by: me.id,
-      },
-      { onConflict: 'member_user_id' },
-    )
-
-  if (upsert.error) {
-    throw new Error(upsert.error.message)
-  }
-  revalidatePath(nextPath)
-  redirect(nextPath)
-}
-
-async function deleteTrainingProfileAction(formData: FormData) {
-  'use server'
-
-  const me = await getSessionUser()
-  const nextPath = String(formData.get('nextPath') || '/members')
-  const memberUserId = String(formData.get('memberUserId') || '')
-  const targetRoleRaw = String(formData.get('targetRole') || '')
-
-  if (!me || !memberUserId || !targetRoleRaw) {
-    redirect(nextPath)
-  }
-
-  const targetRole = targetRoleRaw as Role
-  if (!canEditAthleteProfile(me.role, targetRole)) {
-    redirect(nextPath)
-  }
-
-  const admin = createSupabaseAdminClient()
-  const del = await admin
-    .from('member_training_profiles')
-    .delete()
-    .eq('member_user_id', memberUserId)
-
-  if (del.error) {
-    throw new Error(del.error.message)
-  }
-
-  revalidatePath(nextPath)
-  redirect(nextPath)
-}
-
-async function addBeltPromotionAction(formData: FormData) {
-  'use server'
-
-  const me = await getSessionUser()
-  const nextPath = String(formData.get('nextPath') || '/members')
-  const memberUserId = String(formData.get('memberUserId') || '')
-  const targetRoleRaw = String(formData.get('targetRole') || '')
-  const beltCode = String(formData.get('belt_code') || '').trim().toLowerCase()
-  const promotedAt = String(formData.get('promoted_at') || '').trim()
-  const notes = String(formData.get('notes') || '').trim() || null
-  const certificate = formData.get('certificate')
-
-  if (!me || !memberUserId || !targetRoleRaw || !beltCode || !promotedAt) {
-    redirect(nextPath)
-  }
-
-  const targetRole = targetRoleRaw as Role
-  if (!canEditAthleteProfile(me.role, targetRole) || !isBeltCode(beltCode)) {
-    redirect(nextPath)
-  }
-
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(promotedAt)) {
-    redirect(nextPath)
-  }
-
-  const admin = createSupabaseAdminClient()
-  const beltPromotionId = crypto.randomUUID()
-  const upload = await uploadCertificateFile(admin, memberUserId, beltPromotionId, certificate)
-
-  const insert = await admin.from('member_belt_promotions').insert({
-    id: beltPromotionId,
-    member_user_id: memberUserId,
-    belt_code: beltCode,
-    promoted_at: promotedAt,
-    certificate_path: upload.certificate_path,
-    certificate_mime: upload.certificate_mime,
-    certificate_filename: upload.certificate_filename,
-    certificate_size_bytes: upload.certificate_size_bytes,
-    notes,
-    created_by: me.id,
-    updated_by: me.id,
+  const result = await admin.rpc('update_athlete_profile_non_rank', {
+    p_member_user_id: memberUserId,
+    p_program_level: programLevelRaw,
+    p_specialty: specialty,
+    p_reference_coach_user_id: referenceCoachUserId,
+    p_notes: notes,
+    p_actor_user_id: me.id,
   })
 
-  if (insert.error) {
-    throw new Error(insert.error.message)
+  if (result.error) {
+    throw new Error(result.error.message)
   }
 
   revalidatePath(nextPath)
+  revalidatePath('/head-coach/athletes')
   redirect(nextPath)
 }
 
@@ -371,81 +279,8 @@ async function saveBeltPromotionAction(formData: FormData) {
   const memberUserId = String(formData.get('memberUserId') || '')
   const targetRoleRaw = String(formData.get('targetRole') || '')
   const beltPromotionId = String(formData.get('beltPromotionId') || '').trim()
-  const beltCode = String(formData.get('belt_code') || '').trim().toLowerCase()
-  const promotedAt = String(formData.get('promoted_at') || '').trim()
   const notes = String(formData.get('notes') || '').trim() || null
   const certificate = formData.get('certificate')
-
-  if (!me || !memberUserId || !targetRoleRaw || !beltPromotionId || !beltCode || !promotedAt) {
-    redirect(nextPath)
-  }
-
-  const targetRole = targetRoleRaw as Role
-  if (!canEditAthleteProfile(me.role, targetRole) || !isBeltCode(beltCode)) {
-    redirect(nextPath)
-  }
-
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(promotedAt)) {
-    redirect(nextPath)
-  }
-
-  const admin = createSupabaseAdminClient()
-  const existingRes = await admin
-    .from('member_belt_promotions')
-    .select('id, certificate_path')
-    .eq('id', beltPromotionId)
-    .eq('member_user_id', memberUserId)
-    .maybeSingle<{ id: string; certificate_path: string | null }>()
-
-  if (existingRes.error || !existingRes.data) {
-    throw new Error(existingRes.error?.message || 'Belt promotion not found.')
-  }
-
-  let upload = {
-    certificate_path: existingRes.data.certificate_path,
-    certificate_mime: null as string | null,
-    certificate_filename: null as string | null,
-    certificate_size_bytes: null as number | null,
-  }
-
-  const hasReplacement = certificate && typeof (certificate as any)?.arrayBuffer === 'function' && Number((certificate as File).size || 0) > 0
-  if (hasReplacement) {
-    const newUpload = await uploadCertificateFile(admin, memberUserId, beltPromotionId, certificate)
-    await deleteCertificatePath(admin, existingRes.data.certificate_path)
-    upload = newUpload
-  }
-
-  const update = await admin
-    .from('member_belt_promotions')
-    .update({
-      belt_code: beltCode,
-      promoted_at: promotedAt,
-      notes,
-      certificate_path: upload.certificate_path,
-      certificate_mime: hasReplacement ? upload.certificate_mime : undefined,
-      certificate_filename: hasReplacement ? upload.certificate_filename : undefined,
-      certificate_size_bytes: hasReplacement ? upload.certificate_size_bytes : undefined,
-      updated_by: me.id,
-    })
-    .eq('id', beltPromotionId)
-    .eq('member_user_id', memberUserId)
-
-  if (update.error) {
-    throw new Error(update.error.message)
-  }
-
-  revalidatePath(nextPath)
-  redirect(nextPath)
-}
-
-async function deleteBeltPromotionAction(formData: FormData) {
-  'use server'
-
-  const me = await getSessionUser()
-  const nextPath = String(formData.get('nextPath') || '/members')
-  const memberUserId = String(formData.get('memberUserId') || '')
-  const targetRoleRaw = String(formData.get('targetRole') || '')
-  const beltPromotionId = String(formData.get('beltPromotionId') || '').trim()
 
   if (!me || !memberUserId || !targetRoleRaw || !beltPromotionId) {
     redirect(nextPath)
@@ -468,16 +303,42 @@ async function deleteBeltPromotionAction(formData: FormData) {
     throw new Error(existingRes.error?.message || 'Belt promotion not found.')
   }
 
-  await deleteCertificatePath(admin, existingRes.data.certificate_path)
+  const hasReplacement =
+    certificate &&
+    typeof (certificate as any)?.arrayBuffer === 'function' &&
+    Number((certificate as File).size || 0) > 0
 
-  const del = await admin
+  let replacement: Awaited<ReturnType<typeof uploadCertificateFile>> | null = null
+  if (hasReplacement) {
+    replacement = await uploadCertificateFile(admin, memberUserId, beltPromotionId, certificate)
+  }
+
+  const update = await admin
     .from('member_belt_promotions')
-    .delete()
+    .update({
+      notes,
+      certificate_path: replacement?.certificate_path ?? existingRes.data.certificate_path,
+      certificate_mime: replacement ? replacement.certificate_mime : undefined,
+      certificate_filename: replacement ? replacement.certificate_filename : undefined,
+      certificate_size_bytes: replacement ? replacement.certificate_size_bytes : undefined,
+      updated_by: me.id,
+    })
     .eq('id', beltPromotionId)
     .eq('member_user_id', memberUserId)
 
-  if (del.error) {
-    throw new Error(del.error.message)
+  if (update.error) {
+    if (replacement?.certificate_path) {
+      await deleteCertificatePath(admin, replacement.certificate_path)
+    }
+    throw new Error(update.error.message)
+  }
+
+  if (
+    replacement?.certificate_path &&
+    existingRes.data.certificate_path &&
+    replacement.certificate_path !== existingRes.data.certificate_path
+  ) {
+    await deleteCertificatePath(admin, existingRes.data.certificate_path)
   }
 
   revalidatePath(nextPath)
@@ -616,7 +477,7 @@ function canViewAthleteProfile(viewerRole: Role | null | undefined, targetRole: 
   return (viewerRole === 'head_coach' || viewerRole === 'super_admin') && isEditableAthleteTargetRole(targetRole)
 }
 
-export default async function AthleteProfileSection({ memberUserId, targetRole, viewerRole, isSelf, age, nextPath, allowEdit = true }: Props) {
+export default async function AthleteProfileSection({ memberUserId, targetRole, viewerRole, isSelf, nextPath, allowEdit = true }: Props) {
   if (!canViewAthleteProfile(viewerRole, targetRole, isSelf)) return null
 
   const adminDb = createSupabaseAdminClient()
@@ -677,7 +538,6 @@ export default async function AthleteProfileSection({ memberUserId, targetRole, 
   )
   const certificateUrlById = new Map<string, string | null>(certificateUrls)
 
-  const beltChoices = age !== null ? (age < 17 ? KID_BELTS : ADULT_BELTS) : ALL_BELTS
 
   return (
     <section className="rounded-3xl border border-[hsl(var(--border))] bg-white p-4 shadow-soft sm:p-5">
@@ -688,7 +548,7 @@ export default async function AthleteProfileSection({ memberUserId, targetRole, 
             <h2 className="text-base font-semibold tracking-tight">Athlete profile</h2>
           </div>
           <p className="mt-1 text-sm text-[hsl(var(--muted))]">
-            Program level, belt history, and competition results in one place.
+            Program level, protected rank progression, belt records, and competition results in one place.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -785,17 +645,13 @@ export default async function AthleteProfileSection({ memberUserId, targetRole, 
                     </select>
                   </label>
 
-                  <label className="block text-sm">
+                  <div className="block text-sm">
                     <span className="mb-2 block text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Stripes</span>
-                    <input
-                      type="number"
-                      name="stripes"
-                      min={0}
-                      max={4}
-                      defaultValue={stripeCount}
-                      className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none transition focus:border-black"
-                    />
-                  </label>
+                    <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] px-3 py-2">
+                      <div className="text-sm font-semibold">{stripeCount}</div>
+                      <div className="mt-0.5 text-[11px] text-[hsl(var(--muted))]">Managed only in Promotion Desk.</div>
+                    </div>
+                  </div>
                 </div>
 
                 <div className="grid gap-3 sm:grid-cols-2">
@@ -847,16 +703,6 @@ export default async function AthleteProfileSection({ memberUserId, targetRole, 
                     <Save size={14} />
                     Save program
                   </button>
-                  {training ? (
-                    <button
-                      type="submit"
-                      formAction={deleteTrainingProfileAction}
-                      className="inline-flex items-center justify-center gap-2 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-2 text-sm font-medium text-rose-700 transition hover:bg-rose-100"
-                    >
-                      <Trash2 size={14} />
-                      Remove program
-                    </button>
-                  ) : null}
                 </div>
               </form>
             </DetailsEditor>
@@ -865,72 +711,29 @@ export default async function AthleteProfileSection({ memberUserId, targetRole, 
           <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4 shadow-soft">
             <div className="flex items-center justify-between gap-3">
               <div>
-                <h3 className="text-sm font-semibold tracking-tight">Belt tools</h3>
-                <p className="mt-1 text-xs text-[hsl(var(--muted))]">New promotions stay collapsed until you choose to add one.</p>
+                <h3 className="text-sm font-semibold tracking-tight">Promotion control</h3>
+                <p className="mt-1 text-xs text-[hsl(var(--muted))]">Stripes and belts have one controlled write path.</p>
               </div>
-              <TinyBadge tone="warning">Editable</TinyBadge>
+              <TinyBadge tone="success">Protected</TinyBadge>
             </div>
-            <DetailsEditor label="Add belt promotion">
-              <form action={addBeltPromotionAction} className="grid gap-3">
-                <input type="hidden" name="memberUserId" value={memberUserId} />
-                <input type="hidden" name="targetRole" value={targetRole ?? 'member'} />
-                <input type="hidden" name="nextPath" value={nextPath} />
 
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <label className="block text-sm">
-                    <span className="mb-2 block text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Belt</span>
-                    <select
-                      name="belt_code"
-                      defaultValue={beltChoices[0]}
-                      className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none transition focus:border-black"
-                    >
-                      {beltChoices.map((belt) => (
-                        <option key={belt} value={belt}>{beltLabel(belt)}</option>
-                      ))}
-                    </select>
-                  </label>
+            <div className="mt-3 rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] p-3">
+              <div className="text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Current rank</div>
+              <div className="mt-1 text-sm font-semibold">
+                {currentBelt ? `${beltLabel(currentBelt)} belt · ${stripeCount} stripe${stripeCount === 1 ? '' : 's'}` : `No belt · ${stripeCount} stripe${stripeCount === 1 ? '' : 's'}`}
+              </div>
+            </div>
 
-                  <label className="block text-sm">
-                    <span className="mb-2 block text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Promotion date</span>
-                    <input
-                      type="date"
-                      name="promoted_at"
-                      defaultValue={new Date().toISOString().slice(0, 10)}
-                      className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none transition focus:border-black"
-                    />
-                  </label>
-                </div>
-
-                <label className="block text-sm">
-                  <span className="mb-2 block text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Attestation note</span>
-                  <textarea
-                    name="notes"
-                    rows={3}
-                    placeholder="Optional note"
-                    className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none transition focus:border-black"
-                  />
-                </label>
-
-                <label className="block text-sm">
-                  <span className="mb-2 block text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Certificate file</span>
-                  <input
-                    type="file"
-                    name="certificate"
-                    accept=".pdf,image/jpeg,image/png,image/webp"
-                    className="block w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm"
-                  />
-                  <span className="mt-2 block text-xs text-[hsl(var(--muted))]">PDF, JPG, PNG, or WEBP · max 8MB</span>
-                </label>
-
-                <button
-                  type="submit"
-                  className="inline-flex items-center justify-center gap-2 rounded-2xl border border-black bg-black px-4 py-2 text-sm font-medium text-white transition hover:opacity-90"
-                >
-                  <Upload size={14} />
-                  Save promotion
-                </button>
-              </form>
-            </DetailsEditor>
+            <Link
+              href={`/head-coach/promotion-desk?member=${memberUserId}`}
+              className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-black bg-black px-4 py-2 text-sm font-medium text-white transition hover:opacity-90"
+            >
+              <Award size={14} />
+              Open Promotion Desk
+            </Link>
+            <p className="mt-2 text-xs text-[hsl(var(--muted))]">
+              Use Promotion Desk for every new stripe or belt. Same-day corrections remain available from Ceremony Log.
+            </p>
           </div>
 
           <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4 shadow-soft">
@@ -1025,6 +828,14 @@ export default async function AthleteProfileSection({ memberUserId, targetRole, 
         </div>
       ) : null}
 
+      <UnifiedProgressionHistory
+        memberUserId={memberUserId}
+        viewerRole={viewerRole}
+        isSelf={isSelf}
+        currentBelt={currentBelt}
+        currentStripes={stripeCount}
+      />
+
       <div className="mt-4 grid gap-4 xl:grid-cols-2">
         <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4 shadow-soft">
           <div className="flex items-center justify-between gap-3">
@@ -1071,35 +882,18 @@ export default async function AthleteProfileSection({ memberUserId, targetRole, 
                         </div>
                       ) : null}
                       {canEdit ? (
-                        <DetailsEditor label="Edit belt entry">
+                        <DetailsEditor label="Edit note / certificate">
                           <form action={saveBeltPromotionAction} className="grid gap-3">
                             <input type="hidden" name="memberUserId" value={memberUserId} />
                             <input type="hidden" name="targetRole" value={targetRole ?? 'member'} />
                             <input type="hidden" name="nextPath" value={nextPath} />
                             <input type="hidden" name="beltPromotionId" value={row.id} />
 
-                            <div className="grid gap-3 sm:grid-cols-2">
-                              <label className="block text-sm">
-                                <span className="mb-2 block text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Belt</span>
-                                <select
-                                  name="belt_code"
-                                  defaultValue={row.belt_code}
-                                  className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none transition focus:border-black"
-                                >
-                                  {beltChoices.map((belt) => (
-                                    <option key={belt} value={belt}>{beltLabel(belt)}</option>
-                                  ))}
-                                </select>
-                              </label>
-                              <label className="block text-sm">
-                                <span className="mb-2 block text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Promotion date</span>
-                                <input
-                                  type="date"
-                                  name="promoted_at"
-                                  defaultValue={row.promoted_at}
-                                  className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none transition focus:border-black"
-                                />
-                              </label>
+                            <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] p-3 text-sm">
+                              <div className="font-medium">{beltLabel(row.belt_code)} · {fmtDate(row.promoted_at)}</div>
+                              <div className="mt-1 text-xs text-[hsl(var(--muted))]">
+                                Belt and promotion date are locked here to preserve progression integrity.
+                              </div>
                             </div>
 
                             <label className="block text-sm">
@@ -1127,23 +921,13 @@ export default async function AthleteProfileSection({ memberUserId, targetRole, 
                               <div className="flex flex-wrap gap-2 text-xs text-[hsl(var(--muted))]">
                                 {row.created_at ? <TinyBadge>Created {fmtDate(row.created_at)}</TinyBadge> : null}
                               </div>
-                              <div className="flex flex-wrap gap-2">
-                                <button
-                                  type="submit"
-                                  className="inline-flex items-center justify-center gap-2 rounded-2xl border border-black bg-black px-4 py-2 text-sm font-medium text-white transition hover:opacity-90"
-                                >
-                                  <Save size={14} />
-                                  Save
-                                </button>
-                                <button
-                                  type="submit"
-                                  formAction={deleteBeltPromotionAction}
-                                  className="inline-flex items-center justify-center gap-2 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-2 text-sm font-medium text-rose-700 transition hover:bg-rose-100"
-                                >
-                                  <Trash2 size={14} />
-                                  Remove
-                                </button>
-                              </div>
+                              <button
+                                type="submit"
+                                className="inline-flex items-center justify-center gap-2 rounded-2xl border border-black bg-black px-4 py-2 text-sm font-medium text-white transition hover:opacity-90"
+                              >
+                                <Save size={14} />
+                                Save metadata
+                              </button>
                             </div>
                           </form>
                         </DetailsEditor>

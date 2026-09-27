@@ -546,156 +546,42 @@ async function applyConfirmedResultsAction(formData: FormData) {
 
   const me = await requireAccess(nextHref)
   const admin = getSupabaseAdminClientCached()
-  const [eventRes, candidatesRes] = await Promise.all([
-    admin
-      .from('belt_promotion_events')
-      .select('id, title, event_date, status')
-      .eq('id', eventId)
-      .maybeSingle<{ id: string; title: string; event_date: string; status: string }>(),
-    admin
-      .from('belt_promotion_event_candidates')
-      .select('*')
-      .eq('event_id', eventId)
-      .eq('final_decision', 'confirmed')
-      .is('results_applied_at', null)
-      .returns<BeltPromotionCandidateRow[]>(),
-  ])
+  const eventRes = await admin
+    .from('belt_promotion_events')
+    .select('id')
+    .eq('id', eventId)
+    .maybeSingle<{ id: string }>()
 
   if (eventRes.error) throw new Error(eventRes.error.message)
-  if (candidatesRes.error) throw new Error(candidatesRes.error.message)
   if (!eventRes.data) redirect('/head-coach/belt-promotions')
 
-  const candidates = candidatesRes.data ?? []
-  if (candidates.length === 0) redirect(nextHref)
-
-  const runId = crypto.randomUUID()
-  let stripeCount = 0
-  let beltCount = 0
-  let noteCount = 0
-
-  for (const candidate of candidates) {
-    const trainingRes = await admin
-      .from('member_training_profiles')
-      .select('program_level, stripes, specialty, reference_coach_user_id, notes')
-      .eq('member_user_id', candidate.member_user_id)
-      .maybeSingle<{ program_level: string | null; stripes: number | null; specialty: string | null; reference_coach_user_id: string | null; notes: string | null }>()
-    if (trainingRes.error) throw new Error(trainingRes.error.message)
-
-    const training = trainingRes.data
-    const eventNote = `${eventRes.data.title} · ${eventRes.data.event_date}`
-
-    if (candidate.proposed_decision === 'stripe') {
-      const nextStripes = normalizeStripes(candidate.proposed_stripes ?? candidate.current_stripes ?? 0)
-      const upsert = await admin.from('member_training_profiles').upsert(
-        {
-          member_user_id: candidate.member_user_id,
-          program_level: training?.program_level ?? null,
-          stripes: nextStripes,
-          specialty: training?.specialty ?? null,
-          reference_coach_user_id: candidate.reference_coach_user_id ?? training?.reference_coach_user_id ?? null,
-          notes: training?.notes ?? candidate.head_coach_note ?? null,
-          updated_by: me.id,
-        },
-        { onConflict: 'member_user_id' },
-      )
-      if (upsert.error) throw new Error(upsert.error.message)
-
-      const progress = await admin.from('member_athlete_progress_events').insert({
-        id: crypto.randomUUID(),
-        member_user_id: candidate.member_user_id,
-        event_type: 'stripe_award',
-        effective_date: eventRes.data.event_date,
-        previous_program_level: training?.program_level ?? null,
-        next_program_level: training?.program_level ?? null,
-        previous_stripes: training?.stripes ?? candidate.current_stripes ?? 0,
-        next_stripes: nextStripes,
-        notes: `${eventNote}${candidate.head_coach_note ? ` — ${candidate.head_coach_note}` : ''}`,
-        created_by: me.id,
-      })
-      if (progress.error) throw new Error(progress.error.message)
-      stripeCount += 1
-    } else if (candidate.proposed_decision === 'belt' && candidate.proposed_belt) {
-      const insertBelt = await admin.from('member_belt_promotions').insert({
-        id: crypto.randomUUID(),
-        member_user_id: candidate.member_user_id,
-        belt_code: candidate.proposed_belt,
-        promoted_at: eventRes.data.event_date,
-        notes: `${eventNote}${candidate.head_coach_note ? ` — ${candidate.head_coach_note}` : ''}`,
-        created_by: me.id,
-        updated_by: me.id,
-      })
-      if (insertBelt.error) throw new Error(insertBelt.error.message)
-
-      const upsert = await admin.from('member_training_profiles').upsert(
-        {
-          member_user_id: candidate.member_user_id,
-          program_level: training?.program_level ?? null,
-          stripes: 0,
-          specialty: training?.specialty ?? null,
-          reference_coach_user_id: candidate.reference_coach_user_id ?? training?.reference_coach_user_id ?? null,
-          notes: training?.notes ?? candidate.head_coach_note ?? null,
-          updated_by: me.id,
-        },
-        { onConflict: 'member_user_id' },
-      )
-      if (upsert.error) throw new Error(upsert.error.message)
-
-      const progress = await admin.from('member_athlete_progress_events').insert({
-        id: crypto.randomUUID(),
-        member_user_id: candidate.member_user_id,
-        event_type: 'belt_promotion',
-        effective_date: eventRes.data.event_date,
-        previous_program_level: training?.program_level ?? null,
-        next_program_level: training?.program_level ?? null,
-        previous_belt_code: candidate.current_belt ?? null,
-        next_belt_code: candidate.proposed_belt,
-        previous_stripes: training?.stripes ?? candidate.current_stripes ?? 0,
-        next_stripes: 0,
-        notes: `${eventNote}${candidate.head_coach_note ? ` — ${candidate.head_coach_note}` : ''}`,
-        created_by: me.id,
-      })
-      if (progress.error) throw new Error(progress.error.message)
-      beltCount += 1
-    } else {
-      const noteInsert = await admin.from('member_athlete_progress_events').insert({
-        id: crypto.randomUUID(),
-        member_user_id: candidate.member_user_id,
-        event_type: 'note',
-        effective_date: eventRes.data.event_date,
-        notes: `${eventNote} — confirmed with no promotion${candidate.head_coach_note ? ` — ${candidate.head_coach_note}` : ''}`,
-        created_by: me.id,
-      })
-      if (noteInsert.error) throw new Error(noteInsert.error.message)
-      noteCount += 1
-    }
-
-    const markApplied = await admin
-      .from('belt_promotion_event_candidates')
-      .update({ results_applied_at: new Date().toISOString(), results_applied_by: me.id })
-      .eq('id', candidate.id)
-      .eq('event_id', eventId)
-    if (markApplied.error) throw new Error(markApplied.error.message)
-  }
-
-  const applyRun = await admin.from('belt_promotion_event_apply_runs').insert({
-    id: runId,
-    event_id: eventId,
-    applied_count: candidates.length,
-    stripe_count: stripeCount,
-    belt_count: beltCount,
-    note_count: noteCount,
-    closed_event: closeEventAfter,
-    applied_by: me.id,
-    notes: `${eventRes.data.title} apply run`,
+  const applyRes = await admin.rpc('apply_belt_promotion_event_results', {
+    p_event_id: eventId,
+    p_close_event: closeEventAfter,
+    p_actor_user_id: me.id,
   })
-  if (applyRun.error) throw new Error(applyRun.error.message)
 
-  if (closeEventAfter) {
-    const closeRes = await admin.from('belt_promotion_events').update({ status: 'closed' }).eq('id', eventId)
-    if (closeRes.error) throw new Error(closeRes.error.message)
-  }
+  if (applyRes.error) throw new Error(applyRes.error.message)
 
-  await writeLog({ eventId, action: 'results_applied', details: `${candidates.length} confirmed results applied` })
+  const resultRow = Array.isArray(applyRes.data)
+    ? (applyRes.data[0] as {
+        applied_count?: number | null
+        stripe_count?: number | null
+        belt_count?: number | null
+        note_count?: number | null
+        run_id?: string | null
+      } | undefined)
+    : undefined
+
+  const appliedCount = Number(resultRow?.applied_count ?? 0)
+  if (appliedCount === 0) redirect(nextHref)
+
+  await writeLog({
+    eventId,
+    action: 'results_applied',
+    details: `${appliedCount} confirmed results applied`,
+  })
+
   revalidatePath('/head-coach/belt-promotions')
   revalidatePath('/head-coach/athletes')
   revalidatePath('/members/[id]')

@@ -13,7 +13,6 @@ import {
   ageGroupFromDate,
   ageYears,
   attendanceBand,
-  beltTrackForAgeGroup,
   fmtDate,
   fullName,
   isKimonoEligible,
@@ -235,12 +234,6 @@ function priorityScoreFor(row: { review_queue: { key: string }; promotion: { sta
   return score
 }
 
-function toStripes(value: FormDataEntryValue | null) {
-  const raw = Number(String(value ?? '').trim())
-  if (!Number.isFinite(raw)) return 0
-  return Math.max(0, Math.min(4, Math.trunc(raw)))
-}
-
 async function requireHeadCoachAccess(nextPath: string) {
   const me = await getSessionUserCached()
   if (!me || (me.role !== 'head_coach' && me.role !== 'super_admin')) redirect(nextPath)
@@ -254,7 +247,6 @@ async function saveAthleteProfileAction(formData: FormData) {
   const memberUserId = String(formData.get('memberUserId') || '').trim()
   const programLevel = normalizeProgram(String(formData.get('program_level') || ''))
   const specialty = normalizeSpecialty(String(formData.get('specialty') || ''))
-  const stripes = toStripes(formData.get('stripes'))
   const referenceCoachUserIdRaw = String(formData.get('reference_coach_user_id') || '').trim()
   const referenceCoachUserId = referenceCoachUserIdRaw || null
   const coachNote = sanitizeNote(formData.get('notes'))
@@ -263,47 +255,19 @@ async function saveAthleteProfileAction(formData: FormData) {
   const me = await requireHeadCoachAccess(nextPath)
   const admin = getSupabaseAdminClientCached()
 
-  const existing = await admin
-    .from('member_training_profiles')
-    .select('member_user_id, program_level, stripes, specialty, reference_coach_user_id')
-    .eq('member_user_id', memberUserId)
-    .maybeSingle<{ member_user_id: string; program_level: string | null; stripes: number | null; specialty: string | null; reference_coach_user_id: string | null }>()
-
-  if (existing.error) throw new Error(existing.error.message)
-
-  const upsert = await admin
-    .from('member_training_profiles')
-    .upsert(
-      {
-        member_user_id: memberUserId,
-        program_level: programLevel,
-        stripes,
-        specialty,
-        reference_coach_user_id: referenceCoachUserId,
-        notes: coachNote,
-        updated_by: me.id,
-      },
-      { onConflict: 'member_user_id' },
-    )
-
-  if (upsert.error) throw new Error(upsert.error.message)
-
-  const event = await admin.from('member_athlete_progress_events').insert({
-    id: crypto.randomUUID(),
-    member_user_id: memberUserId,
-    event_type: 'profile_update',
-    effective_date: new Date().toISOString().slice(0, 10),
-    previous_program_level: existing.data?.program_level ?? null,
-    next_program_level: programLevel,
-    previous_stripes: existing.data?.stripes ?? null,
-    next_stripes: stripes,
-    notes: coachNote,
-    created_by: me.id,
+  const result = await admin.rpc('update_athlete_profile_non_rank', {
+    p_member_user_id: memberUserId,
+    p_program_level: programLevel,
+    p_specialty: specialty,
+    p_reference_coach_user_id: referenceCoachUserId,
+    p_notes: coachNote,
+    p_actor_user_id: me.id,
   })
-  if (event.error) throw new Error(event.error.message)
+
+  if (result.error) throw new Error(result.error.message)
 
   revalidatePath('/head-coach/athletes')
-  revalidatePath('/members/[id]')
+  revalidatePath(`/members/${memberUserId}`)
   redirect(nextPath)
 }
 
@@ -319,184 +283,18 @@ async function moveProgramAction(formData: FormData) {
 
   const me = await requireHeadCoachAccess(nextPath)
   const admin = getSupabaseAdminClientCached()
-  const current = await admin
-    .from('member_training_profiles')
-    .select('program_level, stripes, specialty, reference_coach_user_id, notes')
-    .eq('member_user_id', memberUserId)
-    .maybeSingle<{ program_level: string | null; stripes: number | null; specialty: string | null; reference_coach_user_id: string | null; notes: string | null }>()
-
-  if (current.error) throw new Error(current.error.message)
-
-  const upsert = await admin
-    .from('member_training_profiles')
-    .upsert(
-      {
-        member_user_id: memberUserId,
-        program_level: nextProgram,
-        stripes: current.data?.stripes ?? 0,
-        specialty: current.data?.specialty ?? null,
-        reference_coach_user_id: current.data?.reference_coach_user_id ?? null,
-        notes: current.data?.notes ?? null,
-        updated_by: me.id,
-      },
-      { onConflict: 'member_user_id' },
-    )
-  if (upsert.error) throw new Error(upsert.error.message)
-
-  const event = await admin.from('member_athlete_progress_events').insert({
-    id: crypto.randomUUID(),
-    member_user_id: memberUserId,
-    event_type: 'program_change',
-    effective_date: effectiveDate,
-    previous_program_level: current.data?.program_level ?? null,
-    next_program_level: nextProgram,
-    previous_stripes: current.data?.stripes ?? null,
-    next_stripes: current.data?.stripes ?? 0,
-    notes,
-    created_by: me.id,
+  const result = await admin.rpc('move_athlete_program', {
+    p_member_user_id: memberUserId,
+    p_next_program_level: nextProgram,
+    p_effective_date: effectiveDate,
+    p_notes: notes,
+    p_actor_user_id: me.id,
   })
-  if (event.error) throw new Error(event.error.message)
+
+  if (result.error) throw new Error(result.error.message)
 
   revalidatePath('/head-coach/athletes')
-  redirect(nextPath)
-}
-
-async function addStripeAction(formData: FormData) {
-  'use server'
-
-  const nextPath = String(formData.get('nextPath') || '/head-coach/athletes')
-  const memberUserId = String(formData.get('memberUserId') || '').trim()
-  const effectiveDate = String(formData.get('effective_date') || '').trim() || new Date().toISOString().slice(0, 10)
-  const notes = sanitizeNote(formData.get('notes'))
-  const specialty = normalizeSpecialty(String(formData.get('specialty_snapshot') || ''))
-  const ageGroup = String(formData.get('age_group_snapshot') || 'unknown') as AthleteAgeGroup
-
-  if (!memberUserId) redirect(nextPath)
-  if (!isKimonoEligible(specialty, ageGroup)) throw new Error('Kimono training is required before awarding stripes.')
-
-  const me = await requireHeadCoachAccess(nextPath)
-  const admin = getSupabaseAdminClientCached()
-  const current = await admin
-    .from('member_training_profiles')
-    .select('program_level, stripes, specialty, reference_coach_user_id, notes')
-    .eq('member_user_id', memberUserId)
-    .maybeSingle<{ program_level: string | null; stripes: number | null; specialty: string | null; reference_coach_user_id: string | null; notes: string | null }>()
-
-  if (current.error) throw new Error(current.error.message)
-
-  const previousStripes = Math.max(0, Math.min(4, Number(current.data?.stripes ?? 0)))
-  const nextStripes = Math.min(4, previousStripes + 1)
-
-  const upsert = await admin
-    .from('member_training_profiles')
-    .upsert(
-      {
-        member_user_id: memberUserId,
-        program_level: current.data?.program_level ?? null,
-        stripes: nextStripes,
-        specialty: current.data?.specialty ?? specialty,
-        reference_coach_user_id: current.data?.reference_coach_user_id ?? null,
-        notes: current.data?.notes ?? null,
-        updated_by: me.id,
-      },
-      { onConflict: 'member_user_id' },
-    )
-  if (upsert.error) throw new Error(upsert.error.message)
-
-  const event = await admin.from('member_athlete_progress_events').insert({
-    id: crypto.randomUUID(),
-    member_user_id: memberUserId,
-    event_type: 'stripe_award',
-    effective_date: effectiveDate,
-    previous_program_level: current.data?.program_level ?? null,
-    next_program_level: current.data?.program_level ?? null,
-    previous_stripes: previousStripes,
-    next_stripes: nextStripes,
-    notes,
-    created_by: me.id,
-  })
-  if (event.error) throw new Error(event.error.message)
-
-  revalidatePath('/head-coach/athletes')
-  redirect(nextPath)
-}
-
-async function promoteBeltAction(formData: FormData) {
-  'use server'
-
-  const nextPath = String(formData.get('nextPath') || '/head-coach/athletes')
-  const memberUserId = String(formData.get('memberUserId') || '').trim()
-  const beltCode = String(formData.get('belt_code') || '').trim().toLowerCase()
-  const promotedAt = String(formData.get('promoted_at') || '').trim() || new Date().toISOString().slice(0, 10)
-  const notes = sanitizeNote(formData.get('notes'))
-  const specialty = normalizeSpecialty(String(formData.get('specialty_snapshot') || ''))
-  const ageGroup = String(formData.get('age_group_snapshot') || 'unknown') as AthleteAgeGroup
-  if (!memberUserId || !beltCode) redirect(nextPath)
-  if (!isKimonoEligible(specialty, ageGroup)) throw new Error('Kimono training is required before promoting a belt.')
-
-  const me = await requireHeadCoachAccess(nextPath)
-  const admin = getSupabaseAdminClientCached()
-  const currentBelt = await admin
-    .from('member_belt_promotions')
-    .select('belt_code, promoted_at')
-    .eq('member_user_id', memberUserId)
-    .order('promoted_at', { ascending: false })
-    .order('created_at', { ascending: false })
-    .limit(1)
-    .maybeSingle<{ belt_code: string | null; promoted_at: string | null }>()
-  if (currentBelt.error) throw new Error(currentBelt.error.message)
-
-  const training = await admin
-    .from('member_training_profiles')
-    .select('program_level, stripes, specialty, reference_coach_user_id, notes')
-    .eq('member_user_id', memberUserId)
-    .maybeSingle<{ program_level: string | null; stripes: number | null; specialty: string | null; reference_coach_user_id: string | null; notes: string | null }>()
-  if (training.error) throw new Error(training.error.message)
-
-  const insert = await admin.from('member_belt_promotions').insert({
-    id: crypto.randomUUID(),
-    member_user_id: memberUserId,
-    belt_code: beltCode,
-    promoted_at: promotedAt,
-    notes,
-    created_by: me.id,
-    updated_by: me.id,
-  })
-  if (insert.error) throw new Error(insert.error.message)
-
-  const profileUpsert = await admin
-    .from('member_training_profiles')
-    .upsert(
-      {
-        member_user_id: memberUserId,
-        program_level: training.data?.program_level ?? null,
-        stripes: 0,
-        specialty: training.data?.specialty ?? specialty,
-        reference_coach_user_id: training.data?.reference_coach_user_id ?? null,
-        notes: training.data?.notes ?? null,
-        updated_by: me.id,
-      },
-      { onConflict: 'member_user_id' },
-    )
-  if (profileUpsert.error) throw new Error(profileUpsert.error.message)
-
-  const event = await admin.from('member_athlete_progress_events').insert({
-    id: crypto.randomUUID(),
-    member_user_id: memberUserId,
-    event_type: 'belt_promotion',
-    effective_date: promotedAt,
-    previous_program_level: training.data?.program_level ?? null,
-    next_program_level: training.data?.program_level ?? null,
-    previous_belt_code: currentBelt.data?.belt_code ?? null,
-    next_belt_code: beltCode,
-    previous_stripes: training.data?.stripes ?? 0,
-    next_stripes: 0,
-    notes,
-    created_by: me.id,
-  })
-  if (event.error) throw new Error(event.error.message)
-
-  revalidatePath('/head-coach/athletes')
+  revalidatePath(`/members/${memberUserId}`)
   redirect(nextPath)
 }
 
@@ -1099,13 +897,13 @@ export default async function HeadCoachAthletesPage({ searchParams }: { searchPa
               <form action={saveAthleteProfileAction} className="grid gap-3 rounded-2xl border border-[hsl(var(--border))] p-4">
                 <div>
                   <h3 className="text-sm font-semibold tracking-tight">Athlete profile editor</h3>
-                  <p className="mt-1 text-xs text-[hsl(var(--muted))]">Program, stripes, specialty, reference coach, and coach note.</p>
+                  <p className="mt-1 text-xs text-[hsl(var(--muted))]">Program, specialty, reference coach, and coach note. Rank progression is protected.</p>
                 </div>
                 <input type="hidden" name="memberUserId" value={focusAthlete.user_id} />
                 <input type="hidden" name="nextPath" value={nextPath} />
                 <div className="grid gap-3 sm:grid-cols-2">
                   <label className="block text-sm"><span className="mb-2 block text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Program</span><select name="program_level" defaultValue={focusAthlete.program_level ?? ''} className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none transition focus:border-black"><option value="">Program pending</option>{PROGRAM_OPTIONS.map((program) => <option key={program} value={program}>{titleCase(program)}</option>)}</select></label>
-                  <label className="block text-sm"><span className="mb-2 block text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Stripes</span><input type="number" min={0} max={4} name="stripes" defaultValue={Number(focusAthlete.stripes ?? 0)} className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none transition focus:border-black" /></label>
+                  <div className="block text-sm"><span className="mb-2 block text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Stripes</span><div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] px-3 py-2"><div className="text-sm font-semibold">{Number(focusAthlete.stripes ?? 0)}</div><div className="mt-0.5 text-[11px] text-[hsl(var(--muted))]">Managed through the promotion workflow.</div></div></div>
                   <label className="block text-sm"><span className="mb-2 block text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Specialty</span><select name="specialty" defaultValue={focusAthlete.specialty ?? ''} className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none transition focus:border-black"><option value="">Not set yet</option>{SPECIALTY_OPTIONS.map((specialty) => <option key={specialty} value={specialty}>{titleCase(specialty)}</option>)}</select></label>
                   <label className="block text-sm"><span className="mb-2 block text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Reference coach</span><select name="reference_coach_user_id" defaultValue={focusAthlete.reference_coach_user_id ?? ''} className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none transition focus:border-black"><option value="">No reference coach</option>{(coachesRes.data ?? []).map((coach) => <option key={coach.user_id} value={coach.user_id}>{fullName(coach.first_name, coach.last_name, coach.role ? titleCase(coach.role) : 'Coach')}</option>)}</select></label>
                 </div>
@@ -1113,32 +911,39 @@ export default async function HeadCoachAthletesPage({ searchParams }: { searchPa
                 <div className="flex flex-wrap items-center justify-between gap-3"><div className="text-xs text-[hsl(var(--muted))]">Kimono eligibility: <span className="font-medium text-black">{focusAthlete.kimono_eligible ? 'Eligible' : 'Blocked'}</span></div><SaveButton idleLabel="Save athlete profile" pendingLabel="Saving..." className="w-full sm:w-auto" /></div>
               </form>
 
-              <div className="grid gap-3 xl:grid-cols-3">
-                <form action={addStripeAction} className="grid gap-3 rounded-2xl border border-[hsl(var(--border))] p-4">
-                  <div><h3 className="text-sm font-semibold tracking-tight">Award stripe</h3><p className="mt-1 text-xs text-[hsl(var(--muted))]">Increments stripes by one, up to 4.</p></div>
-                  <input type="hidden" name="memberUserId" value={focusAthlete.user_id} />
-                  <input type="hidden" name="nextPath" value={nextPath} />
-                  <input type="hidden" name="specialty_snapshot" value={focusAthlete.specialty ?? ''} />
-                  <input type="hidden" name="age_group_snapshot" value={focusAthlete.age_group} />
-                  <label className="block text-sm"><span className="mb-2 block text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Effective date</span><input type="date" name="effective_date" defaultValue={new Date().toISOString().slice(0, 10)} className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none transition focus:border-black" /></label>
-                  <label className="block text-sm"><span className="mb-2 block text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Note</span><textarea name="notes" rows={2} className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none transition focus:border-black" /></label>
-                  <button type="submit" className="inline-flex items-center justify-center rounded-2xl border border-black bg-black px-4 py-2 text-sm font-medium text-white transition hover:opacity-90">Add stripe</button>
-                </form>
-
-                <form action={promoteBeltAction} className="grid gap-3 rounded-2xl border border-[hsl(var(--border))] p-4">
-                  <div><h3 className="text-sm font-semibold tracking-tight">Promote belt</h3><p className="mt-1 text-xs text-[hsl(var(--muted))]">Adds a belt promotion and resets stripes to 0.</p></div>
-                  <input type="hidden" name="memberUserId" value={focusAthlete.user_id} />
-                  <input type="hidden" name="nextPath" value={nextPath} />
-                  <input type="hidden" name="specialty_snapshot" value={focusAthlete.specialty ?? ''} />
-                  <input type="hidden" name="age_group_snapshot" value={focusAthlete.age_group} />
-                  <label className="block text-sm"><span className="mb-2 block text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">New belt</span><select name="belt_code" defaultValue={focusAthlete.current_belt ?? ''} className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none transition focus:border-black"><option value="">Select belt</option>{beltTrackForAgeGroup(focusAthlete.age_group).map((belt) => <option key={belt} value={belt}>{titleCase(belt)}</option>)}</select></label>
-                  <label className="block text-sm"><span className="mb-2 block text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Promotion date</span><input type="date" name="promoted_at" defaultValue={new Date().toISOString().slice(0, 10)} className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none transition focus:border-black" /></label>
-                  <label className="block text-sm"><span className="mb-2 block text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Note</span><textarea name="notes" rows={2} className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none transition focus:border-black" /></label>
-                  <button type="submit" className="inline-flex items-center justify-center rounded-2xl border border-black bg-black px-4 py-2 text-sm font-medium text-white transition hover:opacity-90">Promote belt</button>
-                </form>
+              <div className="grid gap-3 xl:grid-cols-2">
+                <div className="grid gap-3 rounded-2xl border border-[hsl(var(--border))] p-4">
+                  <div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h3 className="text-sm font-semibold tracking-tight">Promotion control</h3>
+                      <TinyBadge tone="success">Protected</TinyBadge>
+                    </div>
+                    <p className="mt-1 text-xs text-[hsl(var(--muted))]">
+                      Stripes and belts cannot be edited directly from Athlete Operations.
+                    </p>
+                  </div>
+                  <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] p-3">
+                    <div className="text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Current rank</div>
+                    <div className="mt-1 text-sm font-semibold">
+                      {focusAthlete.current_belt
+                        ? `${titleCase(focusAthlete.current_belt)} belt · ${Number(focusAthlete.stripes ?? 0)} stripe${Number(focusAthlete.stripes ?? 0) === 1 ? '' : 's'}`
+                        : Number(focusAthlete.stripes ?? 0) > 0
+                          ? `White belt · ${Number(focusAthlete.stripes ?? 0)} stripe${Number(focusAthlete.stripes ?? 0) === 1 ? '' : 's'}`
+                          : 'No rank recorded'}
+                    </div>
+                  </div>
+                  <div className="flex flex-col gap-2 sm:flex-row">
+                    <Link href={`/head-coach/promotion-desk?member=${focusAthlete.user_id}`} className="inline-flex flex-1 items-center justify-center rounded-2xl border border-black bg-black px-4 py-2 text-sm font-medium text-white transition hover:opacity-90">
+                      Open Promotion Desk
+                    </Link>
+                    <Link href="/head-coach/belt-promotions" className="inline-flex flex-1 items-center justify-center rounded-2xl border border-[hsl(var(--border))] bg-white px-4 py-2 text-sm font-medium transition hover:bg-[hsl(var(--bg))]">
+                      Full event workflow
+                    </Link>
+                  </div>
+                </div>
 
                 <form action={moveProgramAction} className="grid gap-3 rounded-2xl border border-[hsl(var(--border))] p-4">
-                  <div><h3 className="text-sm font-semibold tracking-tight">Move program</h3><p className="mt-1 text-xs text-[hsl(var(--muted))]">Records a program move in the progression history.</p></div>
+                  <div><h3 className="text-sm font-semibold tracking-tight">Move program</h3><p className="mt-1 text-xs text-[hsl(var(--muted))]">Records the move transactionally in progression history without changing rank.</p></div>
                   <input type="hidden" name="memberUserId" value={focusAthlete.user_id} />
                   <input type="hidden" name="nextPath" value={nextPath} />
                   <label className="block text-sm"><span className="mb-2 block text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Next program</span><select name="next_program_level" defaultValue={focusAthlete.program_level ?? ''} className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm outline-none transition focus:border-black">{PROGRAM_OPTIONS.map((program) => <option key={program} value={program}>{titleCase(program)}</option>)}</select></label>
@@ -1147,7 +952,6 @@ export default async function HeadCoachAthletesPage({ searchParams }: { searchPa
                   <SaveButton idleLabel="Save program move" pendingLabel="Saving..." className="w-full sm:w-auto" />
                 </form>
               </div>
-
 
               <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
                 <div className="rounded-2xl border border-[hsl(var(--border))] p-4">
