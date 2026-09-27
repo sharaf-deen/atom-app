@@ -65,6 +65,16 @@ function errorLabel(code: string) {
   return 'Promotion could not be saved. No further action was taken.'
 }
 
+function promotionRpcError(message: string): PromotionError {
+  const value = message.toLowerCase()
+  if (value.includes('duplicate_belt')) return 'duplicate_belt'
+  if (value.includes('stripe_not_higher')) return 'stripe_not_higher'
+  if (value.includes('invalid_stripes')) return 'invalid_stripes'
+  if (value.includes('state_changed')) return 'save_failed'
+  if (value.includes('forbidden') || value.includes('member_not_found')) return 'member_not_found'
+  return 'save_failed'
+}
+
 function searchableText(row: BeltPromotionRosterRow) {
   return [
     row.first_name ?? '',
@@ -156,11 +166,11 @@ async function applyPromotionAction(formData: FormData) {
   }
 
   const member = memberRes.data
-  const eventNote = `Promotion Desk · ${promotedAt}${note ? ` — ${note}` : ''}`
+  const currentStripes = normalizeStripes(member.stripes)
+  const currentBelt = effectiveCurrentBelt(member)
 
   if (promotionType === 'stripe') {
     const nextStripes = normalizeStripes(formData.get('new_stripes'))
-    const currentStripes = normalizeStripes(member.stripes)
 
     if (nextStripes < 1 || nextStripes > 4) {
       redirect(buildHref({ q, member: memberUserId, error: 'invalid_stripes' }))
@@ -169,40 +179,29 @@ async function applyPromotionAction(formData: FormData) {
       redirect(buildHref({ q, member: memberUserId, error: 'stripe_not_higher' }))
     }
 
-    const upsert = await admin.from('member_training_profiles').upsert(
-      {
-        member_user_id: memberUserId,
-        program_level: member.program_level ?? null,
-        stripes: nextStripes,
-        specialty: member.specialty ?? null,
-        reference_coach_user_id: member.reference_coach_user_id ?? null,
-        notes: member.coach_note ?? null,
-        updated_by: me.id,
-      },
-      { onConflict: 'member_user_id' },
-    )
-    if (upsert.error) {
-      redirect(buildHref({ q, member: memberUserId, error: 'save_failed' }))
-    }
-
-    const progress = await admin.from('member_athlete_progress_events').insert({
-      id: crypto.randomUUID(),
-      member_user_id: memberUserId,
-      event_type: 'stripe_award',
-      effective_date: promotedAt,
-      previous_program_level: member.program_level ?? null,
-      next_program_level: member.program_level ?? null,
-      previous_stripes: currentStripes,
-      next_stripes: nextStripes,
-      notes: eventNote,
-      created_by: me.id,
+    const result = await admin.rpc('apply_promotion_desk_promotion', {
+      p_member_user_id: memberUserId,
+      p_promotion_type: 'stripe',
+      p_promoted_at: promotedAt,
+      p_next_stripes: nextStripes,
+      p_new_belt: null,
+      p_note: note,
+      p_expected_previous_belt: currentBelt,
+      p_expected_previous_stripes: currentStripes,
+      p_actor_user_id: me.id,
     })
-    if (progress.error) {
-      redirect(buildHref({ q, member: memberUserId, error: 'save_failed' }))
+
+    if (result.error) {
+      redirect(buildHref({
+        q,
+        member: memberUserId,
+        error: promotionRpcError(result.error.message || ''),
+      }))
     }
   } else if (promotionType === 'belt') {
     const newBelt = String(formData.get('new_belt') || '').trim().toLowerCase()
     const allowed = allowedBeltTargets(member)
+
     if (!newBelt || !allowed.includes(newBelt as any)) {
       const track = beltTrackForAgeGroup(ageGroupFromDate(member.date_of_birth))
       if (!track.includes(newBelt as any)) {
@@ -219,6 +218,7 @@ async function applyPromotionAction(formData: FormData) {
       .eq('promoted_at', promotedAt)
       .limit(1)
       .maybeSingle<{ id: string }>()
+
     if (duplicate.error) {
       redirect(buildHref({ q, member: memberUserId, error: 'save_failed' }))
     }
@@ -226,52 +226,24 @@ async function applyPromotionAction(formData: FormData) {
       redirect(buildHref({ q, member: memberUserId, error: 'duplicate_belt' }))
     }
 
-    const insertBelt = await admin.from('member_belt_promotions').insert({
-      id: crypto.randomUUID(),
-      member_user_id: memberUserId,
-      belt_code: newBelt,
-      promoted_at: promotedAt,
-      notes: eventNote,
-      created_by: me.id,
-      updated_by: me.id,
+    const result = await admin.rpc('apply_promotion_desk_promotion', {
+      p_member_user_id: memberUserId,
+      p_promotion_type: 'belt',
+      p_promoted_at: promotedAt,
+      p_next_stripes: null,
+      p_new_belt: newBelt,
+      p_note: note,
+      p_expected_previous_belt: currentBelt,
+      p_expected_previous_stripes: currentStripes,
+      p_actor_user_id: me.id,
     })
-    if (insertBelt.error) {
-      redirect(buildHref({ q, member: memberUserId, error: 'save_failed' }))
-    }
 
-    const currentStripes = normalizeStripes(member.stripes)
-    const upsert = await admin.from('member_training_profiles').upsert(
-      {
-        member_user_id: memberUserId,
-        program_level: member.program_level ?? null,
-        stripes: 0,
-        specialty: member.specialty ?? null,
-        reference_coach_user_id: member.reference_coach_user_id ?? null,
-        notes: member.coach_note ?? null,
-        updated_by: me.id,
-      },
-      { onConflict: 'member_user_id' },
-    )
-    if (upsert.error) {
-      redirect(buildHref({ q, member: memberUserId, error: 'save_failed' }))
-    }
-
-    const progress = await admin.from('member_athlete_progress_events').insert({
-      id: crypto.randomUUID(),
-      member_user_id: memberUserId,
-      event_type: 'belt_promotion',
-      effective_date: promotedAt,
-      previous_program_level: member.program_level ?? null,
-      next_program_level: member.program_level ?? null,
-      previous_belt_code: effectiveCurrentBelt(member),
-      next_belt_code: newBelt,
-      previous_stripes: currentStripes,
-      next_stripes: 0,
-      notes: eventNote,
-      created_by: me.id,
-    })
-    if (progress.error) {
-      redirect(buildHref({ q, member: memberUserId, error: 'save_failed' }))
+    if (result.error) {
+      redirect(buildHref({
+        q,
+        member: memberUserId,
+        error: promotionRpcError(result.error.message || ''),
+      }))
     }
   } else {
     redirect(buildHref({ q, member: memberUserId, error: 'save_failed' }))
