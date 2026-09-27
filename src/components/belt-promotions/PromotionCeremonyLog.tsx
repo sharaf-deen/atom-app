@@ -1,5 +1,6 @@
 import Link from 'next/link'
 import { revalidatePath } from 'next/cache'
+import { cookies } from 'next/headers'
 import { redirect } from 'next/navigation'
 import { cairoToday } from '@/lib/cairoDate'
 import { getSessionUserCached, getSupabaseAdminClientCached } from '@/lib/requestCache'
@@ -33,6 +34,8 @@ type ProfileRow = {
   last_name: string | null
   email: string | null
 }
+
+const CEREMONY_DATE_COOKIE = 'promotion_desk_ceremony_date'
 
 function displayName(profile?: ProfileRow | null) {
   if (!profile) return 'Unknown'
@@ -75,6 +78,24 @@ function cairoTime(value?: string | null) {
   }).format(dt)
 }
 
+function isIsoDate(value?: string | null) {
+  if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false
+  const [year, month, day] = value.split('-').map(Number)
+  const dt = new Date(Date.UTC(year, month - 1, day))
+  return (
+    dt.getUTCFullYear() === year &&
+    dt.getUTCMonth() === month - 1 &&
+    dt.getUTCDate() === day
+  )
+}
+
+function shiftIsoDate(value: string, days: number) {
+  const [year, month, day] = value.split('-').map(Number)
+  const dt = new Date(Date.UTC(year, month - 1, day))
+  dt.setUTCDate(dt.getUTCDate() + days)
+  return dt.toISOString().slice(0, 10)
+}
+
 function correctionErrorCode(message: string) {
   const value = message.toLowerCase()
   if (value.includes('forbidden')) return 'forbidden'
@@ -84,6 +105,31 @@ function correctionErrorCode(message: string) {
   if (value.includes('state_changed') || value.includes('current_state')) return 'state_changed'
   if (value.includes('reason_required')) return 'invalid'
   return 'failed'
+}
+
+async function setCeremonyDateAction(formData: FormData) {
+  'use server'
+
+  const me = await getSessionUserCached()
+  if (!me || (me.role !== 'head_coach' && me.role !== 'super_admin')) {
+    redirect('/head-coach/promotion-desk')
+  }
+
+  const today = cairoToday()
+  const requested = String(formData.get('ceremony_date') || '').trim()
+  const selectedDate =
+    isIsoDate(requested) && requested <= today ? requested : today
+
+  cookies().set(CEREMONY_DATE_COOKIE, selectedDate, {
+    httpOnly: true,
+    sameSite: 'lax',
+    secure: process.env.NODE_ENV === 'production',
+    path: '/head-coach/promotion-desk',
+    maxAge: 60 * 60 * 24 * 90,
+  })
+
+  revalidatePath('/head-coach/promotion-desk')
+  redirect('/head-coach/promotion-desk')
 }
 
 async function undoPromotionAction(formData: FormData) {
@@ -142,11 +188,18 @@ export default async function PromotionCeremonyLog() {
 
   const admin = getSupabaseAdminClientCached()
   const today = cairoToday()
+  const yesterday = shiftIsoDate(today, -1)
+
+  const storedDate = cookies().get(CEREMONY_DATE_COOKIE)?.value ?? ''
+  const selectedDate =
+    isIsoDate(storedDate) && storedDate <= today ? storedDate : today
+  const viewingToday = selectedDate === today
+  const viewingYesterday = selectedDate === yesterday
 
   const eventsRes = await admin
     .from('member_athlete_progress_events')
     .select('id,member_user_id,event_type,effective_date,previous_belt_code,next_belt_code,previous_stripes,next_stripes,notes,created_at,created_by')
-    .eq('effective_date', today)
+    .eq('effective_date', selectedDate)
     .in('event_type', ['stripe_award', 'belt_promotion'])
     .like('notes', 'Promotion Desk · %')
     .order('created_at', { ascending: false })
@@ -221,14 +274,18 @@ export default async function PromotionCeremonyLog() {
       <PromotionCorrectionNotice />
 
       <section className="rounded-3xl border border-black/10 bg-white p-4 shadow-sm sm:p-5">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div>
             <div className="text-xs font-semibold uppercase tracking-wide text-[hsl(var(--muted))]">
-              Ceremony Log · {today}
+              Ceremony Log · {selectedDate}
             </div>
-            <h2 className="mt-1 text-lg font-bold">Promotions today</h2>
+            <h2 className="mt-1 text-lg font-bold">
+              {viewingToday ? 'Promotions today' : `Promotions on ${selectedDate}`}
+            </h2>
             <p className="mt-1 text-xs text-[hsl(var(--muted))]">
-              Live audit of promotions applied through Promotion Desk. Corrected entries remain visible.
+              {viewingToday
+                ? 'Live audit of promotions applied through Promotion Desk. Corrected entries remain visible.'
+                : 'Historical Promotion Desk audit. Corrections remain visible; undo is disabled outside today.'}
             </p>
           </div>
 
@@ -252,23 +309,87 @@ export default async function PromotionCeremonyLog() {
           </div>
         </div>
 
+        <div className="mt-4 flex flex-col gap-2 rounded-2xl border border-black/10 bg-black/[0.015] p-3 sm:flex-row sm:items-end">
+          <div className="flex gap-2">
+            <form action={setCeremonyDateAction}>
+              <input type="hidden" name="ceremony_date" value={yesterday} />
+              <button
+                type="submit"
+                className={
+                  'rounded-xl border px-3 py-2 text-xs font-semibold ' +
+                  (viewingYesterday
+                    ? 'border-black bg-black text-white'
+                    : 'border-black/10 bg-white hover:bg-black/[0.03]')
+                }
+              >
+                Yesterday
+              </button>
+            </form>
+
+            <form action={setCeremonyDateAction}>
+              <input type="hidden" name="ceremony_date" value={today} />
+              <button
+                type="submit"
+                className={
+                  'rounded-xl border px-3 py-2 text-xs font-semibold ' +
+                  (viewingToday
+                    ? 'border-black bg-black text-white'
+                    : 'border-black/10 bg-white hover:bg-black/[0.03]')
+                }
+              >
+                Today
+              </button>
+            </form>
+          </div>
+
+          <form action={setCeremonyDateAction} className="flex flex-1 flex-col gap-2 sm:flex-row sm:items-end sm:justify-end">
+            <label className="text-xs font-medium">
+              Ceremony date
+              <input
+                type="date"
+                name="ceremony_date"
+                defaultValue={selectedDate}
+                max={today}
+                required
+                className="mt-1 w-full rounded-xl border border-black/10 bg-white px-3 py-2 text-sm sm:w-auto"
+              />
+            </label>
+            <button
+              type="submit"
+              className="rounded-xl border border-black/10 bg-white px-4 py-2 text-xs font-semibold hover:bg-black/[0.03]"
+            >
+              View date
+            </button>
+          </form>
+        </div>
+
+        {!viewingToday ? (
+          <div className="mt-3 rounded-xl border border-sky-200 bg-sky-50 p-3 text-xs text-sky-900">
+            Historical view · You can review profiles and audit entries, but promotions from past dates cannot be undone here.
+          </div>
+        ) : null}
+
         {!migrationReady ? (
           <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
             Deploy the Belt Promotions 2A database migration to enable correction audit and safe undo.
-            Today&apos;s promotion log remains readable.
+            The selected ceremony log remains readable.
           </div>
         ) : null}
 
         <details className="group mt-4">
           <summary className="flex cursor-pointer list-none items-center justify-between rounded-2xl border border-black/10 bg-black/[0.02] px-4 py-3 text-sm font-semibold marker:content-none">
-            <span>View today&apos;s ceremony log</span>
+            <span>
+              {viewingToday ? "View today's ceremony log" : `View ceremony log · ${selectedDate}`}
+            </span>
             <span className="text-xs font-normal text-[hsl(var(--muted))] group-open:hidden">Open</span>
             <span className="hidden text-xs font-normal text-[hsl(var(--muted))] group-open:inline">Close</span>
           </summary>
 
           {events.length === 0 ? (
             <div className="mt-3 rounded-2xl border border-dashed border-black/10 p-5 text-center text-sm text-[hsl(var(--muted))]">
-              No Promotion Desk promotions recorded for today yet.
+              {viewingToday
+                ? 'No Promotion Desk promotions recorded for today yet.'
+                : `No Promotion Desk promotions recorded for ${selectedDate}.`}
             </div>
           ) : (
             <div className="mt-3 grid gap-3">
@@ -278,7 +399,7 @@ export default async function PromotionCeremonyLog() {
                 const correction = correctedByEvent.get(event.id)
                 const correctionActor = correction?.corrected_by ? profiles.get(correction.corrected_by) : null
                 const isLatestActive = latestActiveByMember.get(event.member_user_id) === event.id
-                const canUndo = migrationReady && !correction && isLatestActive
+                const canUndo = viewingToday && migrationReady && !correction && isLatestActive
 
                 return (
                   <div
@@ -375,6 +496,10 @@ export default async function PromotionCeremonyLog() {
                           </button>
                         </form>
                       </details>
+                    ) : !correction && !viewingToday ? (
+                      <div className="mt-3 text-[11px] text-[hsl(var(--muted))]">
+                        Historical entry · Undo is available only for today&apos;s promotions.
+                      </div>
                     ) : !correction && migrationReady ? (
                       <div className="mt-3 text-[11px] text-[hsl(var(--muted))]">
                         A later promotion exists for this member. Correct the latest active promotion first.
