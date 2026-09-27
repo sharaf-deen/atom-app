@@ -6,6 +6,7 @@ import { createSupabaseAdminClient } from '@/lib/supabaseAdmin'
 import { createSupabaseRSC } from '@/lib/supabaseServer'
 import { getSessionUser, type Role } from '@/lib/session'
 import { ATHLETE_SPECIALTY_OPTIONS, type AthleteSpecialty, specialtyLabel } from '@/lib/athleteProgress'
+import UnifiedProgressionHistory from '@/components/member-detail/UnifiedProgressionHistory'
 
 type TrainingProfileRow = {
   member_user_id: string
@@ -688,7 +689,7 @@ export default async function AthleteProfileSection({ memberUserId, targetRole, 
             <h2 className="text-base font-semibold tracking-tight">Athlete profile</h2>
           </div>
           <p className="mt-1 text-sm text-[hsl(var(--muted))]">
-            Program level, belt history, and competition results in one place.
+            Program level, unified progression history, belt records, and competition results in one place.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -1024,6 +1025,14 @@ export default async function AthleteProfileSection({ memberUserId, targetRole, 
           </div>
         </div>
       ) : null}
+
+      <UnifiedProgressionHistory
+        memberUserId={memberUserId}
+        viewerRole={viewerRole}
+        isSelf={isSelf}
+        currentBelt={currentBelt}
+        currentStripes={stripeCount}
+      />
 
       <div className="mt-4 grid gap-4 xl:grid-cols-2">
         <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4 shadow-soft">
