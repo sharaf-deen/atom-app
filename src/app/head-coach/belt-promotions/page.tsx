@@ -868,6 +868,53 @@ export default async function BeltPromotionEventsPage({ searchParams }: { search
                   ))}
                 </div>
 
+                <details className="mt-4 rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] p-4">
+                  <summary className="cursor-pointer text-sm font-semibold tracking-tight">Export promoted athletes PDF</summary>
+                  <p className="mt-2 text-xs text-[hsl(var(--muted))]">Generate a ceremony PDF filtered by Kids / Adults and Stripes / Belts. Applied results is the safest option for an official archive.</p>
+                  <form
+                    method="get"
+                    action={`/api/head-coach/belt-promotions/${selectedEvent.id}/export-pdf`}
+                    className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4"
+                  >
+                    <label className="block text-sm">
+                      <span className="mb-2 block text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Audience</span>
+                      <select name="audience" defaultValue="all" className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm">
+                        <option value="all">Kids + Adults</option>
+                        <option value="kids">Kids only</option>
+                        <option value="adults">Adults only</option>
+                      </select>
+                    </label>
+                    <label className="block text-sm">
+                      <span className="mb-2 block text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Promotion</span>
+                      <select name="promotion" defaultValue="all" className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm">
+                        <option value="all">Belts + Stripes</option>
+                        <option value="belt">Belts only</option>
+                        <option value="stripe">Stripes only</option>
+                      </select>
+                    </label>
+                    <label className="block text-sm">
+                      <span className="mb-2 block text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Result scope</span>
+                      <select name="scope" defaultValue="applied" className="w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm">
+                        <option value="applied">Applied results only</option>
+                        <option value="confirmed">Confirmed results</option>
+                      </select>
+                    </label>
+                    <div className="flex items-end">
+                      <button type="submit" className="w-full rounded-2xl bg-black px-4 py-2 text-sm font-semibold text-white">
+                        Download PDF
+                      </button>
+                    </div>
+                  </form>
+                  <div className="mt-3 flex flex-wrap gap-2 text-xs">
+                    <a href={`/api/head-coach/belt-promotions/${selectedEvent.id}/export-pdf?audience=kids&promotion=all&scope=applied`} className="rounded-xl border border-black/10 bg-white px-3 py-2 font-semibold">Kids · All</a>
+                    <a href={`/api/head-coach/belt-promotions/${selectedEvent.id}/export-pdf?audience=adults&promotion=all&scope=applied`} className="rounded-xl border border-black/10 bg-white px-3 py-2 font-semibold">Adults · All</a>
+                    <a href={`/api/head-coach/belt-promotions/${selectedEvent.id}/export-pdf?audience=kids&promotion=belt&scope=applied`} className="rounded-xl border border-black/10 bg-white px-3 py-2 font-semibold">Kids · Belts</a>
+                    <a href={`/api/head-coach/belt-promotions/${selectedEvent.id}/export-pdf?audience=kids&promotion=stripe&scope=applied`} className="rounded-xl border border-black/10 bg-white px-3 py-2 font-semibold">Kids · Stripes</a>
+                    <a href={`/api/head-coach/belt-promotions/${selectedEvent.id}/export-pdf?audience=adults&promotion=belt&scope=applied`} className="rounded-xl border border-black/10 bg-white px-3 py-2 font-semibold">Adults · Belts</a>
+                    <a href={`/api/head-coach/belt-promotions/${selectedEvent.id}/export-pdf?audience=adults&promotion=stripe&scope=applied`} className="rounded-xl border border-black/10 bg-white px-3 py-2 font-semibold">Adults · Stripes</a>
+                  </div>
+                </details>
+
                 <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
                   <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] p-4"><div className="text-xs font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Candidates</div><div className="mt-2 text-2xl font-semibold tracking-tight">{summary.total}</div></div>
                   <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] p-4"><div className="text-xs font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Present / absent</div><div className="mt-2 text-2xl font-semibold tracking-tight">{summary.present} / {summary.absent}</div></div>
