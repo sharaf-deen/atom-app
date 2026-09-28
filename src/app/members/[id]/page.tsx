@@ -35,6 +35,7 @@ import SettleDueDialog from '@/components/SettleDueDialog'
 import AthleteProfileSection from '@/components/member-detail/AthleteProfileSection'
 import MemberNotifyButton from '@/components/member-detail/MemberNotifyButton'
 import MemberBasicProfileEditButton from '@/components/member-detail/MemberBasicProfileEditButton'
+import MemberProgramSection from '@/components/member-detail/MemberProgramSection'
 import { canManageNotifications as canManageMemberNotifications, hasLifetimeGymAccess } from '@/lib/rbac'
 import { buildSubscriptionFreezeTokenSummary, freezePlanSummaryLabel, toInclusiveFreezeEnd, type SubscriptionFreezeHistoryRow } from '@/lib/subscriptionFreeze'
 
@@ -1496,6 +1497,14 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
             </Surface>
           ) : null}
         </div>
+
+        {['member', 'champion', 'vip'].includes(String(profile.role ?? '')) ? (
+          <MemberProgramSection
+            memberUserId={profile.user_id}
+            viewerRole={me.role}
+            nextPath={nextPath}
+          />
+        ) : null}
 
         {shouldShowAthleteProfileOnMemberDetail(me.role, profile.role) ? (
           <AthleteProfileSection

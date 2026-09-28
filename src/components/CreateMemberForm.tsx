@@ -18,6 +18,17 @@ type NewMemberPayload = {
   // YYYY-MM-DD
   date_of_birth?: string
   visitor_trial_id?: string
+  program_key?: string
+}
+
+type MemberProgramOption = {
+  key: string
+  name: string
+  audience: string
+  age_min: number | null
+  age_max: number | null
+  level: string
+  sort_order: number
 }
 
 type Status = { kind: '' | 'info' | 'success' | 'warning' | 'error'; msg: string }
@@ -54,6 +65,7 @@ function buildInitialForm(initialValues?: Partial<NewMemberPayload>): NewMemberP
     phone: (initialValues?.phone || '').trim() || undefined,
     date_of_birth: (initialValues?.date_of_birth || '').trim(),
     visitor_trial_id: (initialValues?.visitor_trial_id || '').trim() || undefined,
+    program_key: (initialValues?.program_key || '').trim() || undefined,
   }
 }
 
@@ -120,6 +132,30 @@ export default function CreateMemberForm({
   const [status, setStatus] = useState<Status>({ kind: '', msg: '' })
   const [existingMember, setExistingMember] = useState<ExistingMemberRef | null>(null)
   const [confirmOpen, setConfirmOpen] = useState(false)
+  const [programs, setPrograms] = useState<MemberProgramOption[]>([])
+  const [programsLoading, setProgramsLoading] = useState(true)
+
+
+  useEffect(() => {
+    let cancelled = false
+    async function loadPrograms() {
+      setProgramsLoading(true)
+      try {
+        const response = await fetch('/api/member-programs/options', { cache: 'no-store' })
+        const data = await response.json().catch(() => ({}))
+        if (!response.ok || data?.ok !== true) throw new Error(data?.details || data?.error || 'PROGRAM_OPTIONS_FAILED')
+        if (!cancelled) setPrograms(Array.isArray(data.programs) ? data.programs : [])
+      } catch {
+        if (!cancelled) setStatus({ kind: 'error', msg: 'Academy programs could not be loaded. Please refresh and try again.' })
+      } finally {
+        if (!cancelled) setProgramsLoading(false)
+      }
+    }
+    void loadPrograms()
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   function setDobPart(part: 'day' | 'month' | 'year', value: string) {
     setDobParts((prev) => {
@@ -157,6 +193,8 @@ export default function CreateMemberForm({
   const age = useMemo(() => ageFromDob(form.date_of_birth || ''), [form.date_of_birth])
   const ageGroup = age === null ? null : age < 17 ? 'Kid' : 'Adult'
   const dobOk = age !== null // valid + not in future
+  const programOk = !!form.program_key && programs.some((program) => program.key === form.program_key)
+  const selectedProgram = programs.find((program) => program.key === form.program_key) ?? null
 
   const memberSummaryItems = useMemo<ConfirmActionSummaryItem[]>(() => {
     const firstName = cleanText(form.first_name)
@@ -174,6 +212,7 @@ export default function CreateMemberForm({
         label: 'Age / category',
         value: dobOk && ageGroup && age !== null ? `${age} years old · ${ageGroup}` : 'Invalid or missing',
       },
+      { label: 'Academy program', value: selectedProgram?.name ?? 'Not selected' },
       { label: 'Role', value: 'member' },
       { label: 'Invite impact', value: 'Invite email will be sent if this is a new email.' },
       { label: 'Access impact', value: 'A new member profile will be created for app and scan access.' },
@@ -184,7 +223,7 @@ export default function CreateMemberForm({
     }
 
     return items
-  }, [age, ageGroup, dobOk, form.date_of_birth, form.email, form.first_name, form.last_name, form.phone, form.visitor_trial_id])
+  }, [age, ageGroup, dobOk, form.date_of_birth, form.email, form.first_name, form.last_name, form.phone, form.visitor_trial_id, selectedProgram?.name])
 
   function buildPayload() {
     const email = cleanText(form.email).toLowerCase()
@@ -196,6 +235,7 @@ export default function CreateMemberForm({
       phone: cleanText(form.phone) || undefined,
       date_of_birth: cleanText(form.date_of_birth) || undefined,
       visitor_trial_id: cleanText(form.visitor_trial_id) || undefined,
+      program_key: cleanText(form.program_key) || undefined,
       // aliases camelCase (au cas où on les supporte côté API)
       firstName: cleanText(form.first_name) || undefined,
       lastName: cleanText(form.last_name) || undefined,
@@ -205,14 +245,14 @@ export default function CreateMemberForm({
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault()
-    if (submitLockRef.current || busy || !emailOk || !dobOk) return
+    if (submitLockRef.current || busy || !emailOk || !dobOk || !programOk) return
 
     setExistingMember(null)
     setConfirmOpen(true)
   }
 
   async function createMemberConfirmed() {
-    if (submitLockRef.current || busy || !emailOk || !dobOk) return
+    if (submitLockRef.current || busy || !emailOk || !dobOk || !programOk) return
 
     submitLockRef.current = true
     setBusy(true)
@@ -440,6 +480,29 @@ export default function CreateMemberForm({
           </span>
         </label>
 
+        <label className="grid gap-1 sm:col-span-2">
+          <span className="text-sm font-medium">Academy program *</span>
+          <select
+            required
+            value={form.program_key ?? ''}
+            onChange={(e) => update('program_key', e.target.value || undefined)}
+            className="rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2"
+            disabled={busy || programsLoading}
+          >
+            <option value="" disabled>
+              {programsLoading ? 'Loading programs…' : 'Select academy program…'}
+            </option>
+            {programs.map((program) => (
+              <option key={program.key} value={program.key}>
+                {program.name}{program.level ? ` · ${program.level}` : ''}
+              </option>
+            ))}
+          </select>
+          <span className="text-[11px] text-[hsl(var(--muted))]">
+            Tracks the member’s current academy group separately from athlete progression level.
+          </span>
+        </label>
+
         <label className="grid gap-1">
           <span className="text-sm font-medium">First name</span>
           <input
@@ -463,7 +526,7 @@ export default function CreateMemberForm({
         </label>
 
         <div className="mt-2 flex flex-wrap gap-2 sm:col-span-2">
-          <Button type="submit" disabled={busy || !emailOk || !dobOk}>
+          <Button type="submit" disabled={busy || programsLoading || !emailOk || !dobOk || !programOk}>
             {busy ? 'Creating…' : 'Create member'}
           </Button>
 

@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { ProspectRow, ProspectSubmissionRow } from '@/app/admin/prospects/page'
 
 type Props = {
@@ -14,7 +14,10 @@ type MemberCreateForm = {
   last_name: string
   phone: string
   date_of_birth: string
+  program_key: string
 }
+
+type MemberProgramOption = { key: string; name: string; level: string }
 
 function splitName(fullName: string) {
   const parts = fullName.trim().split(/\s+/).filter(Boolean)
@@ -53,8 +56,30 @@ export default function ProspectConversionPanel({ prospect, latestSubmission }: 
     last_name: names.last,
     phone: prospect.phone ?? '',
     date_of_birth: '',
+    program_key: '',
   })
   const [needsNewMember, setNeedsNewMember] = useState(false)
+  const [programs, setPrograms] = useState<MemberProgramOption[]>([])
+  const [programsLoading, setProgramsLoading] = useState(true)
+
+  useEffect(() => {
+    let cancelled = false
+    async function loadPrograms() {
+      setProgramsLoading(true)
+      try {
+        const response = await fetch('/api/member-programs/options', { cache: 'no-store' })
+        const data = await readJson(response)
+        if (!response.ok || data.ok !== true) throw new Error(data.details || data.error || 'PROGRAM_OPTIONS_FAILED')
+        if (!cancelled) setPrograms(Array.isArray(data.programs) ? data.programs : [])
+      } catch (cause: any) {
+        if (!cancelled) setError(String(cause?.message || cause))
+      } finally {
+        if (!cancelled) setProgramsLoading(false)
+      }
+    }
+    void loadPrograms()
+    return () => { cancelled = true }
+  }, [])
 
   const hasVisitor = !!prospect.linked_visitor_trial_id
   const hasMember = !!prospect.linked_member_id
@@ -123,6 +148,7 @@ export default function ProspectConversionPanel({ prospect, latestSubmission }: 
     try {
       if (!member.email.trim()) throw new Error('Email is required for a standalone Member account.')
       if (!member.date_of_birth) throw new Error('Date of birth is required.')
+      if (!member.program_key) throw new Error('Academy program is required.')
 
       const createResponse = await fetch('/api/members/create', {
         method: 'POST',
@@ -136,6 +162,7 @@ export default function ProspectConversionPanel({ prospect, latestSubmission }: 
           firstName: member.first_name.trim() || undefined,
           lastName: member.last_name.trim() || undefined,
           dateOfBirth: member.date_of_birth,
+          program_key: member.program_key,
         }),
       })
       const created = await readJson(createResponse)
@@ -263,8 +290,16 @@ export default function ProspectConversionPanel({ prospect, latestSubmission }: 
               <label className="text-sm font-medium">Date of birth *
                 <input type="date" value={member.date_of_birth} onChange={(e) => setMember((v) => ({ ...v, date_of_birth: e.target.value }))} className="mt-1 w-full rounded-xl border px-3 py-2" />
               </label>
-              <div className="flex items-end">
-                <button type="button" disabled={busy === 'create' || !member.email.trim() || !member.date_of_birth} onClick={() => void createAndLinkMember()} className="w-full rounded-xl bg-black px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">
+              <label className="text-sm font-medium">Academy program *
+                <select value={member.program_key} onChange={(e) => setMember((v) => ({ ...v, program_key: e.target.value }))} disabled={programsLoading} className="mt-1 w-full rounded-xl border bg-white px-3 py-2">
+                  <option value="" disabled>{programsLoading ? 'Loading programs…' : 'Select academy program…'}</option>
+                  {programs.map((program) => (
+                    <option key={program.key} value={program.key}>{program.name}{program.level ? ` · ${program.level}` : ''}</option>
+                  ))}
+                </select>
+              </label>
+              <div className="flex items-end sm:col-span-2">
+                <button type="button" disabled={busy === 'create' || programsLoading || !member.email.trim() || !member.date_of_birth || !member.program_key} onClick={() => void createAndLinkMember()} className="w-full rounded-xl bg-black px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">
                   {busy === 'create' ? 'Creating…' : 'Create through existing Member flow'}
                 </button>
               </div>
