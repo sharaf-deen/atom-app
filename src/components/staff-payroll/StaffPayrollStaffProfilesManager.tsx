@@ -357,6 +357,12 @@ export default function StaffPayrollStaffProfilesManager({
     selectedAccount?.role ??
     'coach'
 
+  const [primaryRoleDraft, setPrimaryRoleDraft] = React.useState(defaultPrimaryRole)
+
+  React.useEffect(() => {
+    setPrimaryRoleDraft(defaultPrimaryRole)
+  }, [defaultPrimaryRole, selectedStaffUserId, selectedProfile?.updated_at])
+
   const candidateLinkedAccounts = accounts.filter((account) => {
     if (account.user_id === selectedStaffUserId) return false
 
@@ -575,7 +581,8 @@ export default function StaffPayrollStaffProfilesManager({
                   Primary role
                   <select
                     name="primary_role"
-                    defaultValue={defaultPrimaryRole}
+                    value={primaryRoleDraft}
+                    onChange={(event) => setPrimaryRoleDraft(event.target.value)}
                     disabled={!canWrite}
                     className="mt-1 w-full rounded-xl border border-black/10 bg-white px-3 py-2"
                   >
@@ -633,7 +640,7 @@ export default function StaffPayrollStaffProfilesManager({
                 <div className="text-sm font-medium">Secondary roles</div>
                 <div className="mt-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
                   {ROLE_OPTIONS.filter(
-                    ([value]) => value !== defaultPrimaryRole
+                    ([value]) => value !== primaryRoleDraft
                   ).map(([value, label]) => (
                     <label
                       key={value}
