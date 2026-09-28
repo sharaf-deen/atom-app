@@ -28,6 +28,12 @@ export default function StaffPayrollLayout({
             Forecast
           </Link>
           <Link
+            href="/admin/staff-payroll/staff"
+            className="rounded-xl border border-black/10 px-3 py-2 text-sm font-semibold hover:bg-black/[0.03]"
+          >
+            Staff Profiles
+          </Link>
+          <Link
             href="/admin/staff-payroll/monthly-tasks"
             className="rounded-xl border border-black/10 px-3 py-2 text-sm font-semibold hover:bg-black/[0.03]"
           >
