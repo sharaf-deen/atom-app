@@ -1,4 +1,4 @@
-import Link from 'next/link'
+﻿import Link from 'next/link'
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 import type { ReactNode } from 'react'
@@ -548,11 +548,11 @@ export default async function AthleteProfileSection({ memberUserId, targetRole, 
             <h2 className="text-base font-semibold tracking-tight">Athlete profile</h2>
           </div>
           <p className="mt-1 text-sm text-[hsl(var(--muted))]">
-            Program level, protected rank progression, belt records, and competition results in one place.
+            Athlete level, protected rank progression, belt records, and competition results in one place.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <TinyBadge>{training?.program_level ? titleCase(training.program_level) : 'Program pending'}</TinyBadge>
+          <TinyBadge>{training?.program_level ? titleCase(training.program_level) : 'Progression pending'}</TinyBadge>
           <TinyBadge>{`Stripes ${stripeCount}`}</TinyBadge>
           <TinyBadge>{specialtyLabel(training?.specialty ?? null)}</TinyBadge>
           <TinyBadge tone={currentBelt ? 'success' : 'neutral'}>{currentBelt ? `${beltLabel(currentBelt)} belt · ${stripeCount} stripe${stripeCount === 1 ? '' : 's'}` : 'No belt yet'}</TinyBadge>
@@ -566,11 +566,11 @@ export default async function AthleteProfileSection({ memberUserId, targetRole, 
         <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] p-4">
           <div className="flex items-center gap-2 text-sm font-medium text-black">
             <Dumbbell size={16} />
-            Program
+            Athlete level
           </div>
           <div className="mt-3 text-lg font-semibold tracking-tight">{training?.program_level ? titleCase(training.program_level) : 'Not set yet'}</div>
           <div className="mt-1 text-sm text-[hsl(var(--muted))]">
-            {training ? `${specialtyLabel(training.specialty)} · ${stripeCount} stripe(s)` : 'No program level saved yet.'}
+            {training ? `${specialtyLabel(training.specialty)} · ${stripeCount} stripe(s)` : 'No athlete level saved yet.'}
           </div>
         </div>
 
@@ -621,19 +621,19 @@ export default async function AthleteProfileSection({ memberUserId, targetRole, 
           <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4 shadow-soft">
             <div className="flex items-center justify-between gap-3">
               <div>
-                <h3 className="text-sm font-semibold tracking-tight">Program tools</h3>
+                <h3 className="text-sm font-semibold tracking-tight">Athlete progression</h3>
                 <p className="mt-1 text-xs text-[hsl(var(--muted))]">Head coach or super admin only.</p>
               </div>
               <TinyBadge tone="warning">Editable</TinyBadge>
             </div>
-            <DetailsEditor label={training ? 'Edit program' : 'Add program'}>
+            <DetailsEditor label={training ? 'Edit progression' : 'Add progression'}>
               <form action={saveTrainingProfileAction} className="grid gap-3">
                 <input type="hidden" name="memberUserId" value={memberUserId} />
                 <input type="hidden" name="targetRole" value={targetRole ?? 'member'} />
                 <input type="hidden" name="nextPath" value={nextPath} />
                 <div className="grid gap-3 sm:grid-cols-2">
                   <label className="block text-sm">
-                    <span className="mb-2 block text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Program level</span>
+                    <span className="mb-2 block text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Athlete level</span>
                     <select
                       name="program_level"
                       defaultValue={training?.program_level ?? 'beginner'}
@@ -701,7 +701,7 @@ export default async function AthleteProfileSection({ memberUserId, targetRole, 
                     className="inline-flex items-center justify-center gap-2 rounded-2xl border border-black bg-black px-4 py-2 text-sm font-medium text-white transition hover:opacity-90"
                   >
                     <Save size={14} />
-                    Save program
+                    Save progression
                   </button>
                 </div>
               </form>
