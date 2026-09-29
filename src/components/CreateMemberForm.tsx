@@ -494,7 +494,7 @@ export default function CreateMemberForm({
             </option>
             {programs.map((program) => (
               <option key={program.key} value={program.key}>
-                {program.name}{program.level ? ` · ${program.level}` : ''}
+                {program.name}
               </option>
             ))}
           </select>
