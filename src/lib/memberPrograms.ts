@@ -10,6 +10,76 @@ export type MemberProgramOption = {
 
 export const MEMBER_PROGRAM_ACTIVITY_TYPES = ['jiu_jitsu', 'competition', 'wrestling'] as const
 
+const LEVEL_RANK: Record<string, number> = {
+  beginner: 0,
+  beginners: 0,
+  intermediate: 1,
+  intermediates: 1,
+  advanced: 2,
+  competitor: 3,
+  competitors: 3,
+}
+
+function normalized(value: string) {
+  return String(value ?? '')
+    .toLowerCase()
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+}
+
+function programAudienceRank(option: MemberProgramOption) {
+  const audience = normalized(option.audience)
+  const name = normalized(option.name)
+
+  const explicitlyYouth =
+    audience.includes('kid') ||
+    audience.includes('child') ||
+    audience.includes('youth') ||
+    audience.includes('teen') ||
+    name.includes('baby') ||
+    name.includes('kid') ||
+    name.includes('child') ||
+    name.includes('youth') ||
+    name.includes('teen') ||
+    (option.age_max != null && option.age_max < 18)
+
+  if (explicitlyYouth) return 0
+
+  const explicitlyAdult =
+    audience.includes('adult') ||
+    name.includes('adult') ||
+    name.includes('master') ||
+    (option.age_min != null && option.age_min >= 18)
+
+  if (explicitlyAdult) return 1
+  return 2
+}
+
+function levelRank(level: string) {
+  return LEVEL_RANK[normalized(level)] ?? 99
+}
+
+function levelAlreadyInName(name: string, level: string) {
+  const normalizedName = ` ${normalized(name)} `
+  const normalizedLevel = normalized(level)
+  if (!normalizedLevel) return false
+
+  const aliases: Record<string, string[]> = {
+    beginner: ['beginner', 'beginners'],
+    beginners: ['beginner', 'beginners'],
+    intermediate: ['intermediate', 'intermediates'],
+    intermediates: ['intermediate', 'intermediates'],
+    advanced: ['advanced'],
+    competitor: ['competitor', 'competitors', 'competition'],
+    competitors: ['competitor', 'competitors', 'competition'],
+  }
+
+  const candidates = aliases[normalizedLevel] ?? [normalizedLevel]
+  return candidates.some((candidate) => normalizedName.includes(` ${candidate} `))
+}
+
 export async function loadActiveMemberProgramOptions(admin: any): Promise<MemberProgramOption[]> {
   const { data, error } = await admin
     .from('schedule_class_templates')
@@ -37,12 +107,30 @@ export async function loadActiveMemberProgramOptions(admin: any): Promise<Member
   }
 
   return [...byKey.values()].sort((a, b) => {
+    const audienceDiff = programAudienceRank(a) - programAudienceRank(b)
+    if (audienceDiff) return audienceDiff
+
+    const ageMinA = a.age_min ?? 999
+    const ageMinB = b.age_min ?? 999
+    if (ageMinA !== ageMinB) return ageMinA - ageMinB
+
+    const ageMaxA = a.age_max ?? 999
+    const ageMaxB = b.age_max ?? 999
+    if (ageMaxA !== ageMaxB) return ageMaxA - ageMaxB
+
+    const nameDiff = a.name.localeCompare(b.name, 'en', { sensitivity: 'base' })
+    if (nameDiff) return nameDiff
+
+    const levelDiff = levelRank(a.level) - levelRank(b.level)
+    if (levelDiff) return levelDiff
+
     if (a.sort_order !== b.sort_order) return a.sort_order - b.sort_order
-    return a.name.localeCompare(b.name)
+    return a.key.localeCompare(b.key)
   })
 }
 
 export function memberProgramLabel(option: MemberProgramOption) {
-  const details = [option.level].filter(Boolean).join(' · ')
-  return details ? `${option.name} · ${details}` : option.name
+  const level = option.level.trim()
+  if (!level || levelAlreadyInName(option.name, level)) return option.name
+  return `${option.name} · ${level}`
 }
