@@ -9,6 +9,7 @@ import { canAccessKiosk, normalizeRole, type Role } from '@/lib/rbac'
 import { createSupabaseServerActionClient } from '@/lib/supabaseServer'
 import { createClient } from '@supabase/supabase-js'
 import { extractActionLink, sendMemberInviteEmailWithQr } from '@/lib/memberInviteEmail'
+import { loadActiveMemberProgramOptions } from '@/lib/memberPrograms'
 
 type Body =
   | {
@@ -22,6 +23,7 @@ type Body =
       dateOfBirth?: string
       dob?: string
       visitor_trial_id?: string
+      program_key?: string
     }
   | Record<string, any>
 
@@ -132,6 +134,7 @@ export async function POST(req: Request) {
     ).trim()
     const date_of_birth = (dobRaw || null) as string | null
     const visitor_trial_id = String((body as any).visitor_trial_id ?? '').trim() || null
+    const program_key = String((body as any).program_key ?? (body as any).programKey ?? '').trim() || null
 
     if (date_of_birth) {
       if (!isValidDateOnly(date_of_birth)) {
@@ -175,6 +178,18 @@ export async function POST(req: Request) {
     const admin = createClient(url, serviceKey, {
       auth: { autoRefreshToken: false, persistSession: false },
     })
+
+    let selectedProgram: { key: string; name: string } | null = null
+    if (program_key) {
+      const programs = await loadActiveMemberProgramOptions(admin)
+      const match = programs.find((program) => program.key === program_key)
+      if (!match) {
+        return noStore(
+          NextResponse.json({ ok: false, error: 'INVALID_MEMBER_PROGRAM' }, { status: 400 }),
+        )
+      }
+      selectedProgram = { key: match.key, name: match.name }
+    }
 
     // 4) Duplicate email safety: never overwrite an existing member from the create flow
     {
@@ -428,6 +443,24 @@ export async function POST(req: Request) {
       .eq('user_id', userId!)
       .maybeSingle()
 
+    if (selectedProgram) {
+      const programResult = await admin.rpc('set_member_current_program_v1', {
+        p_member_user_id: userId!,
+        p_program_key: selectedProgram.key,
+        p_actor_user_id: actor.id,
+        p_source: visitor_trial_id ? 'visitor_conversion' : 'member_registration',
+      })
+
+      if (programResult.error) {
+        return noStore(
+          NextResponse.json(
+            { ok: false, error: `MEMBER_PROGRAM_ASSIGNMENT_FAILED: ${programResult.error.message}`, user_id: userId },
+            { status: 500 },
+          ),
+        )
+      }
+    }
+
     if (outcome === 'invited_new_user' && inviteMode === 'custom_qr' && customActionLink) {
       const qrValue = savedProfile?.qr_code || `atom:${userId}`
       const customEmail = await sendMemberInviteEmailWithQr({
@@ -494,6 +527,7 @@ export async function POST(req: Request) {
         user_id: userId,
         user: { id: userId, email, first_name, last_name, phone, date_of_birth },
         visitor_trial_id,
+        program: selectedProgram,
         message:
           outcome === 'invited_new_user'
             ? inviteMode === 'custom_qr'

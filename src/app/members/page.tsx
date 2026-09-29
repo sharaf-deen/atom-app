@@ -15,7 +15,6 @@ import MembersResults from './_components/MembersResults'
 
 type Status = 'all' | 'active' | 'frozen' | 'inactive'
 type InactiveReason = 'all' | 'expired' | 'cancelled' | 'no_membership' | 'depleted_legacy' | 'other_inactive'
-
 type SearchParams = { [key: string]: string | string[] | undefined }
 
 function clampInt(n: number, min: number, max: number) {
@@ -27,13 +26,10 @@ function StatsCardsFallback() {
   return (
     <div className="grid gap-3 text-sm sm:grid-cols-4">
       {Array.from({ length: 4 }).map((_, i) => (
-        <div
-          key={i}
-          className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] px-4 py-3 shadow-soft"
-        >
-          <div className="h-3 w-20 rounded bg-[hsl(var(--bg))] animate-pulse" />
-          <div className="mt-3 h-8 w-12 rounded bg-[hsl(var(--bg))] animate-pulse" />
-          <div className="mt-3 h-3 w-28 rounded bg-[hsl(var(--bg))] animate-pulse" />
+        <div key={i} className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] px-4 py-3 shadow-soft">
+          <div className="h-3 w-20 animate-pulse rounded bg-[hsl(var(--bg))]" />
+          <div className="mt-3 h-8 w-12 animate-pulse rounded bg-[hsl(var(--bg))]" />
+          <div className="mt-3 h-3 w-28 animate-pulse rounded bg-[hsl(var(--bg))]" />
         </div>
       ))}
     </div>
@@ -45,37 +41,22 @@ function ResultsFallback() {
     <div className="space-y-3">
       <div className="space-y-3 lg:hidden">
         {Array.from({ length: 3 }).map((_, i) => (
-          <div
-            key={i}
-            className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-3 shadow-soft"
-          >
-            <div className="h-5 w-40 rounded bg-[hsl(var(--bg))] animate-pulse" />
-            <div className="mt-2 h-3 w-24 rounded bg-[hsl(var(--bg))] animate-pulse" />
-            <div className="mt-4 space-y-2">
-              <div className="h-3 w-full rounded bg-[hsl(var(--bg))] animate-pulse" />
-              <div className="h-3 w-5/6 rounded bg-[hsl(var(--bg))] animate-pulse" />
-              <div className="h-3 w-2/3 rounded bg-[hsl(var(--bg))] animate-pulse" />
-            </div>
+          <div key={i} className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-3 shadow-soft">
+            <div className="h-5 w-40 animate-pulse rounded bg-[hsl(var(--bg))]" />
+            <div className="mt-2 h-3 w-24 animate-pulse rounded bg-[hsl(var(--bg))]" />
           </div>
         ))}
       </div>
-
-      <div className="hidden lg:block rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-6 shadow-soft">
+      <div className="hidden rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-6 shadow-soft lg:block">
         <div className="space-y-3">
-          {Array.from({ length: 6 }).map((_, i) => (
-            <div key={i} className="h-4 w-full rounded bg-[hsl(var(--bg))] animate-pulse" />
-          ))}
+          {Array.from({ length: 6 }).map((_, i) => <div key={i} className="h-4 w-full animate-pulse rounded bg-[hsl(var(--bg))]" />)}
         </div>
       </div>
     </div>
   )
 }
 
-export default async function MembersPage({
-  searchParams,
-}: {
-  searchParams?: SearchParams
-}) {
+export default async function MembersPage({ searchParams }: { searchParams?: SearchParams }) {
   const me = await getSessionUserCached()
 
   const q = typeof searchParams?.q === 'string' ? searchParams.q.trim() : ''
@@ -89,6 +70,7 @@ export default async function MembersPage({
     (['all', 'expired', 'cancelled', 'no_membership', 'depleted_legacy', 'other_inactive'] as const).includes(inactiveReasonRaw as any)
       ? (inactiveReasonRaw as InactiveReason)
       : 'all'
+  const program = typeof searchParams?.program === 'string' ? searchParams.program.trim() : ''
   const page = clampInt(Number(typeof searchParams?.page === 'string' ? searchParams.page : 1), 1, 1_000_000)
   const pageSize = clampInt(Number(typeof searchParams?.pageSize === 'string' ? searchParams.pageSize : 20), 5, 200)
 
@@ -96,15 +78,13 @@ export default async function MembersPage({
   if (q) current.set('q', q)
   if (!q && status !== 'all') current.set('status', status)
   if (!q && status === 'inactive' && inactiveReason !== 'all') current.set('reason', inactiveReason)
+  if (program) current.set('program', program)
   if (page > 1) current.set('page', String(page))
   if (pageSize !== 20) current.set('pageSize', String(pageSize))
   const currentPath = `/members${current.toString() ? `?${current.toString()}` : ''}`
 
   if (!me) redirect(`/login?next=${encodeURIComponent(currentPath)}`)
-
-  const allowed = canAccessMembersList(me.role)
-
-  if (!allowed) {
+  if (!canAccessMembersList(me.role)) {
     return (
       <AccessDeniedPage
         title="Members"
@@ -122,16 +102,19 @@ export default async function MembersPage({
   return (
     <main>
       <PageHeader title="Members" subtitle="Search and manage members" />
-
       <Section className="space-y-4">
-        <MembersFilters initialQ={q} initialStatus={q ? 'all' : status} initialInactiveReason={q ? 'all' : inactiveReason} initialPageSize={pageSize} />
-
+        <MembersFilters
+          initialQ={q}
+          initialStatus={q ? 'all' : status}
+          initialInactiveReason={q ? 'all' : inactiveReason}
+          initialProgram={program}
+          initialPageSize={pageSize}
+        />
         <Suspense fallback={<StatsCardsFallback />}>
           <MembersStatsCards pageSize={pageSize} />
         </Suspense>
-
         <Suspense fallback={<ResultsFallback />}>
-          <MembersResults q={q} status={status} inactiveReason={inactiveReason} page={page} pageSize={pageSize} />
+          <MembersResults q={q} status={status} inactiveReason={inactiveReason} program={program} page={page} pageSize={pageSize} />
         </Suspense>
       </Section>
     </main>
