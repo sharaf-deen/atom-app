@@ -162,7 +162,7 @@ export default function MembersFilters({
             <option value="">All programs</option>
             <option value="__unassigned__">Program not set</option>
             {programs.map((item) => (
-              <option key={item.key} value={item.key}>{item.name}{item.level ? ` · ${item.level}` : ''}</option>
+              <option key={item.key} value={item.key}>{item.name}</option>
             ))}
           </Select>
         </div>

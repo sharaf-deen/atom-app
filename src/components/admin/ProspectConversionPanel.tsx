@@ -294,7 +294,7 @@ export default function ProspectConversionPanel({ prospect, latestSubmission }: 
                 <select value={member.program_key} onChange={(e) => setMember((v) => ({ ...v, program_key: e.target.value }))} disabled={programsLoading} className="mt-1 w-full rounded-xl border bg-white px-3 py-2">
                   <option value="" disabled>{programsLoading ? 'Loading programs…' : 'Select academy program…'}</option>
                   {programs.map((program) => (
-                    <option key={program.key} value={program.key}>{program.name}{program.level ? ` · ${program.level}` : ''}</option>
+                    <option key={program.key} value={program.key}>{program.name}</option>
                   ))}
                 </select>
               </label>
