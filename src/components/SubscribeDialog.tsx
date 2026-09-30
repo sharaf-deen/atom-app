@@ -207,6 +207,14 @@ export default function SubscribeDialog({
       return 'This database still uses an outdated subscription due rule. Deploy the latest database changes, then try again.'
     }
 
+    if (j?.error === 'LEGAL_CONSENT_REQUIRED') {
+      return 'Legal consent is incomplete. Complete the current required documents in Legal & consents before creating or renewing a subscription.'
+    }
+
+    if (j?.error === 'LEGAL_CONSENT_CHECK_FAILED') {
+      return 'Legal consent status could not be verified. Please retry before creating or renewing a subscription.'
+    }
+
     const base = j?.details || j?.error || 'Failed to save subscription'
     const hint = j?.hint ? ` (${String(j.hint)})` : ''
     return String(base) + hint
