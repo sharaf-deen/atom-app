@@ -8,6 +8,7 @@ import { revalidateTag, revalidatePath } from 'next/cache'
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 import { createSupabaseServerActionClient } from '@/lib/supabaseServer'
 import { generateInvoicePdfBytes, makeInvoiceNumber, type InvoiceSnapshot } from '@/lib/invoices'
+import { getMemberLegalCompliance } from '@/lib/legalConsentEnforcement'
 
 type Plan = '1w' | '1m' | '3m' | '6m' | '12m' | 'sessions'
 type SubscriptionPaymentMethod = 'cash' | 'instapay' | 'card' | 'bank_transfer'
@@ -377,6 +378,29 @@ export async function POST(req: Request) {
 
     if (exErr) return json(500, { ok: false, error: 'PROFILE_CHECK_FAILED', details: exErr.message })
     if (!exists) return json(404, { ok: false, error: 'MEMBER_NOT_FOUND' })
+
+    try {
+      const legalCompliance = await getMemberLegalCompliance(admin, memberId)
+      if (!legalCompliance.complete) {
+        return json(409, {
+          ok: false,
+          error: 'LEGAL_CONSENT_REQUIRED',
+          details: 'Current legal consent must be completed before renewing or extending a subscription.',
+          missing_documents: legalCompliance.missingDocuments.map((doc) => ({
+            key: doc.document_key,
+            title: doc.title,
+            version: doc.version_label,
+            url: doc.published_url,
+          })),
+        })
+      }
+    } catch (legalError: any) {
+      return json(500, {
+        ok: false,
+        error: 'LEGAL_CONSENT_CHECK_FAILED',
+        details: legalError?.message || String(legalError),
+      })
+    }
 
     // Renewal policy:
 // - We allow an existing active subscription.

@@ -108,7 +108,7 @@ export default async function MemberLegalConsentsSection({
   const participantName = `${profile?.first_name ?? ''} ${profile?.last_name ?? ''}`.trim() || 'Member'
 
   return (
-    <section className="rounded-3xl border border-[hsl(var(--border))] bg-white p-4 shadow-soft sm:p-5">
+    <section id="legal-consents" className="scroll-mt-24 rounded-3xl border border-[hsl(var(--border))] bg-white p-4 shadow-soft sm:p-5">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="flex items-start gap-2">
           <FileCheck2 size={18} className="mt-0.5" />

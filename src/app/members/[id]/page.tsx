@@ -37,6 +37,7 @@ import MemberNotifyButton from '@/components/member-detail/MemberNotifyButton'
 import MemberBasicProfileEditButton from '@/components/member-detail/MemberBasicProfileEditButton'
 import MemberProgramSection from '@/components/member-detail/MemberProgramSection'
 import MemberLegalConsentsSection from '@/components/member-detail/MemberLegalConsentsSection'
+import { getMemberLegalCompliance } from '@/lib/legalConsentEnforcement'
 import { canManageNotifications as canManageMemberNotifications, hasLifetimeGymAccess } from '@/lib/rbac'
 import { buildSubscriptionFreezeTokenSummary, freezePlanSummaryLabel, toInclusiveFreezeEnd, type SubscriptionFreezeHistoryRow } from '@/lib/subscriptionFreeze'
 
@@ -815,6 +816,27 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
 
   if (!profile) return notFound()
 
+  let legalCompliance = {
+    complete: false,
+    requiredCount: 0,
+    acceptedCount: 0,
+    missingDocuments: [] as Array<{ id: string; document_key: string; title: string; version_label: string; published_url: string }>,
+  }
+  let legalComplianceCheckFailed = false
+
+  try {
+    legalCompliance = await getMemberLegalCompliance(adminDb, profile.user_id)
+  } catch {
+    legalComplianceCheckFailed = true
+  }
+
+  const legalSubscriptionBlocked = legalComplianceCheckFailed || !legalCompliance.complete
+  const legalSubscriptionBlockedReason = legalComplianceCheckFailed
+    ? 'Legal consent status is temporarily unavailable. Verify Legal & consents before creating or renewing a subscription.'
+    : !legalCompliance.complete
+      ? 'Legal consent is incomplete. Complete Legal & consents before creating or renewing a subscription.'
+      : undefined
+
   const { data: familyLink } = await adminDb
     .from('family_members')
     .select('family_id')
@@ -959,9 +981,11 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
     return true
   })
 
-  const subscribeDisabledReason = hasActiveSubscription
-    ? 'This member already has an active subscription. Please expire or update it first.'
-    : undefined
+  const subscribeDisabledReason = legalSubscriptionBlocked
+    ? legalSubscriptionBlockedReason
+    : hasActiveSubscription
+      ? 'This member already has an active subscription. Please expire or update it first.'
+      : undefined
 
   const activeTimeEnds = subs
     .filter((s) => {
@@ -1317,6 +1341,23 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
                   />
                 ) : null}
 
+                {showSubscriptionActions && legalSubscriptionBlocked ? (
+                  <div className="w-full rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                    <div className="font-semibold">Legal consent required before membership sale</div>
+                    <div className="mt-1">
+                      {legalSubscriptionBlockedReason ?? 'Current legal documents must be accepted first.'}
+                    </div>
+                    {!legalComplianceCheckFailed && legalCompliance.missingDocuments.length > 0 ? (
+                      <div className="mt-1 text-xs">
+                        Missing: {legalCompliance.missingDocuments.map((doc) => `${doc.title} v${doc.version_label}`).join(' · ')}
+                      </div>
+                    ) : null}
+                    <a href="#legal-consents" className="mt-2 inline-flex font-semibold underline underline-offset-2">
+                      Resolve legal consent
+                    </a>
+                  </div>
+                ) : null}
+
                 {showSubscriptionActions ? (
                   <>
                     <SubscribeDialog
@@ -1329,7 +1370,7 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
                       buttonLabel="New subscription"
                       defaultPlan="1m"
                       defaultSessions={10}
-                      disabled={hasActiveSubscription}
+                      disabled={hasActiveSubscription || legalSubscriptionBlocked}
                       disabledReason={subscribeDisabledReason}
                     />
 
@@ -1347,6 +1388,8 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
                         defaultSessions={10}
                         mode="renew"
                         lockStartDate
+                        disabled={legalSubscriptionBlocked}
+                        disabledReason={legalSubscriptionBlockedReason}
                       />
                     ) : null}
                   </>
