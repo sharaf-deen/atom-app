@@ -135,7 +135,13 @@ export async function recordMemberLegalAcceptances({
   admin: any
   memberUserId: string
   actorUserId: string
-  source: 'member_registration' | 'visitor_conversion' | 'prospect_conversion'
+  source:
+    | 'member_registration'
+    | 'visitor_conversion'
+    | 'prospect_conversion'
+    | 'family_intake'
+    | 'profile_reaccept'
+    | 'manual_backfill'
   input: RegistrationLegalAcceptanceInput
   userAgent?: string | null
   ipAddress?: string | null
