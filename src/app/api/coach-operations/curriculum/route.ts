@@ -21,6 +21,7 @@ type Body = {
   technicalLevel?: string | null
   school?: string | null
   trainingFormat?: string | null
+  audiences?: unknown
   opponentReaction?: string | null
   coachingResponse?: string | null
   sortOrder?: number | string | null
@@ -67,6 +68,38 @@ function normalizeSchool(value: unknown) {
 }
 
 type TrainingFormat = 'gi' | 'nogi' | 'both'
+type Audience = 'baby_3_5' | 'kids_beginner' | 'adult_beginner'
+const AUDIENCES: Audience[] = ['baby_3_5', 'kids_beginner', 'adult_beginner']
+
+function normalizeAudiences(value: unknown): Audience[] {
+  if (!Array.isArray(value)) return []
+  return Array.from(new Set(value.map((item) => String(item)).filter((item): item is Audience => AUDIENCES.includes(item as Audience))))
+}
+
+async function isBodyFormsBlock(supabase: any, blockId: string) {
+  const { data: block, error: blockError } = await supabase
+    .from('coach_curriculum_blocks')
+    .select('type_id')
+    .eq('id', blockId)
+    .maybeSingle()
+  if (blockError || !block?.type_id) return false
+  const { data: typeRow } = await supabase
+    .from('coach_curriculum_types')
+    .select('slug')
+    .eq('id', block.type_id)
+    .maybeSingle()
+  return String(typeRow?.slug || '').toLowerCase() === 'body-forms'
+}
+
+async function isBodyFormsTechnique(supabase: any, techniqueId: string) {
+  const { data: technique, error } = await supabase
+    .from('coach_curriculum_techniques')
+    .select('block_id')
+    .eq('id', techniqueId)
+    .maybeSingle()
+  if (error || !technique?.block_id) return false
+  return isBodyFormsBlock(supabase, technique.block_id)
+}
 
 function normalizeTrainingFormat(value: unknown): TrainingFormat | null {
   return value === 'gi' || value === 'nogi' || value === 'both' ? value : null
@@ -224,13 +257,17 @@ export async function POST(request: Request) {
         if (entity === 'technique') {
           const technicalLevel = normalizeTechnicalLevel(body.technicalLevel)
           if (!technicalLevel) return json({ ok: false, error: 'INVALID_TECHNICAL_LEVEL' }, 400)
+          const bodyForms = await isBodyFormsBlock(supabase, parentId)
           const school = normalizeSchool(body.school)
-          if (!school) return json({ ok: false, error: 'INVALID_SCHOOL' }, 400)
+          if (!school && !bodyForms) return json({ ok: false, error: 'INVALID_SCHOOL' }, 400)
           const trainingFormat = normalizeTrainingFormat(body.trainingFormat)
           if (!trainingFormat) return json({ ok: false, error: 'INVALID_TRAINING_FORMAT' }, 400)
+          const audiences = normalizeAudiences(body.audiences)
+          if (bodyForms && audiences.length === 0) return json({ ok: false, error: 'AUDIENCE_REQUIRED' }, 400)
           row.technical_level = technicalLevel
-          row.school = school
+          row.school = bodyForms ? null : school
           row.training_format = trainingFormat
+          row.audiences = audiences
         }
       } else {
         const trainingFormat = normalizeTrainingFormat(body.trainingFormat)
@@ -311,10 +348,13 @@ export async function POST(request: Request) {
     if (entity === 'technique') {
       const technicalLevel = normalizeTechnicalLevel(body.technicalLevel)
       if (!technicalLevel) return json({ ok: false, error: 'INVALID_TECHNICAL_LEVEL' }, 400)
+      const bodyForms = await isBodyFormsTechnique(supabase, id)
       const school = normalizeSchool(body.school)
-      if (!school) return json({ ok: false, error: 'INVALID_SCHOOL' }, 400)
+      if (!school && !bodyForms) return json({ ok: false, error: 'INVALID_SCHOOL' }, 400)
       const trainingFormat = normalizeTrainingFormat(body.trainingFormat)
       if (!trainingFormat) return json({ ok: false, error: 'INVALID_TRAINING_FORMAT' }, 400)
+      const audiences = normalizeAudiences(body.audiences)
+      if (bodyForms && audiences.length === 0) return json({ ok: false, error: 'AUDIENCE_REQUIRED' }, 400)
 
       const { data: existingSituations, error: situationsError } = await supabase
         .from('coach_curriculum_situations').select('training_format').eq('technique_id', id)
@@ -358,8 +398,9 @@ export async function POST(request: Request) {
       }
 
       patch.technical_level = technicalLevel
-      patch.school = school
+      patch.school = bodyForms ? null : school
       patch.training_format = trainingFormat
+      patch.audiences = audiences
     }
   } else {
     const trainingFormat = normalizeTrainingFormat(body.trainingFormat)

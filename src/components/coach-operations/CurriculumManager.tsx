@@ -12,6 +12,22 @@ type TechnicalLevel = 'beginner' | 'intermediate' | 'advanced'
 type School = 'old_school' | 'new_school'
 type TrainingFormat = 'gi' | 'nogi' | 'both'
 type FormatFilter = 'all' | 'gi' | 'nogi'
+type Audience = 'baby_3_5' | 'kids_beginner' | 'adult_beginner'
+type AudienceFilter = 'all' | Audience
+
+const AUDIENCE_OPTIONS: Array<{ value: Audience; label: string }> = [
+  { value: 'baby_3_5', label: 'Baby 3–5' },
+  { value: 'kids_beginner', label: 'Kids Beginners' },
+  { value: 'adult_beginner', label: 'Adult Beginners' },
+]
+
+function audienceLabel(value: Audience) {
+  return AUDIENCE_OPTIONS.find((item) => item.value === value)?.label ?? value
+}
+
+function matchesAudience(values: Audience[] | null | undefined, filter: AudienceFilter) {
+  return filter === 'all' || (values ?? []).includes(filter)
+}
 
 function formatLabel(value: TrainingFormat | null) {
   if (value === 'gi') return 'Gi'
@@ -50,6 +66,7 @@ type CurriculumTechnique = {
   technical_level: TechnicalLevel
   school: School | null
   training_format: TrainingFormat | null
+  audiences: Audience[]
   sort_order: number
   is_active: boolean
 }
@@ -171,6 +188,8 @@ export default function CurriculumManager({
   const [school, setSchool] = React.useState<School | ''>('')
   const [trainingFormat, setTrainingFormat] = React.useState<TrainingFormat | ''>('')
   const [formatFilter, setFormatFilter] = React.useState<FormatFilter>('all')
+  const [audiences, setAudiences] = React.useState<Audience[]>([])
+  const [audienceFilter, setAudienceFilter] = React.useState<AudienceFilter>('all')
   const [opponentReaction, setOpponentReaction] = React.useState('')
   const [coachingResponse, setCoachingResponse] = React.useState('')
   const [sortOrder, setSortOrder] = React.useState('100')
@@ -195,9 +214,14 @@ export default function CurriculumManager({
     setDescription('')
     setTechnicalLevel('beginner')
     setSchool('')
+    setAudiences([])
     if (entity === 'situation') {
       const parentFormat = techniques.find((item) => item.id === parentId)?.training_format
       setTrainingFormat(parentFormat === 'gi' || parentFormat === 'nogi' ? parentFormat : '')
+    } else if (entity === 'technique') {
+      const parentBlock = blocks.find((item) => item.id === parentId)
+      const parentType = types.find((item) => item.id === parentBlock?.type_id)
+      setTrainingFormat(parentType?.slug === 'body-forms' ? 'both' : '')
     } else {
       setTrainingFormat('')
     }
@@ -213,6 +237,7 @@ export default function CurriculumManager({
     setDescription(itemDescription(entity, item))
     setTechnicalLevel(entity === 'technique' ? techniqueLevel(item) : 'beginner')
     setSchool(entity === 'technique' ? techniqueSchool(item) : '')
+    setAudiences(entity === 'technique' && 'audiences' in item ? ((item.audiences ?? []) as Audience[]) : [])
     setTrainingFormat('training_format' in item ? item.training_format ?? '' : '')
     setOpponentReaction(situationReaction(item))
     setCoachingResponse(situationResponse(item))
@@ -222,6 +247,15 @@ export default function CurriculumManager({
   function closeForm() {
     if (pending) return
     setFormTarget(null)
+  }
+
+  function isBodyFormsTechniqueForm() {
+    if (!formTarget || formTarget.entity !== 'technique') return false
+    const blockId = formTarget.mode === 'create'
+      ? formTarget.parentId
+      : (formTarget.item as CurriculumTechnique).block_id
+    const block = blocks.find((item) => item.id === blockId)
+    return types.find((item) => item.id === block?.type_id)?.slug === 'body-forms'
   }
 
   async function submitForm(event: React.FormEvent) {
@@ -238,8 +272,13 @@ export default function CurriculumManager({
       setError('Describe the opponent reaction for this situation.')
       return
     }
-    if (formTarget.entity === 'technique' && !school) {
+    const bodyFormsTechnique = isBodyFormsTechniqueForm()
+    if (formTarget.entity === 'technique' && !school && !bodyFormsTechnique) {
       setError('Choose Old School or New School for this technique.')
+      return
+    }
+    if (formTarget.entity === 'technique' && bodyFormsTechnique && audiences.length === 0) {
+      setError('Choose at least one audience for this Body Forms technique.')
       return
     }
     if ((formTarget.entity === 'technique' || formTarget.entity === 'situation') && !trainingFormat) {
@@ -261,6 +300,7 @@ export default function CurriculumManager({
           description,
           technicalLevel: formTarget.entity === 'technique' ? technicalLevel : undefined,
           school: formTarget.entity === 'technique' ? school : undefined,
+          audiences: formTarget.entity === 'technique' ? audiences : undefined,
           trainingFormat: formTarget.entity === 'technique' || formTarget.entity === 'situation' ? trainingFormat : undefined,
           opponentReaction,
           coachingResponse,
@@ -273,6 +313,7 @@ export default function CurriculumManager({
         if (data.error === 'OPPONENT_REACTION_REQUIRED') throw new Error('Opponent reaction is required.')
         if (data.error === 'INVALID_TECHNICAL_LEVEL') throw new Error('Choose Beginner, Intermediate or Advanced.')
         if (data.error === 'INVALID_SCHOOL') throw new Error('Choose Old School or New School.')
+        if (data.error === 'AUDIENCE_REQUIRED') throw new Error('Choose at least one audience for this Body Forms technique.')
         if (data.error === 'INVALID_TRAINING_FORMAT') throw new Error('Choose Gi, NoGi or both.')
         if (data.error === 'SITUATION_FORMAT_MISMATCH') throw new Error('This situation format is not available for the parent technique.')
         if (data.error === 'TECHNIQUE_FORMAT_IN_USE') throw new Error('Review the existing situations before changing this technique format.')
@@ -357,8 +398,15 @@ export default function CurriculumManager({
   situations.filter((item) => item.is_active).forEach((item) => {
     situationsByTechnique.set(item.technique_id, (situationsByTechnique.get(item.technique_id) ?? 0) + 1)
   })
+  const bodyFormsTypeId = types.find((item) => item.slug === 'body-forms')?.id
+  const bodyFormsBlockIds = new Set(
+    blocks.filter((item) => item.type_id === bodyFormsTypeId).map((item) => item.id),
+  )
   const techniquesNeedingSituations = techniques.filter(
-    (item) => item.is_active && (situationsByTechnique.get(item.id) ?? 0) < 2,
+    (item) =>
+      item.is_active &&
+      !bodyFormsBlockIds.has(item.block_id) &&
+      (situationsByTechnique.get(item.id) ?? 0) < 2,
   ).length
 
   return (
@@ -393,19 +441,43 @@ export default function CurriculumManager({
         ) : null}
       </div>
 
-      <div className="flex flex-wrap items-center gap-2" aria-label="Filter curriculum by training format">
-        <span className="mr-1 text-sm font-medium">Training format:</span>
-        {(['all', 'gi', 'nogi'] as const).map((value) => (
+      <div className="space-y-2">
+        <div className="flex flex-wrap items-center gap-2" aria-label="Filter curriculum by training format">
+          <span className="mr-1 text-sm font-medium">Training format:</span>
+          {(['all', 'gi', 'nogi'] as const).map((value) => (
+            <button
+              key={value}
+              type="button"
+              onClick={() => setFormatFilter(value)}
+              aria-pressed={formatFilter === value}
+              className={`rounded-full border px-3 py-1.5 text-sm font-semibold ${formatFilter === value ? 'border-black bg-black text-white' : 'border-[hsl(var(--border))] bg-white text-black'}`}
+            >
+              {value === 'all' ? 'All' : value === 'gi' ? 'Gi' : 'NoGi'}
+            </button>
+          ))}
+        </div>
+        <div className="flex flex-wrap items-center gap-2" aria-label="Filter curriculum by audience">
+          <span className="mr-1 text-sm font-medium">Audience:</span>
           <button
-            key={value}
             type="button"
-            onClick={() => setFormatFilter(value)}
-            aria-pressed={formatFilter === value}
-            className={`rounded-full border px-3 py-1.5 text-sm font-semibold ${formatFilter === value ? 'border-black bg-black text-white' : 'border-[hsl(var(--border))] bg-white text-black'}`}
+            onClick={() => setAudienceFilter('all')}
+            aria-pressed={audienceFilter === 'all'}
+            className={`rounded-full border px-3 py-1.5 text-sm font-semibold ${audienceFilter === 'all' ? 'border-black bg-black text-white' : 'border-[hsl(var(--border))] bg-white text-black'}`}
           >
-            {value === 'all' ? 'All' : value === 'gi' ? 'Gi' : 'NoGi'}
+            All
           </button>
-        ))}
+          {AUDIENCE_OPTIONS.map((option) => (
+            <button
+              key={option.value}
+              type="button"
+              onClick={() => setAudienceFilter(option.value)}
+              aria-pressed={audienceFilter === option.value}
+              className={`rounded-full border px-3 py-1.5 text-sm font-semibold ${audienceFilter === option.value ? 'border-black bg-black text-white' : 'border-[hsl(var(--border))] bg-white text-black'}`}
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
       </div>
 
       {message ? (
@@ -484,10 +556,10 @@ export default function CurriculumManager({
                 <select
                   value={school}
                   onChange={(event) => setSchool(event.target.value as School | '')}
-                  required
+                  required={!isBodyFormsTechniqueForm()}
                   className="min-h-[44px] w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3.5 py-2.5 text-sm text-black shadow-soft outline-none focus-visible:ring-2 focus-visible:ring-ring sm:max-w-xs"
                 >
-                  <option value="">Choose a school</option>
+                  <option value="">{isBodyFormsTechniqueForm() ? 'Not applicable' : 'Choose a school'}</option>
                   <option value="old_school">Old School</option>
                   <option value="new_school">New School</option>
                 </select>
@@ -495,6 +567,35 @@ export default function CurriculumManager({
                   Existing school labels stay unclassified until the Head Coach or Super Admin reviews them.
                 </span>
               </label>
+            </div>
+          ) : null}
+
+          {formTarget.entity === 'technique' ? (
+            <div className="mt-4">
+              <div className="text-sm font-semibold text-black">Audience</div>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {AUDIENCE_OPTIONS.map((option) => {
+                  const checked = audiences.includes(option.value)
+                  return (
+                    <label key={option.value} className={`inline-flex cursor-pointer items-center gap-2 rounded-full border px-3 py-2 text-sm font-medium ${checked ? 'border-black bg-black text-white' : 'border-[hsl(var(--border))] bg-white text-black'}`}>
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={() => setAudiences((current) =>
+                          current.includes(option.value)
+                            ? current.filter((item) => item !== option.value)
+                            : [...current, option.value]
+                        )}
+                        className="sr-only"
+                      />
+                      {option.label}
+                    </label>
+                  )
+                })}
+              </div>
+              <div className="mt-1 text-xs text-[hsl(var(--muted))]">
+                Body Forms requires at least one audience. Other curriculum techniques may remain unclassified.
+              </div>
             </div>
           ) : null}
 
@@ -609,6 +710,8 @@ export default function CurriculumManager({
                         techniques={techniques}
                         situations={situations}
                         formatFilter={formatFilter}
+                        audienceFilter={audienceFilter}
+                        isBodyForms={type.slug === 'body-forms'}
                         openCreate={openCreate}
                         openEdit={openEdit}
                         setToggleTarget={setToggleTarget}
@@ -677,6 +780,8 @@ function BlockTree({
   techniques,
   situations,
   formatFilter,
+  audienceFilter,
+  isBodyForms,
   openCreate,
   openEdit,
   setToggleTarget,
@@ -688,6 +793,8 @@ function BlockTree({
   techniques: CurriculumTechnique[]
   situations: CurriculumSituation[]
   formatFilter: FormatFilter
+  audienceFilter: AudienceFilter
+  isBodyForms: boolean
   openCreate: (entity: Entity, parentId?: string, parentLabel?: string) => void
   openEdit: (entity: Entity, item: AnyItem) => void
   setToggleTarget: (target: ToggleTarget) => void
@@ -695,7 +802,8 @@ function BlockTree({
 }) {
   const blockTechniques = techniques.filter(
     (technique) => technique.block_id === block.id && (canManage || technique.is_active)
-      && matchesFormat(technique.training_format, formatFilter),
+      && matchesFormat(technique.training_format, formatFilter)
+      && matchesAudience(technique.audiences, audienceFilter),
   )
   const techniqueIds = new Set(blockTechniques.map((technique) => technique.id))
   const blockSituationCount = situations.filter(
@@ -758,6 +866,7 @@ function BlockTree({
                 canManage={canManage}
                 situations={situations}
                 formatFilter={formatFilter}
+                isBodyForms={isBodyForms}
                 openCreate={openCreate}
                 openEdit={openEdit}
                 setToggleTarget={setToggleTarget}
@@ -778,6 +887,7 @@ function TechniqueTree({
   canDeletePermanent,
   situations,
   formatFilter,
+  isBodyForms,
   openCreate,
   openEdit,
   setToggleTarget,
@@ -788,6 +898,7 @@ function TechniqueTree({
   canDeletePermanent: boolean
   situations: CurriculumSituation[]
   formatFilter: FormatFilter
+  isBodyForms: boolean
   openCreate: (entity: Entity, parentId?: string, parentLabel?: string) => void
   openEdit: (entity: Entity, item: AnyItem) => void
   setToggleTarget: (target: ToggleTarget) => void
@@ -814,9 +925,16 @@ function TechniqueTree({
               <span className={`inline-flex rounded-full border px-2 py-0.5 text-[11px] font-semibold ${levelBadgeClass(technique.technical_level)}`}>
                 {levelLabel(technique.technical_level)}
               </span>
-              <span className={`inline-flex rounded-full border px-2 py-0.5 text-[11px] font-semibold ${technique.school === 'new_school' ? 'border-indigo-200 bg-indigo-50 text-indigo-800' : 'border-slate-200 bg-slate-50 text-slate-700'}`}>
-                {technique.school === 'new_school' ? 'New School' : technique.school === 'old_school' ? 'Old School' : 'School to classify'}
-              </span>
+              {!isBodyForms ? (
+                <span className={`inline-flex rounded-full border px-2 py-0.5 text-[11px] font-semibold ${technique.school === 'new_school' ? 'border-indigo-200 bg-indigo-50 text-indigo-800' : 'border-slate-200 bg-slate-50 text-slate-700'}`}>
+                  {technique.school === 'new_school' ? 'New School' : technique.school === 'old_school' ? 'Old School' : 'School to classify'}
+                </span>
+              ) : null}
+              {(technique.audiences ?? []).map((audience) => (
+                <span key={audience} className="inline-flex rounded-full border border-violet-200 bg-violet-50 px-2 py-0.5 text-[11px] font-semibold text-violet-800">
+                  {audienceLabel(audience)}
+                </span>
+              ))}
               <span className="inline-flex rounded-full border border-sky-200 bg-sky-50 px-2 py-0.5 text-[11px] font-semibold text-sky-800">
                 {formatLabel(technique.training_format)}
               </span>
@@ -824,8 +942,8 @@ function TechniqueTree({
             </div>
           </div>
         </div>
-        <span className={`shrink-0 text-xs ${canManage && technique.is_active && activeSituationCount < 2 ? 'font-semibold text-amber-800' : 'text-[hsl(var(--muted))]'}`}>
-          {activeSituationCount} active situation{activeSituationCount === 1 ? '' : 's'}
+        <span className={`shrink-0 text-xs ${!isBodyForms && canManage && technique.is_active && activeSituationCount < 2 ? 'font-semibold text-amber-800' : 'text-[hsl(var(--muted))]'}`}>
+          {isBodyForms ? 'Foundational movement' : `${activeSituationCount} active situation${activeSituationCount === 1 ? '' : 's'}`}
         </span>
       </summary>
 
@@ -836,9 +954,11 @@ function TechniqueTree({
 
         {canManage ? (
           <div className="mb-3 flex flex-wrap gap-2">
-            <Button type="button" size="sm" variant="outline" onClick={() => openCreate('situation', technique.id, technique.name)}>
-              <Plus className="h-4 w-4" /> Situation
-            </Button>
+            {!isBodyForms ? (
+              <Button type="button" size="sm" variant="outline" onClick={() => openCreate('situation', technique.id, technique.name)}>
+                <Plus className="h-4 w-4" /> Situation
+              </Button>
+            ) : null}
             <Button type="button" size="sm" variant="ghost" onClick={() => openEdit('technique', technique)}>
               <Pencil className="h-4 w-4" /> Edit
             </Button>
@@ -849,7 +969,11 @@ function TechniqueTree({
           </div>
         ) : null}
 
-        {techniqueSituations.length === 0 ? (
+        {isBodyForms ? (
+          <div className="rounded-2xl border border-sky-100 bg-sky-50 px-3 py-2 text-sm text-sky-900">
+            Foundational body movement — opponent-reaction situations are not required.
+          </div>
+        ) : techniqueSituations.length === 0 ? (
           <EmptyState label="No opponent-reaction situations yet." compact />
         ) : (
           <div className="space-y-2">
