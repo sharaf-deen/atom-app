@@ -14,6 +14,7 @@ type Program = {
   id: string
   title: string
   target_group: string
+  target_audience: 'baby_3_5' | 'kids_beginner' | 'adult_beginner' | null
   start_date: string
   end_date: string
   notes: string | null
@@ -43,9 +44,9 @@ type ProgramItem = {
   sort_order: number
 }
 
-type CurriculumType = { id: string; name: string; sort_order: number; is_active: boolean }
+type CurriculumType = { id: string; name: string; slug: string; sort_order: number; is_active: boolean }
 type CurriculumBlock = { id: string; type_id: string; name: string; sort_order: number; is_active: boolean }
-type CurriculumTechnique = { id: string; block_id: string; name: string; technical_level: 'beginner' | 'intermediate' | 'advanced'; sort_order: number; is_active: boolean }
+type CurriculumTechnique = { id: string; block_id: string; name: string; technical_level: 'beginner' | 'intermediate' | 'advanced'; audiences: Array<'baby_3_5' | 'kids_beginner' | 'adult_beginner'>; sort_order: number; is_active: boolean }
 type CurriculumSituation = {
   id: string
   technique_id: string
@@ -106,7 +107,7 @@ export default async function CoachTrainingProgramsPage() {
 
   let programsQuery = supabase
     .from('coach_training_programs')
-    .select('id,title,target_group,start_date,end_date,notes,technical_level,status,responsible_coach_user_id,responsible_coach_name_snapshot,responsible_coach_role_snapshot,assistant_coach_1_user_id,assistant_coach_1_name_snapshot,assistant_coach_1_role_snapshot,assistant_coach_2_user_id,assistant_coach_2_name_snapshot,assistant_coach_2_role_snapshot,published_at,updated_at')
+    .select('id,title,target_group,target_audience,start_date,end_date,notes,technical_level,status,responsible_coach_user_id,responsible_coach_name_snapshot,responsible_coach_role_snapshot,assistant_coach_1_user_id,assistant_coach_1_name_snapshot,assistant_coach_1_role_snapshot,assistant_coach_2_user_id,assistant_coach_2_name_snapshot,assistant_coach_2_role_snapshot,published_at,updated_at')
     .order('start_date', { ascending: false })
     .order('created_at', { ascending: false })
 
@@ -122,9 +123,9 @@ export default async function CoachTrainingProgramsPage() {
       .from('coach_training_program_items')
       .select('id,program_id,selected_level,type_id,block_id,technique_id,situation_id,sort_order')
       .order('sort_order', { ascending: true }),
-    supabase.from('coach_curriculum_types').select('id,name,sort_order,is_active').order('sort_order', { ascending: true }).order('name', { ascending: true }),
+    supabase.from('coach_curriculum_types').select('id,name,slug,sort_order,is_active').order('sort_order', { ascending: true }).order('name', { ascending: true }),
     supabase.from('coach_curriculum_blocks').select('id,type_id,name,sort_order,is_active').order('sort_order', { ascending: true }).order('name', { ascending: true }),
-    supabase.from('coach_curriculum_techniques').select('id,block_id,name,technical_level,sort_order,is_active').order('sort_order', { ascending: true }).order('name', { ascending: true }),
+    supabase.from('coach_curriculum_techniques').select('id,block_id,name,technical_level,audiences,sort_order,is_active').order('sort_order', { ascending: true }).order('name', { ascending: true }),
     supabase
       .from('coach_curriculum_situations')
       .select('id,technique_id,name,opponent_reaction,coaching_response,sort_order,is_active')
