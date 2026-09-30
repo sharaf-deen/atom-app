@@ -15,6 +15,7 @@ import MembersResults from './_components/MembersResults'
 
 type Status = 'all' | 'active' | 'frozen' | 'inactive'
 type InactiveReason = 'all' | 'expired' | 'cancelled' | 'no_membership' | 'depleted_legacy' | 'other_inactive'
+type LegalStatus = 'all' | 'complete' | 'action_required'
 type SearchParams = { [key: string]: string | string[] | undefined }
 
 function clampInt(n: number, min: number, max: number) {
@@ -24,14 +25,24 @@ function clampInt(n: number, min: number, max: number) {
 
 function StatsCardsFallback() {
   return (
-    <div className="grid gap-3 text-sm sm:grid-cols-4">
-      {Array.from({ length: 4 }).map((_, i) => (
-        <div key={i} className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] px-4 py-3 shadow-soft">
-          <div className="h-3 w-20 animate-pulse rounded bg-[hsl(var(--bg))]" />
-          <div className="mt-3 h-8 w-12 animate-pulse rounded bg-[hsl(var(--bg))]" />
-          <div className="mt-3 h-3 w-28 animate-pulse rounded bg-[hsl(var(--bg))]" />
-        </div>
-      ))}
+    <div className="space-y-3">
+      <div className="grid gap-3 text-sm sm:grid-cols-4">
+        {Array.from({ length: 4 }).map((_, i) => (
+          <div key={i} className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] px-4 py-3 shadow-soft">
+            <div className="h-3 w-20 animate-pulse rounded bg-[hsl(var(--bg))]" />
+            <div className="mt-3 h-8 w-12 animate-pulse rounded bg-[hsl(var(--bg))]" />
+            <div className="mt-3 h-3 w-28 animate-pulse rounded bg-[hsl(var(--bg))]" />
+          </div>
+        ))}
+      </div>
+      <div className="grid gap-3 text-sm sm:grid-cols-2">
+        {Array.from({ length: 2 }).map((_, i) => (
+          <div key={i} className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] px-4 py-3 shadow-soft">
+            <div className="h-3 w-28 animate-pulse rounded bg-[hsl(var(--bg))]" />
+            <div className="mt-3 h-8 w-12 animate-pulse rounded bg-[hsl(var(--bg))]" />
+          </div>
+        ))}
+      </div>
     </div>
   )
 }
@@ -71,6 +82,10 @@ export default async function MembersPage({ searchParams }: { searchParams?: Sea
       ? (inactiveReasonRaw as InactiveReason)
       : 'all'
   const program = typeof searchParams?.program === 'string' ? searchParams.program.trim() : ''
+  const legalRaw = typeof searchParams?.legal === 'string' ? searchParams.legal.toLowerCase() : 'all'
+  const legalStatus: LegalStatus = (['all', 'complete', 'action_required'] as const).includes(legalRaw as any)
+    ? (legalRaw as LegalStatus)
+    : 'all'
   const page = clampInt(Number(typeof searchParams?.page === 'string' ? searchParams.page : 1), 1, 1_000_000)
   const pageSize = clampInt(Number(typeof searchParams?.pageSize === 'string' ? searchParams.pageSize : 20), 5, 200)
 
@@ -79,6 +94,7 @@ export default async function MembersPage({ searchParams }: { searchParams?: Sea
   if (!q && status !== 'all') current.set('status', status)
   if (!q && status === 'inactive' && inactiveReason !== 'all') current.set('reason', inactiveReason)
   if (program) current.set('program', program)
+  if (legalStatus !== 'all') current.set('legal', legalStatus)
   if (page > 1) current.set('page', String(page))
   if (pageSize !== 20) current.set('pageSize', String(pageSize))
   const currentPath = `/members${current.toString() ? `?${current.toString()}` : ''}`
@@ -108,13 +124,22 @@ export default async function MembersPage({ searchParams }: { searchParams?: Sea
           initialStatus={q ? 'all' : status}
           initialInactiveReason={q ? 'all' : inactiveReason}
           initialProgram={program}
+          initialLegalStatus={legalStatus}
           initialPageSize={pageSize}
         />
         <Suspense fallback={<StatsCardsFallback />}>
           <MembersStatsCards pageSize={pageSize} />
         </Suspense>
         <Suspense fallback={<ResultsFallback />}>
-          <MembersResults q={q} status={status} inactiveReason={inactiveReason} program={program} page={page} pageSize={pageSize} />
+          <MembersResults
+            q={q}
+            status={status}
+            inactiveReason={inactiveReason}
+            program={program}
+            legalStatus={legalStatus}
+            page={page}
+            pageSize={pageSize}
+          />
         </Suspense>
       </Section>
     </main>
