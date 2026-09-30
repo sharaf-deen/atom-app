@@ -325,10 +325,8 @@ export async function POST(request: Request) {
         details: `${technique.name} is not available for this Program audience.`,
       }, 409)
     }
-    const explicit = explicitTechniquesByBlock.get(technique.block_id)
-    if (explicit?.size) {
-      if (!explicit.has(technique.id)) return json({ ok: false, error: 'TECHNIQUE_NOT_IN_PROGRAM' }, 400)
-    } else if (technique.is_active !== true) {
+    const recommended = explicitTechniquesByBlock.get(technique.block_id)
+    if (technique.is_active !== true && !recommended?.has(technique.id)) {
       return json({ ok: false, error: 'ARCHIVED_TECHNIQUE_NOT_ASSIGNED' }, 400)
     }
   }
@@ -338,10 +336,8 @@ export async function POST(request: Request) {
     if (!technique || !techniqueIds.includes(technique.id)) {
       return json({ ok: false, error: 'SITUATION_REQUIRES_SELECTED_TECHNIQUE' }, 400)
     }
-    const explicit = explicitSituationsByTechnique.get(technique.id)
-    if (explicit?.size) {
-      if (!explicit.has(situation.id)) return json({ ok: false, error: 'SITUATION_NOT_IN_PROGRAM' }, 400)
-    } else if (situation.is_active !== true) {
+    const recommended = explicitSituationsByTechnique.get(technique.id)
+    if (situation.is_active !== true && !recommended?.has(situation.id)) {
       return json({ ok: false, error: 'ARCHIVED_SITUATION_NOT_ASSIGNED' }, 400)
     }
   }

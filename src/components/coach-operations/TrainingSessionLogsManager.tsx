@@ -200,12 +200,24 @@ export default function TrainingSessionLogsManager({
     return blocks.filter((block) => allowed.has(block.id))
   }
 
-  function allowedTechniques(id: string, blockId: string) {
-    const explicitIds = new Set(
+  function recommendedTechniqueIds(id: string, blockId: string) {
+    return new Set(
       programItems
         .filter((row) => row.program_id === id && row.selected_level === 'technique' && row.block_id === blockId && row.technique_id)
         .map((row) => row.technique_id!),
     )
+  }
+
+  function recommendedSituationIds(id: string, techniqueId: string) {
+    return new Set(
+      programItems
+        .filter((row) => row.program_id === id && row.selected_level === 'situation' && row.technique_id === techniqueId && row.situation_id)
+        .map((row) => row.situation_id!),
+    )
+  }
+
+  function allowedTechniques(id: string, blockId: string) {
+    const recommendedIds = recommendedTechniqueIds(id, blockId)
     const program = programs.find((row) => row.id === id)
     if (!program) return []
     const levelAllows = (technique: CurriculumTechnique) =>
@@ -214,22 +226,23 @@ export default function TrainingSessionLogsManager({
       !program.target_audience
       || !(technique.audiences ?? []).length
       || technique.audiences.includes(program.target_audience)
-    if (explicitIds.size) {
-      return techniques.filter((technique) => explicitIds.has(technique.id) && levelAllows(technique) && audienceAllows(technique))
-    }
+
     return techniques.filter(
-      (technique) => technique.block_id === blockId && technique.is_active && levelAllows(technique) && audienceAllows(technique),
+      (technique) =>
+        technique.block_id === blockId
+        && (technique.is_active || recommendedIds.has(technique.id))
+        && levelAllows(technique)
+        && audienceAllows(technique),
     )
   }
 
   function allowedSituations(id: string, techniqueId: string) {
-    const explicitIds = new Set(
-      programItems
-        .filter((row) => row.program_id === id && row.selected_level === 'situation' && row.technique_id === techniqueId && row.situation_id)
-        .map((row) => row.situation_id!),
+    const recommendedIds = recommendedSituationIds(id, techniqueId)
+    return situations.filter(
+      (situation) =>
+        situation.technique_id === techniqueId
+        && (situation.is_active || recommendedIds.has(situation.id)),
     )
-    if (explicitIds.size) return situations.filter((situation) => explicitIds.has(situation.id))
-    return situations.filter((situation) => situation.technique_id === techniqueId && situation.is_active)
   }
 
   function resetFeedback() {
@@ -630,7 +643,9 @@ export default function TrainingSessionLogsManager({
             <div className="mt-4">
               <div className="mb-2">
                 <h4 className="text-sm font-semibold text-black">What was actually worked?</h4>
-                <p className="text-xs text-[hsl(var(--muted))]">Select the block first. Techniques above the Program level are not available; situations inherit the level of their parent technique.</p>
+                <p className="text-xs text-[hsl(var(--muted))]">
+                  Select the block first. Head Coach choices are recommendations only. You may choose any active technique compatible with the Program level and audience inside the selected Program blocks.
+                </p>
               </div>
               <div className="space-y-3">
                 {Array.from(
@@ -657,6 +672,7 @@ export default function TrainingSessionLogsManager({
                               <div className="mt-3 space-y-2 border-l border-[hsl(var(--border))] pl-4">
                                 {childTechniques.map((technique) => {
                                   const techniqueSelected = selectedTechniques.has(technique.id)
+                                  const techniqueRecommended = recommendedTechniqueIds(currentProgram.id, block.id).has(technique.id)
                                   const childSituations = allowedSituations(currentProgram.id, technique.id)
                                   return (
                                     <div key={technique.id}>
@@ -667,20 +683,35 @@ export default function TrainingSessionLogsManager({
                                           <span className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold ${technicalLevelClass(technique.technical_level)}`}>
                                             {technicalLevelLabel(technique.technical_level)}
                                           </span>
+                                          {techniqueRecommended ? (
+                                            <span className="rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-[10px] font-semibold text-blue-800">
+                                              Recommended
+                                            </span>
+                                          ) : null}
                                         </span>
                                       </label>
                                       {techniqueSelected && childSituations.length ? (
                                         <div className="mt-2 space-y-2 pl-7">
-                                          {childSituations.map((situation) => (
+                                          {childSituations.map((situation) => {
+                                            const situationRecommended = recommendedSituationIds(currentProgram.id, technique.id).has(situation.id)
+                                            return (
                                             <label key={situation.id} className="flex cursor-pointer items-start gap-3 rounded-xl bg-[hsl(var(--surface-2))] px-3 py-2 text-xs">
                                               <input type="checkbox" className="mt-0.5 h-4 w-4" checked={selectedSituations.has(situation.id)} onChange={(event) => toggleSituation(situation.id, event.target.checked)} />
                                               <span>
-                                                <span className="font-semibold text-black">{situation.name}{!situation.is_active ? ' (Archived)' : ''}</span>
+                                                <span className="flex flex-wrap items-center gap-2 font-semibold text-black">
+                                                  <span>{situation.name}{!situation.is_active ? ' (Archived)' : ''}</span>
+                                                  {situationRecommended ? (
+                                                    <span className="rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-[10px] font-semibold text-blue-800">
+                                                      Recommended
+                                                    </span>
+                                                  ) : null}
+                                                </span>
                                                 <span className="mt-0.5 block text-[hsl(var(--muted))]">Opponent reaction: {situation.opponent_reaction}</span>
                                                 {situation.coaching_response ? <span className="mt-0.5 block text-[hsl(var(--muted))]">Coach response: {situation.coaching_response}</span> : null}
                                               </span>
                                             </label>
-                                          ))}
+                                            )
+                                          })}
                                         </div>
                                       ) : null}
                                     </div>
