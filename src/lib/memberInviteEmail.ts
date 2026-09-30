@@ -18,6 +18,12 @@ export type MemberInviteEmailResult = {
   email_id?: string | null
 }
 
+const LEGAL_DOCUMENTS = [
+  { label: 'Privacy Policy', url: 'https://atomjiujitsuhq.com/privacy-policy/' },
+  { label: 'Terms of Use', url: 'https://atomjiujitsuhq.com/terms-of-use/' },
+  { label: 'Liability Waiver & Assumption of Risk', url: 'https://atomjiujitsuhq.com/liability-waiver-assumption-of-risk' },
+] as const
+
 function escapeHtml(input: string) {
   return input
     .replace(/&/g, '&amp;')
@@ -63,6 +69,35 @@ function modeTextLead(mode: 'invite' | 'resend') {
     : 'A new activation link has been generated for your account. To finish activating your account and access the app, please choose your password.'
 }
 
+function legalDocumentsText() {
+  return [
+    'Legal documents:',
+    ...LEGAL_DOCUMENTS.flatMap((document) => [document.label, document.url]),
+  ]
+}
+
+function legalDocumentsHtml() {
+  const items = LEGAL_DOCUMENTS.map(
+    (document) => `<tr><td style="padding:6px 0;"><a href="${escapeHtml(document.url)}" target="_blank" style="font-size:13px;font-weight:600;color:#18181b;text-decoration:underline;text-underline-offset:2px;">${escapeHtml(document.label)}</a></td></tr>`,
+  ).join('')
+
+  return `
+            <!-- LEGAL DOCUMENTS -->
+            <tr>
+              <td style="padding:8px 24px 12px 24px;text-align:left;">
+                <table width="100%" cellpadding="0" cellspacing="0" role="presentation" style="border:1px solid #e4e4e7;border-radius:16px;background-color:#fafafa;">
+                  <tr>
+                    <td style="padding:16px 16px 8px 16px;">
+                      <p style="margin:0;font-size:13px;font-weight:700;color:#18181b;">Legal documents</p>
+                      <p style="margin:4px 0 0 0;font-size:12px;color:#71717a;line-height:1.5;">You can review the current legal documents accepted during registration:</p>
+                    </td>
+                  </tr>
+                  <tr><td style="padding:0 16px 16px 16px;"><table width="100%" cellpadding="0" cellspacing="0" role="presentation">${items}</table></td></tr>
+                </table>
+              </td>
+            </tr>`
+}
+
 function makeText(args: MemberInviteEmailArgs) {
   const name = greetingLabel(args)
   const memberLine = args.memberId ? `Member ID: ${args.memberId}\n` : ''
@@ -79,6 +114,7 @@ function makeText(args: MemberInviteEmailArgs) {
     'Your ATOM access QR code is included in this email and attached as a PNG file.',
     '',
     'If the QR image does not display in your email app, use the attached PNG file.',
+    ...(args.mode === 'invite' ? ['', ...legalDocumentsText()] : []),
     '',
     'For security reasons, this link will expire after a short time. If it expires, please contact the academy so we can send you a new one.',
     '',
@@ -204,6 +240,8 @@ function makeHtml(args: MemberInviteEmailArgs) {
                 </table>
               </td>
             </tr>
+
+            ${args.mode === 'invite' ? legalDocumentsHtml() : ''}
 
             <!-- TEXTE DE SÉCURITÉ -->
             <tr>
