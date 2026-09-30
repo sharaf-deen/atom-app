@@ -10,6 +10,7 @@ import { createSupabaseServerActionClient } from '@/lib/supabaseServer'
 import { createClient } from '@supabase/supabase-js'
 import { extractActionLink, sendMemberInviteEmailWithQr } from '@/lib/memberInviteEmail'
 import { loadActiveMemberProgramOptions } from '@/lib/memberPrograms'
+import { recordMemberLegalAcceptances, validateRegistrationLegalAcceptance, type RegistrationLegalAcceptanceInput } from '@/lib/legalConsent'
 
 type Body =
   | {
@@ -24,6 +25,8 @@ type Body =
       dob?: string
       visitor_trial_id?: string
       program_key?: string
+      legal_acceptance?: RegistrationLegalAcceptanceInput
+      legal_acceptance_source?: 'member_registration' | 'prospect_conversion'
     }
   | Record<string, any>
 
@@ -189,6 +192,18 @@ export async function POST(req: Request) {
         )
       }
       selectedProgram = { key: match.key, name: match.name }
+    }
+
+    const legalAcceptanceInput = ((body as any).legal_acceptance ?? null) as RegistrationLegalAcceptanceInput | null
+    const legalValidation = await validateRegistrationLegalAcceptance(admin, date_of_birth, legalAcceptanceInput)
+
+    if (!legalValidation.ok) {
+      return noStore(
+        NextResponse.json(
+          { ok: false, error: legalValidation.error, details: 'details' in legalValidation ? legalValidation.details : undefined },
+          { status: legalValidation.status },
+        ),
+      )
     }
 
     // 4) Duplicate email safety: never overwrite an existing member from the create flow
@@ -461,6 +476,40 @@ export async function POST(req: Request) {
       }
     }
 
+    if (legalValidation.normalized) {
+      const forwardedFor = req.headers.get('x-forwarded-for')
+      const ipAddress = forwardedFor?.split(',')[0]?.trim() || req.headers.get('x-real-ip') || null
+      const source = visitor_trial_id
+        ? 'visitor_conversion'
+        : (body as any).legal_acceptance_source === 'prospect_conversion'
+          ? 'prospect_conversion'
+          : 'member_registration'
+
+      const consentResult = await recordMemberLegalAcceptances({
+        admin,
+        memberUserId: userId!,
+        actorUserId: actor.id,
+        source,
+        input: legalValidation.normalized,
+        userAgent: req.headers.get('user-agent'),
+        ipAddress,
+      })
+
+      if (consentResult.error) {
+        return noStore(
+          NextResponse.json(
+            {
+              ok: false,
+              error: `LEGAL_CONSENT_RECORDING_FAILED: ${consentResult.error.message}`,
+              user_id: userId,
+              details: 'The member profile was created, but legal acceptance could not be recorded. Open the member profile before continuing.',
+            },
+            { status: 500 },
+          ),
+        )
+      }
+    }
+
     if (outcome === 'invited_new_user' && inviteMode === 'custom_qr' && customActionLink) {
       const qrValue = savedProfile?.qr_code || `atom:${userId}`
       const customEmail = await sendMemberInviteEmailWithQr({
@@ -528,6 +577,7 @@ export async function POST(req: Request) {
         user: { id: userId, email, first_name, last_name, phone, date_of_birth },
         visitor_trial_id,
         program: selectedProgram,
+        legal_acceptance_recorded: !!legalValidation.normalized,
         message:
           outcome === 'invited_new_user'
             ? inviteMode === 'custom_qr'
