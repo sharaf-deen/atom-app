@@ -12,11 +12,30 @@ import Textarea from '@/components/ui/Textarea'
 
 type ProgramStatus = 'draft' | 'published' | 'archived'
 type TechnicalLevel = 'beginner' | 'intermediate' | 'advanced'
+type Audience = 'baby_3_5' | 'kids_beginner' | 'adult_beginner'
+
+const AUDIENCE_OPTIONS: Array<{ value: Audience; label: string }> = [
+  { value: 'baby_3_5', label: 'Baby 3–5' },
+  { value: 'kids_beginner', label: 'Kids Beginners' },
+  { value: 'adult_beginner', label: 'Adult Beginners' },
+]
+
+function audienceLabel(value: Audience | null | undefined) {
+  if (!value) return 'General'
+  return AUDIENCE_OPTIONS.find((option) => option.value === value)?.label ?? value
+}
+
+function techniqueMatchesAudience(technique: { audiences?: Audience[] | null }, audience: Audience | '') {
+  if (!audience) return true
+  const values = technique.audiences ?? []
+  return values.length === 0 || values.includes(audience)
+}
 
 type Program = {
   id: string
   title: string
   target_group: string
+  target_audience: Audience | null
   start_date: string
   end_date: string
   notes: string | null
@@ -49,6 +68,7 @@ type ProgramItem = {
 type CurriculumType = {
   id: string
   name: string
+  slug: string
   sort_order: number
   is_active: boolean
 }
@@ -66,6 +86,7 @@ type CurriculumTechnique = {
   block_id: string
   name: string
   technical_level: TechnicalLevel
+  audiences: Audience[]
   sort_order: number
   is_active: boolean
 }
@@ -250,6 +271,7 @@ export default function TrainingProgramsManager({
   const [formOpen, setFormOpen] = React.useState(false)
   const [title, setTitle] = React.useState('')
   const [targetGroup, setTargetGroup] = React.useState('')
+  const [targetAudience, setTargetAudience] = React.useState<Audience | ''>('')
   const [technicalLevel, setTechnicalLevel] = React.useState<TechnicalLevel>('beginner')
   const [startDate, setStartDate] = React.useState(todayIso())
   const [endDate, setEndDate] = React.useState(plusDays(todayIso(), 6))
@@ -344,6 +366,7 @@ export default function TrainingProgramsManager({
     setEditingId(null)
     setTitle('')
     setTargetGroup('')
+    setTargetAudience('')
     setTechnicalLevel('beginner')
     setStartDate(todayIso())
     setEndDate(plusDays(todayIso(), 6))
@@ -363,6 +386,7 @@ export default function TrainingProgramsManager({
     setEditingId(program.id)
     setTitle(program.title)
     setTargetGroup(program.target_group)
+    setTargetAudience(program.target_audience ?? '')
     setTechnicalLevel(program.technical_level)
     setStartDate(program.start_date)
     setEndDate(program.end_date)
@@ -375,7 +399,11 @@ export default function TrainingProgramsManager({
     const programItems = items.filter((item) => item.program_id === program.id)
     const allowedTechniqueIds = new Set(
       techniques
-        .filter((technique) => technicalLevelRank(technique.technical_level) <= technicalLevelRank(program.technical_level))
+        .filter(
+          (technique) =>
+            technicalLevelRank(technique.technical_level) <= technicalLevelRank(program.technical_level)
+            && techniqueMatchesAudience(technique, program.target_audience ?? ''),
+        )
         .map((technique) => technique.id),
     )
     setSelectedBlocks(new Set(programItems.filter((item) => item.selected_level === 'block').map((item) => item.block_id)))
@@ -429,6 +457,22 @@ export default function TrainingProgramsManager({
       return next
     })
     if (checked && !targetGroup.trim() && groupTemplates[0]?.name) setTargetGroup(groupTemplates[0].name)
+  }
+
+  function changeTargetAudience(nextAudience: Audience | '') {
+    setTargetAudience(nextAudience)
+    const allowedTechniqueIds = new Set(
+      techniques
+        .filter((technique) => techniqueMatchesAudience(technique, nextAudience))
+        .map((technique) => technique.id),
+    )
+    setSelectedTechniques((current) => new Set(Array.from(current).filter((id) => allowedTechniqueIds.has(id))))
+    setSelectedSituations((current) => {
+      const allowedSituationIds = new Set(
+        situations.filter((situation) => allowedTechniqueIds.has(situation.technique_id)).map((situation) => situation.id),
+      )
+      return new Set(Array.from(current).filter((id) => allowedSituationIds.has(id)))
+    })
   }
 
   function changeTechnicalLevel(nextLevel: TechnicalLevel) {
@@ -512,6 +556,7 @@ export default function TrainingProgramsManager({
           id: editingId,
           title: cleanTitle,
           targetGroup: cleanGroup,
+          targetAudience: targetAudience || null,
           technicalLevel,
           startDate,
           endDate,
@@ -732,6 +777,16 @@ export default function TrainingProgramsManager({
             <Input label="Program title" value={title} onChange={(event) => setTitle(event.target.value)} placeholder="September Week 1 · Guard Passing" />
             <Input label="Group / class" value={targetGroup} onChange={(event) => setTargetGroup(event.target.value)} placeholder="Kids 6–9 Beginners" hint="Use the same group name used in the academy Schedule." />
             <Select
+              label="Program audience"
+              value={targetAudience}
+              onChange={(event) => changeTargetAudience(event.target.value as Audience | '')}
+            >
+              <option value="">General / not restricted</option>
+              {AUDIENCE_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>{option.label}</option>
+              ))}
+            </Select>
+            <Select
               label="Technical level"
               value={technicalLevel}
               onChange={(event) => changeTechnicalLevel(event.target.value as TechnicalLevel)}
@@ -886,7 +941,8 @@ export default function TrainingProgramsManager({
                         const childTechniques = activeTechniques.filter(
                           (technique) =>
                             technique.block_id === block.id
-                            && technicalLevelRank(technique.technical_level) <= technicalLevelRank(technicalLevel),
+                            && technicalLevelRank(technique.technical_level) <= technicalLevelRank(technicalLevel)
+                            && techniqueMatchesAudience(technique, targetAudience),
                         )
                         return (
                           <div key={block.id} className="rounded-2xl border border-[hsl(var(--border))] bg-white p-3">
@@ -908,6 +964,11 @@ export default function TrainingProgramsManager({
                                           <span className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold ${technicalLevelClass(technique.technical_level)}`}>
                                             {technicalLevelLabel(technique.technical_level)}
                                           </span>
+                                          {(technique.audiences ?? []).map((audience) => (
+                                            <span key={audience} className="rounded-full border border-violet-200 bg-violet-50 px-2 py-0.5 text-[10px] font-semibold text-violet-800">
+                                              {audienceLabel(audience)}
+                                            </span>
+                                          ))}
                                         </span>
                                       </label>
                                       {techniqueSelected && childSituations.length ? (
@@ -971,6 +1032,11 @@ export default function TrainingProgramsManager({
                       <span className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold ${technicalLevelClass(program.technical_level)}`}>
                         {technicalLevelLabel(program.technical_level)}
                       </span>
+                      {program.target_audience ? (
+                        <span className="rounded-full border border-violet-200 bg-violet-50 px-2.5 py-1 text-[11px] font-semibold text-violet-800">
+                          {audienceLabel(program.target_audience)}
+                        </span>
+                      ) : null}
                       {!canManage && viewerRole ? (
                         <span className="rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1 text-[11px] font-semibold text-blue-800">{viewerRole}</span>
                       ) : null}

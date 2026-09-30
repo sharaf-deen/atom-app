@@ -10,11 +10,13 @@ import Textarea from '@/components/ui/Textarea'
 import type { LinkedScheduleSession } from '@/app/coach-operations/training-logs/page'
 
 type TechnicalLevel = 'beginner' | 'intermediate' | 'advanced'
+type Audience = 'baby_3_5' | 'kids_beginner' | 'adult_beginner'
 
 type Program = {
   id: string
   title: string
   target_group: string
+  target_audience: Audience | null
   start_date: string
   end_date: string
   notes: string | null
@@ -35,7 +37,7 @@ type ProgramItem = {
 
 type CurriculumType = { id: string; name: string; sort_order: number; is_active: boolean }
 type CurriculumBlock = { id: string; type_id: string; name: string; sort_order: number; is_active: boolean }
-type CurriculumTechnique = { id: string; block_id: string; name: string; technical_level: TechnicalLevel; sort_order: number; is_active: boolean }
+type CurriculumTechnique = { id: string; block_id: string; name: string; technical_level: TechnicalLevel; audiences: Audience[]; sort_order: number; is_active: boolean }
 type CurriculumSituation = {
   id: string
   technique_id: string
@@ -208,8 +210,16 @@ export default function TrainingSessionLogsManager({
     if (!program) return []
     const levelAllows = (technique: CurriculumTechnique) =>
       technicalLevelRank(technique.technical_level) <= technicalLevelRank(program.technical_level)
-    if (explicitIds.size) return techniques.filter((technique) => explicitIds.has(technique.id) && levelAllows(technique))
-    return techniques.filter((technique) => technique.block_id === blockId && technique.is_active && levelAllows(technique))
+    const audienceAllows = (technique: CurriculumTechnique) =>
+      !program.target_audience
+      || !(technique.audiences ?? []).length
+      || technique.audiences.includes(program.target_audience)
+    if (explicitIds.size) {
+      return techniques.filter((technique) => explicitIds.has(technique.id) && levelAllows(technique) && audienceAllows(technique))
+    }
+    return techniques.filter(
+      (technique) => technique.block_id === blockId && technique.is_active && levelAllows(technique) && audienceAllows(technique),
+    )
   }
 
   function allowedSituations(id: string, techniqueId: string) {

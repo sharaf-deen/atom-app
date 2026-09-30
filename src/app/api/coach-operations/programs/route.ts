@@ -11,6 +11,7 @@ import { createSupabaseServerActionClient } from '@/lib/supabaseServer'
 
 type ProgramStatus = 'draft' | 'published' | 'archived'
 type TechnicalLevel = 'beginner' | 'intermediate' | 'advanced'
+type Audience = 'baby_3_5' | 'kids_beginner' | 'adult_beginner'
 type Operation = 'save' | 'set_status' | 'delete_impact' | 'delete_permanent'
 
 type Body = {
@@ -18,6 +19,7 @@ type Body = {
   id?: string
   title?: string
   targetGroup?: string
+  targetAudience?: string | null
   technicalLevel?: string
   startDate?: string
   endDate?: string
@@ -70,6 +72,19 @@ function normalizeTechnicalLevel(value: unknown): TechnicalLevel | null {
   return normalized === 'beginner' || normalized === 'intermediate' || normalized === 'advanced'
     ? normalized
     : null
+}
+
+function normalizeAudience(value: unknown): Audience | null {
+  const normalized = String(value ?? '').trim()
+  return normalized === 'baby_3_5' || normalized === 'kids_beginner' || normalized === 'adult_beginner'
+    ? normalized
+    : null
+}
+
+function audienceAllows(audiences: unknown, targetAudience: Audience | null) {
+  if (!targetAudience) return true
+  if (!Array.isArray(audiences) || audiences.length === 0) return true
+  return audiences.includes(targetAudience)
 }
 
 function technicalLevelRank(level: TechnicalLevel) {
@@ -266,6 +281,7 @@ export async function POST(request: Request) {
 
   const title = cleanText(body.title, 160)
   const targetGroup = cleanText(body.targetGroup, 180)
+  const targetAudience = normalizeAudience(body.targetAudience)
   const technicalLevel = normalizeTechnicalLevel(body.technicalLevel)
   const startDate = String(body.startDate ?? '').trim()
   const endDate = String(body.endDate ?? '').trim()
@@ -371,7 +387,7 @@ export async function POST(request: Request) {
       ? supabase.from('coach_curriculum_blocks').select('id,type_id,is_active').in('id', blockIds)
       : Promise.resolve({ data: [], error: null } as any),
     techniqueIds.length
-      ? supabase.from('coach_curriculum_techniques').select('id,block_id,name,technical_level,is_active').in('id', techniqueIds)
+      ? supabase.from('coach_curriculum_techniques').select('id,block_id,name,technical_level,audiences,is_active').in('id', techniqueIds)
       : Promise.resolve({ data: [], error: null } as any),
     situationIds.length
       ? supabase.from('coach_curriculum_situations').select('id,technique_id,is_active').in('id', situationIds)
@@ -382,7 +398,7 @@ export async function POST(request: Request) {
   if (curriculumError) return json({ ok: false, error: 'CURRICULUM_LOOKUP_FAILED', details: curriculumError.message }, 500)
 
   const blocks = (blocksResult.data ?? []) as Array<{ id: string; type_id: string; is_active: boolean }>
-  const techniques = (techniquesResult.data ?? []) as Array<{ id: string; block_id: string; name: string; technical_level: TechnicalLevel; is_active: boolean }>
+  const techniques = (techniquesResult.data ?? []) as Array<{ id: string; block_id: string; name: string; technical_level: TechnicalLevel; audiences: Audience[]; is_active: boolean }>
   const situations = (situationsResult.data ?? []) as Array<{ id: string; technique_id: string; is_active: boolean }>
 
   if (blocks.length !== blockIds.length || techniques.length !== techniqueIds.length || situations.length !== situationIds.length) {
@@ -400,6 +416,15 @@ export async function POST(request: Request) {
       ok: false,
       error: 'CURRICULUM_LEVEL_EXCEEDS_PROGRAM',
       details: `${incompatibleTechnique.name} is ${incompatibleTechnique.technical_level} and cannot be assigned to a ${technicalLevel} Program.`,
+    }, 409)
+  }
+
+  const audienceMismatch = techniques.find((technique) => !audienceAllows(technique.audiences, targetAudience))
+  if (audienceMismatch) {
+    return json({
+      ok: false,
+      error: 'CURRICULUM_AUDIENCE_MISMATCH',
+      details: `${audienceMismatch.name} is not available for the selected Program audience.`,
     }, 409)
   }
 
@@ -421,6 +446,7 @@ export async function POST(request: Request) {
   const basePatch = {
     title,
     target_group: targetGroup,
+    target_audience: targetAudience,
     technical_level: technicalLevel,
     start_date: startDate,
     end_date: endDate,

@@ -10,6 +10,7 @@ import { createSupabaseServerActionClient } from '@/lib/supabaseServer'
 
 type Operation = 'save' | 'reopen'
 type TechnicalLevel = 'beginner' | 'intermediate' | 'advanced'
+type Audience = 'baby_3_5' | 'kids_beginner' | 'adult_beginner'
 
 type Body = {
   operation?: Operation
@@ -67,6 +68,19 @@ function normalizeTechnicalLevel(value: unknown): TechnicalLevel | null {
   return normalized === 'beginner' || normalized === 'intermediate' || normalized === 'advanced'
     ? normalized
     : null
+}
+
+function normalizeAudience(value: unknown): Audience | null {
+  const normalized = String(value ?? '').trim()
+  return normalized === 'baby_3_5' || normalized === 'kids_beginner' || normalized === 'adult_beginner'
+    ? normalized
+    : null
+}
+
+function audienceAllows(audiences: unknown, targetAudience: Audience | null) {
+  if (!targetAudience) return true
+  if (!Array.isArray(audiences) || audiences.length === 0) return true
+  return audiences.includes(targetAudience)
 }
 
 function technicalLevelRank(level: TechnicalLevel) {
@@ -211,7 +225,7 @@ export async function POST(request: Request) {
 
   const { data: program, error: programError } = await supabase
     .from('coach_training_programs')
-    .select('id,title,target_group,start_date,end_date,status,technical_level')
+    .select('id,title,target_group,target_audience,start_date,end_date,status,technical_level')
     .eq('id', programId)
     .eq('status', 'published')
     .maybeSingle()
@@ -219,6 +233,7 @@ export async function POST(request: Request) {
   if (programError) return json({ ok: false, error: 'PROGRAM_LOOKUP_FAILED', details: programError.message }, 500)
   if (!program) return json({ ok: false, error: 'PUBLISHED_PROGRAM_NOT_FOUND' }, 400)
   const programTechnicalLevel = normalizeTechnicalLevel(program.technical_level)
+  const programAudience = normalizeAudience(program.target_audience)
   if (!programTechnicalLevel) {
     return json({ ok: false, error: 'PROGRAM_TECHNICAL_LEVEL_REQUIRED', details: 'Head Coach must set the Program technical level first.' }, 409)
   }
@@ -261,7 +276,7 @@ export async function POST(request: Request) {
       ? supabase.from('coach_curriculum_blocks').select('id,type_id,name,is_active').in('id', blockIds)
       : Promise.resolve({ data: [], error: null } as any),
     techniqueIds.length
-      ? supabase.from('coach_curriculum_techniques').select('id,block_id,name,technical_level,is_active').in('id', techniqueIds)
+      ? supabase.from('coach_curriculum_techniques').select('id,block_id,name,technical_level,audiences,is_active').in('id', techniqueIds)
       : Promise.resolve({ data: [], error: null } as any),
     situationIds.length
       ? supabase
@@ -275,7 +290,7 @@ export async function POST(request: Request) {
   if (lookupError) return json({ ok: false, error: 'CURRICULUM_LOOKUP_FAILED', details: lookupError.message }, 500)
 
   const blocks = (blocksResult.data ?? []) as Array<{ id: string; type_id: string; name: string; is_active: boolean }>
-  const techniques = (techniquesResult.data ?? []) as Array<{ id: string; block_id: string; name: string; technical_level: TechnicalLevel; is_active: boolean }>
+  const techniques = (techniquesResult.data ?? []) as Array<{ id: string; block_id: string; name: string; technical_level: TechnicalLevel; audiences: Audience[]; is_active: boolean }>
   const situations = (situationsResult.data ?? []) as Array<{
     id: string
     technique_id: string
@@ -301,6 +316,13 @@ export async function POST(request: Request) {
         ok: false,
         error: 'CURRICULUM_LEVEL_EXCEEDS_PROGRAM',
         details: `${technique.name} is ${technique.technical_level} and is not allowed in this ${programTechnicalLevel} Program.`,
+      }, 409)
+    }
+    if (!audienceAllows(technique.audiences, programAudience)) {
+      return json({
+        ok: false,
+        error: 'CURRICULUM_AUDIENCE_MISMATCH',
+        details: `${technique.name} is not available for this Program audience.`,
       }, 409)
     }
     const explicit = explicitTechniquesByBlock.get(technique.block_id)
