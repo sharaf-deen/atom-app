@@ -300,6 +300,23 @@ export default function TrainingProgramsManager({
   const activeTechniques = techniques.filter((row) => row.is_active)
   const activeSituations = situations.filter((row) => row.is_active)
   const activeClassTemplates = classTemplates.filter((row) => row.is_active)
+  const bodyFormsType = activeTypes.find((row) => row.slug === 'body-forms') ?? null
+  const bodyFormsBlockIds = new Set(
+    activeBlocks.filter((row) => row.type_id === bodyFormsType?.id).map((row) => row.id),
+  )
+  const allBodyFormsTechniqueIds = new Set(
+    activeTechniques.filter((row) => bodyFormsBlockIds.has(row.block_id)).map((row) => row.id),
+  )
+  const eligibleBodyFormsTechniques = activeTechniques.filter(
+    (technique) =>
+      bodyFormsBlockIds.has(technique.block_id)
+      && technicalLevelRank(technique.technical_level) <= technicalLevelRank(technicalLevel)
+      && techniqueMatchesAudience(technique, targetAudience),
+  )
+  const eligibleBodyFormsBlockIds = new Set(eligibleBodyFormsTechniques.map((technique) => technique.block_id))
+  const selectedBodyFormsCount = eligibleBodyFormsTechniques.filter((technique) =>
+    selectedTechniques.has(technique.id),
+  ).length
   const classTemplateById = React.useMemo(() => new Map(classTemplates.map((row) => [row.id, row])), [classTemplates])
   const visiblePrograms = React.useMemo(
     () =>
@@ -491,6 +508,54 @@ export default function TrainingProgramsManager({
       )
       return new Set(Array.from(current).filter((id) => allowedSituationIds.has(id)))
     })
+  }
+
+  function addRecommendedBodyForms() {
+    resetFeedback()
+    if (!targetAudience) {
+      setError('Choose a Program audience before adding recommended Body Forms.')
+      return
+    }
+    if (!bodyFormsType || !eligibleBodyFormsTechniques.length) {
+      setError('No compatible Body Forms are available for this audience and Program level.')
+      return
+    }
+
+    setSelectedBlocks((current) => {
+      const next = new Set(current)
+      for (const blockId of eligibleBodyFormsBlockIds) next.add(blockId)
+      return next
+    })
+    setSelectedTechniques((current) => {
+      const next = new Set(current)
+      for (const technique of eligibleBodyFormsTechniques) next.add(technique.id)
+      return next
+    })
+
+    setMessage(
+      `${eligibleBodyFormsTechniques.length} recommended Body Form${eligibleBodyFormsTechniques.length === 1 ? '' : 's'} added for ${audienceLabel(targetAudience)}.`,
+    )
+  }
+
+  function clearBodyForms() {
+    resetFeedback()
+
+    setSelectedBlocks((current) =>
+      new Set(Array.from(current).filter((id) => !bodyFormsBlockIds.has(id))),
+    )
+    setSelectedTechniques((current) =>
+      new Set(Array.from(current).filter((id) => !allBodyFormsTechniqueIds.has(id))),
+    )
+    setSelectedSituations((current) => {
+      const bodyFormSituationIds = new Set(
+        situations
+          .filter((situation) => allBodyFormsTechniqueIds.has(situation.technique_id))
+          .map((situation) => situation.id),
+      )
+      return new Set(Array.from(current).filter((id) => !bodyFormSituationIds.has(id)))
+    })
+
+    setMessage('Body Forms removed from this Program. Other curriculum selections were preserved.')
   }
 
   function toggleBlock(blockId: string, checked: boolean) {
@@ -928,6 +993,45 @@ export default function TrainingProgramsManager({
               <h4 className="text-sm font-semibold">Curriculum assignment</h4>
               <p className="text-xs text-[hsl(var(--muted))]">Select a block first. Only techniques allowed by the {technicalLevelLabel(technicalLevel)} Program level are available; situations inherit their technique level.</p>
             </div>
+            {bodyFormsType ? (
+              <div className="mb-3 rounded-2xl border border-violet-200 bg-violet-50/60 p-3">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <div className="text-sm font-semibold text-violet-950">Body Forms quick selection</div>
+                    <div className="mt-0.5 text-xs text-violet-900">
+                      {targetAudience
+                        ? `${eligibleBodyFormsTechniques.length} movement${eligibleBodyFormsTechniques.length === 1 ? '' : 's'} available for ${audienceLabel(targetAudience)} at ${technicalLevelLabel(technicalLevel)} level.`
+                        : 'Choose a Program audience to load the recommended Body Forms.'}
+                    </div>
+                    {targetAudience ? (
+                      <div className="mt-1 text-xs font-semibold text-violet-950">
+                        {selectedBodyFormsCount} / {eligibleBodyFormsTechniques.length} selected
+                      </div>
+                    ) : null}
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      type="button"
+                      size="sm"
+                      onClick={addRecommendedBodyForms}
+                      disabled={!targetAudience || !eligibleBodyFormsTechniques.length || pending}
+                    >
+                      Add recommended Body Forms
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      onClick={clearBodyForms}
+                      disabled={!Array.from(selectedTechniques).some((id) => allBodyFormsTechniqueIds.has(id)) || pending}
+                    >
+                      Clear Body Forms
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            ) : null}
+
             <div className="space-y-3">
               {activeTypes.map((type) => {
                 const typeBlocks = activeBlocks.filter((block) => block.type_id === type.id)
