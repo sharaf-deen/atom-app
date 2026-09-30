@@ -7,6 +7,7 @@ import { cairoToday } from '@/lib/cairoDate'
 
 type Status = 'all' | 'active' | 'frozen' | 'inactive'
 type InactiveReason = 'all' | 'expired' | 'cancelled' | 'no_membership' | 'depleted_legacy' | 'other_inactive'
+type LegalStatus = 'all' | 'complete' | 'action_required'
 
 type MemberRow = {
   user_id: string
@@ -23,6 +24,10 @@ type MemberRow = {
   inactive_reason?: InactiveReason | null
   program_key?: string | null
   program_name?: string | null
+  legal_complete?: boolean | null
+  legal_required_count?: number | null
+  legal_accepted_count?: number | null
+  legal_missing_count?: number | null
 }
 
 type MemberRowWithTotal = MemberRow & { total_count?: number | string | null }
@@ -32,6 +37,7 @@ type Props = {
   status: Status
   inactiveReason: InactiveReason
   program: string
+  legalStatus: LegalStatus
   page: number
   pageSize: number
 }
@@ -101,7 +107,22 @@ function ProgramBadge({ name }: { name?: string | null }) {
   )
 }
 
-export default async function MembersResults({ q, status, inactiveReason, program, page, pageSize }: Props) {
+function LegalBadge({ complete, missingCount }: { complete?: boolean | null; missingCount?: number | null }) {
+  if (complete === true) {
+    return <span className="inline-flex rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700">Legal complete</span>
+  }
+
+  return (
+    <span
+      className="inline-flex rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-800"
+      title={typeof missingCount === 'number' ? `${missingCount} required document(s) missing` : undefined}
+    >
+      Legal action required{typeof missingCount === 'number' && missingCount > 0 ? ` · ${missingCount}` : ''}
+    </span>
+  )
+}
+
+export default async function MembersResults({ q, status, inactiveReason, program, legalStatus, page, pageSize }: Props) {
   const admin = getSupabaseAdminClientCached()
   let rows: MemberRow[] = []
   let totalResults = 0
@@ -109,11 +130,12 @@ export default async function MembersResults({ q, status, inactiveReason, progra
   const mode: 'search' | 'list' = q ? 'search' : 'list'
 
   try {
-    const { data, error } = await admin.rpc('search_members_v5', {
+    const { data, error } = await admin.rpc('search_members_v6', {
       p_q: q || null,
       p_status: q ? 'all' : status,
       p_inactive_reason: q || status !== 'inactive' ? 'all' : inactiveReason,
       p_program_key: program || null,
+      p_legal_status: legalStatus,
       p_page: page,
       p_page_size: pageSize,
     })
@@ -131,6 +153,7 @@ export default async function MembersResults({ q, status, inactiveReason, progra
   if (!q && status !== 'all') base.set('status', status)
   if (!q && status === 'inactive' && inactiveReason !== 'all') base.set('reason', inactiveReason)
   if (program) base.set('program', program)
+  if (legalStatus !== 'all') base.set('legal', legalStatus)
   if (pageSize !== 20) base.set('pageSize', String(pageSize))
 
   const hrefForPage = (p: number) => {
@@ -154,7 +177,10 @@ export default async function MembersResults({ q, status, inactiveReason, progra
                   <div className="min-w-0">
                     <div className="truncate text-[15px] font-semibold leading-5">{name}</div>
                     <div className="mt-1 text-[12px] text-[hsl(var(--muted))]">ID: <code className="text-[11px]">{m.member_id?.trim() || '—'}</code></div>
-                    <div className="mt-2"><ProgramBadge name={m.program_name} /></div>
+                    <div className="mt-2 flex flex-wrap gap-1">
+                      <ProgramBadge name={m.program_name} />
+                      <LegalBadge complete={m.legal_complete} missingCount={m.legal_missing_count} />
+                    </div>
                   </div>
                   <div className="flex shrink-0 flex-col items-end gap-1">
                     <StatusBadge active={m.is_active} frozen={m.is_frozen} />
@@ -168,7 +194,9 @@ export default async function MembersResults({ q, status, inactiveReason, progra
                   <div className="flex items-start justify-between gap-3"><span className="text-[11px] font-medium text-[hsl(var(--muted))]">Joined</span><span className="text-right font-medium">{fmtDate(m.created_at)}</span></div>
                 </div>
                 <div className="mt-3 flex justify-end border-t border-[hsl(var(--border))] pt-3">
-                  <Link prefetch={false} href={`/members/${m.user_id}`} className="inline-flex items-center rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm font-semibold hover:bg-[hsl(var(--bg))]">View</Link>
+                  <Link prefetch={false} href={`/members/${m.user_id}${m.legal_complete ? '' : '#legal-consents'}`} className="inline-flex items-center rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm font-semibold hover:bg-[hsl(var(--bg))]">
+                    {m.legal_complete ? 'View' : 'Resolve'}
+                  </Link>
                 </div>
               </div>
             )
@@ -183,6 +211,7 @@ export default async function MembersResults({ q, status, inactiveReason, progra
                 <th className="border-b border-[hsl(var(--border))] px-4 py-3 font-medium">Name</th>
                 <th className="border-b border-[hsl(var(--border))] px-4 py-3 font-medium">Member ID</th>
                 <th className="border-b border-[hsl(var(--border))] px-4 py-3 font-medium">Program</th>
+                <th className="border-b border-[hsl(var(--border))] px-4 py-3 font-medium">Legal status</th>
                 <th className="border-b border-[hsl(var(--border))] px-4 py-3 font-medium">Email</th>
                 <th className="border-b border-[hsl(var(--border))] px-4 py-3 font-medium">Phone</th>
                 <th className="border-b border-[hsl(var(--border))] px-4 py-3 font-medium">Joined</th>
@@ -202,14 +231,19 @@ export default async function MembersResults({ q, status, inactiveReason, progra
                     </td>
                     <td className="border-t border-[hsl(var(--border))] px-4 py-3"><code className="text-xs">{m.member_id?.trim() || '—'}</code></td>
                     <td className="border-t border-[hsl(var(--border))] px-4 py-3"><ProgramBadge name={m.program_name} /></td>
+                    <td className="border-t border-[hsl(var(--border))] px-4 py-3"><LegalBadge complete={m.legal_complete} missingCount={m.legal_missing_count} /></td>
                     <td className="border-t border-[hsl(var(--border))] px-4 py-3">{m.email ?? '—'}</td>
                     <td className="border-t border-[hsl(var(--border))] px-4 py-3">{m.phone ?? '—'}</td>
                     <td className="border-t border-[hsl(var(--border))] px-4 py-3">{fmtDate(m.created_at)}</td>
-                    <td className="border-t border-[hsl(var(--border))] px-4 py-3"><Link prefetch={false} href={`/members/${m.user_id}`} className="inline-flex items-center rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-1.5 text-sm font-medium hover:bg-[hsl(var(--bg))]">View</Link></td>
+                    <td className="border-t border-[hsl(var(--border))] px-4 py-3">
+                      <Link prefetch={false} href={`/members/${m.user_id}${m.legal_complete ? '' : '#legal-consents'}`} className="inline-flex items-center rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-1.5 text-sm font-medium hover:bg-[hsl(var(--bg))]">
+                        {m.legal_complete ? 'View' : 'Resolve'}
+                      </Link>
+                    </td>
                   </tr>
                 )
               })}
-              {rows.length === 0 && !errorMsg ? <tr><td className="px-4 py-8 text-center text-[hsl(var(--muted))]" colSpan={7}>{mode === 'search' ? 'No members found.' : 'No members to show.'}</td></tr> : null}
+              {rows.length === 0 && !errorMsg ? <tr><td className="px-4 py-8 text-center text-[hsl(var(--muted))]" colSpan={8}>{mode === 'search' ? 'No members found.' : 'No members to show.'}</td></tr> : null}
             </tbody>
           </table>
 
