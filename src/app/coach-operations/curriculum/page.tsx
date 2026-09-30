@@ -36,6 +36,7 @@ type CurriculumTechnique = {
   technical_level: 'beginner' | 'intermediate' | 'advanced'
   school: 'old_school' | 'new_school' | null
   training_format: 'gi' | 'nogi' | 'both' | null
+  audiences: Array<'baby_3_5' | 'kids_beginner' | 'adult_beginner'>
   sort_order: number
   is_active: boolean
 }
@@ -84,7 +85,7 @@ export default async function CoachCurriculumPage() {
       .order('name', { ascending: true }),
     supabase
       .from('coach_curriculum_techniques')
-      .select('id,block_id,name,description,technical_level,school,training_format,sort_order,is_active')
+      .select('id,block_id,name,description,technical_level,school,training_format,audiences,sort_order,is_active')
       .order('sort_order', { ascending: true })
       .order('name', { ascending: true }),
     supabase
