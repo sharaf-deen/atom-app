@@ -9,6 +9,7 @@ import Button from '@/components/ui/Button'
 
 type Status = 'all' | 'active' | 'frozen' | 'inactive'
 type InactiveReason = 'all' | 'expired' | 'cancelled' | 'no_membership' | 'depleted_legacy' | 'other_inactive'
+type LegalStatus = 'all' | 'complete' | 'action_required'
 type ProgramOption = { key: string; name: string; level: string }
 
 function clampInt(n: number, min: number, max: number) {
@@ -25,12 +26,17 @@ function normalizeInactiveReason(v: string): InactiveReason {
     ? (s as InactiveReason)
     : 'all'
 }
+function normalizeLegalStatus(v: string): LegalStatus {
+  const s = (v || 'all').toLowerCase()
+  return (['all', 'complete', 'action_required'] as const).includes(s as any) ? (s as LegalStatus) : 'all'
+}
 
 export default function MembersFilters({
   initialQ,
   initialStatus,
   initialInactiveReason,
   initialProgram,
+  initialLegalStatus,
   initialPageSize,
   className,
 }: {
@@ -38,6 +44,7 @@ export default function MembersFilters({
   initialStatus: Status
   initialInactiveReason: InactiveReason
   initialProgram: string
+  initialLegalStatus: LegalStatus
   initialPageSize: number
   className?: string
 }) {
@@ -48,6 +55,7 @@ export default function MembersFilters({
   const [status, setStatus] = useState<Status>(initialStatus)
   const [inactiveReason, setInactiveReason] = useState<InactiveReason>(initialInactiveReason)
   const [program, setProgram] = useState(initialProgram)
+  const [legalStatus, setLegalStatus] = useState<LegalStatus>(initialLegalStatus)
   const [programs, setPrograms] = useState<ProgramOption[]>([])
   const [pageSize, setPageSize] = useState(clampInt(initialPageSize, 5, 200))
 
@@ -71,17 +79,27 @@ export default function MembersFilters({
     p.delete('status')
     p.delete('reason')
     p.delete('program')
+    p.delete('legal')
     p.delete('page')
     p.delete('pageSize')
     return p
   }, [sp])
 
-  function apply(next: { q?: string; status?: Status; inactiveReason?: InactiveReason; program?: string; page?: number; pageSize?: number }) {
+  function apply(next: {
+    q?: string
+    status?: Status
+    inactiveReason?: InactiveReason
+    program?: string
+    legalStatus?: LegalStatus
+    page?: number
+    pageSize?: number
+  }) {
     const p = new URLSearchParams(base)
     const nextQ = (next.q ?? q).trim()
     const nextStatus = normalizeStatus(String(next.status ?? status))
     const nextReason = normalizeInactiveReason(String(next.inactiveReason ?? inactiveReason))
     const nextProgram = String(next.program ?? program).trim()
+    const nextLegalStatus = normalizeLegalStatus(String(next.legalStatus ?? legalStatus))
     const nextPageSize = clampInt(Number(next.pageSize ?? pageSize), 5, 200)
     const nextPage = clampInt(Number(next.page ?? 1), 1, 1_000_000)
 
@@ -91,6 +109,7 @@ export default function MembersFilters({
       if (nextStatus === 'inactive' && nextReason !== 'all') p.set('reason', nextReason)
     }
     if (nextProgram) p.set('program', nextProgram)
+    if (nextLegalStatus !== 'all') p.set('legal', nextLegalStatus)
     if (nextPage > 1) p.set('page', String(nextPage))
     if (nextPageSize !== 20) p.set('pageSize', String(nextPageSize))
 
@@ -108,6 +127,7 @@ export default function MembersFilters({
     setStatus('all')
     setInactiveReason('all')
     setProgram('')
+    setLegalStatus('all')
     setPageSize(20)
     startTransition(() => router.push('/members'))
   }
@@ -167,6 +187,18 @@ export default function MembersFilters({
           </Select>
         </div>
 
+        <div className="w-full sm:w-52">
+          <Select label="Legal status" value={legalStatus} onChange={(e) => {
+            const v = normalizeLegalStatus(e.target.value)
+            setLegalStatus(v)
+            apply({ legalStatus: v, page: 1 })
+          }}>
+            <option value="all">All legal statuses</option>
+            <option value="complete">Complete</option>
+            <option value="action_required">Action required</option>
+          </Select>
+        </div>
+
         <div className="w-full sm:w-32">
           <Select label="Rows" value={String(pageSize)} onChange={(e) => {
             const v = clampInt(Number(e.target.value), 5, 200)
@@ -183,7 +215,7 @@ export default function MembersFilters({
         </div>
       </div>
       <p className="mt-2 text-[11px] text-[hsl(var(--muted))]">
-        Program tracks the member’s current academy group. Athlete progression level remains separate.
+        Legal status compares each member against the current active required legal-document versions.
       </p>
     </form>
   )
