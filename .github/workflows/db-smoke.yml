@@ -16,6 +16,7 @@ jobs:
       CI: true
       NEXT_TELEMETRY_DISABLED: 1
       SUPABASE_DB_ONLY: "true"
+      SUPABASE_INTERNAL_IMAGE_REGISTRY: ghcr.io
 
     steps:
       - name: Checkout
