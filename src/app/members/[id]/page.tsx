@@ -36,6 +36,7 @@ import AthleteProfileSection from '@/components/member-detail/AthleteProfileSect
 import MemberNotifyButton from '@/components/member-detail/MemberNotifyButton'
 import MemberBasicProfileEditButton from '@/components/member-detail/MemberBasicProfileEditButton'
 import MemberProgramSection from '@/components/member-detail/MemberProgramSection'
+import MemberLegalConsentsSection from '@/components/member-detail/MemberLegalConsentsSection'
 import { canManageNotifications as canManageMemberNotifications, hasLifetimeGymAccess } from '@/lib/rbac'
 import { buildSubscriptionFreezeTokenSummary, freezePlanSummaryLabel, toInclusiveFreezeEnd, type SubscriptionFreezeHistoryRow } from '@/lib/subscriptionFreeze'
 
@@ -1503,6 +1504,14 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
             memberUserId={profile.user_id}
             viewerRole={me.role}
             nextPath={nextPath}
+          />
+        ) : null}
+
+        {!coachSafeView && ['member', 'champion', 'vip'].includes(String(profile.role ?? '')) ? (
+          <MemberLegalConsentsSection
+            memberUserId={profile.user_id}
+            viewerRole={me.role}
+            isSelf={isSelf}
           />
         ) : null}
 

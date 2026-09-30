@@ -9,6 +9,7 @@ import Button from '@/components/ui/Button'
 import InlineAlert from '@/components/ui/InlineAlert'
 import ConfirmActionModal, { type ConfirmActionSummaryItem } from '@/components/ui/ConfirmActionModal'
 import { cairoToday } from '@/lib/cairoDate'
+import LegalConsentCapture, { type LegalConsentPayload } from '@/components/legal/LegalConsentCapture'
 
 type NewMemberPayload = {
   email: string
@@ -134,6 +135,8 @@ export default function CreateMemberForm({
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [programs, setPrograms] = useState<MemberProgramOption[]>([])
   const [programsLoading, setProgramsLoading] = useState(true)
+  const [legalConsent, setLegalConsent] = useState<LegalConsentPayload | null>(null)
+  const [legalConsentValid, setLegalConsentValid] = useState(false)
 
 
   useEffect(() => {
@@ -187,6 +190,8 @@ export default function CreateMemberForm({
     setStatus({ kind: '', msg: '' })
     setExistingMember(null)
     setConfirmOpen(false)
+    setLegalConsent(null)
+    setLegalConsentValid(false)
   }
 
   const emailOk = !!(form.email || '').trim()
@@ -213,6 +218,7 @@ export default function CreateMemberForm({
         value: dobOk && ageGroup && age !== null ? `${age} years old · ${ageGroup}` : 'Invalid or missing',
       },
       { label: 'Academy program', value: selectedProgram?.name ?? 'Not selected' },
+      { label: 'Legal acceptance', value: legalConsentValid ? 'Required documents accepted' : 'Incomplete' },
       { label: 'Role', value: 'member' },
       { label: 'Invite impact', value: 'Invite email will be sent if this is a new email.' },
       { label: 'Access impact', value: 'A new member profile will be created for app and scan access.' },
@@ -223,7 +229,7 @@ export default function CreateMemberForm({
     }
 
     return items
-  }, [age, ageGroup, dobOk, form.date_of_birth, form.email, form.first_name, form.last_name, form.phone, form.visitor_trial_id, selectedProgram?.name])
+  }, [age, ageGroup, dobOk, form.date_of_birth, form.email, form.first_name, form.last_name, form.phone, form.visitor_trial_id, legalConsentValid, selectedProgram?.name])
 
   function buildPayload() {
     const email = cleanText(form.email).toLowerCase()
@@ -236,6 +242,8 @@ export default function CreateMemberForm({
       date_of_birth: cleanText(form.date_of_birth) || undefined,
       visitor_trial_id: cleanText(form.visitor_trial_id) || undefined,
       program_key: cleanText(form.program_key) || undefined,
+      legal_acceptance: legalConsent ?? undefined,
+      legal_acceptance_source: 'member_registration',
       // aliases camelCase (au cas où on les supporte côté API)
       firstName: cleanText(form.first_name) || undefined,
       lastName: cleanText(form.last_name) || undefined,
@@ -245,14 +253,14 @@ export default function CreateMemberForm({
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault()
-    if (submitLockRef.current || busy || !emailOk || !dobOk || !programOk) return
+    if (submitLockRef.current || busy || !emailOk || !dobOk || !programOk || !legalConsentValid) return
 
     setExistingMember(null)
     setConfirmOpen(true)
   }
 
   async function createMemberConfirmed() {
-    if (submitLockRef.current || busy || !emailOk || !dobOk || !programOk) return
+    if (submitLockRef.current || busy || !emailOk || !dobOk || !programOk || !legalConsentValid) return
 
     submitLockRef.current = true
     setBusy(true)
@@ -525,8 +533,16 @@ export default function CreateMemberForm({
           />
         </label>
 
+        <LegalConsentCapture
+          dateOfBirth={form.date_of_birth}
+          participantName={[cleanText(form.first_name), cleanText(form.last_name)].filter(Boolean).join(' ')}
+          disabled={busy}
+          onChange={setLegalConsent}
+          onValidityChange={setLegalConsentValid}
+        />
+
         <div className="mt-2 flex flex-wrap gap-2 sm:col-span-2">
-          <Button type="submit" disabled={busy || programsLoading || !emailOk || !dobOk || !programOk}>
+          <Button type="submit" disabled={busy || programsLoading || !emailOk || !dobOk || !programOk || !legalConsentValid}>
             {busy ? 'Creating…' : 'Create member'}
           </Button>
 

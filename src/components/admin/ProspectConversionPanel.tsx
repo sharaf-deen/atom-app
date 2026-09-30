@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import type { ProspectRow, ProspectSubmissionRow } from '@/app/admin/prospects/page'
+import LegalConsentCapture, { type LegalConsentPayload } from '@/components/legal/LegalConsentCapture'
 
 type Props = {
   prospect: ProspectRow
@@ -61,6 +62,8 @@ export default function ProspectConversionPanel({ prospect, latestSubmission }: 
   const [needsNewMember, setNeedsNewMember] = useState(false)
   const [programs, setPrograms] = useState<MemberProgramOption[]>([])
   const [programsLoading, setProgramsLoading] = useState(true)
+  const [legalConsent, setLegalConsent] = useState<LegalConsentPayload | null>(null)
+  const [legalConsentValid, setLegalConsentValid] = useState(false)
 
   useEffect(() => {
     let cancelled = false
@@ -149,6 +152,7 @@ export default function ProspectConversionPanel({ prospect, latestSubmission }: 
       if (!member.email.trim()) throw new Error('Email is required for a standalone Member account.')
       if (!member.date_of_birth) throw new Error('Date of birth is required.')
       if (!member.program_key) throw new Error('Academy program is required.')
+      if (!legalConsentValid || !legalConsent) throw new Error('Required legal documents must be accepted.')
 
       const createResponse = await fetch('/api/members/create', {
         method: 'POST',
@@ -163,6 +167,8 @@ export default function ProspectConversionPanel({ prospect, latestSubmission }: 
           lastName: member.last_name.trim() || undefined,
           dateOfBirth: member.date_of_birth,
           program_key: member.program_key,
+          legal_acceptance: legalConsent,
+          legal_acceptance_source: 'prospect_conversion',
         }),
       })
       const created = await readJson(createResponse)
@@ -298,8 +304,15 @@ export default function ProspectConversionPanel({ prospect, latestSubmission }: 
                   ))}
                 </select>
               </label>
+              <LegalConsentCapture
+                dateOfBirth={member.date_of_birth}
+                participantName={[member.first_name.trim(), member.last_name.trim()].filter(Boolean).join(' ')}
+                disabled={busy === 'create'}
+                onChange={setLegalConsent}
+                onValidityChange={setLegalConsentValid}
+              />
               <div className="flex items-end sm:col-span-2">
-                <button type="button" disabled={busy === 'create' || programsLoading || !member.email.trim() || !member.date_of_birth || !member.program_key} onClick={() => void createAndLinkMember()} className="w-full rounded-xl bg-black px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">
+                <button type="button" disabled={busy === 'create' || programsLoading || !member.email.trim() || !member.date_of_birth || !member.program_key || !legalConsentValid} onClick={() => void createAndLinkMember()} className="w-full rounded-xl bg-black px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">
                   {busy === 'create' ? 'Creating…' : 'Create through existing Member flow'}
                 </button>
               </div>
