@@ -6,7 +6,12 @@ import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import AccessDeniedCard from '@/components/AccessDeniedCard'
 import Button from '@/components/ui/Button'
-import InactiveFollowupActions from '@/components/admin/members/InactiveFollowupActions'
+import InactiveFollowupActions, {
+  type InactiveActivityRow,
+  type InactiveStaffRow,
+  type InactiveTemplateRow,
+} from '@/components/admin/members/InactiveFollowupActions'
+import InactiveMessageTemplateAdmin from '@/components/admin/members/InactiveMessageTemplateAdmin'
 import { getSessionUser } from '@/lib/session'
 import { getSupabaseAdminClientCached } from '@/lib/requestCache'
 import {
@@ -76,6 +81,8 @@ type FollowupRow = {
   reviewed_at: string | null
   reviewed_by: string | null
   next_follow_up_at: string | null
+  assigned_to: string | null
+  last_contacted_at: string | null
   updated_at: string | null
 }
 
@@ -425,7 +432,39 @@ export default async function AdminInactiveMembersPage({
 
   const { data: followupsData, error: followupsError } = await admin
     .from('member_inactive_followups')
-    .select('member_id,status,note,reviewed_at,reviewed_by,next_follow_up_at,updated_at')
+    .select('member_id,status,note,reviewed_at,reviewed_by,next_follow_up_at,assigned_to,last_contacted_at,updated_at')
+
+  const [activitiesResult, staffResult, templatesResult] = await Promise.all([
+    admin
+      .from('member_inactive_activities')
+      .select('id,member_id,activity_type,summary,details,actor_user_id,occurred_at')
+      .order('occurred_at', { ascending: false })
+      .limit(5000),
+    admin
+      .from('profiles')
+      .select('user_id,first_name,last_name,email,role')
+      .in('role', ['reception', 'admin', 'super_admin'])
+      .order('first_name', { ascending: true })
+      .limit(200),
+    admin
+      .from('inactive_message_templates')
+      .select('id,channel,template_key,language,label,subject_template,body_template,is_active,updated_at')
+      .eq('is_active', true)
+      .order('channel', { ascending: true })
+      .order('template_key', { ascending: true })
+      .order('language', { ascending: true }),
+  ])
+
+  const inactiveActivities = activitiesResult.error ? [] : ((activitiesResult.data ?? []) as InactiveActivityRow[])
+  const inactiveStaff = staffResult.error ? [] : ((staffResult.data ?? []) as InactiveStaffRow[])
+  const inactiveTemplates = templatesResult.error ? [] : ((templatesResult.data ?? []) as InactiveTemplateRow[])
+
+  const activitiesByMember = new Map<string, InactiveActivityRow[]>()
+  for (const activity of inactiveActivities) {
+    const current = activitiesByMember.get(activity.member_id) ?? []
+    current.push(activity)
+    activitiesByMember.set(activity.member_id, current)
+  }
 
 
   const { data: familyMemberLinks } = await admin
@@ -570,6 +609,11 @@ export default async function AdminInactiveMembersPage({
 
   const reviewedCount = followupCounts.reviewed ?? 0
   const notReviewedCount = Math.max(0, inactiveAll.length - reviewedCount)
+  const followupDueCount = inactiveAll.filter((item) => {
+    const value = item.followup?.next_follow_up_at
+    if (!value || item.followup?.status === 'resolved') return false
+    return String(value).slice(0, 10) <= today
+  }).length
 
   const baseArgs = { q, reason, role, inactiveSince, followupStatus, reviewState, pageSize }
   const hasFilters = Boolean(q || reason !== 'all' || role || inactiveSince > 0 || followupStatus !== 'all' || reviewState !== 'all' || pageSize !== DEFAULT_PAGE_SIZE)
@@ -601,43 +645,51 @@ export default async function AdminInactiveMembersPage({
         </div>
       ) : null}
 
-      <section className="grid gap-3 md:grid-cols-4 xl:grid-cols-8">
-        <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4 shadow-soft">
-          <p className="text-xs font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Inactive total</p>
-          <p className="mt-2 text-3xl font-bold">{counts.total}</p>
+      {me.role === 'super_admin' ? (
+        <InactiveMessageTemplateAdmin templates={inactiveTemplates} />
+      ) : null}
+
+      <section className="space-y-3">
+        <div>
+          <h2 className="text-base font-semibold">Inactive follow-up queue</h2>
+          <p className="text-sm text-[hsl(var(--muted))]">Choose a queue to focus on the inactive members who need attention.</p>
         </div>
-        <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4 shadow-soft">
-          <p className="text-xs font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Expired</p>
-          <p className="mt-2 text-3xl font-bold">{counts.expired}</p>
-        </div>
-        <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4 shadow-soft">
-          <p className="text-xs font-medium uppercase tracking-wide text-[hsl(var(--muted))]">No membership yet</p>
-          <p className="mt-2 text-3xl font-bold">{counts.no_membership}</p>
-        </div>
-        <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4 shadow-soft">
-          <p className="text-xs font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Cancelled</p>
-          <p className="mt-2 text-3xl font-bold">{counts.cancelled}</p>
-        </div>
-        <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4 shadow-soft">
-          <p className="text-xs font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Depleted legacy</p>
-          <p className="mt-2 text-3xl font-bold">{counts.depleted_legacy}</p>
-        </div>
-        <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4 shadow-soft">
-          <p className="text-xs font-medium uppercase tracking-wide text-[hsl(var(--muted))]">To contact</p>
-          <p className="mt-2 text-3xl font-bold">{followupCounts.to_contact ?? 0}</p>
-        </div>
-        <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4 shadow-soft">
-          <p className="text-xs font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Not reviewed</p>
-          <p className="mt-2 text-3xl font-bold">{notReviewedCount}</p>
-        </div>
-        <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4 shadow-soft">
-          <p className="text-xs font-medium uppercase tracking-wide text-[hsl(var(--muted))]">Reviewed</p>
-          <p className="mt-2 text-3xl font-bold">{reviewedCount}</p>
+
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 xl:grid-cols-7">
+          <Link href="/admin/members/inactive?followupStatus=to_contact" className={`rounded-2xl border p-3 transition ${followupStatus === 'to_contact' ? 'border-black bg-black text-white' : 'border-[hsl(var(--border))] bg-white'}`}>
+            <p className="text-xs font-semibold uppercase tracking-wide">To contact</p>
+            <p className="mt-1 text-2xl font-bold">{followupCounts.to_contact ?? 0}</p>
+          </Link>
+          <Link href="/admin/members/inactive?reviewState=not_reviewed" className={`rounded-2xl border p-3 transition ${reviewState === 'not_reviewed' ? 'border-black bg-black text-white' : 'border-[hsl(var(--border))] bg-white'}`}>
+            <p className="text-xs font-semibold uppercase tracking-wide">Not reviewed</p>
+            <p className="mt-1 text-2xl font-bold">{notReviewedCount}</p>
+          </Link>
+          <div className="rounded-2xl border border-amber-200 bg-amber-50 p-3">
+            <p className="text-xs font-semibold uppercase tracking-wide text-amber-800">Follow-up due</p>
+            <p className="mt-1 text-2xl font-bold text-amber-900">{followupDueCount}</p>
+            <p className="mt-1 text-[11px] text-amber-800">Today or overdue</p>
+          </div>
+          <Link href="/admin/members/inactive?reason=expired" className={`rounded-2xl border p-3 transition ${reason === 'expired' ? 'border-black bg-black text-white' : 'border-[hsl(var(--border))] bg-white'}`}>
+            <p className="text-xs font-semibold uppercase tracking-wide">Expired</p>
+            <p className="mt-1 text-2xl font-bold">{counts.expired}</p>
+          </Link>
+          <Link href="/admin/members/inactive?reason=no_membership" className={`rounded-2xl border p-3 transition ${reason === 'no_membership' ? 'border-black bg-black text-white' : 'border-[hsl(var(--border))] bg-white'}`}>
+            <p className="text-xs font-semibold uppercase tracking-wide">No membership</p>
+            <p className="mt-1 text-2xl font-bold">{counts.no_membership}</p>
+          </Link>
+          <Link href="/admin/members/inactive?reviewState=reviewed" className={`rounded-2xl border p-3 transition ${reviewState === 'reviewed' ? 'border-black bg-black text-white' : 'border-[hsl(var(--border))] bg-white'}`}>
+            <p className="text-xs font-semibold uppercase tracking-wide">Reviewed</p>
+            <p className="mt-1 text-2xl font-bold">{reviewedCount}</p>
+          </Link>
+          <Link href="/admin/members/inactive" className={`rounded-2xl border p-3 transition ${!hasFilters ? 'border-black bg-black text-white' : 'border-[hsl(var(--border))] bg-white'}`}>
+            <p className="text-xs font-semibold uppercase tracking-wide">All inactive</p>
+            <p className="mt-1 text-2xl font-bold">{counts.total}</p>
+          </Link>
         </div>
       </section>
 
-      <form action="/admin/members/inactive" className="rounded-3xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4 shadow-soft">
-        <div className="grid gap-3 lg:grid-cols-[minmax(0,1.3fr)_190px_170px_160px_170px_170px_110px_auto] lg:items-end">
+      <div className="rounded-2xl border border-[hsl(var(--border))] bg-white p-4 shadow-soft">
+        <form action="/admin/members/inactive" className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
           <label className="block">
             <span className="text-sm font-semibold">Search</span>
             <input
@@ -645,78 +697,67 @@ export default async function AdminInactiveMembersPage({
               defaultValue={q}
               type="search"
               placeholder="Name, email, phone, ATOM ID"
-              className="mt-1 w-full rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] px-4 py-3 text-sm outline-none focus:border-black"
-              autoCapitalize="none"
-              autoCorrect="off"
-              spellCheck={false}
+              className="mt-1 w-full rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2.5 text-sm outline-none focus:border-black"
             />
           </label>
-
-          <label className="block">
-            <span className="text-sm font-semibold">Reason</span>
-            <select name="reason" defaultValue={reason} className="mt-1 w-full rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] px-4 py-3 text-sm outline-none focus:border-black">
-              {REASON_OPTIONS.map((option) => (
-                <option key={option.value} value={option.value}>{option.label}</option>
-              ))}
-            </select>
-          </label>
-
-          <label className="block">
-            <span className="text-sm font-semibold">Role</span>
-            <select name="role" defaultValue={role} className="mt-1 w-full rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] px-4 py-3 text-sm outline-none focus:border-black">
-              {MEMBER_ROLE_OPTIONS.map((option) => (
-                <option key={option.value || 'all'} value={option.value}>{option.label}</option>
-              ))}
-            </select>
-          </label>
-
-          <label className="block">
-            <span className="text-sm font-semibold">Inactive since</span>
-            <select name="inactiveSince" defaultValue={String(inactiveSince)} className="mt-1 w-full rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] px-4 py-3 text-sm outline-none focus:border-black">
-              <option value="0">Any duration</option>
-              <option value="7">7+ days</option>
-              <option value="14">14+ days</option>
-              <option value="30">30+ days</option>
-              <option value="60">60+ days</option>
-              <option value="90">90+ days</option>
-            </select>
-          </label>
-
-          <label className="block">
-            <span className="text-sm font-semibold">Follow-up</span>
-            <select name="followupStatus" defaultValue={followupStatus} className="mt-1 w-full rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] px-4 py-3 text-sm outline-none focus:border-black">
-              {FOLLOWUP_STATUS_OPTIONS.map((option) => (
-                <option key={option.value} value={option.value}>{option.label}</option>
-              ))}
-            </select>
-          </label>
-
-          <label className="block">
-            <span className="text-sm font-semibold">Reviewed</span>
-            <select name="reviewState" defaultValue={reviewState} className="mt-1 w-full rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] px-4 py-3 text-sm outline-none focus:border-black">
-              {REVIEW_STATE_OPTIONS.map((option) => (
-                <option key={option.value} value={option.value}>{option.label}</option>
-              ))}
-            </select>
-          </label>
-
-          <label className="block">
-            <span className="text-sm font-semibold">Rows</span>
-            <select name="pageSize" defaultValue={String(pageSize)} className="mt-1 w-full rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] px-4 py-3 text-sm outline-none focus:border-black">
-              {PAGE_SIZE_OPTIONS.map((option) => (
-                <option key={option} value={option}>{option}</option>
-              ))}
-            </select>
-          </label>
-
-          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-1">
-            <Button type="submit" className="w-full">Apply</Button>
-            <Button asChild variant="outline" className={`w-full ${!hasFilters ? 'pointer-events-none opacity-50' : ''}`} href="/admin/members/inactive">
-              Reset
-            </Button>
+          <div className="flex gap-2">
+            <Button type="submit" variant="outline">Search</Button>
+            {hasFilters ? <Button asChild variant="ghost" href="/admin/members/inactive">Clear</Button> : null}
           </div>
-        </div>
-      </form>
+        </form>
+
+        <details className="mt-3 border-t border-[hsl(var(--border))] pt-3">
+          <summary className="cursor-pointer text-sm font-semibold">More filters</summary>
+          <form action="/admin/members/inactive" className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+            <input type="hidden" name="q" value={q} />
+            <label className="block">
+              <span className="text-sm font-semibold">Reason</span>
+              <select name="reason" defaultValue={reason} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm">
+                {REASON_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+              </select>
+            </label>
+            <label className="block">
+              <span className="text-sm font-semibold">Role</span>
+              <select name="role" defaultValue={role} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm">
+                {MEMBER_ROLE_OPTIONS.map((option) => <option key={option.value || 'all'} value={option.value}>{option.label}</option>)}
+              </select>
+            </label>
+            <label className="block">
+              <span className="text-sm font-semibold">Inactive since</span>
+              <select name="inactiveSince" defaultValue={String(inactiveSince)} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm">
+                <option value="0">Any duration</option>
+                <option value="7">7+ days</option>
+                <option value="14">14+ days</option>
+                <option value="30">30+ days</option>
+                <option value="60">60+ days</option>
+                <option value="90">90+ days</option>
+              </select>
+            </label>
+            <label className="block">
+              <span className="text-sm font-semibold">Follow-up</span>
+              <select name="followupStatus" defaultValue={followupStatus} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm">
+                {FOLLOWUP_STATUS_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+              </select>
+            </label>
+            <label className="block">
+              <span className="text-sm font-semibold">Reviewed</span>
+              <select name="reviewState" defaultValue={reviewState} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm">
+                {REVIEW_STATE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+              </select>
+            </label>
+            <label className="block">
+              <span className="text-sm font-semibold">Rows</span>
+              <select name="pageSize" defaultValue={String(pageSize)} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm">
+                {PAGE_SIZE_OPTIONS.map((option) => <option key={option} value={option}>{option}</option>)}
+              </select>
+            </label>
+            <div className="flex items-end gap-2">
+              <Button type="submit">Apply</Button>
+              <Button asChild variant="outline" href="/admin/members/inactive">Reset</Button>
+            </div>
+          </form>
+        </details>
+      </div>
 
       <div className="flex flex-col gap-2 text-sm text-[hsl(var(--muted))] sm:flex-row sm:items-center sm:justify-between">
         <p>
@@ -803,6 +844,16 @@ export default async function AdminInactiveMembersPage({
                   initialStatus={item.followup?.status ?? 'to_contact'}
                   initialNote={item.followup?.note ?? ''}
                   initialNextFollowUpAt={item.followup?.next_follow_up_at ?? ''}
+                  initialAssignedTo={item.followup?.assigned_to ?? ''}
+                  initialLastContactedAt={item.followup?.last_contacted_at ?? ''}
+                  initialReviewedAt={item.followup?.reviewed_at ?? ''}
+                  inactiveDays={item.inactiveDays}
+                  latestSubscriptionPlan={latest?.plan ?? null}
+                  latestSubscriptionEndDate={latest?.end_date ?? null}
+                  latestAmountDue={Number(latest?.amount_due ?? 0)}
+                  staff={inactiveStaff}
+                  templates={inactiveTemplates}
+                  initialActivities={activitiesByMember.get(member.user_id) ?? []}
                 />
               </div>
 
@@ -836,7 +887,7 @@ export default async function AdminInactiveMembersPage({
       </div>
 
       <p className="text-xs text-[hsl(var(--muted))]">
-This page can save follow-up notes/status only. It does not modify member accounts, subscriptions, access, or roles.
+This page manages inactive-member follow-up only. It does not modify member accounts, subscriptions, access, or roles.
       </p>
     </main>
   )
