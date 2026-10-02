@@ -11,9 +11,7 @@ export default function BankSuggestAllButton() {
 
   async function run() {
     if (busy) return
-    setBusy(true)
-    setNotice(null)
-    setError(null)
+    setBusy(true); setNotice(null); setError(null)
     try {
       const response = await fetch('/api/admin/banking/classification', {
         method: 'POST',
@@ -22,26 +20,19 @@ export default function BankSuggestAllButton() {
       })
       const data = await response.json()
       if (!response.ok || !data?.ok) throw new Error(data?.details || data?.error || 'Suggestion run failed.')
-      setNotice(`${data.updated ?? 0} transaction(s) received a suggestion.`)
+      setNotice(`${data.updated ?? 0} suggested · ${data.high ?? 0} high · ${data.medium ?? 0} medium · ${data.low ?? 0} low confidence.`)
       router.refresh()
     } catch (caught: any) {
       setError(String(caught?.message ?? caught))
-    } finally {
-      setBusy(false)
-    }
+    } finally { setBusy(false) }
   }
 
   return (
     <div className="flex flex-col items-start gap-1 sm:items-end">
-      <button
-        type="button"
-        disabled={busy}
-        onClick={() => void run()}
-        className="rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm font-semibold disabled:opacity-40"
-      >
-        {busy ? 'Analyzing…' : 'Suggest classifications'}
+      <button type="button" disabled={busy} onClick={() => void run()} className="rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm font-semibold disabled:opacity-40">
+        {busy ? 'Analyzing…' : 'Run smart recognition'}
       </button>
-      {notice ? <span className="text-xs text-emerald-700">{notice}</span> : null}
+      {notice ? <span className="max-w-md text-xs text-emerald-700">{notice}</span> : null}
       {error ? <span className="text-xs text-rose-700">{error}</span> : null}
     </div>
   )
