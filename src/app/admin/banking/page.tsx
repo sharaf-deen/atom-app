@@ -274,6 +274,7 @@ export default async function AdminBankingPage({
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
+          <Button asChild variant="outline" href="/admin/banking/reconciliation">Bank reconciliation</Button>
           <Button asChild variant="outline" href="/admin/payments/reconciliation">Payments reconciliation</Button>
           <Button asChild variant="outline" href="/admin">Admin</Button>
         </div>
