@@ -39,6 +39,12 @@ type BankTransactionRow = {
   category_code: string | null
   classification_status: 'unclassified' | 'suggested' | 'confirmed'
   classification_note: string | null
+
+  classification_confidence: number | string | null
+
+  classification_reason: string | null
+
+  classification_rule_id: string | null
 }
 
 type ImportRow = {
@@ -190,7 +196,7 @@ export default async function AdminBankingPage({
 
   let txQuery = admin
     .from('bank_transactions')
-    .select('id,account_id,transaction_date,value_date,description,reference,counterparty,amount,direction,running_balance,currency,source_row,created_at,category_code,classification_status,classification_note')
+    .select('id,account_id,transaction_date,value_date,description,reference,counterparty,amount,direction,running_balance,currency,source_row,created_at,category_code,classification_status,classification_note,classification_confidence,classification_reason,classification_rule_id')
     .gte('transaction_date', from)
     .lte('transaction_date', to)
     .order('transaction_date', { ascending: false })
@@ -277,6 +283,7 @@ export default async function AdminBankingPage({
           <Button asChild variant="outline" href="/admin/banking/reconciliation">Income reconciliation</Button>
           <Button asChild variant="outline" href="/admin/banking/outflows">Outflow reconciliation</Button>
           <Button asChild variant="outline" href="/admin/banking/cash-position">Cash position</Button>
+          <Button asChild variant="outline" href="/admin/banking/classification-rules">Smart rules</Button>
           <Button asChild variant="outline" href="/admin/payments/reconciliation">Payments reconciliation</Button>
           <Button asChild variant="outline" href="/admin">Admin</Button>
         </div>
@@ -341,7 +348,7 @@ export default async function AdminBankingPage({
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div className="flex flex-col gap-1">
             <h2 className="font-semibold">Bank feed</h2>
-            <p className="text-sm text-[hsl(var(--muted))]">Search, classify and review imported bank transactions.</p>
+            <p className="text-sm text-[hsl(var(--muted))]">Search, classify and review imported bank transactions with confidence-based Smart Recognition.</p>
           </div>
           <BankSuggestAllButton />
         </div>
@@ -453,6 +460,9 @@ export default async function AdminBankingPage({
                   currentCategory={row.category_code}
                   currentStatus={row.classification_status}
                   currentNote={row.classification_note}
+                  currentConfidence={row.classification_confidence == null ? null : Number(row.classification_confidence)}
+                  currentReason={row.classification_reason}
+                  currentRuleId={row.classification_rule_id}
                   categories={categories}
                 />
               </article>
