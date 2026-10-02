@@ -6,6 +6,8 @@ import { redirect } from 'next/navigation'
 import AccessDeniedCard from '@/components/AccessDeniedCard'
 import Button from '@/components/ui/Button'
 import BankStatementImporter from '@/components/admin/banking/BankStatementImporter'
+import BankTransactionClassifier, { type BankCategory } from '@/components/admin/banking/BankTransactionClassifier'
+import BankSuggestAllButton from '@/components/admin/banking/BankSuggestAllButton'
 import { getSessionUserCached, getSupabaseAdminClientCached } from '@/lib/requestCache'
 
 type Direction = 'all' | 'credit' | 'debit'
@@ -34,6 +36,9 @@ type BankTransactionRow = {
   currency: string
   source_row: number | null
   created_at: string
+  category_code: string | null
+  classification_status: 'unclassified' | 'suggested' | 'confirmed'
+  classification_note: string | null
 }
 
 type ImportRow = {
@@ -159,22 +164,33 @@ export default async function AdminBankingPage({
   const from = safeDate(first(searchParams?.from)) || defaultFrom(today)
   const to = safeDate(first(searchParams?.to)) || today
   const accountFilter = String(first(searchParams?.account) ?? '').trim()
+  const categoryFilter = String(first(searchParams?.category) ?? '').trim()
+  const classificationFilter = String(first(searchParams?.classification) ?? '').trim()
 
   const admin = getSupabaseAdminClientCached() as any
 
-  const { data: accountsData, error: accountsError } = await admin
-    .from('bank_accounts')
-    .select('id,code,display_name,bank_name,account_reference,currency,is_active')
-    .eq('is_active', true)
-    .order('display_name', { ascending: true })
+  const [accountsResult, categoriesResult] = await Promise.all([
+    admin
+      .from('bank_accounts')
+      .select('id,code,display_name,bank_name,account_reference,currency,is_active')
+      .eq('is_active', true)
+      .order('display_name', { ascending: true }),
+    admin
+      .from('bank_categories')
+      .select('code,label,direction_scope')
+      .eq('is_active', true)
+      .order('sort_order', { ascending: true }),
+  ])
 
-  const accounts = (accountsData ?? []) as BankAccountRow[]
+  const accountsError = accountsResult.error
+  const accounts = (accountsResult.data ?? []) as BankAccountRow[]
+  const categories = (categoriesResult.data ?? []) as BankCategory[]
   const validAccountId = accounts.some((row) => row.id === accountFilter) ? accountFilter : ''
   const currency = accounts[0]?.currency || 'EGP'
 
   let txQuery = admin
     .from('bank_transactions')
-    .select('id,account_id,transaction_date,value_date,description,reference,counterparty,amount,direction,running_balance,currency,source_row,created_at')
+    .select('id,account_id,transaction_date,value_date,description,reference,counterparty,amount,direction,running_balance,currency,source_row,created_at,category_code,classification_status,classification_note')
     .gte('transaction_date', from)
     .lte('transaction_date', to)
     .order('transaction_date', { ascending: false })
@@ -183,6 +199,12 @@ export default async function AdminBankingPage({
 
   if (validAccountId) txQuery = txQuery.eq('account_id', validAccountId)
   if (direction !== 'all') txQuery = txQuery.eq('direction', direction)
+  if (categoryFilter && categories.some((row) => row.code === categoryFilter)) {
+    txQuery = txQuery.eq('category_code', categoryFilter)
+  }
+  if (classificationFilter === 'unclassified' || classificationFilter === 'suggested' || classificationFilter === 'confirmed') {
+    txQuery = txQuery.eq('classification_status', classificationFilter)
+  }
 
   const [txResult, importsResult] = await Promise.all([
     txQuery,
@@ -195,7 +217,7 @@ export default async function AdminBankingPage({
 
   const transactions = (txResult.data ?? []) as BankTransactionRow[]
   const imports = (importsResult.data ?? []) as ImportRow[]
-  const loadError = accountsError?.message || txResult.error?.message || importsResult.error?.message || null
+  const loadError = accountsError?.message || categoriesResult.error?.message || txResult.error?.message || importsResult.error?.message || null
 
   const needle = q.toLowerCase()
   const filtered = needle
@@ -232,6 +254,15 @@ export default async function AdminBankingPage({
   }
 
   const accountById = new Map(accounts.map((row) => [row.id, row]))
+  const categoryByCode = new Map(categories.map((row) => [row.code, row]))
+
+  const classificationCounts = filtered.reduce(
+    (acc, row) => {
+      acc[row.classification_status] += 1
+      return acc
+    },
+    { unclassified: 0, suggested: 0, confirmed: 0 },
+  )
 
   return (
     <main className="mx-auto max-w-7xl space-y-4 p-4 sm:p-6">
@@ -279,6 +310,21 @@ export default async function AdminBankingPage({
         </div>
       </section>
 
+      <section className="grid grid-cols-3 gap-3">
+        <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-soft">
+          <p className="text-xs font-semibold uppercase tracking-wide text-[hsl(var(--muted))]">Unclassified</p>
+          <p className="mt-1 text-2xl font-bold">{classificationCounts.unclassified}</p>
+        </div>
+        <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 shadow-soft">
+          <p className="text-xs font-semibold uppercase tracking-wide text-amber-800">Suggested</p>
+          <p className="mt-1 text-2xl font-bold text-amber-900">{classificationCounts.suggested}</p>
+        </div>
+        <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 shadow-soft">
+          <p className="text-xs font-semibold uppercase tracking-wide text-emerald-800">Confirmed</p>
+          <p className="mt-1 text-2xl font-bold text-emerald-900">{classificationCounts.confirmed}</p>
+        </div>
+      </section>
+
       <BankStatementImporter
         accounts={accounts.map((row) => ({
           id: row.id,
@@ -289,12 +335,15 @@ export default async function AdminBankingPage({
       />
 
       <section className="rounded-2xl border border-[hsl(var(--border))] bg-white p-4 shadow-soft">
-        <div className="flex flex-col gap-1">
-          <h2 className="font-semibold">Bank feed</h2>
-          <p className="text-sm text-[hsl(var(--muted))]">Search and review imported bank transactions.</p>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div className="flex flex-col gap-1">
+            <h2 className="font-semibold">Bank feed</h2>
+            <p className="text-sm text-[hsl(var(--muted))]">Search, classify and review imported bank transactions.</p>
+          </div>
+          <BankSuggestAllButton />
         </div>
 
-        <form className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-[minmax(220px,1fr)_180px_180px_180px_220px_auto] xl:items-end">
+        <form className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4 xl:items-end">
           <label className="space-y-1 text-sm">
             <span className="font-medium">Search</span>
             <input name="q" defaultValue={q} placeholder="Description, reference, counterparty…" className="w-full rounded-xl border px-3 py-2.5" />
@@ -320,6 +369,22 @@ export default async function AdminBankingPage({
             <select name="account" defaultValue={validAccountId} className="w-full rounded-xl border px-3 py-2.5">
               <option value="">All accounts</option>
               {accounts.map((row) => <option key={row.id} value={row.id}>{row.display_name}</option>)}
+            </select>
+          </label>
+          <label className="space-y-1 text-sm">
+            <span className="font-medium">Category</span>
+            <select name="category" defaultValue={categoryFilter} className="w-full rounded-xl border px-3 py-2.5">
+              <option value="">All categories</option>
+              {categories.map((row) => <option key={row.code} value={row.code}>{row.label}</option>)}
+            </select>
+          </label>
+          <label className="space-y-1 text-sm">
+            <span className="font-medium">Classification</span>
+            <select name="classification" defaultValue={classificationFilter} className="w-full rounded-xl border px-3 py-2.5">
+              <option value="">All statuses</option>
+              <option value="unclassified">Unclassified</option>
+              <option value="suggested">Suggested</option>
+              <option value="confirmed">Confirmed</option>
             </select>
           </label>
           <div className="flex gap-2">
@@ -356,8 +421,37 @@ export default async function AdminBankingPage({
                     {row.running_balance !== null ? (
                       <p className="mt-1 text-xs text-[hsl(var(--muted))]">Balance: {fmtMoney(row.running_balance, row.currency)}</p>
                     ) : null}
+                    <div className="mt-2 flex flex-wrap justify-start gap-2 md:justify-end">
+                      <span className={`rounded-full border px-2 py-0.5 text-xs font-semibold ${
+                        row.classification_status === 'confirmed'
+                          ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
+                          : row.classification_status === 'suggested'
+                            ? 'border-amber-200 bg-amber-50 text-amber-800'
+                            : 'border-slate-200 bg-slate-50 text-slate-700'
+                      }`}>
+                        {row.classification_status === 'confirmed'
+                          ? 'Confirmed'
+                          : row.classification_status === 'suggested'
+                            ? 'Suggested'
+                            : 'Unclassified'}
+                      </span>
+                      {row.category_code ? (
+                        <span className="rounded-full border border-sky-200 bg-sky-50 px-2 py-0.5 text-xs font-semibold text-sky-800">
+                          {categoryByCode.get(row.category_code)?.label ?? row.category_code}
+                        </span>
+                      ) : null}
+                    </div>
                   </div>
                 </div>
+
+                <BankTransactionClassifier
+                  transactionId={row.id}
+                  direction={row.direction}
+                  currentCategory={row.category_code}
+                  currentStatus={row.classification_status}
+                  currentNote={row.classification_note}
+                  categories={categories}
+                />
               </article>
             )
           })}
@@ -400,7 +494,7 @@ export default async function AdminBankingPage({
       </section>
 
       <p className="text-xs text-[hsl(var(--muted))]">
-        Banking 1A is read-only with respect to the bank and other ATOM finance modules. It never initiates transfers or modifies Payments, Expenses, Store or Payroll.
+        Banking 1B adds internal transaction classification only. It remains read-only with respect to the bank and still does not modify Payments, Expenses, Store or Payroll.
       </p>
     </main>
   )
