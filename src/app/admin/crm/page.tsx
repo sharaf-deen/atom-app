@@ -10,6 +10,13 @@ import Section from '@/components/layout/Section'
 import Forbidden from '@/components/Forbidden'
 import Button from '@/components/ui/Button'
 import InlineAlert from '@/components/ui/InlineAlert'
+import CrmMemberFollowupActions, {
+  type CrmActivityRow,
+  type CrmFollowupRow,
+  type CrmMessageTemplateRow,
+  type CrmStaffRow,
+} from '@/components/admin/crm/CrmMemberFollowupActions'
+import CrmMessageTemplateAdmin from '@/components/admin/crm/CrmMessageTemplateAdmin'
 import { getSessionUserCached, getSupabaseAdminClientCached } from '@/lib/requestCache'
 import { addDays, cairoToday, clampInt, diffDays, CAIRO_TZ } from '@/lib/cairoDate'
 import { canAccessCrm, canManageNotifications } from '@/lib/rbac'
@@ -300,6 +307,10 @@ export default async function AdminCrmPage({
 
   let loadError: string | null = null
   let queue: QueueItem[] = []
+  let crmFollowups: CrmFollowupRow[] = []
+  let crmActivities: CrmActivityRow[] = []
+  let crmStaff: CrmStaffRow[] = []
+  let crmTemplates: CrmMessageTemplateRow[] = []
 
   try {
     const admin = getSupabaseAdminClientCached()
@@ -437,6 +448,47 @@ export default async function AdminCrmPage({
           (sub.status === 'active' && (!att.lastValidAttendanceDate || att.lastValidAttendanceDate < since30)),
       }
     })
+
+    const crmMemberIds = queue.map((item) => item.memberId)
+    const [followupsRes, activitiesRes, staffRes, templatesRes] = await Promise.all([
+      crmMemberIds.length
+        ? admin
+            .from('crm_member_followups')
+            .select('member_id,status,assigned_to,next_follow_up_at,last_contacted_at,updated_at')
+            .in('member_id', crmMemberIds)
+        : Promise.resolve({ data: [], error: null } as any),
+      crmMemberIds.length
+        ? admin
+            .from('crm_member_activities')
+            .select('id,member_id,activity_type,summary,details,actor_user_id,occurred_at')
+            .in('member_id', crmMemberIds)
+            .order('occurred_at', { ascending: false })
+            .limit(5000)
+        : Promise.resolve({ data: [], error: null } as any),
+      admin
+        .from('profiles')
+        .select('user_id,first_name,last_name,email,role')
+        .in('role', ['reception', 'admin', 'super_admin'])
+        .order('first_name', { ascending: true })
+        .limit(200),
+      admin
+        .from('crm_message_templates')
+        .select('id,channel,template_key,language,label,subject_template,body_template,is_active,updated_at')
+        .eq('is_active', true)
+        .order('channel', { ascending: true })
+        .order('template_key', { ascending: true })
+        .order('language', { ascending: true }),
+    ])
+
+    if (followupsRes.error) throw new Error(followupsRes.error.message)
+    if (activitiesRes.error) throw new Error(activitiesRes.error.message)
+    if (staffRes.error) throw new Error(staffRes.error.message)
+    if (templatesRes.error) throw new Error(templatesRes.error.message)
+
+    crmFollowups = (followupsRes.data ?? []) as CrmFollowupRow[]
+    crmActivities = (activitiesRes.data ?? []) as CrmActivityRow[]
+    crmStaff = (staffRes.data ?? []) as CrmStaffRow[]
+    crmTemplates = (templatesRes.data ?? []) as CrmMessageTemplateRow[]
   } catch (e: any) {
     loadError = e?.message ?? String(e)
   }
@@ -467,6 +519,14 @@ export default async function AdminCrmPage({
   const expiringCount = filtered.filter((i) => i.daysLeft !== null && i.daysLeft >= 0 && i.daysLeft <= 7).length
 
   const subtitle = `Who should be contacted today — Cairo time (${CAIRO_TZ}).`
+
+  const crmFollowupByMember = new Map(crmFollowups.map((row) => [row.member_id, row]))
+  const crmActivitiesByMember = new Map<string, CrmActivityRow[]>()
+  for (const row of crmActivities) {
+    const current = crmActivitiesByMember.get(row.member_id) ?? []
+    current.push(row)
+    crmActivitiesByMember.set(row.member_id, current)
+  }
 
   const queueCounts: Record<Segment, number> = {
     action: queue.filter((item) => segmentMatches(item, 'action')).length,
@@ -524,6 +584,10 @@ export default async function AdminCrmPage({
           <InlineAlert variant="error" title="Could not load CRM queue">
             {loadError}
           </InlineAlert>
+        ) : null}
+
+        {me.role === 'super_admin' ? (
+          <CrmMessageTemplateAdmin templates={crmTemplates} />
         ) : null}
 
         <div className="space-y-3">
@@ -604,9 +668,6 @@ export default async function AdminCrmPage({
             const statusToneKind = statusTone(item.subscription, today)
             const plan = humanPlan(item.subscription.plan, item.subscription.sessions_total)
             const memberHref = `/members/${item.memberId}`
-            const waDigits = normalizeWhatsappPhone(item.phone)
-            const callHref = item.phone ? `tel:${item.phone}` : ''
-            const mailHref = item.email ? `mailto:${item.email}` : ''
 
             let nextStep = 'Monitor'
             if (item.dueAmount > 0) nextStep = `Collect ${fmtMoneyEGP(item.dueAmount)}`
@@ -664,28 +725,25 @@ export default async function AdminCrmPage({
 
                   <div className="flex flex-wrap gap-2 lg:max-w-[360px] lg:justify-end">
                     <Button asChild size="sm" variant="outline" href={memberHref}>Open member</Button>
-                    {waDigits ? (
-                      <a
-                        href={`https://wa.me/${waDigits}`}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="inline-flex items-center justify-center rounded-xl border border-green-200 bg-green-50 px-3 py-2 text-sm font-semibold text-green-800"
-                      >
-                        WhatsApp
-                      </a>
-                    ) : null}
-                    {callHref ? (
-                      <a href={callHref} className="inline-flex items-center justify-center rounded-xl border border-[hsl(var(--border))] px-3 py-2 text-sm font-semibold">
-                        Call
-                      </a>
-                    ) : null}
-                    {mailHref ? (
-                      <a href={mailHref} className="inline-flex items-center justify-center rounded-xl border border-[hsl(var(--border))] px-3 py-2 text-sm font-semibold">
-                        Email
-                      </a>
-                    ) : null}
                   </div>
                 </div>
+
+                <CrmMemberFollowupActions
+                  memberId={item.memberId}
+                  memberName={item.name}
+                  memberCode={item.memberCode}
+                  email={item.email}
+                  phone={item.phone}
+                  plan={plan}
+                  dueAmount={item.dueAmount}
+                  endDate={item.subscription.end_date}
+                  lastAttendanceDate={item.lastValidAttendanceDate}
+                  noAttendance14d={item.noAttendance14d}
+                  initialFollowup={crmFollowupByMember.get(item.memberId) ?? null}
+                  staff={crmStaff}
+                  templates={crmTemplates}
+                  initialActivities={crmActivitiesByMember.get(item.memberId) ?? []}
+                />
 
                 <details className="mt-3 rounded-xl border border-[hsl(var(--border))] bg-slate-50/70 px-3 py-2">
                   <summary className="cursor-pointer text-sm font-semibold">Details</summary>
