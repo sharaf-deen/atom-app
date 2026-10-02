@@ -8,7 +8,19 @@ import { canImportProspects } from '@/lib/rbac'
 import { getSessionUser } from '@/lib/session'
 
 const CHANNELS = ['whatsapp', 'email'] as const
-const TEMPLATE_KEYS = ['first_contact', 'follow_up', 'trial_reminder'] as const
+const TEMPLATE_KEYS = [
+  'first_contact',
+  'follow_up',
+  'trial_reminder',
+  'pricing_membership',
+  'schedule_info',
+  'trial_invitation',
+  'needs_time',
+  'no_response_follow_up',
+  'trial_reschedule',
+  'post_trial_follow_up',
+  'final_follow_up',
+] as const
 const LANGUAGES = ['en', 'ar'] as const
 
 function json(body: unknown, status = 200) {

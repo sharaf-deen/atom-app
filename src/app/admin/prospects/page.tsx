@@ -73,7 +73,18 @@ export type FrontDeskStaffRow = {
 export type ProspectMessageTemplateRow = {
   id: string
   channel: 'whatsapp' | 'email'
-  template_key: 'first_contact' | 'follow_up' | 'trial_reminder'
+  template_key:
+    | 'first_contact'
+    | 'follow_up'
+    | 'trial_reminder'
+    | 'pricing_membership'
+    | 'schedule_info'
+    | 'trial_invitation'
+    | 'needs_time'
+    | 'no_response_follow_up'
+    | 'trial_reschedule'
+    | 'post_trial_follow_up'
+    | 'final_follow_up'
   language: 'en' | 'ar'
   label: string
   subject_template: string | null
