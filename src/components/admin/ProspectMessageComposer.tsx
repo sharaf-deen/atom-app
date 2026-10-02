@@ -8,7 +8,18 @@ import type {
 } from '@/app/admin/prospects/page'
 
 export type MessageChannel = 'whatsapp' | 'email'
-export type MessageTemplateKey = 'first_contact' | 'follow_up' | 'trial_reminder'
+export type MessageTemplateKey =
+  | 'first_contact'
+  | 'follow_up'
+  | 'trial_reminder'
+  | 'pricing_membership'
+  | 'schedule_info'
+  | 'trial_invitation'
+  | 'needs_time'
+  | 'no_response_follow_up'
+  | 'trial_reschedule'
+  | 'post_trial_follow_up'
+  | 'final_follow_up'
 export type MessageLanguage = 'en' | 'ar'
 
 export type MessageComposerRequest = {
@@ -34,11 +45,22 @@ const KEY_LABELS: Record<MessageTemplateKey, string> = {
   first_contact: 'First Contact',
   follow_up: 'Follow-Up',
   trial_reminder: 'Trial Reminder',
+  pricing_membership: 'Pricing / Membership',
+  schedule_info: 'Schedule / Class Times',
+  trial_invitation: 'Invite to Free Trial',
+  needs_time: 'Needs Time / Thinking',
+  no_response_follow_up: 'No Response Follow-Up',
+  trial_reschedule: 'Trial Reschedule',
+  post_trial_follow_up: 'Post-Trial Follow-Up',
+  final_follow_up: 'Final Follow-Up',
 }
 
 function defaultKey(prospect: ProspectRow): MessageTemplateKey {
   if (prospect.status === 'new') return 'first_contact'
   if (prospect.status === 'trial_booked') return 'trial_reminder'
+  if (prospect.status === 'trial_completed') return 'post_trial_follow_up'
+  if (prospect.status === 'awaiting_reply') return 'no_response_follow_up'
+  if (prospect.status === 'lost') return 'final_follow_up'
   return 'follow_up'
 }
 
