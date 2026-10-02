@@ -1086,6 +1086,9 @@ export default async function AdminPaymentsReconciliationPage({
               <Link prefetch={false} href="/admin/payments" className="border px-4 py-2 rounded-xl hover:bg-gray-50">
                 Payments
               </Link>
+              <Link prefetch={false} href="/admin/banking/reconciliation" className="border px-4 py-2 rounded-xl hover:bg-gray-50">
+                Bank reconciliation
+              </Link>
               <Link prefetch={false} href="/admin/external-income" className="border px-4 py-2 rounded-xl hover:bg-gray-50">
                 Other Income
               </Link>
