@@ -190,6 +190,7 @@ const APP_NAV_BY_ROLE: MenuByRole = {
     { label: 'Store Admin', href: '/admin/store', icon: 'bag' },
     { label: 'Invoices', href: '/invoices', icon: 'file-text' },
     { label: 'Payments', href: '/admin/payments', icon: 'file-text' },
+    { label: 'Banking', href: '/admin/banking', icon: 'wallet' },
     { label: 'Membership Refunds', href: '/admin/membership-refunds', icon: 'wallet' },
     { label: 'Freeze Requests', href: '/admin/freeze-requests', icon: 'calendar' },
     { label: 'Cash Report', href: '/admin/cash-report', icon: 'wallet' },
@@ -343,6 +344,10 @@ export function canAccessPayments(role: Role | null | undefined) {
 
 export function canAccessCashReport(role: Role | null | undefined) {
   return hasAnyRole(role, ADMIN_ROLES)
+}
+
+export function canAccessBanking(role: Role | null | undefined) {
+  return hasAnyRole(role, SUPER_ADMIN_ROLES)
 }
 
 export function canAccessExpenses(role: Role | null | undefined) {
@@ -689,6 +694,14 @@ const CAPABILITY_BLUEPRINTS: CapabilityBlueprint[] = [
     description: 'Open admin payments list and exports.',
     href: '/admin/payments',
     check: (role) => canAccessPayments(role),
+  },
+  {
+    key: 'banking',
+    category: 'Finance',
+    label: 'Banking',
+    description: 'Review ATOM bank statement imports, inflows, outflows and transaction history.',
+    href: '/admin/banking',
+    check: (role) => canAccessBanking(role),
   },
   {
     key: 'cash_report',

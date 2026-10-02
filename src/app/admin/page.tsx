@@ -286,6 +286,11 @@ export default async function AdminPage() {
           <Button asChild variant="outline" href="/admin/payments">
             Payments
           </Button>
+          {me.role === 'super_admin' ? (
+            <Button asChild variant="outline" href="/admin/banking">
+              Banking
+            </Button>
+          ) : null}
           <Button asChild variant="outline" href="/admin/cash-report">
             Cash report
           </Button>
