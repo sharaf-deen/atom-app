@@ -8,9 +8,6 @@ import { redirect } from 'next/navigation'
 import PageHeader from '@/components/layout/PageHeader'
 import Section from '@/components/layout/Section'
 import Forbidden from '@/components/Forbidden'
-import { Table } from '@/components/ui/Table'
-import Input from '@/components/ui/Input'
-import Select from '@/components/ui/Select'
 import Button from '@/components/ui/Button'
 import InlineAlert from '@/components/ui/InlineAlert'
 import { getSessionUserCached, getSupabaseAdminClientCached } from '@/lib/requestCache'
@@ -194,16 +191,6 @@ function TinyBadge({ children, tone = 'neutral' }: { children: ReactNode; tone?:
   )
 }
 
-function SummaryCard({ label, value, hint }: { label: string; value: string; hint: string }) {
-  return (
-    <div className="rounded-2xl border border-[hsl(var(--border))] bg-white p-4 shadow-soft">
-      <div className="text-sm text-[hsl(var(--muted))]">{label}</div>
-      <div className="mt-1 text-2xl font-semibold tracking-tight">{value}</div>
-      <div className="mt-2 text-xs text-[hsl(var(--muted))]">{hint}</div>
-    </div>
-  )
-}
-
 function subscriptionRank(s: SubscriptionRow, today: string) {
   const due = Math.max(Number(s.amount_due ?? 0), 0)
   const daysLeft = s.end_date ? diffDays(today, s.end_date) : 999
@@ -308,7 +295,6 @@ export default async function AdminCrmPage({
   const page = clampInt(Number(searchParams?.page ?? 1), 1, 9999)
 
   const today = cairoToday()
-  const next7 = addDays(today, 7)
   const since14 = addDays(today, -14)
   const since30 = addDays(today, -30)
 
@@ -482,119 +468,23 @@ export default async function AdminCrmPage({
 
   const subtitle = `Who should be contacted today — Cairo time (${CAIRO_TZ}).`
 
-  const rowData = paged.map((item) => {
-    const status = statusLabel(item.subscription, today)
-    const statusToneKind = statusTone(item.subscription, today)
-    const plan = humanPlan(item.subscription.plan, item.subscription.sessions_total)
-    const memberHref = `/members/${item.memberId}`
-    const waDigits = normalizeWhatsappPhone(item.phone)
-    const callHref = item.phone ? `tel:${item.phone}` : ''
-    const mailHref = item.email ? `mailto:${item.email}` : ''
+  const queueCounts: Record<Segment, number> = {
+    action: queue.filter((item) => segmentMatches(item, 'action')).length,
+    all: queue.length,
+    expiring: queue.filter((item) => segmentMatches(item, 'expiring')).length,
+    due: queue.filter((item) => segmentMatches(item, 'due')).length,
+    no_attendance: queue.filter((item) => segmentMatches(item, 'no_attendance')).length,
+    inactive: queue.filter((item) => segmentMatches(item, 'inactive')).length,
+  }
 
-    let nextStep = 'Monitor'
-    if (item.dueAmount > 0) nextStep = `Collect ${fmtMoneyEGP(item.dueAmount)}`
-    else if (item.daysLeft !== null && item.daysLeft <= 3) nextStep = 'Renew membership'
-    else if (item.noAttendance14d) nextStep = 'Follow up attendance'
-
-    let coverage = 'No end date'
-    if (item.subscription.frozen_until && item.subscription.frozen_until >= today) {
-      coverage = `Frozen until ${fmtDate(item.subscription.frozen_until)}`
-    } else if (item.daysLeft !== null) {
-      if (item.daysLeft < 0) coverage = `Expired ${Math.abs(item.daysLeft)}d ago`
-      else if (item.daysLeft === 0) coverage = 'Expires today'
-      else coverage = `Ends in ${item.daysLeft}d`
-    }
-
-    const lastSeen = item.lastValidAttendanceDate
-      ? `${fmtDate(item.lastValidAttendanceDate)}${item.validAttendance7d > 0 ? ` · ${item.validAttendance7d}/7d` : ''}`
-      : 'No valid attendance in 30d'
-
-    return {
-      id: item.memberId,
-      member: (
-        <div className="space-y-1">
-          <Link href={memberHref} className="font-semibold underline-offset-2 hover:underline">
-            {item.name}
-          </Link>
-          <div className="text-xs text-[hsl(var(--muted))]">
-            {item.memberCode ? `ID ${item.memberCode}` : 'No member code'}
-            {item.phone ? ` · ${item.phone}` : ''}
-          </div>
-        </div>
-      ),
-      next_step: (
-        <div className="space-y-2">
-          <div className="font-medium">{nextStep}</div>
-          <div className="flex flex-wrap gap-1.5">
-            {item.reasons.slice(0, 2).map((reason) => (
-              <TinyBadge key={reason.label} tone={reason.tone}>
-                {reason.label}
-              </TinyBadge>
-            ))}
-          </div>
-        </div>
-      ),
-      status: (
-        <div className="space-y-1">
-          <div className="flex flex-wrap items-center gap-2">
-            <TinyBadge tone={statusToneKind}>{status}</TinyBadge>
-            <span className="text-sm font-medium">{plan}</span>
-          </div>
-          <div className="text-xs text-[hsl(var(--muted))]">{coverage}</div>
-          <div className="text-xs text-[hsl(var(--muted))]">
-            {item.dueAmount > 0 ? `${fmtMoneyEGP(item.dueAmount)} due` : 'No due'}
-            {item.subscription.paid_at ? ` · Paid ${fmtDate(item.subscription.paid_at)}` : ''}
-          </div>
-        </div>
-      ),
-      last_seen: (
-        <div className="space-y-1">
-          <div className="font-medium">{lastSeen}</div>
-          <div className="text-xs text-[hsl(var(--muted))]">
-            {item.lastAttendanceDate ? `Latest record ${fmtDate(item.lastAttendanceDate)}` : 'No attendance record in 30d'}
-          </div>
-        </div>
-      ),
-      actions: (
-        <div className="flex flex-wrap items-center gap-2 whitespace-normal">
-          <Button asChild size="sm" variant="outline" href={memberHref}>
-            Open member
-          </Button>
-          {canManageNotifications(me.role) ? (
-            <Button asChild size="sm" variant="ghost" href="/notifications">
-              Notify
-            </Button>
-          ) : null}
-          {waDigits ? (
-            <a
-              href={`https://wa.me/${waDigits}`}
-              target="_blank"
-              rel="noreferrer"
-              className="inline-flex items-center justify-center gap-2 rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-1.5 text-sm shadow-soft hover:bg-[hsl(var(--bg))]/80"
-            >
-              WhatsApp
-            </a>
-          ) : null}
-          {callHref ? (
-            <a
-              href={callHref}
-              className="inline-flex items-center justify-center gap-2 rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-1.5 text-sm shadow-soft hover:bg-[hsl(var(--bg))]/80"
-            >
-              Call
-            </a>
-          ) : null}
-          {mailHref ? (
-            <a
-              href={mailHref}
-              className="inline-flex items-center justify-center gap-2 rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-1.5 text-sm shadow-soft hover:bg-[hsl(var(--bg))]/80"
-            >
-              Email
-            </a>
-          ) : null}
-        </div>
-      ),
-    }
-  })
+  const queueOptions: Array<{ value: Segment; label: string; hint: string }> = [
+    { value: 'action', label: 'Action needed', hint: 'Treat first' },
+    { value: 'expiring', label: 'Expiring', hint: 'Next 7 days' },
+    { value: 'due', label: 'Payment due', hint: 'Outstanding balance' },
+    { value: 'no_attendance', label: 'No attendance', hint: '14+ days' },
+    { value: 'inactive', label: 'Inactive', hint: '30+ days' },
+    { value: 'all', label: 'All', hint: 'Full CRM queue' },
+  ]
 
   const segmentLabel =
     segment === 'action'
@@ -636,66 +526,203 @@ export default async function AdminCrmPage({
           </InlineAlert>
         ) : null}
 
-        <div className="grid gap-4 grid-cols-1 sm:grid-cols-3">
-          <SummaryCard label="Overview" value={String(totalVisible)} hint={segmentLabel} />
-          <SummaryCard label="Contact today" value={String(actionCount)} hint="Rows to treat first" />
-          <SummaryCard label="High priority" value={`${dueCount} due · ${expiringCount} expiring`} hint={`${today} → ${next7}`} />
+        <div className="space-y-3">
+          <div>
+            <h2 className="text-base font-semibold">Daily work queue</h2>
+            <p className="text-sm text-[hsl(var(--muted))]">Choose a queue to focus on the members who need attention first.</p>
+          </div>
+
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-6">
+            {queueOptions.map((option) => {
+              const active = segment === option.value
+              const urgent = option.value === 'action' && queueCounts.action > 0
+              return (
+                <Link
+                  key={option.value}
+                  href={`/admin/crm${buildQS({ segment: option.value, q: q || undefined })}`}
+                  className={`rounded-2xl border p-3 text-left transition ${
+                    active
+                      ? 'border-black bg-black text-white shadow-soft'
+                      : urgent
+                        ? 'border-rose-300 bg-rose-50 hover:border-rose-400'
+                        : 'border-[hsl(var(--border))] bg-white hover:border-slate-400'
+                  }`}
+                >
+                  <div className={`text-xs font-semibold uppercase tracking-wide ${active ? 'text-white/70' : 'text-[hsl(var(--muted))]'}`}>
+                    {option.label}
+                  </div>
+                  <div className="mt-1 text-2xl font-bold">{queueCounts[option.value]}</div>
+                  <div className={`mt-1 text-xs ${active ? 'text-white/70' : 'text-[hsl(var(--muted))]'}`}>{option.hint}</div>
+                </Link>
+              )
+            })}
+          </div>
         </div>
 
         <div className="rounded-2xl border border-[hsl(var(--border))] bg-white p-4 shadow-soft">
-          <div className="mb-3 flex flex-wrap gap-2">
-            <Button asChild variant="outline" href="/admin/outstanding-dues">
-              Outstanding dues
-            </Button>
-            <Button asChild variant="outline" href="/admin/expiring-soon">
-              Expiring soon
-            </Button>
-            <Button asChild variant="outline" href="/members">
-              Open members
-            </Button>
-            {canManageNotifications(me.role) ? (
-              <Button asChild variant="outline" href="/notifications">
-                Notifications
-              </Button>
-            ) : null}
-          </div>
-          <form className="grid gap-3 md:grid-cols-[180px_minmax(0,1fr)_auto] md:items-end" method="get">
-            <Select label="Queue" name="segment" defaultValue={segment}>
-              <option value="action">Action needed first</option>
-              <option value="all">All rows</option>
-              <option value="expiring">Expiring soon</option>
-              <option value="due">Outstanding dues</option>
-              <option value="no_attendance">No recent attendance</option>
-              <option value="inactive">Inactive recently</option>
-            </Select>
-            <Input label="Search" name="q" defaultValue={q} placeholder="Name, email, phone, member ID" />
-            <div className="flex flex-wrap gap-2">
-              <Button type="submit" variant="outline">
-                Apply
-              </Button>
-              <Button asChild variant="ghost" href="/admin/crm">
-                Reset
-              </Button>
+          <form className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end" method="get">
+            <input type="hidden" name="segment" value={segment} />
+            <label className="space-y-1 text-sm">
+              <span className="font-medium">Search</span>
+              <input
+                name="q"
+                defaultValue={q}
+                type="search"
+                placeholder="Name, email, phone, member ID…"
+                className="w-full rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2.5 outline-none focus:border-black"
+                autoCapitalize="none"
+                autoCorrect="off"
+                spellCheck={false}
+              />
+            </label>
+            <div className="flex gap-2">
+              <Button type="submit" variant="outline">Search</Button>
+              {(q || segment !== 'action') ? (
+                <Button asChild variant="ghost" href="/admin/crm">Clear</Button>
+              ) : null}
             </div>
           </form>
+
+          <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs text-[hsl(var(--muted))]">
+            <span>
+              Queue: <strong className="text-[hsl(var(--foreground))]">{segmentLabel}</strong>
+              {' · '}Showing {totalVisible} of {queue.length} member(s) in priority order.
+            </span>
+            <div className="flex flex-wrap gap-2">
+              <Button asChild size="sm" variant="ghost" href="/admin/outstanding-dues">Outstanding dues</Button>
+              <Button asChild size="sm" variant="ghost" href="/admin/expiring-soon">Expiring soon</Button>
+              {canManageNotifications(me.role) ? (
+                <Button asChild size="sm" variant="ghost" href="/notifications">Notifications</Button>
+              ) : null}
+            </div>
+          </div>
         </div>
 
-        <Table
-          keyField="id"
-          stickyTopClassName="top-0"
-          columns={[
-            { key: 'member', header: 'Member' },
-            { key: 'next_step', header: 'Next step' },
-            { key: 'status', header: 'Status' },
-            { key: 'last_seen', header: 'Last seen' },
-            { key: 'actions', header: 'Actions' },
-          ]}
-          rows={rowData}
-        />
+        <div className="space-y-3">
+          {paged.map((item) => {
+            const status = statusLabel(item.subscription, today)
+            const statusToneKind = statusTone(item.subscription, today)
+            const plan = humanPlan(item.subscription.plan, item.subscription.sessions_total)
+            const memberHref = `/members/${item.memberId}`
+            const waDigits = normalizeWhatsappPhone(item.phone)
+            const callHref = item.phone ? `tel:${item.phone}` : ''
+            const mailHref = item.email ? `mailto:${item.email}` : ''
 
-        {!loadError && !rowData.length ? (
+            let nextStep = 'Monitor'
+            if (item.dueAmount > 0) nextStep = `Collect ${fmtMoneyEGP(item.dueAmount)}`
+            else if (item.daysLeft !== null && item.daysLeft <= 3) nextStep = 'Renew membership'
+            else if (item.noAttendance14d) nextStep = 'Follow up attendance'
+
+            let coverage = 'No end date'
+            if (item.subscription.frozen_until && item.subscription.frozen_until >= today) {
+              coverage = `Frozen until ${fmtDate(item.subscription.frozen_until)}`
+            } else if (item.daysLeft !== null) {
+              if (item.daysLeft < 0) coverage = `Expired ${Math.abs(item.daysLeft)}d ago`
+              else if (item.daysLeft === 0) coverage = 'Expires today'
+              else coverage = `Ends in ${item.daysLeft}d`
+            }
+
+            const lastSeen = item.lastValidAttendanceDate
+              ? `${fmtDate(item.lastValidAttendanceDate)}${item.validAttendance7d > 0 ? ` · ${item.validAttendance7d}/7d` : ''}`
+              : 'No valid attendance in 30d'
+
+            return (
+              <article key={item.memberId} className="rounded-2xl border border-[hsl(var(--border))] bg-white p-4 shadow-soft">
+                <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                  <div className="min-w-0 space-y-2">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Link href={memberHref} className="text-lg font-semibold underline-offset-2 hover:underline">
+                        {item.name}
+                      </Link>
+                      <TinyBadge tone={statusToneKind}>{status}</TinyBadge>
+                      {item.reasons.slice(0, 3).map((reason) => (
+                        <TinyBadge key={reason.label} tone={reason.tone}>{reason.label}</TinyBadge>
+                      ))}
+                    </div>
+
+                    <div className="text-xs text-[hsl(var(--muted))]">
+                      {item.memberCode ? `ID ${item.memberCode}` : 'No member code'}
+                      {item.phone ? ` · ${item.phone}` : ''}
+                      {item.email ? ` · ${item.email}` : ''}
+                    </div>
+
+                    <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                      <div className="rounded-xl bg-slate-50 px-3 py-2">
+                        <div className="text-[11px] font-semibold uppercase tracking-wide text-[hsl(var(--muted))]">Next action</div>
+                        <div className="mt-0.5 text-sm font-semibold">{nextStep}</div>
+                      </div>
+                      <div className="rounded-xl bg-slate-50 px-3 py-2">
+                        <div className="text-[11px] font-semibold uppercase tracking-wide text-[hsl(var(--muted))]">Membership</div>
+                        <div className="mt-0.5 text-sm font-semibold">{coverage}</div>
+                      </div>
+                      <div className="rounded-xl bg-slate-50 px-3 py-2">
+                        <div className="text-[11px] font-semibold uppercase tracking-wide text-[hsl(var(--muted))]">Last attendance</div>
+                        <div className="mt-0.5 text-sm font-semibold">{lastSeen}</div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-wrap gap-2 lg:max-w-[360px] lg:justify-end">
+                    <Button asChild size="sm" variant="outline" href={memberHref}>Open member</Button>
+                    {waDigits ? (
+                      <a
+                        href={`https://wa.me/${waDigits}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex items-center justify-center rounded-xl border border-green-200 bg-green-50 px-3 py-2 text-sm font-semibold text-green-800"
+                      >
+                        WhatsApp
+                      </a>
+                    ) : null}
+                    {callHref ? (
+                      <a href={callHref} className="inline-flex items-center justify-center rounded-xl border border-[hsl(var(--border))] px-3 py-2 text-sm font-semibold">
+                        Call
+                      </a>
+                    ) : null}
+                    {mailHref ? (
+                      <a href={mailHref} className="inline-flex items-center justify-center rounded-xl border border-[hsl(var(--border))] px-3 py-2 text-sm font-semibold">
+                        Email
+                      </a>
+                    ) : null}
+                  </div>
+                </div>
+
+                <details className="mt-3 rounded-xl border border-[hsl(var(--border))] bg-slate-50/70 px-3 py-2">
+                  <summary className="cursor-pointer text-sm font-semibold">Details</summary>
+                  <div className="mt-3 grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-4">
+                    <div>
+                      <div className="text-xs font-semibold uppercase tracking-wide text-[hsl(var(--muted))]">Plan</div>
+                      <div className="mt-1 font-medium">{plan}</div>
+                      <div className="mt-1 text-xs text-[hsl(var(--muted))]">{status} · {coverage}</div>
+                    </div>
+                    <div>
+                      <div className="text-xs font-semibold uppercase tracking-wide text-[hsl(var(--muted))]">Payment</div>
+                      <div className="mt-1 font-medium">{item.dueAmount > 0 ? `${fmtMoneyEGP(item.dueAmount)} due` : 'No due'}</div>
+                      <div className="mt-1 text-xs text-[hsl(var(--muted))]">
+                        {humanPayment(item.subscription.payment_method)}
+                        {item.subscription.paid_at ? ` · Paid ${fmtDate(item.subscription.paid_at)}` : ''}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-xs font-semibold uppercase tracking-wide text-[hsl(var(--muted))]">Attendance</div>
+                      <div className="mt-1 font-medium">{item.validAttendance30d} valid / 30d</div>
+                      <div className="mt-1 text-xs text-[hsl(var(--muted))]">{item.validAttendance7d} valid / 7d</div>
+                    </div>
+                    <div>
+                      <div className="text-xs font-semibold uppercase tracking-wide text-[hsl(var(--muted))]">Latest record</div>
+                      <div className="mt-1 font-medium">{item.lastAttendanceDate ? fmtDate(item.lastAttendanceDate) : 'No attendance record in 30d'}</div>
+                      <div className="mt-1 text-xs text-[hsl(var(--muted))]">Priority score {item.priority}</div>
+                    </div>
+                  </div>
+                </details>
+              </article>
+            )
+          })}
+        </div>
+
+        {!loadError && !paged.length ? (
           <InlineAlert variant="info" title="No members in this queue">
-            Nothing matches the current CRM filters.
+            Nothing matches the current CRM queue and search.
           </InlineAlert>
         ) : null}
 
