@@ -1,10 +1,11 @@
-// Staff Payroll 2I — Financial Snapshot, Salary Calculation & Approval
+// Staff Payroll — Hybrid Official Engine 1B
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
 import { redirect } from 'next/navigation'
 import AccessDeniedCard from '@/components/AccessDeniedCard'
 import StaffPayrollCalculationManager from '@/components/staff-payroll/StaffPayrollCalculationManager'
+import StaffPayrollHybridOfficialManager from '@/components/staff-payroll/StaffPayrollHybridOfficialManager'
 import { getSessionUser } from '@/lib/session'
 import { getSupabaseAdminClientCached } from '@/lib/requestCache'
 
@@ -136,7 +137,7 @@ export default async function StaffPayrollCalculationPage({
     admin
       .from('staff_payroll_monthly_snapshots')
       .select(
-        'id,month_start,status,eligible_revenue_scope,rate_model,bonus_pool_percent,variable_payroll_percent,safety_reserve_percent,safety_reserve_amount,membership_revenue,membership_payment_count,paid_membership_refunds,paid_membership_refund_count,net_membership_revenue,eligible_operating_expenses,eligible_expense_count,excluded_payroll_expenses,excluded_payroll_expense_count,operating_result_before_payroll,guaranteed_payroll,fixed_base_payroll,minimum_task_payroll,available_result_after_guaranteed_payroll,performance_bonus_pool,dynamic_task_supplement_pool,variable_payroll_pool,variable_pool_weighted_hours,variable_weighted_hour_value,salary_before_adjustments_total,manual_bonus_total,manual_deduction_total,net_manual_adjustment_total,calculated_payroll_total,staff_count,missing_hours_task_count,unconfigured_staff_count,calculated_at,source_data_as_of,approval_version_no,approved_at,approved_by,last_reopened_at,last_reopened_by,last_reopen_reason,financial_source_hash,task_source_hash,compensation_source_hash,staff_source_hash,draft_snapshot_hash,draft_calculation_hash'
+        'id,month_start,status,eligible_revenue_scope,rate_model,bonus_pool_percent,variable_payroll_percent,safety_reserve_percent,safety_reserve_amount,coach_session_rate,head_coach_session_rate,coach_session_count,head_coach_session_count,guaranteed_coaching_payroll,membership_revenue,membership_payment_count,paid_membership_refunds,paid_membership_refund_count,net_membership_revenue,eligible_operating_expenses,eligible_expense_count,excluded_payroll_expenses,excluded_payroll_expense_count,operating_result_before_payroll,guaranteed_payroll,fixed_base_payroll,minimum_task_payroll,available_result_after_guaranteed_payroll,performance_bonus_pool,dynamic_task_supplement_pool,variable_payroll_pool,variable_pool_weighted_hours,variable_weighted_hour_value,salary_before_adjustments_total,manual_bonus_total,manual_deduction_total,net_manual_adjustment_total,calculated_payroll_total,staff_count,missing_hours_task_count,unconfigured_staff_count,calculated_at,source_data_as_of,approval_version_no,approved_at,approved_by,last_reopened_at,last_reopened_by,last_reopen_reason,financial_source_hash,task_source_hash,compensation_source_hash,staff_source_hash,draft_snapshot_hash,draft_calculation_hash'
       )
       .eq('month_start', monthStart)
       .maybeSingle(),
@@ -177,6 +178,8 @@ export default async function StaffPayrollCalculationPage({
     loadError.includes('staff_payroll_approval_versions') ||
     loadError.includes('staff_payroll_reopen_events') ||
     loadError.includes('financial_source_hash') ||
+    loadError.includes('coach_session_rate') ||
+    loadError.includes('guaranteed_coaching_payroll') ||
     loadError.toLowerCase().includes('does not exist')
 
   let calculationsResult: any = { data: [], error: null }
@@ -184,7 +187,7 @@ export default async function StaffPayrollCalculationPage({
     calculationsResult = await admin
       .from('staff_payroll_monthly_calculations')
       .select(
-        'id,snapshot_id,month_start,staff_user_id,staff_name_snapshot,staff_role_snapshot,compensation_configured,compensation_rate_period_id,compensation_effective_from,compensation_effective_until,fixed_monthly_base,weighted_hour_rate,bonus_eligible,active_task_count,missing_hours_task_count,actual_hours,weighted_hours,task_compensation,minimum_task_compensation,dynamic_task_supplement,dynamic_weight_share_percent,guaranteed_compensation,bonus_weight_share_percent,performance_bonus,salary_before_adjustments,manual_bonus,manual_deduction,net_manual_adjustment,calculated_salary,adjustment_breakdown,task_rate_breakdown,updated_at'
+        'id,snapshot_id,month_start,staff_user_id,staff_name_snapshot,staff_role_snapshot,compensation_configured,compensation_rate_period_id,compensation_effective_from,compensation_effective_until,fixed_monthly_base,weighted_hour_rate,bonus_eligible,active_task_count,missing_hours_task_count,actual_hours,weighted_hours,coaching_sessions,coaching_session_rate,coaching_guarantee,non_coaching_weighted_hours,non_coaching_variable_pay,task_compensation,minimum_task_compensation,dynamic_task_supplement,dynamic_weight_share_percent,guaranteed_compensation,bonus_weight_share_percent,performance_bonus,salary_before_adjustments,manual_bonus,manual_deduction,net_manual_adjustment,calculated_salary,adjustment_breakdown,task_rate_breakdown,updated_at'
       )
       .eq('snapshot_id', snapshotResult.data.id)
       .order('staff_name_snapshot', { ascending: true })
@@ -221,49 +224,32 @@ export default async function StaffPayrollCalculationPage({
         id: String(snapshotResult.data.id),
         month_start: String(snapshotResult.data.month_start),
         status: String(snapshotResult.data.status ?? 'draft'),
-        eligible_revenue_scope: String(
-          snapshotResult.data.eligible_revenue_scope ?? 'membership_only'
-        ),
+        eligible_revenue_scope: String(snapshotResult.data.eligible_revenue_scope ?? 'membership_only'),
         rate_model: String(snapshotResult.data.rate_model ?? 'legacy_performance_bonus'),
         bonus_pool_percent: Number(snapshotResult.data.bonus_pool_percent ?? 0),
         variable_payroll_percent: Number(snapshotResult.data.variable_payroll_percent ?? snapshotResult.data.bonus_pool_percent ?? 0),
         safety_reserve_percent: Number(snapshotResult.data.safety_reserve_percent ?? 0),
         safety_reserve_amount: Number(snapshotResult.data.safety_reserve_amount ?? 0),
+        coach_session_rate: Number(snapshotResult.data.coach_session_rate ?? 0),
+        head_coach_session_rate: Number(snapshotResult.data.head_coach_session_rate ?? 0),
+        coach_session_count: Number(snapshotResult.data.coach_session_count ?? 0),
+        head_coach_session_count: Number(snapshotResult.data.head_coach_session_count ?? 0),
+        guaranteed_coaching_payroll: Number(snapshotResult.data.guaranteed_coaching_payroll ?? 0),
         membership_revenue: Number(snapshotResult.data.membership_revenue ?? 0),
-        membership_payment_count: Number(
-          snapshotResult.data.membership_payment_count ?? 0
-        ),
-        paid_membership_refunds: Number(
-          snapshotResult.data.paid_membership_refunds ?? 0
-        ),
-        paid_membership_refund_count: Number(
-          snapshotResult.data.paid_membership_refund_count ?? 0
-        ),
-        net_membership_revenue: Number(
-          snapshotResult.data.net_membership_revenue ?? 0
-        ),
-        eligible_operating_expenses: Number(
-          snapshotResult.data.eligible_operating_expenses ?? 0
-        ),
+        membership_payment_count: Number(snapshotResult.data.membership_payment_count ?? 0),
+        paid_membership_refunds: Number(snapshotResult.data.paid_membership_refunds ?? 0),
+        paid_membership_refund_count: Number(snapshotResult.data.paid_membership_refund_count ?? 0),
+        net_membership_revenue: Number(snapshotResult.data.net_membership_revenue ?? 0),
+        eligible_operating_expenses: Number(snapshotResult.data.eligible_operating_expenses ?? 0),
         eligible_expense_count: Number(snapshotResult.data.eligible_expense_count ?? 0),
-        excluded_payroll_expenses: Number(
-          snapshotResult.data.excluded_payroll_expenses ?? 0
-        ),
-        excluded_payroll_expense_count: Number(
-          snapshotResult.data.excluded_payroll_expense_count ?? 0
-        ),
-        operating_result_before_payroll: Number(
-          snapshotResult.data.operating_result_before_payroll ?? 0
-        ),
+        excluded_payroll_expenses: Number(snapshotResult.data.excluded_payroll_expenses ?? 0),
+        excluded_payroll_expense_count: Number(snapshotResult.data.excluded_payroll_expense_count ?? 0),
+        operating_result_before_payroll: Number(snapshotResult.data.operating_result_before_payroll ?? 0),
         guaranteed_payroll: Number(snapshotResult.data.guaranteed_payroll ?? 0),
         fixed_base_payroll: Number(snapshotResult.data.fixed_base_payroll ?? snapshotResult.data.guaranteed_payroll ?? 0),
         minimum_task_payroll: Number(snapshotResult.data.minimum_task_payroll ?? 0),
-        available_result_after_guaranteed_payroll: Number(
-          snapshotResult.data.available_result_after_guaranteed_payroll ?? 0
-        ),
-        performance_bonus_pool: Number(
-          snapshotResult.data.performance_bonus_pool ?? 0
-        ),
+        available_result_after_guaranteed_payroll: Number(snapshotResult.data.available_result_after_guaranteed_payroll ?? 0),
+        performance_bonus_pool: Number(snapshotResult.data.performance_bonus_pool ?? 0),
         dynamic_task_supplement_pool: Number(snapshotResult.data.dynamic_task_supplement_pool ?? 0),
         variable_payroll_pool: Number(snapshotResult.data.variable_payroll_pool ?? snapshotResult.data.dynamic_task_supplement_pool ?? 0),
         variable_pool_weighted_hours: Number(snapshotResult.data.variable_pool_weighted_hours ?? 0),
@@ -275,40 +261,20 @@ export default async function StaffPayrollCalculationPage({
             ? Number(snapshotResult.data.calculated_payroll_total ?? 0)
             : Number(snapshotResult.data.salary_before_adjustments_total ?? 0),
         manual_bonus_total: Number(snapshotResult.data.manual_bonus_total ?? 0),
-        manual_deduction_total: Number(
-          snapshotResult.data.manual_deduction_total ?? 0
-        ),
-        net_manual_adjustment_total: Number(
-          snapshotResult.data.net_manual_adjustment_total ?? 0
-        ),
-        calculated_payroll_total: Number(
-          snapshotResult.data.calculated_payroll_total ?? 0
-        ),
+        manual_deduction_total: Number(snapshotResult.data.manual_deduction_total ?? 0),
+        net_manual_adjustment_total: Number(snapshotResult.data.net_manual_adjustment_total ?? 0),
+        calculated_payroll_total: Number(snapshotResult.data.calculated_payroll_total ?? 0),
         staff_count: Number(snapshotResult.data.staff_count ?? 0),
-        missing_hours_task_count: Number(
-          snapshotResult.data.missing_hours_task_count ?? 0
-        ),
-        unconfigured_staff_count: Number(
-          snapshotResult.data.unconfigured_staff_count ?? 0
-        ),
+        missing_hours_task_count: Number(snapshotResult.data.missing_hours_task_count ?? 0),
+        unconfigured_staff_count: Number(snapshotResult.data.unconfigured_staff_count ?? 0),
         calculated_at: String(snapshotResult.data.calculated_at),
         source_data_as_of: String(snapshotResult.data.source_data_as_of),
         approval_version_no: Number(snapshotResult.data.approval_version_no ?? 0),
-        approved_at: snapshotResult.data.approved_at
-          ? String(snapshotResult.data.approved_at)
-          : null,
-        approved_by: snapshotResult.data.approved_by
-          ? String(snapshotResult.data.approved_by)
-          : null,
-        last_reopened_at: snapshotResult.data.last_reopened_at
-          ? String(snapshotResult.data.last_reopened_at)
-          : null,
-        last_reopened_by: snapshotResult.data.last_reopened_by
-          ? String(snapshotResult.data.last_reopened_by)
-          : null,
-        last_reopen_reason: snapshotResult.data.last_reopen_reason
-          ? String(snapshotResult.data.last_reopen_reason)
-          : null,
+        approved_at: snapshotResult.data.approved_at ? String(snapshotResult.data.approved_at) : null,
+        approved_by: snapshotResult.data.approved_by ? String(snapshotResult.data.approved_by) : null,
+        last_reopened_at: snapshotResult.data.last_reopened_at ? String(snapshotResult.data.last_reopened_at) : null,
+        last_reopened_by: snapshotResult.data.last_reopened_by ? String(snapshotResult.data.last_reopened_by) : null,
+        last_reopen_reason: snapshotResult.data.last_reopen_reason ? String(snapshotResult.data.last_reopen_reason) : null,
         integrity_ready: Boolean(
           snapshotResult.data.financial_source_hash &&
           snapshotResult.data.task_source_hash &&
@@ -324,9 +290,7 @@ export default async function StaffPayrollCalculationPage({
     const calculatedSalary = Number(row.calculated_salary ?? 0)
     const manualBonus = Number(row.manual_bonus ?? 0)
     const manualDeduction = Number(row.manual_deduction ?? 0)
-    const adjustmentBreakdown = Array.isArray(row.adjustment_breakdown)
-      ? row.adjustment_breakdown
-      : []
+    const adjustmentBreakdown = Array.isArray(row.adjustment_breakdown) ? row.adjustment_breakdown : []
     const storedSalaryBefore = Number(row.salary_before_adjustments ?? 0)
     const salaryBeforeAdjustments =
       storedSalaryBefore === 0 && manualBonus === 0 && manualDeduction === 0 && !adjustmentBreakdown.length
@@ -334,49 +298,44 @@ export default async function StaffPayrollCalculationPage({
         : storedSalaryBefore
 
     return {
-    id: String(row.id),
-    snapshot_id: String(row.snapshot_id),
-    month_start: String(row.month_start),
-    staff_user_id: String(row.staff_user_id),
-    staff_name_snapshot: String(row.staff_name_snapshot),
-    staff_role_snapshot: row.staff_role_snapshot
-      ? String(row.staff_role_snapshot)
-      : null,
-    compensation_configured: Boolean(row.compensation_configured),
-    compensation_rate_period_id: row.compensation_rate_period_id
-      ? String(row.compensation_rate_period_id)
-      : null,
-    compensation_effective_from: row.compensation_effective_from
-      ? String(row.compensation_effective_from)
-      : null,
-    compensation_effective_until: row.compensation_effective_until
-      ? String(row.compensation_effective_until)
-      : null,
-    fixed_monthly_base: Number(row.fixed_monthly_base ?? 0),
-    weighted_hour_rate: Number(row.weighted_hour_rate ?? 0),
-    bonus_eligible: Boolean(row.bonus_eligible),
-    active_task_count: Number(row.active_task_count ?? 0),
-    missing_hours_task_count: Number(row.missing_hours_task_count ?? 0),
-    actual_hours: Number(row.actual_hours ?? 0),
-    weighted_hours: Number(row.weighted_hours ?? 0),
-    task_compensation: Number(row.task_compensation ?? 0),
-    minimum_task_compensation: Number(row.minimum_task_compensation ?? row.task_compensation ?? 0),
-    dynamic_task_supplement: Number(row.dynamic_task_supplement ?? 0),
-    dynamic_weight_share_percent: Number(row.dynamic_weight_share_percent ?? 0),
-    guaranteed_compensation: Number(row.guaranteed_compensation ?? 0),
-    bonus_weight_share_percent: Number(row.bonus_weight_share_percent ?? 0),
-    performance_bonus: Number(row.performance_bonus ?? 0),
-    salary_before_adjustments: salaryBeforeAdjustments,
-    manual_bonus: manualBonus,
-    manual_deduction: manualDeduction,
-    net_manual_adjustment: Number(row.net_manual_adjustment ?? 0),
-    calculated_salary: calculatedSalary,
-    adjustment_breakdown: adjustmentBreakdown,
-    task_rate_breakdown: Array.isArray(row.task_rate_breakdown)
-      ? row.task_rate_breakdown
-      : [],
-    updated_at: String(row.updated_at),
-  }
+      id: String(row.id),
+      snapshot_id: String(row.snapshot_id),
+      month_start: String(row.month_start),
+      staff_user_id: String(row.staff_user_id),
+      staff_name_snapshot: String(row.staff_name_snapshot),
+      staff_role_snapshot: row.staff_role_snapshot ? String(row.staff_role_snapshot) : null,
+      compensation_configured: Boolean(row.compensation_configured),
+      compensation_rate_period_id: row.compensation_rate_period_id ? String(row.compensation_rate_period_id) : null,
+      compensation_effective_from: row.compensation_effective_from ? String(row.compensation_effective_from) : null,
+      compensation_effective_until: row.compensation_effective_until ? String(row.compensation_effective_until) : null,
+      fixed_monthly_base: Number(row.fixed_monthly_base ?? 0),
+      weighted_hour_rate: Number(row.weighted_hour_rate ?? 0),
+      bonus_eligible: Boolean(row.bonus_eligible),
+      active_task_count: Number(row.active_task_count ?? 0),
+      missing_hours_task_count: Number(row.missing_hours_task_count ?? 0),
+      actual_hours: Number(row.actual_hours ?? 0),
+      weighted_hours: Number(row.weighted_hours ?? 0),
+      coaching_sessions: Number(row.coaching_sessions ?? 0),
+      coaching_session_rate: Number(row.coaching_session_rate ?? 0),
+      coaching_guarantee: Number(row.coaching_guarantee ?? 0),
+      non_coaching_weighted_hours: Number(row.non_coaching_weighted_hours ?? 0),
+      non_coaching_variable_pay: Number(row.non_coaching_variable_pay ?? 0),
+      task_compensation: Number(row.task_compensation ?? 0),
+      minimum_task_compensation: Number(row.minimum_task_compensation ?? row.task_compensation ?? 0),
+      dynamic_task_supplement: Number(row.dynamic_task_supplement ?? 0),
+      dynamic_weight_share_percent: Number(row.dynamic_weight_share_percent ?? 0),
+      guaranteed_compensation: Number(row.guaranteed_compensation ?? 0),
+      bonus_weight_share_percent: Number(row.bonus_weight_share_percent ?? 0),
+      performance_bonus: Number(row.performance_bonus ?? 0),
+      salary_before_adjustments: salaryBeforeAdjustments,
+      manual_bonus: manualBonus,
+      manual_deduction: manualDeduction,
+      net_manual_adjustment: Number(row.net_manual_adjustment ?? 0),
+      calculated_salary: calculatedSalary,
+      adjustment_breakdown: adjustmentBreakdown,
+      task_rate_breakdown: Array.isArray(row.task_rate_breakdown) ? row.task_rate_breakdown : [],
+      updated_at: String(row.updated_at),
+    }
   })
 
   const approvalVersions = ((approvalVersionsResult.data ?? []) as any[]).map(
@@ -405,6 +364,9 @@ export default async function StaffPayrollCalculationPage({
     reason: String(row.reason ?? ''),
   }))
 
+  const useLegacyApprovedView =
+    snapshot?.status === 'approved' && snapshot?.rate_model !== 'hybrid_payroll'
+
   return (
     <main className="mx-auto max-w-6xl space-y-5 p-4 sm:p-6">
       <section className="rounded-3xl border border-black/10 bg-gradient-to-br from-white to-black/[0.02] p-5 sm:p-6">
@@ -412,7 +374,7 @@ export default async function StaffPayrollCalculationPage({
           <div className="max-w-3xl">
             <div className="flex flex-wrap items-center gap-2">
               <span className="rounded-full bg-black px-3 py-1 text-xs font-semibold text-white">
-                Staff Payroll 1D
+                Hybrid Official Engine 1B
               </span>
               <span
                 className={
@@ -422,20 +384,18 @@ export default async function StaffPayrollCalculationPage({
                     : 'bg-sky-50 text-sky-800')
                 }
               >
-                {canWrite ? 'Super Admin · draft calculation' : 'Admin · read-only'}
+                {canWrite ? 'Super Admin · official draft' : 'Admin · read-only'}
               </span>
             </div>
 
             <h1 className="mt-3 text-2xl font-bold sm:text-3xl">
-              Financial Snapshot, Salary Calculation & Approval
+              Staff Payroll · Official Hybrid Calculation
             </h1>
             <p className="mt-2 text-sm text-[hsl(var(--muted))] sm:text-base">
-              Calculate a monthly payroll draft from membership payments, paid membership refunds,
-              operating expenses and weighted work, then approve and lock the month when the draft is ready.
+              Guaranteed coaching compensation plus weighted non-coaching work, calculated from ATOM&apos;s monthly operating result.
             </p>
             <p className="mt-2 text-xs text-[hsl(var(--muted))]">
-              Eligible revenue is membership/subscription payments only. External Income, Store revenue,
-              Funding and other revenue streams remain excluded. Approved months are locked and versioned.
+              Approved legacy payroll history remains available unchanged. Hybrid approval is intentionally disabled until the approval-integration lot.
             </p>
           </div>
         </div>
@@ -454,10 +414,7 @@ export default async function StaffPayrollCalculationPage({
               className="mt-1 w-full rounded-xl border border-black/10 bg-white px-3 py-2 text-sm sm:w-[220px]"
             />
           </label>
-          <button
-            type="submit"
-            className="rounded-xl bg-black px-4 py-2 text-sm font-semibold text-white"
-          >
+          <button type="submit" className="rounded-xl bg-black px-4 py-2 text-sm font-semibold text-white">
             Load month
           </button>
         </form>
@@ -470,7 +427,7 @@ export default async function StaffPayrollCalculationPage({
         <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950">
           <div className="font-semibold">Database update required</div>
           <div className="mt-1 text-xs">
-            Deploy the latest database changes, then refresh this page.
+            Deploy Hybrid Official Engine 1A database changes, then refresh this page.
           </div>
         </div>
       ) : null}
@@ -482,19 +439,28 @@ export default async function StaffPayrollCalculationPage({
       ) : null}
 
       {!migrationMissing ? (
-        <StaffPayrollCalculationManager
-          monthStart={monthStart}
-          staffProfiles={staffProfiles}
-          compensationProfiles={compensationProfiles}
-          snapshot={snapshot}
-          calculations={calculations}
-          approvalVersions={approvalVersions}
-          reopenEvents={reopenEvents}
-          canWrite={canWrite}
-          initialVariablePayrollPercent={initialVariablePayrollPercent}
-          initialSafetyReservePercent={initialSafetyReservePercent}
-          scenarioPrefill={scenarioPrefill}
-        />
+        useLegacyApprovedView ? (
+          <StaffPayrollCalculationManager
+            monthStart={monthStart}
+            staffProfiles={staffProfiles}
+            compensationProfiles={compensationProfiles}
+            snapshot={snapshot}
+            calculations={calculations}
+            approvalVersions={approvalVersions}
+            reopenEvents={reopenEvents}
+            canWrite={canWrite}
+            initialVariablePayrollPercent={initialVariablePayrollPercent}
+            initialSafetyReservePercent={initialSafetyReservePercent}
+            scenarioPrefill={scenarioPrefill}
+          />
+        ) : (
+          <StaffPayrollHybridOfficialManager
+            monthStart={monthStart}
+            snapshot={snapshot}
+            calculations={calculations}
+            canWrite={canWrite}
+          />
+        )
       ) : null}
     </main>
   )
