@@ -121,10 +121,10 @@ export default function StaffPayrollScenarioSimulator({ monthStart, snapshot, ca
 
   // Experimental hybrid model requested for September 2026 testing only.
   // It never writes to the official payroll draft.
-  const [hybridCoachRate, setHybridCoachRate] = React.useState('450')
+  const [hybridCoachRate, setHybridCoachRate] = React.useState('400')
   const [hybridHeadCoachRate, setHybridHeadCoachRate] = React.useState('300')
   const [hybridReservePercent, setHybridReservePercent] = React.useState('0')
-  const [hybridVariablePercent, setHybridVariablePercent] = React.useState('100')
+  const [hybridVariablePercent, setHybridVariablePercent] = React.useState('80')
 
   const scenario = React.useMemo(() => {
     const revenue = Math.max(0, Number(membershipRevenue) || 0)
@@ -282,7 +282,7 @@ export default function StaffPayrollScenarioSimulator({ monthStart, snapshot, ca
           <h2 className="mt-1 text-xl font-bold">Hybrid payroll test</h2>
           <p className="mt-1 max-w-3xl text-sm text-[hsl(var(--muted))]">Coaching is guaranteed per validated session. Coaching weighted hours are excluded from the residual pool, which is distributed only across non-coaching weighted work. This section never writes to the official payroll draft.</p>
         </div>
-        <button type="button" onClick={() => { setHybridCoachRate('450'); setHybridHeadCoachRate('300'); setHybridReservePercent('0'); setHybridVariablePercent('100') }} className="rounded-xl border border-violet-200 bg-white px-3 py-2 text-xs font-semibold text-violet-900">ATOM test · Coach 450 · Head Coach 300 · 0% / 100%</button>
+        <button type="button" onClick={() => { setHybridCoachRate('400'); setHybridHeadCoachRate('300'); setHybridReservePercent('0'); setHybridVariablePercent('80') }} className="rounded-xl border border-violet-200 bg-white px-3 py-2 text-xs font-semibold text-violet-900">ATOM test · Coach {hybridCoachRate || '0'} · Head Coach {hybridHeadCoachRate || '0'} · {hybridReservePercent || '0'}% / {hybridVariablePercent || '0'}%</button>
       </div>
 
       <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
