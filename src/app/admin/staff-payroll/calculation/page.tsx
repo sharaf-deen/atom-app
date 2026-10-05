@@ -392,7 +392,7 @@ export default async function StaffPayrollCalculationPage({
               Staff Payroll · Official Hybrid Calculation
             </h1>
             <p className="mt-2 text-sm text-[hsl(var(--muted))] sm:text-base">
-              Guaranteed coaching compensation plus weighted non-coaching work, calculated from ATOM's monthly operating result.
+              Guaranteed coaching compensation plus weighted non-coaching work, calculated from ATOM&apos;s monthly operating result.
             </p>
             <p className="mt-2 text-xs text-[hsl(var(--muted))]">
               Approved legacy payroll history remains available unchanged. Hybrid approval is intentionally disabled until the approval-integration lot.
