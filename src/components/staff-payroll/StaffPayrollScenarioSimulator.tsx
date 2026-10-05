@@ -121,7 +121,8 @@ export default function StaffPayrollScenarioSimulator({ monthStart, snapshot, ca
 
   // Experimental hybrid model requested for September 2026 testing only.
   // It never writes to the official payroll draft.
-  const [hybridCoachingRate, setHybridCoachingRate] = React.useState('300')
+  const [hybridCoachRate, setHybridCoachRate] = React.useState('450')
+  const [hybridHeadCoachRate, setHybridHeadCoachRate] = React.useState('300')
   const [hybridReservePercent, setHybridReservePercent] = React.useState('0')
   const [hybridVariablePercent, setHybridVariablePercent] = React.useState('100')
 
@@ -156,7 +157,8 @@ export default function StaffPayrollScenarioSimulator({ monthStart, snapshot, ca
     const revenue = Math.max(0, Number(membershipRevenue) || 0)
     const refunds = Math.max(0, Number(paidRefunds) || 0)
     const expenses = Math.max(0, Number(operatingExpenses) || 0)
-    const coachingRate = Math.max(0, Number(hybridCoachingRate) || 0)
+    const coachRate = Math.max(0, Number(hybridCoachRate) || 0)
+    const headCoachRate = Math.max(0, Number(hybridHeadCoachRate) || 0)
     const reserve = clampPercent(Number(hybridReservePercent))
     const variable = clampPercent(Number(hybridVariablePercent))
     const netRevenue = round2(revenue - refunds)
@@ -181,6 +183,7 @@ export default function StaffPayrollScenarioSimulator({ monthStart, snapshot, ca
     const baseRows = calculations.map((row) => {
       const stats = statsByStaff.get(row.staff_user_id) ?? { coachingSessions: 0, nonCoachingWeightedHours: 0, missingCoachingQuantity: 0 }
       const coachingSessions = round2(stats.coachingSessions)
+      const coachingRate = row.staff_role_snapshot === 'head_coach' ? headCoachRate : coachRate
       const coachingPay = round2(coachingSessions * coachingRate)
       const nonCoachingWeightedHours = round2(stats.nonCoachingWeightedHours)
       return { ...row, coachingSessions, coachingPay, nonCoachingWeightedHours, missingCoachingQuantity: stats.missingCoachingQuantity }
@@ -217,7 +220,8 @@ export default function StaffPayrollScenarioSimulator({ monthStart, snapshot, ca
       revenue,
       refunds,
       expenses,
-      coachingRate,
+      coachRate,
+      headCoachRate,
       reserve,
       variable,
       netRevenue,
@@ -232,13 +236,15 @@ export default function StaffPayrollScenarioSimulator({ monthStart, snapshot, ca
       nonCoachingTotalWeight: allocation.totalWeight,
       nonCoachingWeightedHourValue,
       totalCoachingSessions,
+      coachSessions: round2(rows.filter((row) => row.staff_role_snapshot !== 'head_coach').reduce((sum, row) => sum + row.coachingSessions, 0)),
+      headCoachSessions: round2(rows.filter((row) => row.staff_role_snapshot === 'head_coach').reduce((sum, row) => sum + row.coachingSessions, 0)),
       missingCoachingQuantity,
       rows,
       payrollTotal,
       resultAfterPayroll,
       payrollRatio,
     }
-  }, [membershipRevenue, paidRefunds, operatingExpenses, hybridCoachingRate, hybridReservePercent, hybridVariablePercent, calculations, taskLogs])
+  }, [membershipRevenue, paidRefunds, operatingExpenses, hybridCoachRate, hybridHeadCoachRate, hybridReservePercent, hybridVariablePercent, calculations, taskLogs])
 
   const alerts = React.useMemo(() => {
     const result: Array<{ tone: 'warning' | 'danger'; text: string }> = []
@@ -276,18 +282,19 @@ export default function StaffPayrollScenarioSimulator({ monthStart, snapshot, ca
           <h2 className="mt-1 text-xl font-bold">Hybrid payroll test</h2>
           <p className="mt-1 max-w-3xl text-sm text-[hsl(var(--muted))]">Coaching is guaranteed per validated session. Coaching weighted hours are excluded from the residual pool, which is distributed only across non-coaching weighted work. This section never writes to the official payroll draft.</p>
         </div>
-        <button type="button" onClick={() => { setHybridCoachingRate('300'); setHybridReservePercent('0'); setHybridVariablePercent('100') }} className="rounded-xl border border-violet-200 bg-white px-3 py-2 text-xs font-semibold text-violet-900">ATOM test · 300 / 0% / 100%</button>
+        <button type="button" onClick={() => { setHybridCoachRate('450'); setHybridHeadCoachRate('300'); setHybridReservePercent('0'); setHybridVariablePercent('100') }} className="rounded-xl border border-violet-200 bg-white px-3 py-2 text-xs font-semibold text-violet-900">ATOM test · Coach 450 · Head Coach 300 · 0% / 100%</button>
       </div>
 
-      <div className="mt-4 grid gap-3 sm:grid-cols-3">
-        <label className="text-xs font-medium">Coaching floor / session<input type="number" min="0" step="1" value={hybridCoachingRate} onChange={(e) => setHybridCoachingRate(e.target.value)} className="mt-1 w-full rounded-xl border border-black/10 bg-white px-3 py-2 text-sm" /></label>
+      <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <label className="text-xs font-medium">Coach floor / session<input type="number" min="0" step="1" value={hybridCoachRate} onChange={(e) => setHybridCoachRate(e.target.value)} className="mt-1 w-full rounded-xl border border-black/10 bg-white px-3 py-2 text-sm" /></label>
+        <label className="text-xs font-medium">Head Coach floor / session<input type="number" min="0" step="1" value={hybridHeadCoachRate} onChange={(e) => setHybridHeadCoachRate(e.target.value)} className="mt-1 w-full rounded-xl border border-black/10 bg-white px-3 py-2 text-sm" /></label>
         <label className="text-xs font-medium">Safety reserve %<input type="number" min="0" max="100" step="0.01" value={hybridReservePercent} onChange={(e) => setHybridReservePercent(e.target.value)} className="mt-1 w-full rounded-xl border border-black/10 bg-white px-3 py-2 text-sm" /></label>
         <label className="text-xs font-medium">Residual non-coaching pool %<input type="number" min="0" max="100" step="0.01" value={hybridVariablePercent} onChange={(e) => setHybridVariablePercent(e.target.value)} className="mt-1 w-full rounded-xl border border-black/10 bg-white px-3 py-2 text-sm" /></label>
       </div>
 
       <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <Metric label="Operating result before payroll" value={money(hybrid.operatingResult)} sub={`Net revenue ${money(hybrid.netRevenue)}`} />
-        <Metric label="Guaranteed coaching" value={money(hybrid.guaranteedCoaching)} sub={`${hybrid.totalCoachingSessions.toFixed(2)} sessions × ${money(hybrid.coachingRate)}`} />
+        <Metric label="Guaranteed coaching" value={money(hybrid.guaranteedCoaching)} sub={`${hybrid.coachSessions.toFixed(2)} coach sessions × ${money(hybrid.coachRate)} + ${hybrid.headCoachSessions.toFixed(2)} Head Coach sessions × ${money(hybrid.headCoachRate)}`} />
         <Metric label="Result after guarantees" value={money(hybrid.resultAfterGuarantees)} sub={`Fixed bases ${money(hybrid.fixedBases)}`} />
         <Metric label="Protected reserve" value={money(hybrid.reserveAmount)} sub={`${pct(hybrid.reserve)} after guarantees`} />
         <Metric label="Non-coaching pool" value={money(hybrid.nonCoachingPool)} sub={`${pct(hybrid.variable)} of available residual`} />
