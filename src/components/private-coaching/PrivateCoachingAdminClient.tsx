@@ -36,6 +36,8 @@ type RequestRow = {
   passRemainingSessions: number | null
   passStatus: string | null
   openBookingCount: number
+  archivedAt: string | null
+  archiveReason: string | null
 }
 
 type Props = {
@@ -160,23 +162,29 @@ function deleteSummaryItems(row: RequestRow | null): ConfirmActionSummaryItem[] 
 export default function PrivateCoachingAdminClient({ rows }: Props) {
   const router = useRouter()
   const [busyId, setBusyId] = React.useState('')
-  const [busyAction, setBusyAction] = React.useState<'confirm-payment' | 'update-request' | 'delete-request' | ''>('')
+  const [busyAction, setBusyAction] = React.useState<'confirm-payment' | 'update-request' | 'delete-request' | 'archive-request' | 'restore-request' | ''>('')
   const [confirmPaymentRow, setConfirmPaymentRow] = React.useState<RequestRow | null>(null)
   const [confirmDeleteRow, setConfirmDeleteRow] = React.useState<RequestRow | null>(null)
+  const [confirmArchiveRow, setConfirmArchiveRow] = React.useState<RequestRow | null>(null)
+  const [archiveMode, setArchiveMode] = React.useState<'archive' | 'restore'>('archive')
   const [editingRow, setEditingRow] = React.useState<RequestRow | null>(null)
   const [editSessions, setEditSessions] = React.useState<PrivateCoachingPackageSessions>(1)
   const [editPaymentMethod, setEditPaymentMethod] = React.useState<PrivateCoachingPaymentMethod>('cash')
   const [confirmEditOpen, setConfirmEditOpen] = React.useState(false)
   const [memberFilter, setMemberFilter] = React.useState('all')
+  const [archiveFilter, setArchiveFilter] = React.useState<'active' | 'archived' | 'all'>('active')
   const [page, setPage] = React.useState(1)
   const [status, setStatus] = React.useState<{ kind: 'success' | 'error' | ''; message: string }>({ kind: '', message: '' })
 
   const memberOptions = React.useMemo(() => uniqueMemberOptions(rows), [rows])
 
   const filteredRows = React.useMemo(() => {
-    if (memberFilter === 'all') return rows
-    return rows.filter((row) => userKey(row) === memberFilter)
-  }, [memberFilter, rows])
+    return rows.filter((row) => {
+      const matchesMember = memberFilter === 'all' || userKey(row) === memberFilter
+      const matchesArchive = archiveFilter === 'all' || (archiveFilter === 'archived' ? Boolean(row.archivedAt) : !row.archivedAt)
+      return matchesMember && matchesArchive
+    })
+  }, [archiveFilter, memberFilter, rows])
 
   const pageCount = Math.max(1, Math.ceil(filteredRows.length / REQUESTS_PAGE_SIZE))
   const safePage = Math.min(page, pageCount)
@@ -189,6 +197,11 @@ export default function PrivateCoachingAdminClient({ rows }: Props) {
 
   function setFilterAndReset(value: string) {
     setMemberFilter(value)
+    setPage(1)
+  }
+
+  function setArchiveFilterAndReset(value: 'active' | 'archived' | 'all') {
+    setArchiveFilter(value)
     setPage(1)
   }
 
@@ -291,6 +304,34 @@ export default function PrivateCoachingAdminClient({ rows }: Props) {
     }
   }
 
+  async function setRequestArchived(row: RequestRow, mode: 'archive' | 'restore') {
+    setBusyId(row.id)
+    setBusyAction(mode === 'archive' ? 'archive-request' : 'restore-request')
+    setStatus({ kind: '', message: '' })
+
+    try {
+      const res = await fetch(`/api/private-coaching/requests/${encodeURIComponent(row.id)}/archive`, {
+        method: mode === 'archive' ? 'POST' : 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        ...(mode === 'archive' ? { body: JSON.stringify({ reason: 'Archived from Head Coach private coaching cleanup.' }) } : {}),
+      })
+      const json = await res.json().catch(() => ({}))
+      if (!res.ok || !json?.ok) {
+        setStatus({ kind: 'error', message: json?.details || json?.error || `Could not ${mode} request.` })
+        return
+      }
+      setConfirmArchiveRow(null)
+      setStatus({ kind: 'success', message: mode === 'archive' ? 'Private coaching request archived.' : 'Private coaching request restored.' })
+      router.refresh()
+    } catch (error: any) {
+      setStatus({ kind: 'error', message: error?.message || `Could not ${mode} request.` })
+    } finally {
+      setBusyId('')
+      setBusyAction('')
+    }
+  }
+
+
   return (
     <div className="space-y-4">
       {status.message ? <InlineAlert variant={status.kind === 'error' ? 'error' : 'success'}>{status.message}</InlineAlert> : null}
@@ -311,6 +352,18 @@ export default function PrivateCoachingAdminClient({ rows }: Props) {
                     {member.label}{member.meta ? ` — ${member.meta}` : ''}
                   </option>
                 ))}
+              </select>
+            </label>
+            <label className="grid gap-1 lg:min-w-[180px]">
+              <span className="text-sm font-semibold">Archive</span>
+              <select
+                value={archiveFilter}
+                onChange={(event) => setArchiveFilterAndReset(event.target.value as 'active' | 'archived' | 'all')}
+                className="min-h-11 rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm shadow-soft outline-none focus:border-black"
+              >
+                <option value="active">Current</option>
+                <option value="archived">Archived</option>
+                <option value="all">All</option>
               </select>
             </label>
             <div className="text-sm font-semibold text-[hsl(var(--muted))]">
@@ -334,8 +387,10 @@ export default function PrivateCoachingAdminClient({ rows }: Props) {
 
       <div className="grid gap-3">
         {paginatedRows.map((row) => {
-          const canManagePending = row.status === 'payment_pending'
-          const canCancelConfirmed = row.status === 'active'
+          const isArchived = Boolean(row.archivedAt)
+          const canManagePending = !isArchived && row.status === 'payment_pending'
+          const canCancelConfirmed = !isArchived && row.status === 'active'
+          const canArchive = !isArchived && (row.status === 'cancelled' || (row.status === 'active' && (row.passRemainingSessions ?? 0) === 0 && row.openBookingCount === 0))
           const isEditing = editingRow?.id === row.id
 
           return (
@@ -346,6 +401,11 @@ export default function PrivateCoachingAdminClient({ rows }: Props) {
                     <span className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold ${statusClass(row.status)}`}>
                       {privateCoachingStatusLabel(row.status)}
                     </span>
+                    {isArchived ? (
+                      <span className="rounded-full border border-slate-300 bg-slate-100 px-2.5 py-1 text-[11px] font-semibold text-slate-700">
+                        Archived {formatDateTime(row.archivedAt)}
+                      </span>
+                    ) : null}
                     <span className="rounded-full border border-[hsl(var(--border))] bg-[hsl(var(--bg))] px-2.5 py-1 text-[11px] font-semibold text-[hsl(var(--muted))]">
                       {row.packageSessions} session(s)
                     </span>
@@ -377,7 +437,24 @@ export default function PrivateCoachingAdminClient({ rows }: Props) {
                   </div>
                 </div>
 
-                {canManagePending ? (
+                {isArchived ? (
+                  <div className="flex w-full flex-col gap-2 lg:w-auto lg:items-end">
+                    <div className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold text-slate-700">
+                      Archived history
+                    </div>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => { setConfirmArchiveRow(row); setArchiveMode('restore') }}
+                      disabled={Boolean(busyId)}
+                      loading={busyId === row.id && busyAction === 'restore-request'}
+                      loadingText="Restoring…"
+                      className="w-full lg:w-auto"
+                    >
+                      Restore request
+                    </Button>
+                  </div>
+                ) : canManagePending ? (
                   <div className="flex w-full flex-col gap-2 lg:w-auto">
                     <Button
                       type="button"
@@ -426,6 +503,19 @@ export default function PrivateCoachingAdminClient({ rows }: Props) {
                         className="w-full lg:w-auto"
                       >
                         Cancel request
+                      </Button>
+                    ) : null}
+                    {canArchive ? (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() => { setConfirmArchiveRow(row); setArchiveMode('archive') }}
+                        disabled={Boolean(busyId)}
+                        loading={busyId === row.id && busyAction === 'archive-request'}
+                        loadingText="Archiving…"
+                        className="w-full lg:w-auto"
+                      >
+                        Archive request
                       </Button>
                     ) : null}
                   </div>
@@ -547,6 +637,26 @@ export default function PrivateCoachingAdminClient({ rows }: Props) {
         onConfirm={() => {
           if (confirmDeleteRow) return deleteRequest(confirmDeleteRow)
         }}
+      />
+
+      <ConfirmActionModal
+        open={Boolean(confirmArchiveRow)}
+        title={archiveMode === 'archive' ? 'Archive private coaching request?' : 'Restore private coaching request?'}
+        description={archiveMode === 'archive' ? 'The request will be removed from the current workspace but preserved in archived history.' : 'The request will return to the current workspace.'}
+        confirmLabel={archiveMode === 'archive' ? 'Archive request' : 'Restore request'}
+        pendingLabel={archiveMode === 'archive' ? 'Archiving…' : 'Restoring…'}
+        pending={Boolean(confirmArchiveRow && busyId === confirmArchiveRow.id)}
+        tone={archiveMode === 'archive' ? 'destructive' : 'default'}
+        summaryItems={confirmArchiveRow ? [
+          { label: 'Member', value: confirmArchiveRow.memberName },
+          { label: 'Coach', value: confirmArchiveRow.coachName },
+          { label: 'Status', value: privateCoachingStatusLabel(confirmArchiveRow.status) },
+          { label: 'Package', value: `${confirmArchiveRow.packageSessions} session(s)` },
+          { label: 'History impact', value: 'No payment, pass, token or booking record is deleted' },
+        ] : []}
+        warning={archiveMode === 'archive' ? 'Archive is a cleanup action only. The record remains auditable and can be restored.' : 'Restoring does not reactivate cancelled passes or return tokens.'}
+        onCancel={() => { if (!busyId) setConfirmArchiveRow(null) }}
+        onConfirm={() => { if (confirmArchiveRow) return setRequestArchived(confirmArchiveRow, archiveMode) }}
       />
     </div>
   )
