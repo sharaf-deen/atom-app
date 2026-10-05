@@ -33,6 +33,8 @@ type RequestRow = {
   status: string
   created_at: string
   confirmed_at: string | null
+  archived_at: string | null
+  archive_reason: string | null
 }
 
 type PromoRow = {
@@ -98,6 +100,8 @@ type BookingRow = {
   booked_at: string
   completed_at: string | null
   cancelled_at: string | null
+  archived_at: string | null
+  archive_reason: string | null
 }
 
 function profileMeta(profile: ProfileRow | undefined | null) {
@@ -131,7 +135,7 @@ export default async function HeadCoachPrivateCoachingPage() {
 
   let requestsQuery = admin
     .from('private_coaching_requests')
-    .select('id, member_id, coach_id, package_sessions, amount_cents, original_amount_cents, discount_code, discount_label, discount_percent, discount_amount_cents, payment_method, status, created_at, confirmed_at')
+    .select('id, member_id, coach_id, package_sessions, amount_cents, original_amount_cents, discount_code, discount_label, discount_percent, discount_amount_cents, payment_method, status, created_at, confirmed_at, archived_at, archive_reason')
     .order('created_at', { ascending: false })
     .limit(100)
 
@@ -148,7 +152,7 @@ export default async function HeadCoachPrivateCoachingPage() {
 
   let bookingsQuery = admin
     .from('private_coaching_bookings')
-    .select('id, member_id, coach_id, slot_date, start_time, end_time, status, note, booked_at, completed_at, cancelled_at')
+    .select('id, member_id, coach_id, slot_date, start_time, end_time, status, note, booked_at, completed_at, cancelled_at, archived_at, archive_reason')
     .order('slot_date', { ascending: false })
     .order('start_time', { ascending: false })
     .limit(100)
@@ -215,16 +219,18 @@ export default async function HeadCoachPrivateCoachingPage() {
     }
   }
 
-  const pendingCount = requests.filter((row) => row.status === 'payment_pending').length
-  const activeCount = requests.filter((row) => row.status === 'active').length
-  const pendingValueCents = requests
+  const visibleRequests = requests.filter((row) => !row.archived_at)
+  const visibleBookings = bookings.filter((row) => !row.archived_at)
+  const pendingCount = visibleRequests.filter((row) => row.status === 'payment_pending').length
+  const activeCount = visibleRequests.filter((row) => row.status === 'active').length
+  const pendingValueCents = visibleRequests
     .filter((row) => row.status === 'payment_pending')
     .reduce((sum, row) => sum + Number(row.amount_cents ?? 0), 0)
   const activeTokens = passes
     .filter((row) => row.status === 'active')
     .reduce((sum, row) => sum + Math.max(0, Number(row.remaining_sessions ?? 0)), 0)
   const availableSlotsCount = slots.filter((row) => row.status === 'available').length
-  const bookedCount = bookings.filter((row) => row.status === 'booked').length
+  const bookedCount = visibleBookings.filter((row) => row.status === 'booked').length
 
   const coachMap = new Map(coaches.map((coach) => [coach.user_id, coach]))
   const coachOptions = coaches.map((coach) => ({
@@ -272,6 +278,8 @@ export default async function HeadCoachPrivateCoachingPage() {
       bookedAt: row.booked_at,
       completedAt: row.completed_at,
       cancelledAt: row.cancelled_at,
+      archivedAt: row.archived_at,
+      archiveReason: row.archive_reason,
     }
   })
 
@@ -320,6 +328,8 @@ export default async function HeadCoachPrivateCoachingPage() {
       passRemainingSessions: pass ? Number(pass.remaining_sessions ?? 0) : null,
       passStatus: pass?.status ?? null,
       openBookingCount: openBookingsBySignature.get(`${row.member_id}||${row.coach_id}`) ?? 0,
+      archivedAt: row.archived_at,
+      archiveReason: row.archive_reason,
     }
   })
 
