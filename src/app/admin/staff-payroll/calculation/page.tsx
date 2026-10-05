@@ -1,4 +1,4 @@
-// Staff Payroll — Hybrid Official Engine 1B
+﻿// Staff Payroll â€” Hybrid Official Engine 1C
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
@@ -81,7 +81,7 @@ export default async function StaffPayrollCalculationPage({
   if (!canView) {
     return (
       <main className="p-6">
-        <h1 className="text-2xl font-bold">Staff Payroll · Salary Calculation</h1>
+        <h1 className="text-2xl font-bold">Staff Payroll Â· Salary Calculation</h1>
         <div className="mt-4 max-w-2xl">
           <AccessDeniedCard
             title="Forbidden"
@@ -101,7 +101,7 @@ export default async function StaffPayrollCalculationPage({
   } catch {
     return (
       <main className="p-6">
-        <h1 className="text-2xl font-bold">Staff Payroll · Salary Calculation</h1>
+        <h1 className="text-2xl font-bold">Staff Payroll Â· Salary Calculation</h1>
         <p className="mt-3 text-sm text-rose-700">
           Server env missing: NEXT_PUBLIC_SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY
         </p>
@@ -374,7 +374,7 @@ export default async function StaffPayrollCalculationPage({
           <div className="max-w-3xl">
             <div className="flex flex-wrap items-center gap-2">
               <span className="rounded-full bg-black px-3 py-1 text-xs font-semibold text-white">
-                Hybrid Official Engine 1B
+                Hybrid Official Engine 1C
               </span>
               <span
                 className={
@@ -384,18 +384,18 @@ export default async function StaffPayrollCalculationPage({
                     : 'bg-sky-50 text-sky-800')
                 }
               >
-                {canWrite ? 'Super Admin · official draft' : 'Admin · read-only'}
+                {canWrite ? 'Super Admin Â· official draft' : 'Admin Â· read-only'}
               </span>
             </div>
 
             <h1 className="mt-3 text-2xl font-bold sm:text-3xl">
-              Staff Payroll · Official Hybrid Calculation
+              Staff Payroll Â· Official Hybrid Calculation
             </h1>
             <p className="mt-2 text-sm text-[hsl(var(--muted))] sm:text-base">
               Guaranteed coaching compensation plus weighted non-coaching work, calculated from ATOM&apos;s monthly operating result.
             </p>
             <p className="mt-2 text-xs text-[hsl(var(--muted))]">
-              Approved legacy payroll history remains available unchanged. Hybrid approval is intentionally disabled until the approval-integration lot.
+              Approved legacy payroll history remains available unchanged. Hybrid drafts can now be created, recalculated, verified, approved and locked.
             </p>
           </div>
         </div>
@@ -465,3 +465,4 @@ export default async function StaffPayrollCalculationPage({
     </main>
   )
 }
+
