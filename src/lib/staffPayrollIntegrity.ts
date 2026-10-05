@@ -166,8 +166,6 @@ export function buildPayrollSnapshotHash(snapshot: Record<string, any>) {
     core[key] = typeof value === 'number' ? normalizeNumber(value) : value ?? null
   }
 
-  // Keep hashes for already-approved legacy/2H snapshots byte-for-byte stable.
-  // The 2I fields become immutable only for the new variable-pool model.
   if (snapshot.rate_model === 'variable_payroll_pool') {
     for (const key of [
       'variable_payroll_percent',
@@ -179,6 +177,24 @@ export function buildPayrollSnapshotHash(snapshot: Record<string, any>) {
       core[key] = normalizeNumber(snapshot[key])
     }
   }
+
+  if (snapshot.rate_model === 'hybrid_payroll') {
+    for (const key of [
+      'variable_payroll_percent',
+      'fixed_base_payroll',
+      'variable_payroll_pool',
+      'variable_pool_weighted_hours',
+      'variable_weighted_hour_value',
+      'coach_session_rate',
+      'head_coach_session_rate',
+      'coach_session_count',
+      'head_coach_session_count',
+      'guaranteed_coaching_payroll',
+    ] as const) {
+      core[key] = normalizeNumber(snapshot[key])
+    }
+  }
+
   return stableHash(core)
 }
 
@@ -207,6 +223,11 @@ export function buildPayrollCalculationsHash(rows: any[]) {
     missing_hours_task_count: Number(row.missing_hours_task_count ?? 0),
     actual_hours: normalizeNumber(row.actual_hours),
     weighted_hours: normalizeNumber(row.weighted_hours),
+    coaching_sessions: normalizeNumber(row.coaching_sessions),
+    coaching_session_rate: normalizeNumber(row.coaching_session_rate),
+    coaching_guarantee: normalizeNumber(row.coaching_guarantee),
+    non_coaching_weighted_hours: normalizeNumber(row.non_coaching_weighted_hours),
+    non_coaching_variable_pay: normalizeNumber(row.non_coaching_variable_pay),
     task_compensation: normalizeNumber(row.task_compensation),
     minimum_task_compensation: normalizeNumber(row.minimum_task_compensation),
     dynamic_task_supplement: normalizeNumber(row.dynamic_task_supplement),
@@ -237,6 +258,9 @@ export function buildPayrollCalculationsHash(rows: any[]) {
       task_log_id: String(item.task_log_id ?? ''),
       task_id: String(item.task_id ?? ''),
       task_name: String(item.task_name ?? ''),
+      work_quantity: normalizeNumber(item.work_quantity),
+      is_coaching: Boolean(item.is_coaching),
+      coaching_sessions: normalizeNumber(item.coaching_sessions),
       actual_hours: normalizeNumber(item.actual_hours),
       importance_multiplier: normalizeNumber(item.importance_multiplier),
       weighted_hours: normalizeNumber(item.weighted_hours),
