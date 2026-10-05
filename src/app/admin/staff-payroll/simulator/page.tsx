@@ -84,7 +84,14 @@ export default async function StaffPayrollSimulatorPage({ searchParams }: { sear
       .order('staff_name_snapshot', { ascending: true })
   }
 
-  const loadError = snapshotResult.error?.message || calculationsResult.error?.message || ''
+  const taskLogsResult = await admin
+    .from('staff_monthly_task_logs')
+    .select('id,staff_user_id,area_name_snapshot,unit_snapshot,work_quantity,actual_hours,weighted_hours')
+    .eq('month_start', monthStart)
+    .is('voided_at', null)
+    .limit(100000)
+
+  const loadError = snapshotResult.error?.message || calculationsResult.error?.message || taskLogsResult.error?.message || ''
   const snapshot = snapshotResult.data ? {
     id: String(snapshotResult.data.id),
     month_start: String(snapshotResult.data.month_start),
@@ -124,6 +131,16 @@ export default async function StaffPayrollSimulatorPage({ searchParams }: { sear
     calculated_salary: Number(row.calculated_salary ?? 0),
   }))
 
+  const taskLogs = ((taskLogsResult.data ?? []) as any[]).map((row) => ({
+    id: String(row.id),
+    staff_user_id: String(row.staff_user_id),
+    area_name_snapshot: String(row.area_name_snapshot ?? ''),
+    unit_snapshot: String(row.unit_snapshot ?? ''),
+    work_quantity: row.work_quantity === null || row.work_quantity === undefined ? null : Number(row.work_quantity),
+    actual_hours: row.actual_hours === null || row.actual_hours === undefined ? null : Number(row.actual_hours),
+    weighted_hours: Number(row.weighted_hours ?? 0),
+  }))
+
   return (
     <main className="mx-auto max-w-7xl space-y-5 p-4 sm:p-6">
       <section className="rounded-3xl border border-black/10 bg-gradient-to-br from-white to-black/[0.02] p-5 sm:p-6">
@@ -132,7 +149,7 @@ export default async function StaffPayrollSimulatorPage({ searchParams }: { sear
           <span className="rounded-full bg-sky-50 px-3 py-1 text-xs font-semibold text-sky-800">Read-only simulation</span>
         </div>
         <h1 className="mt-3 text-2xl font-bold sm:text-3xl">Payroll Simulation & Budget Guardrails</h1>
-        <p className="mt-2 max-w-3xl text-sm text-[hsl(var(--muted))]">Test revenue, expenses, reserve and variable payroll assumptions without changing the official payroll draft. Scenario values remain in this browser page only.</p>
+        <p className="mt-2 max-w-3xl text-sm text-[hsl(var(--muted))]">Test revenue, expenses, reserve and payroll assumptions without changing the official payroll draft. Scenario values remain in this browser page only.</p>
       </section>
 
       <section className="rounded-2xl border border-black/10 bg-white p-4">
@@ -149,7 +166,7 @@ export default async function StaffPayrollSimulatorPage({ searchParams }: { sear
           <div className="mt-2 text-sm text-[hsl(var(--muted))]">Calculate this month once in Salary Calculation before running scenarios. The simulator needs the latest draft or approved calculation as its real-world baseline.</div>
         </section>
       ) : null}
-      {snapshot ? <StaffPayrollScenarioSimulator monthStart={monthStart} snapshot={snapshot} calculations={calculations} canTransfer={canTransfer} /> : null}
+      {snapshot ? <StaffPayrollScenarioSimulator monthStart={monthStart} snapshot={snapshot} calculations={calculations} taskLogs={taskLogs} canTransfer={canTransfer} /> : null}
     </main>
   )
 }
