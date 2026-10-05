@@ -1,9 +1,10 @@
-// Staff Payroll 2K — Salary Payments, Payment Closeout & Audit History
+// Staff Payroll — Hybrid Official Engine 1D: Payment & Closeout Integration
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
 import { redirect } from 'next/navigation'
 import AccessDeniedCard from '@/components/AccessDeniedCard'
+import StaffPayrollHybridPaymentContext from '@/components/staff-payroll/StaffPayrollHybridPaymentContext'
 import StaffPayrollPaymentsManager from '@/components/staff-payroll/StaffPayrollPaymentsManager'
 import { getSessionUser } from '@/lib/session'
 import { getSupabaseAdminClientCached } from '@/lib/requestCache'
@@ -99,12 +100,12 @@ export default async function StaffPayrollPaymentsPage({
   const [snapshotResult, versionsResult, paymentsResult, closeoutsResult] = await Promise.all([
     admin
       .from('staff_payroll_monthly_snapshots')
-      .select('id,month_start,status,approval_version_no,approved_at,calculated_payroll_total,staff_count')
+      .select('id,month_start,status,rate_model,approval_version_no,approved_at,calculated_payroll_total,staff_count')
       .eq('month_start', monthStart)
       .maybeSingle(),
     admin
       .from('staff_payroll_approval_versions')
-      .select('id,snapshot_id,month_start,version_no,approved_at,approved_by_name_snapshot,calculated_payroll_total,staff_count')
+      .select('id,snapshot_id,month_start,version_no,approved_at,approved_by_name_snapshot,calculated_payroll_total,staff_count,rate_model,coach_session_rate,head_coach_session_rate,coach_session_count,head_coach_session_count,fixed_base_payroll,guaranteed_coaching_payroll,variable_payroll_percent,safety_reserve_percent,safety_reserve_amount,variable_payroll_pool,variable_pool_weighted_hours,variable_weighted_hour_value')
       .eq('month_start', monthStart)
       .order('version_no', { ascending: false }),
     admin
@@ -114,7 +115,7 @@ export default async function StaffPayrollPaymentsPage({
       .order('recorded_at', { ascending: false }),
     admin
       .from('staff_payroll_payment_closeouts')
-      .select('id,approval_version_id,snapshot_id,month_start,approval_version_no,approved_payroll_total,payable_salary_total,active_payment_total,active_payment_count,staff_count,status,closeout_note,closed_at,closed_by_name_snapshot,reopened_at,reopened_by_name_snapshot,reopen_reason')
+      .select('id,approval_version_id,snapshot_id,month_start,approval_version_no,approved_payroll_total,payable_salary_total,active_payment_total,active_payment_count,staff_count,status,closeout_note,closed_at,closed_by_name_snapshot,reopened_at,reopened_by_name_snapshot,reopen_reason,rate_model,guaranteed_coaching_payroll,variable_payroll_pool,variable_pool_weighted_hours,variable_weighted_hour_value')
       .eq('month_start', monthStart)
       .order('closed_at', { ascending: false }),
   ])
@@ -129,6 +130,7 @@ export default async function StaffPayrollPaymentsPage({
   const migrationMissing =
     loadError.includes('staff_payroll_salary_payments') ||
     loadError.includes('staff_payroll_payment_closeouts') ||
+    loadError.includes('guaranteed_coaching_payroll') ||
     loadError.toLowerCase().includes('does not exist')
 
   const snapshot = snapshotResult.data
@@ -136,10 +138,9 @@ export default async function StaffPayrollPaymentsPage({
         id: String(snapshotResult.data.id),
         month_start: String(snapshotResult.data.month_start),
         status: String(snapshotResult.data.status ?? 'draft'),
+        rate_model: String(snapshotResult.data.rate_model ?? 'legacy_performance_bonus'),
         approval_version_no: Number(snapshotResult.data.approval_version_no ?? 0),
-        approved_at: snapshotResult.data.approved_at
-          ? String(snapshotResult.data.approved_at)
-          : null,
+        approved_at: snapshotResult.data.approved_at ? String(snapshotResult.data.approved_at) : null,
         calculated_payroll_total: Number(snapshotResult.data.calculated_payroll_total ?? 0),
         staff_count: Number(snapshotResult.data.staff_count ?? 0),
       }
@@ -154,6 +155,19 @@ export default async function StaffPayrollPaymentsPage({
     approved_by_name_snapshot: String(row.approved_by_name_snapshot ?? 'Super Admin'),
     calculated_payroll_total: Number(row.calculated_payroll_total ?? 0),
     staff_count: Number(row.staff_count ?? 0),
+    rate_model: String(row.rate_model ?? 'legacy_performance_bonus'),
+    coach_session_rate: Number(row.coach_session_rate ?? 0),
+    head_coach_session_rate: Number(row.head_coach_session_rate ?? 0),
+    coach_session_count: Number(row.coach_session_count ?? 0),
+    head_coach_session_count: Number(row.head_coach_session_count ?? 0),
+    fixed_base_payroll: Number(row.fixed_base_payroll ?? 0),
+    guaranteed_coaching_payroll: Number(row.guaranteed_coaching_payroll ?? 0),
+    variable_payroll_percent: Number(row.variable_payroll_percent ?? 0),
+    safety_reserve_percent: Number(row.safety_reserve_percent ?? 0),
+    safety_reserve_amount: Number(row.safety_reserve_amount ?? 0),
+    variable_payroll_pool: Number(row.variable_payroll_pool ?? 0),
+    variable_pool_weighted_hours: Number(row.variable_pool_weighted_hours ?? 0),
+    variable_weighted_hour_value: Number(row.variable_weighted_hour_value ?? 0),
   }))
 
   const currentVersion =
@@ -165,7 +179,7 @@ export default async function StaffPayrollPaymentsPage({
   if (!migrationMissing && currentVersion?.id) {
     calculationsResult = await admin
       .from('staff_payroll_approval_calculations')
-      .select('id,approval_version_id,snapshot_id,month_start,staff_user_id,staff_name_snapshot,staff_role_snapshot,fixed_monthly_base,weighted_hour_rate,actual_hours,weighted_hours,task_compensation,performance_bonus,dynamic_task_supplement,salary_before_adjustments,manual_bonus,manual_deduction,net_manual_adjustment,calculated_salary,adjustment_breakdown')
+      .select('id,approval_version_id,snapshot_id,month_start,staff_user_id,staff_name_snapshot,staff_role_snapshot,fixed_monthly_base,weighted_hour_rate,actual_hours,weighted_hours,task_compensation,performance_bonus,dynamic_task_supplement,salary_before_adjustments,manual_bonus,manual_deduction,net_manual_adjustment,calculated_salary,adjustment_breakdown,coaching_sessions,coaching_session_rate,coaching_guarantee,non_coaching_weighted_hours,non_coaching_variable_pay')
       .eq('approval_version_id', currentVersion.id)
       .order('staff_name_snapshot', { ascending: true })
   }
@@ -174,9 +188,7 @@ export default async function StaffPayrollPaymentsPage({
     const calculatedSalary = Number(row.calculated_salary ?? 0)
     const manualBonus = Number(row.manual_bonus ?? 0)
     const manualDeduction = Number(row.manual_deduction ?? 0)
-    const adjustmentBreakdown = Array.isArray(row.adjustment_breakdown)
-      ? row.adjustment_breakdown
-      : []
+    const adjustmentBreakdown = Array.isArray(row.adjustment_breakdown) ? row.adjustment_breakdown : []
     const storedSalaryBefore = Number(row.salary_before_adjustments ?? 0)
     const salaryBeforeAdjustments =
       storedSalaryBefore === 0 && manualBonus === 0 && manualDeduction === 0 && !adjustmentBreakdown.length
@@ -184,27 +196,32 @@ export default async function StaffPayrollPaymentsPage({
         : storedSalaryBefore
 
     return {
-    id: String(row.id),
-    approval_version_id: String(row.approval_version_id),
-    snapshot_id: String(row.snapshot_id),
-    month_start: String(row.month_start),
-    staff_user_id: String(row.staff_user_id),
-    staff_name_snapshot: String(row.staff_name_snapshot),
-    staff_role_snapshot: row.staff_role_snapshot ? String(row.staff_role_snapshot) : null,
-    fixed_monthly_base: Number(row.fixed_monthly_base ?? 0),
-    weighted_hour_rate: Number(row.weighted_hour_rate ?? 0),
-    actual_hours: Number(row.actual_hours ?? 0),
-    weighted_hours: Number(row.weighted_hours ?? 0),
-    task_compensation: Number(row.task_compensation ?? 0),
-    performance_bonus: Number(row.performance_bonus ?? 0),
-    dynamic_task_supplement: Number(row.dynamic_task_supplement ?? 0),
-    salary_before_adjustments: salaryBeforeAdjustments,
-    manual_bonus: manualBonus,
-    manual_deduction: manualDeduction,
-    net_manual_adjustment: Number(row.net_manual_adjustment ?? 0),
-    calculated_salary: calculatedSalary,
-    adjustment_breakdown: adjustmentBreakdown,
-  }
+      id: String(row.id),
+      approval_version_id: String(row.approval_version_id),
+      snapshot_id: String(row.snapshot_id),
+      month_start: String(row.month_start),
+      staff_user_id: String(row.staff_user_id),
+      staff_name_snapshot: String(row.staff_name_snapshot),
+      staff_role_snapshot: row.staff_role_snapshot ? String(row.staff_role_snapshot) : null,
+      fixed_monthly_base: Number(row.fixed_monthly_base ?? 0),
+      weighted_hour_rate: Number(row.weighted_hour_rate ?? 0),
+      actual_hours: Number(row.actual_hours ?? 0),
+      weighted_hours: Number(row.weighted_hours ?? 0),
+      task_compensation: Number(row.task_compensation ?? 0),
+      performance_bonus: Number(row.performance_bonus ?? 0),
+      dynamic_task_supplement: Number(row.dynamic_task_supplement ?? 0),
+      salary_before_adjustments: salaryBeforeAdjustments,
+      manual_bonus: manualBonus,
+      manual_deduction: manualDeduction,
+      net_manual_adjustment: Number(row.net_manual_adjustment ?? 0),
+      calculated_salary: calculatedSalary,
+      adjustment_breakdown: adjustmentBreakdown,
+      coaching_sessions: Number(row.coaching_sessions ?? 0),
+      coaching_session_rate: Number(row.coaching_session_rate ?? 0),
+      coaching_guarantee: Number(row.coaching_guarantee ?? 0),
+      non_coaching_weighted_hours: Number(row.non_coaching_weighted_hours ?? 0),
+      non_coaching_variable_pay: Number(row.non_coaching_variable_pay ?? 0),
+    }
   })
 
   const payments = ((paymentsResult.data ?? []) as any[]).map((row) => ({
@@ -226,9 +243,7 @@ export default async function StaffPayrollPaymentsPage({
     recorded_at: String(row.recorded_at),
     recorded_by_name_snapshot: String(row.recorded_by_name_snapshot ?? 'Super Admin'),
     reversed_at: row.reversed_at ? String(row.reversed_at) : null,
-    reversed_by_name_snapshot: row.reversed_by_name_snapshot
-      ? String(row.reversed_by_name_snapshot)
-      : null,
+    reversed_by_name_snapshot: row.reversed_by_name_snapshot ? String(row.reversed_by_name_snapshot) : null,
     reversal_reason: row.reversal_reason ? String(row.reversal_reason) : null,
   }))
 
@@ -248,10 +263,13 @@ export default async function StaffPayrollPaymentsPage({
     closed_at: String(row.closed_at),
     closed_by_name_snapshot: String(row.closed_by_name_snapshot ?? 'Super Admin'),
     reopened_at: row.reopened_at ? String(row.reopened_at) : null,
-    reopened_by_name_snapshot: row.reopened_by_name_snapshot
-      ? String(row.reopened_by_name_snapshot)
-      : null,
+    reopened_by_name_snapshot: row.reopened_by_name_snapshot ? String(row.reopened_by_name_snapshot) : null,
     reopen_reason: row.reopen_reason ? String(row.reopen_reason) : null,
+    rate_model: String(row.rate_model ?? 'legacy_performance_bonus'),
+    guaranteed_coaching_payroll: Number(row.guaranteed_coaching_payroll ?? 0),
+    variable_payroll_pool: Number(row.variable_payroll_pool ?? 0),
+    variable_pool_weighted_hours: Number(row.variable_pool_weighted_hours ?? 0),
+    variable_weighted_hour_value: Number(row.variable_weighted_hour_value ?? 0),
   }))
 
   const calculationError = calculationsResult.error?.message || ''
@@ -263,16 +281,9 @@ export default async function StaffPayrollPaymentsPage({
           <div>
             <div className="flex flex-wrap items-center gap-2">
               <span className="rounded-full bg-black px-3 py-1 text-xs font-semibold text-white">
-                Staff Payroll 2K
+                Hybrid Official Engine 1D
               </span>
-              <span
-                className={
-                  'rounded-full px-3 py-1 text-xs font-semibold ' +
-                  (canWrite
-                    ? 'bg-emerald-50 text-emerald-800'
-                    : 'bg-sky-50 text-sky-800')
-                }
-              >
+              <span className={'rounded-full px-3 py-1 text-xs font-semibold ' + (canWrite ? 'bg-emerald-50 text-emerald-800' : 'bg-sky-50 text-sky-800')}>
                 {canWrite ? 'Super Admin · payment & closeout control' : 'Admin · read-only'}
               </span>
             </div>
@@ -281,7 +292,7 @@ export default async function StaffPayrollPaymentsPage({
               Salary Payments & Payment Closeout
             </h1>
             <p className="mt-2 max-w-3xl text-sm text-[hsl(var(--muted))] sm:text-base">
-              Record real salary payments against the immutable approved payroll version, then close the payment cycle once every salary is fully settled. Closed cycles are locked and can only be reopened by Super Admin with an audit reason.
+              Settle salaries against the immutable approved payroll version. Hybrid compensation remains visible through payment and closeout so the approved coaching guarantee and non-coaching allocation stay auditable.
             </p>
           </div>
         </div>
@@ -290,9 +301,7 @@ export default async function StaffPayrollPaymentsPage({
       {migrationMissing ? (
         <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950">
           <div className="font-semibold">Database update required</div>
-          <div className="mt-1 text-xs">
-            Deploy the latest database changes, then refresh this page.
-          </div>
+          <div className="mt-1 text-xs">Deploy Hybrid Official Engine 1D database changes, then refresh this page.</div>
         </div>
       ) : null}
 
@@ -300,6 +309,19 @@ export default async function StaffPayrollPaymentsPage({
         <div className="rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800">
           Payment data load warning: {loadError || calculationError}
         </div>
+      ) : null}
+
+      {!migrationMissing && currentVersion?.rate_model === 'hybrid_payroll' ? (
+        <StaffPayrollHybridPaymentContext
+          currentVersion={currentVersion}
+          calculations={calculations}
+          payments={payments}
+          currentCloseout={closeouts.find(
+            (closeout) =>
+              closeout.approval_version_id === currentVersion.id &&
+              closeout.status === 'closed'
+          ) ?? null}
+        />
       ) : null}
 
       {!migrationMissing ? (
