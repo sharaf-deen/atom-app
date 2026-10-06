@@ -10,6 +10,7 @@ import AccessDeniedPage from '@/components/AccessDeniedPage'
 import PrivateCoachingAdminClient from '@/components/private-coaching/PrivateCoachingAdminClient'
 import PrivateCoachingSlotsClient from '@/components/private-coaching/PrivateCoachingSlotsClient'
 import PrivateCoachingBookingsClient from '@/components/private-coaching/PrivateCoachingBookingsClient'
+import PrivateCoachingSessionContentClient from '@/components/private-coaching/PrivateCoachingSessionContentClient'
 import PrivateCoachingPromoCodesClient from '@/components/private-coaching/PrivateCoachingPromoCodesClient'
 import { getSessionUserCached, getSupabaseAdminClientCached } from '@/lib/requestCache'
 import {
@@ -412,6 +413,15 @@ export default async function HeadCoachPrivateCoachingPage() {
           </CardHeader>
           <CardContent>
             <PrivateCoachingBookingsClient rows={bookingRows} />
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Session technical content</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <PrivateCoachingSessionContentClient rows={bookingRows} />
           </CardContent>
         </Card>
 
