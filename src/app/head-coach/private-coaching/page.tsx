@@ -11,6 +11,7 @@ import PrivateCoachingAdminClient from '@/components/private-coaching/PrivateCoa
 import PrivateCoachingSlotsClient from '@/components/private-coaching/PrivateCoachingSlotsClient'
 import PrivateCoachingBookingsClient from '@/components/private-coaching/PrivateCoachingBookingsClient'
 import PrivateCoachingSessionContentClient from '@/components/private-coaching/PrivateCoachingSessionContentClient'
+import PrivateCoachingBackdatedCompletedClient from '@/components/private-coaching/PrivateCoachingBackdatedCompletedClient'
 import PrivateCoachingPromoCodesClient from '@/components/private-coaching/PrivateCoachingPromoCodesClient'
 import { getSessionUserCached, getSupabaseAdminClientCached } from '@/lib/requestCache'
 import {
@@ -246,6 +247,14 @@ export default async function HeadCoachPrivateCoachingPage() {
     meta: profileMeta(profile),
   }))
 
+  const tokenBalances = passes
+    .filter((pass) => pass.status === 'active' && Number(pass.remaining_sessions ?? 0) > 0)
+    .map((pass) => ({
+      memberId: pass.member_id,
+      coachId: pass.coach_id,
+      remaining: Number(pass.remaining_sessions ?? 0),
+    }))
+
   const slotRows = slots.map((row) => ({
     id: row.id,
     coachId: row.coach_id,
@@ -404,6 +413,21 @@ export default async function HeadCoachPrivateCoachingPage() {
           </CardHeader>
           <CardContent>
             <PrivateCoachingPromoCodesClient rows={promoCodeRows} />
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Record a completed past session</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <PrivateCoachingBackdatedCompletedClient
+              members={memberOptions}
+              coaches={coachOptions}
+              tokenBalances={tokenBalances}
+              canChooseCoach={me.role === 'super_admin'}
+              defaultCoachId={me.role === 'head_coach' ? me.id : coachOptions[0]?.user_id ?? ''}
+            />
           </CardContent>
         </Card>
 
