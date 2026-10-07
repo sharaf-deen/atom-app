@@ -9,6 +9,7 @@ import Button from '@/components/ui/Button'
 import AccessDeniedPage from '@/components/AccessDeniedPage'
 import PrivateCoachingRequestForm from '@/components/private-coaching/PrivateCoachingRequestForm'
 import PrivateCoachingBookingClient from '@/components/private-coaching/PrivateCoachingBookingClient'
+import PrivateCoachingMemberSessionHistory from '@/components/private-coaching/PrivateCoachingMemberSessionHistory'
 import { getSessionUserCached, getSupabaseAdminClientCached } from '@/lib/requestCache'
 import {
   PRIVATE_COACHING_ALLOWED_MEMBER_ROLES,
@@ -318,6 +319,15 @@ export default async function PrivateCoachingPage() {
               availableSlots={availableSlotRows}
               bookings={bookingRows}
             />
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Your technical session history</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <PrivateCoachingMemberSessionHistory />
           </CardContent>
         </Card>
       </Section>
