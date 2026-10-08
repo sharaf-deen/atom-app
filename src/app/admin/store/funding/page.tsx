@@ -256,8 +256,8 @@ export default async function StoreFundingPage({ searchParams }: { searchParams?
         title="Store Funding"
         subtitle="Access restricted."
         signedInAs={me.email}
-        message="Only admin and super admin roles can access store external funding."
-        allowed="admin, super_admin"
+        message="Only Super Admin can access this financial workspace."
+        allowed="super_admin"
         nextPath="/admin/store/funding"
         actions={[{ href: '/admin/store/dashboard', label: 'Go to Store Dashboard' }]}
         showBackHome
@@ -419,7 +419,7 @@ export default async function StoreFundingPage({ searchParams }: { searchParams?
 
         {!canManage ? (
           <InlineAlert variant="info" title="Read-only">
-            Admin can review store funding. Only super admin can add, edit, or delete funding entries.
+            Store funding data is restricted to Super Admin.
           </InlineAlert>
         ) : null}
 

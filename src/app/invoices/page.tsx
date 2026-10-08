@@ -11,6 +11,7 @@ import AccessDeniedPage from '@/components/AccessDeniedPage'
 import { Card, CardContent } from '@/components/ui/Card'
 import { getSessionUserCached, getSupabaseAdminClientCached } from '@/lib/requestCache'
 import { type Role } from '@/lib/session'
+import { canAccessInvoices } from '@/lib/rbac'
 
 type InvoiceRow = {
   id: string
@@ -38,7 +39,6 @@ const searchInvoicesCached = unstable_cache(
 )
 
 
-const STAFF: Role[] = ['reception', 'admin', 'super_admin']
 const DEFAULT_PAGE_SIZE = 50
 const MAX_PAGE_SIZE = 200
 
@@ -83,15 +83,15 @@ export default async function InvoicesPage({
   const nextPath = '/invoices'
   if (!me) redirect(`/login?next=${encodeURIComponent(nextPath)}`)
 
-  const isStaff = STAFF.includes(me.role)
+  const isStaff = canAccessInvoices(me.role)
   if (!isStaff) {
     return (
       <AccessDeniedPage
         title="Invoices"
         subtitle="Access restricted."
         signedInAs={me.email}
-        message="Only Reception / Admin / Super Admin can view invoices."
-        allowed="reception, admin, super_admin"
+        message="Only Super Admin can view the full invoice register."
+        allowed="super_admin"
         nextPath={nextPath}
         showBackHome
         showProfile
