@@ -20,11 +20,12 @@ function fmtAmount(n?: number | null) {
 }
 function humanPlan(p: SubRow['plan']) {
   const map: Record<SubRow['plan'], string> = {
+    '1w': '1 week',
     '1m': '1 month',
     '3m': '3 months',
     '6m': '6 months',
     '12m': '12 months',
-    'sessions': 'Per sessions',
+    'sessions': 'Legacy sessions',
   }
   return map[p] ?? p
 }

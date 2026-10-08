@@ -14,6 +14,17 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok:false, error:'Missing user_id or plan_type' }, { status:400 });
   }
 
+  if (plan_type === 'pay_per_class' || plan_type === 'sessions') {
+    return NextResponse.json(
+      {
+        ok: false,
+        error: 'SESSION_MEMBERSHIPS_LEGACY_ONLY',
+        details: 'Session-based memberships are no longer sold. Use the 1 Week membership instead.',
+      },
+      { status: 410 },
+    )
+  }
+
   const admin = createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.SUPABASE_SERVICE_ROLE_KEY!

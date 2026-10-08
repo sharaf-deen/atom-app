@@ -36,6 +36,18 @@ export type InvoiceSnapshot = {
   }
 }
 
+function humanSubscriptionPlan(plan?: string | null) {
+  switch (plan) {
+    case '1w': return '1 week'
+    case '1m': return '1 month'
+    case '3m': return '3 months'
+    case '6m': return '6 months'
+    case '12m': return '12 months'
+    case 'sessions': return 'Legacy sessions'
+    default: return plan ? String(plan) : 'Membership'
+  }
+}
+
 function humanPaymentMethod(m?: string | null) {
   switch (m) {
     case 'cash':
@@ -147,7 +159,7 @@ export async function generateInvoicePdfBytes(snapshot: InvoiceSnapshot) {
     drawText(value, x + 120, y, 10)
   }
 
-  row('Plan:', safeText(snapshot.transaction.plan), 'left')
+  row('Plan:', humanSubscriptionPlan(snapshot.transaction.plan), 'left')
   row('Type:', safeText(snapshot.transaction.subscription_type), 'right')
   y -= 16
   row('Paid at:', fmtDate(snapshot.transaction.paid_at), 'left')
