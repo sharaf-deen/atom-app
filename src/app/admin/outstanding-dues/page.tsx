@@ -7,12 +7,11 @@ import { redirect } from 'next/navigation'
 import { createClient } from '@supabase/supabase-js'
 import AccessDeniedCard from '@/components/AccessDeniedCard'
 import { getSessionUser } from '@/lib/session'
+import { canAccessOutstandingDues } from '@/lib/rbac'
 import OutstandingDuesClient from './_components/OutstandingDuesClient'
 import RunOutstandingRemindersButton from './_components/RunOutstandingRemindersButton'
 import type { OutstandingDueRow } from './types'
 
-type Role = 'member' | 'assistant_coach' | 'coach' | 'reception' | 'admin' | 'super_admin'
-const OPS: Role[] = ['admin', 'super_admin']
 
 type SubRow = {
   id: string
@@ -41,7 +40,7 @@ export default async function AdminOutstandingDuesPage() {
   const me = await getSessionUser()
   if (!me) redirect('/login?next=/admin/outstanding-dues')
 
-  const allowed = OPS.includes(me.role as Role)
+  const allowed = canAccessOutstandingDues(me.role)
   if (!allowed) {
     return (
       <main className="p-6">

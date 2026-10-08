@@ -5,7 +5,7 @@ export const revalidate = 0 // no ISR
 
 import { NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
-import { requireAdmin } from '@/lib/apiAuth'
+import { requireSuperAdmin } from '@/lib/apiAuth'
 import { cairoRangeBoundsUTC, cairoTodayDateOnly } from '@/lib/cairoTime'
 import { computeRecognizedSubscriptionRevenue } from '@/lib/subscriptionRevenue'
 
@@ -31,7 +31,7 @@ function addDays(dateOnly: string, days: number) {
 
 export async function GET(req: Request) {
   // 🔒 PROTECTION: service role endpoint must not be public
-  const gate = await requireAdmin()
+  const gate = await requireSuperAdmin()
   if (!gate.ok) return noStore(gate.res)
 
   try {

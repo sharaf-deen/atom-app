@@ -86,7 +86,7 @@ export async function GET(req: Request) {
     if (profileError) {
       return json(500, { ok: false, error: 'PROFILE_LOOKUP_FAILED', details: profileError.message })
     }
-    if (profile?.role !== 'admin' && profile?.role !== 'super_admin') {
+    if (profile?.role !== 'super_admin') {
       return json(403, { ok: false, error: 'FORBIDDEN' })
     }
 

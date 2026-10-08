@@ -43,7 +43,7 @@ export async function GET(_req: Request, ctx: { params: { id: string } }) {
       .maybeSingle<{ role: Role | null }>()
 
     const role: Role = (me?.role as Role) ?? 'member'
-    const isStaff = ['reception', 'admin', 'super_admin'].includes(role)
+    const isStaff = role === 'super_admin'
 
     // Fetch invoice row with service role (then authorize manually)
     const { data: inv, error: invErr } = await admin
