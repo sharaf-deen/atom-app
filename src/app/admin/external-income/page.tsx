@@ -15,7 +15,7 @@ import Textarea from '@/components/ui/Textarea'
 import InlineAlert from '@/components/ui/InlineAlert'
 import { cairoTodayDateOnly, addDaysDateOnly, formatDateTimeInCairo } from '@/lib/cairoTime'
 import { getSessionUserCached, getSupabaseAdminClientCached } from '@/lib/requestCache'
-import { canAccessExternalIncome, normalizeRole, type Role } from '@/lib/rbac'
+import { canAccessExternalIncome, canManageExternalIncome, normalizeRole, type Role } from '@/lib/rbac'
 
 type EntrySource = 'bar' | 'store' | 'other'
 type RangePreset = '30d' | '90d' | 'year' | 'all' | 'custom'
@@ -261,11 +261,8 @@ function attachmentCell(entry: Pick<EntryRow, 'id' | 'attachment_path' | 'attach
   )
 }
 
-function canManageEntry(actorRole: Role, actorUserId: string, creatorProfile: ProfileMini | null | undefined, createdBy: string | null | undefined) {
-  if (actorRole === 'super_admin') return true
-  if (actorRole !== 'admin') return false
-  if (createdBy && createdBy === actorUserId) return true
-  return normalizeRole(creatorProfile?.role) !== 'super_admin'
+function canManageEntry(actorRole: Role, _actorUserId: string, _creatorProfile: ProfileMini | null | undefined, _createdBy: string | null | undefined) {
+  return canManageExternalIncome(actorRole)
 }
 
 
@@ -279,7 +276,7 @@ async function addEntryAction(formData: FormData) {
 
   const me = await getSessionUserCached()
   if (!me) redirect('/login?next=/admin/external-income')
-  if (!canAccessExternalIncome(me.role)) redirect('/admin/external-income?error=Access%20denied')
+  if (!canManageExternalIncome(me.role)) redirect('/admin/external-income?error=Read-only%20access')
 
   const returnQS = safeStr(formData.get('return_qs'))
   const entry_date = safeStr(formData.get('entry_date')).trim() || cairoTodayDateOnly()
@@ -346,7 +343,7 @@ async function updateEntryAction(formData: FormData) {
 
   const me = await getSessionUserCached()
   if (!me) redirect('/login?next=/admin/external-income')
-  if (!canAccessExternalIncome(me.role)) redirect('/admin/external-income?error=Access%20denied')
+  if (!canManageExternalIncome(me.role)) redirect('/admin/external-income?error=Read-only%20access')
 
   const returnQS = safeStr(formData.get('return_qs'))
   const id = safeStr(formData.get('id')).trim()
@@ -455,7 +452,7 @@ async function deleteEntryAction(formData: FormData) {
 
   const me = await getSessionUserCached()
   if (!me) redirect('/login?next=/admin/external-income')
-  if (!canAccessExternalIncome(me.role)) redirect('/admin/external-income?error=Access%20denied')
+  if (!canManageExternalIncome(me.role)) redirect('/admin/external-income?error=Read-only%20access')
 
   const returnQS = safeStr(formData.get('return_qs'))
   const id = safeStr(formData.get('id')).trim()
@@ -518,6 +515,7 @@ export default async function ExternalIncomePage({
     )
   }
 
+  const canWrite = canManageExternalIncome(me.role)
   const admin = getSupabaseAdminClientCached()
   const today = cairoTodayDateOnly()
   const preset = parsePreset(typeof searchParams.preset === 'string' ? searchParams.preset : '90d')
@@ -641,7 +639,7 @@ export default async function ExternalIncomePage({
   const editEntry = edit ? entries.find((row) => row.id === edit) ?? null : null
   const editCreator = editEntry?.created_by ? profileMap.get(editEntry.created_by) ?? null : null
   const editEntryLock = editEntry ? entryLockMap.get(editEntry.id) ?? null : null
-  const canEditEntry = editEntry ? canManageEntry(me.role, me.id, editCreator, editEntry.created_by) && !editEntryLock : false
+  const canEditEntry = canWrite && editEntry ? canManageEntry(me.role, me.id, editCreator, editEntry.created_by) && !editEntryLock : false
 
   const returnParams = {
     preset,
@@ -703,7 +701,7 @@ export default async function ExternalIncomePage({
               <Textarea name="note" label="Note" rows={4} placeholder="Optional note" />
               <Input name="attachment" type="file" label="Attachment" hint="Optional PDF, JPG, PNG, or WEBP. Max 8MB." accept=".pdf,.jpg,.jpeg,.png,.webp,application/pdf,image/jpeg,image/png,image/webp" />
               <div className="flex flex-wrap gap-2">
-                <Button type="submit">Save entry</Button>
+                <Button type="submit" disabled={!canWrite}>{canWrite ? "Save entry" : "Read only"}</Button>
                 <Button asChild variant="outline" href="/admin/external-income?preset=90d">Reset page</Button>
               </div>
             </form>
@@ -839,7 +837,7 @@ export default async function ExternalIncomePage({
             {entries.length ? entries.map((entry) => {
               const creator = entry.created_by ? profileMap.get(entry.created_by) ?? null : null
               const updater = entry.updated_by ? profileMap.get(entry.updated_by) ?? null : null
-              const canManage = canManageEntry(me.role, me.id, creator, entry.created_by)
+              const canManage = canWrite && canManageEntry(me.role, me.id, creator, entry.created_by)
               const reconciliationLock = entryLockMap.get(entry.id) ?? null
               const isLockedForAdmin = me.role === 'admin' && !canManage
               const isReconciledLocked = !!reconciliationLock

@@ -5,7 +5,7 @@ export const revalidate = 0
 import { NextResponse } from 'next/server'
 import { createSupabaseServerActionClient } from '@/lib/supabaseServer'
 import { createSupabaseAdminClient } from '@/lib/supabaseAdmin'
-import { canAccessExpenses, normalizeRole, type Role } from '@/lib/rbac'
+import { canManageExpenses, normalizeRole, type Role } from '@/lib/rbac'
 
 function json(status: number, body: any) {
   const res = NextResponse.json(body, { status })
@@ -43,7 +43,7 @@ async function requireAdmin() {
   if (meErr) return { error: json(500, { ok: false, error: 'PROFILE_LOOKUP_FAILED', details: meErr.message }) }
 
   const role = normalizeRole(me?.role)
-  if (!canAccessExpenses(role)) {
+  if (!canManageExpenses(role)) {
     return { error: json(403, { ok: false, error: 'FORBIDDEN' }) }
   }
 

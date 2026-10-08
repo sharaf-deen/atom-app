@@ -10,7 +10,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card'
 import { Table } from '@/components/ui/Table'
 import EditPaymentDateButton from '@/components/EditPaymentDateButton'
 import { addDaysDateOnly, cairoDayBoundsUTC, cairoTodayDateOnly, isISODateOnly } from '@/lib/cairoTime'
-import { canAccessPayments } from '@/lib/rbac'
+import { canAccessPayments, canManagePayments } from '@/lib/rbac'
 import { getSessionUserCached, getSupabaseAdminClientCached } from '@/lib/requestCache'
 
 const PAGE_SIZE = 50
@@ -194,6 +194,7 @@ export default async function AdminPaymentsPage({
   const fromIdx = (page - 1) * PAGE_SIZE
   const toIdx = fromIdx + PAGE_SIZE - 1
 
+  const canManage = canManagePayments(me.role)
   const admin = getSupabaseAdminClientCached()
 
   const startISO = cairoDayBoundsUTC(from).startISO
@@ -375,7 +376,7 @@ export default async function AdminPaymentsPage({
         </div>
       ),
       by: <span className="text-sm">{by}</span>,
-      edit_date: (
+      edit_date: canManage ? (
         <EditPaymentDateButton
           paymentId={r.id}
           memberLabel={memberLabel}
@@ -383,6 +384,8 @@ export default async function AdminPaymentsPage({
           disabled={!!lock}
           disabledReason={lockReason}
         />
+      ) : (
+        <span className="text-xs text-[hsl(var(--muted))]">Read only</span>
       ),
       open: (
         <Link
@@ -418,9 +421,11 @@ export default async function AdminPaymentsPage({
               Reconciliation
             </Link>
           ) : null}
-          <Link prefetch={false} href={cashReportHref} className="border px-4 py-2 rounded-lg hover:bg-gray-50">
-            Filtered Cash Report
-          </Link>
+          {me.role === 'super_admin' ? (
+            <Link prefetch={false} href={cashReportHref} className="border px-4 py-2 rounded-lg hover:bg-gray-50">
+              Filtered Cash Report
+            </Link>
+          ) : null}
         </div>
       </div>
 

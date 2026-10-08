@@ -6,6 +6,7 @@ export const revalidate = 0
 import { NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { createSupabaseServerActionClient } from '@/lib/supabaseServer'
+import { canAccessMembershipRefunds, normalizeRole } from '@/lib/rbac'
 
 const BUCKET = 'membership-refund-proofs'
 
@@ -49,8 +50,8 @@ export async function GET(req: Request) {
 
     if (meErr) return json(500, { ok: false, error: 'PROFILE_LOOKUP_FAILED', details: meErr.message })
 
-    const role = me?.role ?? 'member'
-    const canView = role === 'super_admin'
+    const role = normalizeRole(me?.role)
+    const canView = canAccessMembershipRefunds(role)
     if (!canView) return json(403, { ok: false, error: 'FORBIDDEN' })
 
     const url = new URL(req.url)

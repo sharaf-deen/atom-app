@@ -15,7 +15,7 @@ import InlineAlert from '@/components/ui/InlineAlert'
 import SaveButton from '@/components/forms/SaveButton'
 import ScrollToSavedItem from '@/components/ScrollToSavedItem'
 import { getSessionUserCached, getSupabaseAdminClientCached } from '@/lib/requestCache'
-import { canAccessPersonalFunds } from '@/lib/rbac'
+import { canAccessPersonalFunds, canManagePersonalFunds } from '@/lib/rbac'
 
 type EntryKind = 'advance_to_gym' | 'expense_paid_personally' | 'reimbursement_from_gym'
 type RangePreset = '30d' | '90d' | 'year' | 'all' | 'custom'
@@ -313,7 +313,7 @@ async function addPersonAction(formData: FormData) {
 
   const me = await getSessionUserCached()
   if (!me) redirect('/login?next=/admin/personal-funds')
-  if (!canAccessPersonalFunds(me.role)) redirect('/admin/personal-funds?error=Access%20denied')
+  if (!canManagePersonalFunds(me.role)) redirect('/admin/personal-funds?error=Read-only%20access')
 
   const returnQS = safeStr(formData.get('return_qs'))
   const label = safeStr(formData.get('label')).trim()
@@ -343,7 +343,7 @@ async function deletePersonAction(formData: FormData) {
 
   const me = await getSessionUserCached()
   if (!me) redirect('/login?next=/admin/personal-funds')
-  if (!canAccessPersonalFunds(me.role)) redirect('/admin/personal-funds?error=Access%20denied')
+  if (!canManagePersonalFunds(me.role)) redirect('/admin/personal-funds?error=Read-only%20access')
 
   const returnQS = safeStr(formData.get('return_qs'))
   const personId = safeStr(formData.get('person_id')).trim()
@@ -375,7 +375,7 @@ async function addEntryAction(formData: FormData) {
 
   const me = await getSessionUserCached()
   if (!me) redirect('/login?next=/admin/personal-funds')
-  if (!canAccessPersonalFunds(me.role)) redirect('/admin/personal-funds?error=Access%20denied')
+  if (!canManagePersonalFunds(me.role)) redirect('/admin/personal-funds?error=Read-only%20access')
 
   const returnQS = safeStr(formData.get('return_qs'))
   const entry_date = safeStr(formData.get('entry_date')).trim() || toISODate(new Date())
@@ -462,7 +462,7 @@ async function updateEntryAction(formData: FormData) {
 
   const me = await getSessionUserCached()
   if (!me) redirect('/login?next=/admin/personal-funds')
-  if (!canAccessPersonalFunds(me.role)) redirect('/admin/personal-funds?error=Access%20denied')
+  if (!canManagePersonalFunds(me.role)) redirect('/admin/personal-funds?error=Read-only%20access')
 
   const returnQS = safeStr(formData.get('return_qs'))
   const id = safeStr(formData.get('id')).trim()
@@ -568,7 +568,7 @@ async function deleteEntryAction(formData: FormData) {
 
   const me = await getSessionUserCached()
   if (!me) redirect('/login?next=/admin/personal-funds')
-  if (!canAccessPersonalFunds(me.role)) redirect('/admin/personal-funds?error=Access%20denied')
+  if (!canManagePersonalFunds(me.role)) redirect('/admin/personal-funds?error=Read-only%20access')
 
   const returnQS = safeStr(formData.get('return_qs'))
   const id = safeStr(formData.get('id')).trim()
@@ -618,6 +618,7 @@ export default async function PersonalFundsPage({
     )
   }
 
+  const canWrite = canManagePersonalFunds(me.role)
   const admin = getSupabaseAdminClientCached()
   const now = new Date()
   const today = toISODate(now)
@@ -889,20 +890,24 @@ export default async function PersonalFundsPage({
                   </a>
                 </>
               ) : null}
-              <Link
-                prefetch={false}
-                href={`/admin/personal-funds?${buildQS({ ...returnParams, edit: entry.id })}`}
-                className={actionLinkClass()}
-              >
-                {isEditing ? 'Editing' : 'Edit'}
-              </Link>
-              <form action={deleteEntryAction}>
-                <input type="hidden" name="id" value={entry.id} />
-                <input type="hidden" name="return_qs" value={returnQS} />
-                <Button variant="outline" size="sm" type="submit">
-                  Delete
-                </Button>
-              </form>
+              {canWrite ? (
+                <>
+                  <Link
+                    prefetch={false}
+                    href={`/admin/personal-funds?${buildQS({ ...returnParams, edit: entry.id })}`}
+                    className={actionLinkClass()}
+                  >
+                    {isEditing ? 'Editing' : 'Edit'}
+                  </Link>
+                  <form action={deleteEntryAction}>
+                    <input type="hidden" name="id" value={entry.id} />
+                    <input type="hidden" name="return_qs" value={returnQS} />
+                    <Button variant="outline" size="sm" type="submit">
+                      Delete
+                    </Button>
+                  </form>
+                </>
+              ) : null}
             </div>
           </div>
         </div>
@@ -923,9 +928,11 @@ export default async function PersonalFundsPage({
             <Button asChild variant="outline" href="/expenses">
               Expenses
             </Button>
-            <Button asChild variant="outline" href="/admin/cash-report">
-              Cash Report
-            </Button>
+            {canWrite ? (
+              <Button asChild variant="outline" href="/admin/cash-report">
+                Cash Report
+              </Button>
+            ) : null}
           </div>
         }
       />
@@ -1096,7 +1103,7 @@ export default async function PersonalFundsPage({
                 </label>
 
                 <div className="flex flex-wrap items-center gap-2">
-                  <SaveButton idleLabel="Add entry" pendingLabel="Saving..." disabled={people.length === 0} />
+                  <SaveButton idleLabel={canWrite ? "Add entry" : "Read only"} pendingLabel="Saving..." disabled={!canWrite || people.length === 0} />
                   <div className="text-xs text-[hsl(var(--muted))]">Editing and receipt replacement stay inside Personal Funds.</div>
                 </div>
               </form>
@@ -1113,7 +1120,7 @@ export default async function PersonalFundsPage({
                 <div className="min-w-0 flex-1">
                   <Input name="label" placeholder="e.g. Shawki" />
                 </div>
-                <SaveButton idleLabel="Add person" pendingLabel="Saving..." />
+                <SaveButton idleLabel={canWrite ? "Add person" : "Read only"} pendingLabel="Saving..." disabled={!canWrite} />
               </form>
 
               {personCards.length === 0 ? (
@@ -1129,7 +1136,7 @@ export default async function PersonalFundsPage({
                           <div className="font-medium">{person.label}</div>
                           <div className="mt-1 text-xs text-[hsl(var(--muted))]">{person.entriesCount} entr{person.entriesCount === 1 ? 'y' : 'ies'}</div>
                         </div>
-                        {person.entriesCount === 0 ? (
+                        {canWrite && person.entriesCount === 0 ? (
                           <form action={deletePersonAction}>
                             <input type="hidden" name="person_id" value={person.id} />
                             <input type="hidden" name="return_qs" value={returnQS} />
@@ -1276,7 +1283,7 @@ export default async function PersonalFundsPage({
         </Card>
 
 
-        {editEntry ? (
+        {canWrite && editEntry ? (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-3 sm:p-6">
             <div className="max-h-[92vh] w-full max-w-5xl overflow-hidden rounded-3xl border border-[hsl(var(--border))] bg-white shadow-soft">
               <div className="flex flex-wrap items-start justify-between gap-3 border-b border-[hsl(var(--border))] px-4 py-3 sm:px-6">
@@ -1405,7 +1412,7 @@ export default async function PersonalFundsPage({
                     </div>
 
                     <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] px-4 py-3 text-sm text-[hsl(var(--muted))]">
-                      Admin and super admin can edit or delete any stored entry.
+                      Only Super Admin can edit or delete stored entries.
                     </div>
                   </div>
                 </form>
