@@ -15,6 +15,18 @@ function json(status: number, body: any) {
 function isISODateOnly(s?: string | null) {
   return !!s && /^\d{4}-\d{2}-\d{2}$/.test(s)
 }
+function planLabel(plan?: string | null) {
+  switch (plan) {
+    case '1w': return '1 week'
+    case '1m': return '1 month'
+    case '3m': return '3 months'
+    case '6m': return '6 months'
+    case '12m': return '12 months'
+    case 'sessions': return 'Legacy sessions'
+    default: return plan || 'Membership'
+  }
+}
+
 function csvCell(v: any) {
   const s = v === null || v === undefined ? '' : String(v)
   return `"${s.replace(/"/g, '""')}"`
@@ -75,7 +87,7 @@ export async function GET(req: Request) {
 
       const header = [
         'id','member_id','member_email','first_name','last_name',
-        'plan','subscription_type','status',
+        'plan','plan_label','subscription_type','status',
         'start_date','end_date',
         'sessions_total','sessions_used',
         'paid_amount','amount_due','total_subscription_value','payment_method','paid_at'
@@ -92,6 +104,7 @@ export async function GET(req: Request) {
           prof.first_name,
           prof.last_name,
           r.plan,
+          planLabel(r.plan),
           r.subscription_type,
           r.status,
           r.start_date,
@@ -133,7 +146,7 @@ export async function GET(req: Request) {
 
     const header = [
       'month','subscription_id','member_id','member_email','first_name','last_name',
-      'plan','start_date','end_date','freeze_from','freeze_until',
+      'plan','plan_label','start_date','end_date','freeze_from','freeze_until',
       'recognized_days','total_service_days','recognized_amount','total_subscription_value'
     ]
     const lines = [header.map(csvCell).join(',')]
@@ -147,6 +160,7 @@ export async function GET(req: Request) {
         prof?.first_name ?? null,
         prof?.last_name ?? null,
         row.plan,
+        planLabel(row.plan),
         row.start_date,
         row.end_date,
         row.frozen_from,
