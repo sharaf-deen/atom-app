@@ -121,6 +121,7 @@ export default async function AdminPage() {
   }
 
   const supa = createSupabaseRSC()
+  const canSeeFinance = me.role === 'super_admin'
 
   // Cairo date strings (YYYY-MM-DD)
   const today = cairoToday()
@@ -146,21 +147,23 @@ export default async function AdminPage() {
     supa.from('attendance').select('id', { count: 'exact', head: true }).eq('date', today),
   ])
 
-  // Outstanding total (sum)
+  // Outstanding totals are finance-sensitive and are only loaded for Super Admin.
   let outstandingCount = 0
   let outstandingTotal = 0
-  try {
-    const { data, count } = await supa
-      .from('subscriptions')
-      .select('amount_due', { count: 'exact' })
-      .gt('amount_due', 0)
-      .not('member_id', 'is', null)
-      .limit(10000)
+  if (canSeeFinance) {
+    try {
+      const { data, count } = await supa
+        .from('subscriptions')
+        .select('amount_due', { count: 'exact' })
+        .gt('amount_due', 0)
+        .not('member_id', 'is', null)
+        .limit(10000)
 
-    outstandingCount = count ?? (data?.length ?? 0)
-    outstandingTotal = (data ?? []).reduce((acc, r: any) => acc + Number(r?.amount_due ?? 0), 0)
-  } catch {
-    // ignore
+      outstandingCount = count ?? (data?.length ?? 0)
+      outstandingTotal = (data ?? []).reduce((acc, r: any) => acc + Number(r?.amount_due ?? 0), 0)
+    } catch {
+      // ignore
+    }
   }
 
   let latestHealthStatus: string | null = null
@@ -217,12 +220,21 @@ export default async function AdminPage() {
             hint={`Window: ${today} → ${next7}`}
             href="/admin/expiring-soon"
           />
-          <StatCard
-            label="Outstanding total"
-            value={fmtMoneyEGP(outstandingTotal)}
-            hint={`${outstandingCount} member(s) with dues`}
-            href="/admin/outstanding-dues"
-          />
+          {canSeeFinance ? (
+            <StatCard
+              label="Outstanding total"
+              value={fmtMoneyEGP(outstandingTotal)}
+              hint={`${outstandingCount} member(s) with dues`}
+              href="/admin/outstanding-dues"
+            />
+          ) : (
+            <StatCard
+              label="Health Monitor"
+              value={latestHealthLabel}
+              hint="Operational system status"
+              href="/admin/health-monitor"
+            />
+          )}
           <StatCard
             label="Scans today"
             value={scansToday}
@@ -255,18 +267,28 @@ export default async function AdminPage() {
               )
             }
           />
+          {canSeeFinance ? (
+            <TodayCard
+              href="/admin/payments"
+              label="Finance"
+              title={outstandingCount > 0 ? fmtMoneyEGP(outstandingTotal) : 'Payments clear'}
+              hint={outstandingCount > 0 ? `${outstandingCount} member(s) still have dues to settle.` : 'Open Payments or Cash Report for detail.'}
+              icon={<Wallet size={18} strokeWidth={2.1} />}
+            />
+          ) : (
+            <TodayCard
+              href="/admin/attendance"
+              label="Operations"
+              title="Attendance"
+              hint="Review attendance activity without financial data."
+              icon={<ShieldCheck size={18} strokeWidth={2.1} />}
+            />
+          )}
           <TodayCard
-            href="/admin/payments"
-            label="Finance"
-            title={outstandingCount > 0 ? fmtMoneyEGP(outstandingTotal) : 'Payments clear'}
-            hint={outstandingCount > 0 ? `${outstandingCount} member(s) still have dues to settle.` : 'Open Payments or Cash Report for detail.'}
-            icon={<Wallet size={18} strokeWidth={2.1} />}
-          />
-          <TodayCard
-            href={me.role === 'super_admin' ? '/admin/permissions-audit' : '/admin/personal-funds'}
-            label={me.role === 'super_admin' ? 'Control' : 'Review'}
-            title={me.role === 'super_admin' ? 'Permissions audit' : 'Personal funds'}
-            hint={me.role === 'super_admin' ? 'Review access in one place.' : 'Review advances, reimbursements and proof.'}
+            href={me.role === 'super_admin' ? '/admin/permissions-audit' : '/admin/account-activation'}
+            label={me.role === 'super_admin' ? 'Control' : 'Accounts'}
+            title={me.role === 'super_admin' ? 'Permissions audit' : 'Account activation'}
+            hint={me.role === 'super_admin' ? 'Review access in one place.' : 'Review member account activation and onboarding status.'}
             icon={<UserCog size={18} strokeWidth={2.1} />}
           />
         </div>
@@ -283,31 +305,16 @@ export default async function AdminPage() {
           <Button asChild variant="outline" href="/admin/crm">
             CRM
           </Button>
-          <Button asChild variant="outline" href="/admin/payments">
-            Payments
-          </Button>
           {me.role === 'super_admin' ? (
             <Button asChild variant="outline" href="/admin/banking">
               Banking
             </Button>
           ) : null}
-          <Button asChild variant="outline" href="/admin/cash-report">
-            Cash report
-          </Button>
-          <Button asChild variant="outline" href="/expenses">
-            Expenses
-          </Button>
           <Button asChild variant="outline" href="/admin/health-monitor">
             Health Monitor
           </Button>
           <Button asChild variant="outline" href="/admin/account-activation">
             Account Activation
-          </Button>
-          <Button asChild variant="outline" href="/admin/personal-funds">
-            Personal Funds
-          </Button>
-          <Button asChild variant="outline" href="/admin/external-income">
-            Other Income
           </Button>
           {me.role === 'super_admin' ? (
             <Button asChild variant="outline" href="/admin/permissions-audit">
@@ -316,10 +323,12 @@ export default async function AdminPage() {
           ) : null}
         </div>
 
-        <div className="grid gap-4 lg:grid-cols-2">
-          <AdminRevenue />
-          <AdminExports />
-        </div>
+        {canSeeFinance ? (
+          <div className="grid gap-4 lg:grid-cols-2">
+            <AdminRevenue />
+            <AdminExports />
+          </div>
+        ) : null}
 
         <Card>
           <CardContent className="flex flex-wrap items-center gap-3 text-sm text-[hsl(var(--muted))]">
