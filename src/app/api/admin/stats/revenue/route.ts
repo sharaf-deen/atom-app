@@ -9,7 +9,7 @@ import { requireAdmin } from '@/lib/apiAuth'
 import { cairoRangeBoundsUTC, cairoTodayDateOnly } from '@/lib/cairoTime'
 import { computeRecognizedSubscriptionRevenue } from '@/lib/subscriptionRevenue'
 
-type Plan = '1m' | '3m' | '6m' | '12m' | 'sessions'
+type Plan = '1w' | '1m' | '3m' | '6m' | '12m' | 'sessions'
 type RevenueMode = 'cash' | 'recognized'
 
 function noStore(res: NextResponse) {
@@ -97,7 +97,7 @@ export async function GET(req: Request) {
         from = addDays(to, -29)
       }
 
-      const plans: Plan[] = ['1m', '3m', '6m', '12m', 'sessions']
+      const plans: Plan[] = ['1w', '1m', '3m', '6m', '12m', 'sessions']
 
       if (revenueMode === 'cash') {
         const { startISO, endISO } = cairoRangeBoundsUTC(from!, to!)
@@ -113,7 +113,7 @@ export async function GET(req: Request) {
           return noStore(NextResponse.json({ ok: false, error: 'QUERY_FAILED', details: qErr.message }, { status: 500 }))
         }
 
-        const byPlan: Record<Plan, number> = { '1m': 0, '3m': 0, '6m': 0, '12m': 0, 'sessions': 0 }
+        const byPlan: Record<Plan, number> = { '1w': 0, '1m': 0, '3m': 0, '6m': 0, '12m': 0, 'sessions': 0 }
         const dailyMap = new Map<string, number>()
         for (let d = from!; d < addDays(to!, 1); d = addDays(d, 1)) dailyMap.set(d, 0)
 
