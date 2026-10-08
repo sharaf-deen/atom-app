@@ -783,9 +783,9 @@ function buildAdminPriorities(ops: OpsKpis, health: HealthLite | null, role: 'ad
       href: '/admin/crm',
       eyebrow: 'Operations today',
       title: 'Open the follow-up queue',
-      desc: 'Review expiring members, dues and no-attendance cases in one live queue.',
+      desc: role === 'super_admin' ? 'Review expiring members, dues and no-attendance cases in one live queue.' : 'Review expiring members and no-attendance cases in one live queue.',
       icon: MessageSquare,
-      tone: ops.expiring7Count > 0 || ops.outstandingCount > 0 ? 'warning' : 'neutral',
+      tone: ops.expiring7Count > 0 || (role === 'super_admin' && ops.outstandingCount > 0) ? 'warning' : 'neutral',
     },
     {
       href: '/admin/health-monitor',
@@ -821,7 +821,9 @@ function buildAdminPriorities(ops: OpsKpis, health: HealthLite | null, role: 'ad
     },
   ]
 
-  return items
+  return role === 'super_admin'
+    ? items
+    : items.filter((item) => !['/admin/payments', '/admin/personal-funds', '/admin/external-income'].includes(item.href))
 }
 
 function toneClasses(tone: 'success' | 'warning' | 'neutral') {
@@ -1189,7 +1191,16 @@ function adminActions(role: 'admin' | 'super_admin'): QuickAction[] {
     base.push({ href: '/admin/permissions-audit', label: 'Permissions audit', desc: 'Review who can access what.', icon: UserCog })
   }
 
-  return base
+  return role === 'super_admin'
+    ? base
+    : base.filter((item) => ![
+        '/admin/payments',
+        '/admin/cash-report',
+        '/expenses',
+        '/admin/personal-funds',
+        '/admin/external-income',
+        '/admin/outstanding-dues',
+      ].includes(item.href))
 }
 
 export default async function HomePage() {
@@ -1366,7 +1377,11 @@ export default async function HomePage() {
             <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
               <SummaryCard label="1 Week active" value={opsKpis?.weeklyActiveCount ?? 0} hint="Current weekly memberships." href="/members" />
               <SummaryCard label="Expiring soon" value={opsKpis?.expiring7Count ?? 0} hint="Renewals needing attention." href="/admin/expiring-soon" />
-              <SummaryCard label="Outstanding total" value={fmtMoneyEGP(opsKpis?.outstandingTotal ?? 0)} hint={`${opsKpis?.outstandingCount ?? 0} member(s) with dues`} href="/admin/outstanding-dues" />
+              {user.role === 'super_admin' ? (
+                <SummaryCard label="Outstanding total" value={fmtMoneyEGP(opsKpis?.outstandingTotal ?? 0)} hint={`${opsKpis?.outstandingCount ?? 0} member(s) with dues`} href="/admin/outstanding-dues" />
+              ) : (
+                <SummaryCard label="Health" value={healthSnapshot?.status ? String(healthSnapshot.status) : 'Open'} hint="Operational system status" href="/admin/health-monitor" />
+              )}
               <SummaryCard label="Scans today" value={opsKpis?.scansToday ?? 0} hint={`Kiosk attendance · ${cairoToday()}`} href="/admin/scan-audit" />
             </div>
 

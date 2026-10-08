@@ -61,8 +61,8 @@ export default async function PermissionsAuditPage() {
         pageTitle="Permissions Audit"
         subtitle="Access restricted."
         signedInAs={me.email}
-        message="Only Admin / Super Admin can review the internal permissions audit."
-        allowed="admin, super_admin"
+        message="Only Super Admin can review the internal permissions audit."
+        allowed="super_admin"
         nextPath="/admin/permissions-audit"
         actions={[{ href: '/admin', label: 'Back to Admin' }, { href: '/', label: 'Go Home' }]}
         showBackHome
@@ -148,7 +148,7 @@ export default async function PermissionsAuditPage() {
             <CardContent>
               <div className="text-sm text-[hsl(var(--muted))]">Admin-only items</div>
               <div className="mt-1 text-2xl font-semibold">{adminOnly}</div>
-              <div className="mt-1 text-xs text-[hsl(var(--muted))]">Accessible to Admin / Super Admin, not front desk or coaches</div>
+              <div className="mt-1 text-xs text-[hsl(var(--muted))]">Capabilities available to Admin but not front desk or coaches</div>
             </CardContent>
           </Card>
           <Card>

@@ -8,15 +8,16 @@ export const FRONT_DESK_ROLES = ['reception', 'admin', 'super_admin'] as const s
 export const SCAN_TERMINAL_ROLES = ['scan_terminal'] as const satisfies readonly Role[]
 export const ADMIN_ROLES = ['admin', 'super_admin'] as const satisfies readonly Role[]
 export const SUPER_ADMIN_ROLES = ['super_admin'] as const satisfies readonly Role[]
+export const FINANCE_ROLES = ['super_admin'] as const satisfies readonly Role[]
 export const COACH_ROLES = ['coach', 'assistant_coach', 'head_coach'] as const satisfies readonly Role[]
 export const LIFETIME_ACCESS_ROLES = ['assistant_coach', 'coach', 'head_coach', 'champion', 'vip'] as const satisfies readonly Role[]
 export const NOTIFICATION_MANAGER_ROLES = ['head_coach', 'admin', 'super_admin'] as const satisfies readonly Role[]
 export const NOTIFICATION_RECIPIENT_ROLES = ['member', 'champion', 'vip', 'assistant_coach', 'coach', 'head_coach'] as const satisfies readonly Role[]
 export const STORE_CUSTOMER_ROLES = ['member', 'champion', 'vip', 'assistant_coach', 'coach', 'head_coach'] as const satisfies readonly Role[]
 export const STORE_CATALOG_ADMIN_ROLES = ['reception', 'admin', 'super_admin'] as const satisfies readonly Role[]
-export const STORE_DASHBOARD_ROLES = ['admin', 'super_admin'] as const satisfies readonly Role[]
-export const STORE_EXPENSE_ROLES = ['admin', 'super_admin'] as const satisfies readonly Role[]
-export const STORE_FUNDING_ROLES = ['admin', 'super_admin'] as const satisfies readonly Role[]
+export const STORE_DASHBOARD_ROLES = ['super_admin'] as const satisfies readonly Role[]
+export const STORE_EXPENSE_ROLES = ['super_admin'] as const satisfies readonly Role[]
+export const STORE_FUNDING_ROLES = ['super_admin'] as const satisfies readonly Role[]
 
 export type NavIconKey =
   | 'home'
@@ -137,7 +138,6 @@ const APP_NAV_BY_ROLE: MenuByRole = {
     { label: 'Attendance', href: '/admin/attendance', icon: 'calendar' },
     { label: 'Scan Audit', href: '/admin/scan-audit', icon: 'file-text' },
     { label: 'Health Monitor', href: '/admin/health-monitor', icon: 'file-text' },
-    { label: 'Permissions Audit', href: '/admin/permissions-audit', icon: 'file-text' },
     { label: 'Packages & Promos', href: '/packages-and-promos', icon: 'gift' },
     { label: 'Membership', href: '/kiosk', icon: 'id' },
     { label: 'Scan', href: '/scan', icon: 'scan' },
@@ -149,17 +149,9 @@ const APP_NAV_BY_ROLE: MenuByRole = {
     { label: 'Family Operations', href: '/admin/members/family-operations', icon: 'users' },
     { label: 'Coaches', href: '/coaches', icon: 'user-cog' },
     { label: 'Athletes', href: '/head-coach/athletes', icon: 'users' },
-    { label: 'Store Dashboard', href: '/admin/store/dashboard', icon: 'bag' },
     { label: 'Store Catalog', href: '/admin/store', icon: 'bag' },
-    { label: 'Invoices', href: '/invoices', icon: 'file-text' },
-    { label: 'Payments', href: '/admin/payments', icon: 'file-text' },
-    { label: 'Membership Refunds', href: '/admin/membership-refunds', icon: 'wallet' },
-    { label: 'Cash Report', href: '/admin/cash-report', icon: 'wallet' },
-    { label: 'Outstanding Dues', href: '/admin/outstanding-dues', icon: 'wallet' },
     { label: 'Membership Activity', href: '/admin/membership-activity', icon: 'file-text' },
     { label: 'Expiring Soon', href: '/admin/expiring-soon', icon: 'bell' },
-    { label: 'Expenses', href: '/expenses', icon: 'wallet' },
-    { label: 'Other Income', href: '/admin/external-income', icon: 'wallet' },
   ],
   super_admin: [
     { label: 'Home', href: '/', icon: 'home' },
@@ -335,15 +327,15 @@ export function canAccessHealthMonitor(role: Role | null | undefined) {
 }
 
 export function canAccessPermissionsAudit(role: Role | null | undefined) {
-  return hasAnyRole(role, ADMIN_ROLES)
+  return hasAnyRole(role, SUPER_ADMIN_ROLES)
 }
 
 export function canAccessPayments(role: Role | null | undefined) {
-  return hasAnyRole(role, ADMIN_ROLES)
+  return hasAnyRole(role, FINANCE_ROLES)
 }
 
 export function canAccessCashReport(role: Role | null | undefined) {
-  return hasAnyRole(role, ADMIN_ROLES)
+  return hasAnyRole(role, FINANCE_ROLES)
 }
 
 export function canAccessBanking(role: Role | null | undefined) {
@@ -351,15 +343,27 @@ export function canAccessBanking(role: Role | null | undefined) {
 }
 
 export function canAccessExpenses(role: Role | null | undefined) {
-  return hasAnyRole(role, ADMIN_ROLES)
+  return hasAnyRole(role, FINANCE_ROLES)
 }
 
 export function canAccessPersonalFunds(role: Role | null | undefined) {
-  return hasAnyRole(role, ADMIN_ROLES)
+  return hasAnyRole(role, FINANCE_ROLES)
 }
 
 export function canAccessExternalIncome(role: Role | null | undefined) {
-  return hasAnyRole(role, ADMIN_ROLES)
+  return hasAnyRole(role, FINANCE_ROLES)
+}
+
+export function canAccessOutstandingDues(role: Role | null | undefined) {
+  return hasAnyRole(role, FINANCE_ROLES)
+}
+
+export function canAccessMembershipRefunds(role: Role | null | undefined) {
+  return hasAnyRole(role, FINANCE_ROLES)
+}
+
+export function canAccessStaffPayroll(role: Role | null | undefined) {
+  return hasAnyRole(role, FINANCE_ROLES)
 }
 
 export function canAccessVisitorTrials(role: Role | null | undefined) {
@@ -547,7 +551,7 @@ export function canManageNotifications(role: Role | null | undefined) {
 }
 
 export function canAccessInvoices(role: Role | null | undefined) {
-  return hasAnyRole(role, FRONT_DESK_ROLES)
+  return hasAnyRole(role, FINANCE_ROLES)
 }
 
 const CAPABILITY_BLUEPRINTS: CapabilityBlueprint[] = [
@@ -702,6 +706,30 @@ const CAPABILITY_BLUEPRINTS: CapabilityBlueprint[] = [
     description: 'Review ATOM bank statement imports, inflows, outflows and transaction history.',
     href: '/admin/banking',
     check: (role) => canAccessBanking(role),
+  },
+  {
+    key: 'outstanding_dues',
+    category: 'Finance',
+    label: 'Outstanding dues',
+    description: 'Review outstanding member balances and payment follow-up totals.',
+    href: '/admin/outstanding-dues',
+    check: (role) => canAccessOutstandingDues(role),
+  },
+  {
+    key: 'membership_refunds',
+    category: 'Finance',
+    label: 'Membership refunds',
+    description: 'Review and manage exceptional membership refund records.',
+    href: '/admin/membership-refunds',
+    check: (role) => canAccessMembershipRefunds(role),
+  },
+  {
+    key: 'staff_payroll',
+    category: 'Finance',
+    label: 'Staff payroll',
+    description: 'Access salary calculations, payments, closeout and payroll financial data.',
+    href: '/admin/staff-payroll',
+    check: (role) => canAccessStaffPayroll(role),
   },
   {
     key: 'cash_report',
