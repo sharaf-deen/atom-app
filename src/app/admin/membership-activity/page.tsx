@@ -99,6 +99,18 @@ function titleFromKey(key: string) {
     .join(' ')
 }
 
+function planLabel(plan?: string | null) {
+  switch (plan) {
+    case '1w': return '1 week'
+    case '1m': return '1 month'
+    case '3m': return '3 months'
+    case '6m': return '6 months'
+    case '12m': return '12 months'
+    case 'sessions': return 'Legacy sessions'
+    default: return plan || ''
+  }
+}
+
 function fmtNum(v: any) {
   const n = typeof v === 'number' ? v : Number(v)
   if (!Number.isFinite(n)) return ''
@@ -136,7 +148,7 @@ function actionMeta(actionRaw: string, details: any): { label: string; tone: Act
     if (action === 'subscription_create') {
       const paid = fmtNum(details?.amount_paid)
       const due = fmtNum(details?.amount_due)
-      const plan = details?.plan ? String(details.plan) : ''
+      const plan = details?.plan ? planLabel(String(details.plan)) : ''
       const pm = details?.payment_method ? String(details.payment_method) : ''
       subtitle = [plan ? `Plan: ${plan}` : '', paid ? `Paid: ${paid}` : '', due ? `Due: ${due}` : '', pm ? `Method: ${pm}` : '']
         .filter(Boolean)

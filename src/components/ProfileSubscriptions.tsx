@@ -6,7 +6,7 @@ import { createSupabaseRSC } from '@/lib/supabaseServer'
 import { getSessionUser } from '@/lib/session'
 import ProfileSubscriptionsHistoryClient from './ProfileSubscriptionsHistoryClient'
 
-type Plan = '1m' | '3m' | '6m' | '12m' | 'sessions'
+type Plan = '1w' | '1m' | '3m' | '6m' | '12m' | 'sessions'
 export type SubRow = {
   id: number
   plan: Plan
@@ -38,11 +38,12 @@ function fmtAmount(n?: number | null) {
 
 function humanPlan(p: Plan) {
   const map: Record<Plan, string> = {
+    '1w': '1 week',
     '1m': '1 month',
     '3m': '3 months',
     '6m': '6 months',
     '12m': '12 months',
-    'sessions': 'Per sessions',
+    'sessions': 'Legacy sessions',
   }
   return map[p] ?? p
 }

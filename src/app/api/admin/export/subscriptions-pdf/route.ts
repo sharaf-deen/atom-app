@@ -16,6 +16,18 @@ function json(status: number, body: any) {
 function isISODateOnly(s?: string | null) {
   return !!s && /^\d{4}-\d{2}-\d{2}$/.test(s)
 }
+function planLabel(plan?: string | null) {
+  switch (plan) {
+    case '1w': return '1 week'
+    case '1m': return '1 month'
+    case '3m': return '3 months'
+    case '6m': return '6 months'
+    case '12m': return '12 months'
+    case 'sessions': return 'Legacy sessions'
+    default: return plan || 'Membership'
+  }
+}
+
 function formatEGP(n: number) {
   return new Intl.NumberFormat('en-EG', { style: 'currency', currency: 'EGP', maximumFractionDigits: 2 }).format(Number.isFinite(n) ? n : 0)
 }
@@ -104,7 +116,7 @@ export async function GET(req: Request) {
       for (const row of subs ?? []) {
         if (y < 56) addPage()
         const prof = row.member_id ? memberProfiles.get(row.member_id) : null
-        const line = `${memberName(prof)} · ${row.plan ?? '—'} · Paid ${formatEGP(Number(row.amount ?? 0))} · Due ${formatEGP(Number(row.amount_due ?? 0))} · ${row.paid_at ? String(row.paid_at).slice(0, 10) : '—'}`
+        const line = `${memberName(prof)} · ${planLabel(row.plan)} · Paid ${formatEGP(Number(row.amount ?? 0))} · Due ${formatEGP(Number(row.amount_due ?? 0))} · ${row.paid_at ? String(row.paid_at).slice(0, 10) : '—'}`
         page.drawText(lineClamp(line), { x: marginX, y, size: 10, font, color: rgb(0.08, 0.08, 0.08) })
         y -= 14
       }
@@ -127,7 +139,7 @@ export async function GET(req: Request) {
       for (const row of rows) {
         if (y < 56) addPage()
         const prof = row.member_id ? memberProfiles.get(row.member_id) : null
-        const line = `${row.month} · ${memberName(prof)} · ${row.plan} · ${row.recognized_days}/${row.total_service_days} active days · ${formatEGP(row.recognized_amount)}`
+        const line = `${row.month} · ${memberName(prof)} · ${planLabel(row.plan)} · ${row.recognized_days}/${row.total_service_days} active days · ${formatEGP(row.recognized_amount)}`
         page.drawText(lineClamp(line), { x: marginX, y, size: 10, font, color: rgb(0.08, 0.08, 0.08) })
         y -= 14
       }

@@ -64,7 +64,7 @@ type TrainingProfileLite = {
 
 type SubscriptionLite = {
   id: string
-  plan: '1m' | '3m' | '6m' | '12m' | 'sessions' | null
+  plan: '1w' | '1m' | '3m' | '6m' | '12m' | 'sessions' | null
   subscription_type: 'time' | 'sessions' | null
   status: 'active' | 'expired' | 'canceled' | 'paused' | string | null
   start_date: string | null
@@ -87,6 +87,7 @@ type MembershipSnapshot = {
 
 type OpsKpis = {
   activeCount: number
+  weeklyActiveCount: number
   expiring7Count: number
   scansToday: number
   outstandingCount: number
@@ -152,6 +153,8 @@ function fmtMoneyEGP(v: number) {
 
 function humanPlan(p?: SubscriptionLite['plan']) {
   switch (p) {
+    case '1w':
+      return '1 week'
     case '1m':
       return '1 month'
     case '3m':
@@ -334,13 +337,19 @@ async function getOpsKpis(): Promise<OpsKpis> {
   const today = cairoToday()
   const next7 = addDays(today, 7)
 
-  const [{ count: activeCount }, { count: expiring7Count }, scansRes] = await Promise.all([
+  const [{ count: activeCount }, { count: weeklyActiveCount }, { count: expiring7Count }, scansRes] = await Promise.all([
     supa
       .from('subscriptions')
       .select('id', { count: 'exact', head: true })
       .eq('status', 'active')
       .gte('end_date', today)
       .or(`frozen_until.is.null,frozen_until.lt.${today}`),
+    supa
+      .from('subscriptions')
+      .select('id', { count: 'exact', head: true })
+      .eq('status', 'active')
+      .eq('plan', '1w')
+      .gte('end_date', today),
     supa
       .from('subscriptions')
       .select('id', { count: 'exact', head: true })
@@ -371,6 +380,7 @@ async function getOpsKpis(): Promise<OpsKpis> {
 
   return {
     activeCount: activeCount ?? 0,
+    weeklyActiveCount: weeklyActiveCount ?? 0,
     expiring7Count: expiring7Count ?? 0,
     scansToday: scansRes?.count ?? 0,
     outstandingCount,
@@ -1324,7 +1334,8 @@ export default async function HomePage() {
               items={buildReceptionPriorities(opsKpis!)}
             />
 
-            <div className="grid gap-4 sm:grid-cols-3">
+            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+              <SummaryCard label="1 Week active" value={opsKpis?.weeklyActiveCount ?? 0} hint="Current weekly memberships." href="/members" />
               <SummaryCard label="Scans today" value={opsKpis?.scansToday ?? 0} hint={`Attendance · ${cairoToday()}`} href="/scan" />
               <SummaryCard label="Expiring soon" value={opsKpis?.expiring7Count ?? 0} hint="Members to renew soon." href="/admin/expiring-soon" />
               <SummaryCard label="Outstanding dues" value={opsKpis?.outstandingCount ?? 0} hint={fmtMoneyEGP(opsKpis?.outstandingTotal ?? 0)} href="/admin/outstanding-dues" />
@@ -1352,7 +1363,8 @@ export default async function HomePage() {
               items={buildAdminPriorities(opsKpis!, healthSnapshot, user.role)}
             />
 
-            <div className="grid gap-4 sm:grid-cols-3">
+            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+              <SummaryCard label="1 Week active" value={opsKpis?.weeklyActiveCount ?? 0} hint="Current weekly memberships." href="/members" />
               <SummaryCard label="Expiring soon" value={opsKpis?.expiring7Count ?? 0} hint="Renewals needing attention." href="/admin/expiring-soon" />
               <SummaryCard label="Outstanding total" value={fmtMoneyEGP(opsKpis?.outstandingTotal ?? 0)} hint={`${opsKpis?.outstandingCount ?? 0} member(s) with dues`} href="/admin/outstanding-dues" />
               <SummaryCard label="Scans today" value={opsKpis?.scansToday ?? 0} hint={`Kiosk attendance · ${cairoToday()}`} href="/admin/scan-audit" />
