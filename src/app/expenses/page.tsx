@@ -8,7 +8,7 @@ import AccessDeniedPage from '@/components/AccessDeniedPage'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card'
 import InlineAlert from '@/components/ui/InlineAlert'
 import ExpensesTableClient, { type ExpenseRow } from '@/components/ExpensesTableClient'
-import { canAccessExpenses } from '@/lib/rbac'
+import { canAccessExpenses, canManageExpenses } from '@/lib/rbac'
 import ExpenseSubmitButton from '@/components/ExpenseSubmitButton'
 
 type RangePreset = 'today' | '7d' | 'month' | 'custom'
@@ -89,7 +89,7 @@ async function addExpenseAction(formData: FormData) {
 
   const me = await getSessionUserCached()
   if (!me) redirect('/login?next=/expenses')
-  if (!canAccessExpenses(me.role)) redirect('/expenses?error=Access%20denied')
+  if (!canManageExpenses(me.role)) redirect('/expenses?error=Read-only%20access')
 
   const return_qs = safeStr(formData.get('return_qs'))
 
@@ -209,6 +209,7 @@ export default async function ExpensesPage({
     )
   }
 
+  const canWrite = canManageExpenses(user.role)
   const now = new Date()
   const today = toISODate(now)
   const thisMonthFrom = toISODate(startOfMonth(now))
@@ -559,7 +560,7 @@ export default async function ExpensesPage({
 
         <CardContent>
           {expenses.length > 0 ? (
-            <ExpensesTableClient expenses={expenses} labelByKey={labelByKeyObj} returnQueryString={filterReturnQS} focusExpenseId={focusId} />
+            <ExpensesTableClient expenses={expenses} labelByKey={labelByKeyObj} returnQueryString={filterReturnQS} focusExpenseId={focusId} canManage={canWrite} />
           ) : (
             <div className="rounded-2xl border border-dashed border-[hsl(var(--border))] bg-[hsl(var(--bg))]/40 p-6 text-center">
               <div className="text-base font-medium">No expenses found for the current filters.</div>
@@ -628,7 +629,7 @@ export default async function ExpensesPage({
       <Card>
         <CardHeader>
           <CardTitle>Add expense</CardTitle>
-          <div className="text-xs text-[hsl(var(--muted))]">Admin / Super Admin</div>
+          <div className="text-xs text-[hsl(var(--muted))]">{canWrite ? "Super Admin" : "Admin · read-only"}</div>
         </CardHeader>
         <CardContent>
           <form action={addExpenseAction} className="grid gap-3 sm:grid-cols-4">
@@ -695,7 +696,7 @@ export default async function ExpensesPage({
             </label>
 
             <div className="sm:col-span-4">
-              <ExpenseSubmitButton />
+              <ExpenseSubmitButton idleLabel={canWrite ? 'Save expense' : 'Read only'} disabled={!canWrite} />
             </div>
           </form>
         </CardContent>

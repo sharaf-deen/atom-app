@@ -8,6 +8,7 @@ export const FRONT_DESK_ROLES = ['reception', 'admin', 'super_admin'] as const s
 export const SCAN_TERMINAL_ROLES = ['scan_terminal'] as const satisfies readonly Role[]
 export const ADMIN_ROLES = ['admin', 'super_admin'] as const satisfies readonly Role[]
 export const SUPER_ADMIN_ROLES = ['super_admin'] as const satisfies readonly Role[]
+export const FINANCE_READ_ROLES = ['admin', 'super_admin'] as const satisfies readonly Role[]
 export const FINANCE_ROLES = ['super_admin'] as const satisfies readonly Role[]
 export const COACH_ROLES = ['coach', 'assistant_coach', 'head_coach'] as const satisfies readonly Role[]
 export const LIFETIME_ACCESS_ROLES = ['assistant_coach', 'coach', 'head_coach', 'champion', 'vip'] as const satisfies readonly Role[]
@@ -150,6 +151,13 @@ const APP_NAV_BY_ROLE: MenuByRole = {
     { label: 'Coaches', href: '/coaches', icon: 'user-cog' },
     { label: 'Athletes', href: '/head-coach/athletes', icon: 'users' },
     { label: 'Store Catalog', href: '/admin/store', icon: 'bag' },
+    { label: 'Invoices', href: '/invoices', icon: 'file-text' },
+    { label: 'Payments', href: '/admin/payments', icon: 'file-text' },
+    { label: 'Membership Refunds', href: '/admin/membership-refunds', icon: 'wallet' },
+    { label: 'Outstanding Dues', href: '/admin/outstanding-dues', icon: 'wallet' },
+    { label: 'Expenses', href: '/expenses', icon: 'wallet' },
+    { label: 'Personal Funds', href: '/admin/personal-funds', icon: 'wallet' },
+    { label: 'Other Income', href: '/admin/external-income', icon: 'wallet' },
     { label: 'Membership Activity', href: '/admin/membership-activity', icon: 'file-text' },
     { label: 'Expiring Soon', href: '/admin/expiring-soon', icon: 'bell' },
   ],
@@ -331,6 +339,10 @@ export function canAccessPermissionsAudit(role: Role | null | undefined) {
 }
 
 export function canAccessPayments(role: Role | null | undefined) {
+  return hasAnyRole(role, FINANCE_READ_ROLES)
+}
+
+export function canManagePayments(role: Role | null | undefined) {
   return hasAnyRole(role, FINANCE_ROLES)
 }
 
@@ -343,22 +355,42 @@ export function canAccessBanking(role: Role | null | undefined) {
 }
 
 export function canAccessExpenses(role: Role | null | undefined) {
+  return hasAnyRole(role, FINANCE_READ_ROLES)
+}
+
+export function canManageExpenses(role: Role | null | undefined) {
   return hasAnyRole(role, FINANCE_ROLES)
 }
 
 export function canAccessPersonalFunds(role: Role | null | undefined) {
+  return hasAnyRole(role, FINANCE_READ_ROLES)
+}
+
+export function canManagePersonalFunds(role: Role | null | undefined) {
   return hasAnyRole(role, FINANCE_ROLES)
 }
 
 export function canAccessExternalIncome(role: Role | null | undefined) {
+  return hasAnyRole(role, FINANCE_READ_ROLES)
+}
+
+export function canManageExternalIncome(role: Role | null | undefined) {
   return hasAnyRole(role, FINANCE_ROLES)
 }
 
 export function canAccessOutstandingDues(role: Role | null | undefined) {
+  return hasAnyRole(role, FINANCE_READ_ROLES)
+}
+
+export function canManageOutstandingDues(role: Role | null | undefined) {
   return hasAnyRole(role, FINANCE_ROLES)
 }
 
 export function canAccessMembershipRefunds(role: Role | null | undefined) {
+  return hasAnyRole(role, FINANCE_READ_ROLES)
+}
+
+export function canManageMembershipRefunds(role: Role | null | undefined) {
   return hasAnyRole(role, FINANCE_ROLES)
 }
 
@@ -551,6 +583,10 @@ export function canManageNotifications(role: Role | null | undefined) {
 }
 
 export function canAccessInvoices(role: Role | null | undefined) {
+  return hasAnyRole(role, FINANCE_READ_ROLES)
+}
+
+export function canManageInvoices(role: Role | null | undefined) {
   return hasAnyRole(role, FINANCE_ROLES)
 }
 

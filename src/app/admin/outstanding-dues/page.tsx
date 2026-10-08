@@ -7,7 +7,7 @@ import { redirect } from 'next/navigation'
 import { createClient } from '@supabase/supabase-js'
 import AccessDeniedCard from '@/components/AccessDeniedCard'
 import { getSessionUser } from '@/lib/session'
-import { canAccessOutstandingDues } from '@/lib/rbac'
+import { canAccessOutstandingDues, canManageOutstandingDues } from '@/lib/rbac'
 import OutstandingDuesClient from './_components/OutstandingDuesClient'
 import RunOutstandingRemindersButton from './_components/RunOutstandingRemindersButton'
 import type { OutstandingDueRow } from './types'
@@ -41,6 +41,7 @@ export default async function AdminOutstandingDuesPage() {
   if (!me) redirect('/login?next=/admin/outstanding-dues')
 
   const allowed = canAccessOutstandingDues(me.role)
+  const canManage = canManageOutstandingDues(me.role)
   if (!allowed) {
     return (
       <main className="p-6">
@@ -153,7 +154,7 @@ export default async function AdminOutstandingDuesPage() {
         </div>
 
         <div className="flex gap-2 flex-wrap items-center">
-          <RunOutstandingRemindersButton />
+          {canManage ? <RunOutstandingRemindersButton /> : null}
           <Link prefetch={false} href="/admin" className="border px-4 py-2 rounded-lg hover:bg-gray-50">
             ← Admin
           </Link>

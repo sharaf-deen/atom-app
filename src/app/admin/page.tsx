@@ -121,7 +121,7 @@ export default async function AdminPage() {
   }
 
   const supa = createSupabaseRSC()
-  const canSeeFinance = me.role === 'super_admin'
+  const canSeeFinance = me.role === 'admin' || me.role === 'super_admin'
 
   // Cairo date strings (YYYY-MM-DD)
   const today = cairoToday()
@@ -310,6 +310,27 @@ export default async function AdminPage() {
               Banking
             </Button>
           ) : null}
+          <Button asChild variant="outline" href="/admin/payments">
+            Payments
+          </Button>
+          <Button asChild variant="outline" href="/admin/outstanding-dues">
+            Outstanding Dues
+          </Button>
+          <Button asChild variant="outline" href="/invoices">
+            Invoices
+          </Button>
+          <Button asChild variant="outline" href="/admin/membership-refunds">
+            Membership Refunds
+          </Button>
+          <Button asChild variant="outline" href="/admin/personal-funds">
+            Personal Funds
+          </Button>
+          <Button asChild variant="outline" href="/expenses">
+            Expenses
+          </Button>
+          <Button asChild variant="outline" href="/admin/external-income">
+            Other Income
+          </Button>
           <Button asChild variant="outline" href="/admin/health-monitor">
             Health Monitor
           </Button>
@@ -324,9 +345,9 @@ export default async function AdminPage() {
         </div>
 
         {canSeeFinance ? (
-          <div className="grid gap-4 lg:grid-cols-2">
+          <div className={me.role === 'super_admin' ? 'grid gap-4 lg:grid-cols-2' : 'grid gap-4'}>
             <AdminRevenue />
-            <AdminExports />
+            {me.role === 'super_admin' ? <AdminExports /> : null}
           </div>
         ) : null}
 
