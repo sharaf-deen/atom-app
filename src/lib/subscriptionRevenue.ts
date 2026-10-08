@@ -35,7 +35,7 @@ export type MonthlyRecognitionRow = {
 export type RecognizedBucket = { date: string; sum: number }
 export type RecognizedMonthBucket = { month: string; sum: number }
 
-type PlanKey = '1m' | '3m' | '6m' | '12m' | 'sessions'
+type PlanKey = '1w' | '1m' | '3m' | '6m' | '12m' | 'sessions'
 type TotalsByPlan = Record<PlanKey, number>
 
 export type RecognizedSubscriptionRevenueResult = {
@@ -72,7 +72,7 @@ function monthKey(dateOnly: string) {
 }
 
 function isTimePlan(plan: string | null | undefined) {
-  return plan === '1m' || plan === '3m' || plan === '6m' || plan === '12m'
+  return plan === '1w' || plan === '1m' || plan === '3m' || plan === '6m' || plan === '12m'
 }
 
 function parseDateOnly(v?: string | null): string | null {
@@ -216,6 +216,7 @@ export function computeRecognizedSubscriptionRevenue(...args: any[]): Recognized
   const dailyMap = new Map<string, number>()
   const monthMap = new Map<string, number>()
   const byPlan: TotalsByPlan = {
+    '1w': 0,
     '1m': 0,
     '3m': 0,
     '6m': 0,
@@ -255,7 +256,7 @@ export function computeRecognizedSubscriptionRevenue(...args: any[]): Recognized
       dailyMap.set(d, Number(((dailyMap.get(d) ?? 0) + perDay).toFixed(6)))
     }
     monthMap.set(row.month, Number(((monthMap.get(row.month) ?? 0) + row.recognized_amount).toFixed(6)))
-    if (row.plan === '1m' || row.plan === '3m' || row.plan === '6m' || row.plan === '12m') {
+    if (row.plan === '1w' || row.plan === '1m' || row.plan === '3m' || row.plan === '6m' || row.plan === '12m') {
       byPlan[row.plan] += row.recognized_amount
     }
     breakdownRows.push({
@@ -273,6 +274,7 @@ export function computeRecognizedSubscriptionRevenue(...args: any[]): Recognized
     .map(([month, sum]) => ({ month, sum: Number(sum.toFixed(2)) }))
   const total = Number(monthly.reduce((acc, x) => acc + x.sum, 0).toFixed(2))
   const byPlanRounded: TotalsByPlan = {
+    '1w': Number(byPlan['1w'].toFixed(2)),
     '1m': Number(byPlan['1m'].toFixed(2)),
     '3m': Number(byPlan['3m'].toFixed(2)),
     '6m': Number(byPlan['6m'].toFixed(2)),

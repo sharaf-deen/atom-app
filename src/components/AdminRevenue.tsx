@@ -3,7 +3,7 @@
 
 import { useEffect, useMemo, useState } from 'react'
 
-type Plan = '1m' | '3m' | '6m' | '12m' | 'sessions'
+type Plan = '1w' | '1m' | '3m' | '6m' | '12m' | 'sessions'
 type RevenueMode = 'cash' | 'recognized'
 type RevenueResp =
   | {
@@ -157,7 +157,7 @@ export default function AdminRevenue() {
           <div className="text-xs text-gray-500">{resolvedMode === 'recognized' ? 'Recognized revenue' : 'Total revenue'}</div>
           <div className="text-xl font-semibold">{totals ? fmtCurrency(totals.sum) : '—'}</div>
         </div>
-        {(['1m', '3m', '6m', '12m', 'sessions'] as Plan[]).map((p) => (
+        {(['1w', '1m', '3m', '6m', '12m'] as Plan[]).map((p) => (
           <div key={p} className="rounded-lg border p-3">
             <div className="text-xs text-gray-500">Plan {p}</div>
             <div className="text-lg font-medium">{totals ? fmtCurrency(totals.by_plan[p] || 0) : '—'}</div>
