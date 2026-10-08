@@ -1124,14 +1124,24 @@ function HomeLogoutShortcut() {
 }
 
 
-function memberActions(): QuickAction[] {
-  return [
-    { href: '/profile#freeze-request', label: 'Request freeze', desc: 'Submit or review a membership freeze request.', icon: Clock3 },
-    { href: '/profile', label: 'My profile', desc: 'Identity, subscription details and QR code.', icon: IdCard },
+function memberActions(role: Role): QuickAction[] {
+  const actions: QuickAction[] = [
+    { href: '/profile', label: 'My profile', desc: 'Identity, access details and QR code.', icon: IdCard },
     { href: '/private-coaching', label: 'Private coaching', desc: 'Request and book private coaching sessions.', icon: UserCog },
     { href: '/store', label: 'Store', desc: 'Browse available products and equipment.', icon: ShoppingBag },
     { href: '/notifications?thread=admin', label: 'Contact admin', desc: 'Message the ATOM team.', icon: UserCog },
   ]
+
+  if (!hasLifetimeGymAccess(role)) {
+    actions.unshift({
+      href: '/profile#freeze-request',
+      label: 'Request freeze',
+      desc: 'Submit or review a membership freeze request.',
+      icon: Clock3,
+    })
+  }
+
+  return actions
 }
 
 function coachActions(role: Role): QuickAction[] {
@@ -1302,7 +1312,7 @@ export default async function HomePage() {
             <QuickActions
               title="Quick actions"
               subtitle="Keep the next step simple."
-              items={memberActions()}
+              items={memberActions(user.role)}
             />
           </>
         ) : null}

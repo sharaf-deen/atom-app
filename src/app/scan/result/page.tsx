@@ -22,7 +22,7 @@ import { Card, CardContent } from '@/components/ui/Card'
 import Button from '@/components/ui/Button'
 import AccessDeniedPage from '@/components/AccessDeniedPage'
 import { getSessionUserCached, getSupabaseAdminClientCached } from '@/lib/requestCache'
-import { canAccessScan } from '@/lib/rbac'
+import { canAccessScan, hasLifetimeGymAccess, normalizeRole } from '@/lib/rbac'
 import AutoReturn from './AutoReturn'
 import ResultSound from './ResultSound'
 
@@ -401,6 +401,7 @@ export default async function ScanResultPage({ searchParams }: { searchParams: S
 
   let memberName = ''
   let memberCode = ''
+  let scannedMemberRole = 'member'
   let signedPhoto = ''
   let subscriptions: SubRow[] = []
   let attendanceTodayScannedAt: string | null = null
@@ -422,6 +423,7 @@ export default async function ScanResultPage({ searchParams }: { searchParams: S
 
       memberName = [p?.first_name ?? '', p?.last_name ?? ''].join(' ').trim() || ''
       memberCode = p?.member_id ?? ''
+      scannedMemberRole = p?.role ?? 'member'
 
       if (p?.id_photo_path) {
         const { data } = await admin.storage.from('id-photos').createSignedUrl(p.id_photo_path, 60 * 5)
@@ -589,7 +591,17 @@ export default async function ScanResultPage({ searchParams }: { searchParams: S
   }
 
   const today = todayDateOnlyCairo()
-  const summary = buildSubscriptionSummary(subscriptions, today, {
+  const lifetimeAccess = hasLifetimeGymAccess(normalizeRole(scannedMemberRole))
+  const summary = lifetimeAccess
+    ? {
+        stateLabel: 'ALWAYS ACTIVE',
+        stateTone: 'success' as const,
+        startDate: null,
+        endDate: null,
+        durationLabel: 'Permanent access',
+        detailLabel: 'Role-based lifetime gym access',
+      }
+    : buildSubscriptionSummary(subscriptions, today, {
     valid,
     frozen,
     apiMessage,
@@ -611,16 +623,26 @@ export default async function ScanResultPage({ searchParams }: { searchParams: S
     <ShieldAlert size={22} strokeWidth={2.1} />
   )
 
-  const title = frozen ? 'Subscription frozen' : valid ? 'Membership active' : 'Membership expired'
-  const subtitle = frozen
-    ? 'Do not allow entry until the freeze ends or the membership is updated.'
-    : valid
-      ? 'Membership is valid. You can let the member in.'
-      : 'Membership is not active. Send the member to reception.'
+  const title = lifetimeAccess
+    ? 'Permanent access'
+    : frozen
+      ? 'Subscription frozen'
+      : valid
+        ? 'Membership active'
+        : 'Membership expired'
+  const subtitle = lifetimeAccess
+    ? 'Role-based access is always active. You can let the member in.'
+    : frozen
+      ? 'Do not allow entry until the freeze ends or the membership is updated.'
+      : valid
+        ? 'Membership is valid. You can let the member in.'
+        : 'Membership is not active. Send the member to reception.'
 
   const infoTitle = repeatScan
     ? 'Repeated scan'
-    : valid
+    : lifetimeAccess
+      ? 'Permanent role access'
+      : valid
       ? attendanceTodayScannedAt
         ? 'Already scanned today'
         : 'Check-in recorded'
@@ -632,7 +654,9 @@ export default async function ScanResultPage({ searchParams }: { searchParams: S
     ? `Same QR scanned again${typeof repeatSeconds === 'number' ? ` after ${repeatSeconds}s` : ''}.`
     : attendanceTodayScannedAt && valid
       ? `Attendance already recorded today at ${fmtDateTimeNice(attendanceTodayScannedAt)}.`
-      : apiMessage || subtitle
+      : lifetimeAccess
+        ? 'No membership renewal or expiry date is required for this role.'
+        : apiMessage || subtitle
 
   const primaryHref = valid ? returnHref : memberId ? `/members/${memberId}` : '/members'
   const primaryLabel = valid ? 'Scan next' : memberId ? 'Open member' : 'Open members'
@@ -676,12 +700,20 @@ export default async function ScanResultPage({ searchParams }: { searchParams: S
                 <StatusHero label={summary.stateLabel} tone={tone} />
               </div>
 
-              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-                <KeyFact label="Status" value={summary.stateLabel} icon={<ShieldCheck size={18} strokeWidth={2.1} />} emphasize />
-                <KeyFact label="Start date" value={fmtDateNice(summary.startDate)} icon={<CalendarDays size={18} strokeWidth={2.1} />} />
-                <KeyFact label="End date" value={fmtDateNice(summary.endDate)} icon={<CalendarDays size={18} strokeWidth={2.1} />} />
-                <KeyFact label="Duration" value={summary.durationLabel} icon={<Clock3 size={18} strokeWidth={2.1} />} />
-              </div>
+              {lifetimeAccess ? (
+                <div className="grid gap-3 sm:grid-cols-3">
+                  <KeyFact label="Status" value={summary.stateLabel} icon={<ShieldCheck size={18} strokeWidth={2.1} />} emphasize />
+                  <KeyFact label="Access type" value="Permanent" icon={<CircleCheckBig size={18} strokeWidth={2.1} />} />
+                  <KeyFact label="Role" value={roleLabel(scannedMemberRole)} icon={<UserRound size={18} strokeWidth={2.1} />} />
+                </div>
+              ) : (
+                <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                  <KeyFact label="Status" value={summary.stateLabel} icon={<ShieldCheck size={18} strokeWidth={2.1} />} emphasize />
+                  <KeyFact label="Start date" value={fmtDateNice(summary.startDate)} icon={<CalendarDays size={18} strokeWidth={2.1} />} />
+                  <KeyFact label="End date" value={fmtDateNice(summary.endDate)} icon={<CalendarDays size={18} strokeWidth={2.1} />} />
+                  <KeyFact label="Duration" value={summary.durationLabel} icon={<Clock3 size={18} strokeWidth={2.1} />} />
+                </div>
+              )}
 
               <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_240px]">
                 <InlineInfo tone={tone} title={infoTitle} body={infoBody} />

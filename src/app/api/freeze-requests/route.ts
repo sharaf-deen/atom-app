@@ -13,6 +13,7 @@ import {
   type SubscriptionFreezeHistoryRow,
 } from '@/lib/subscriptionFreeze'
 import { createSupabaseServerActionClient } from '@/lib/supabaseServer'
+import { hasLifetimeGymAccess, normalizeRole, type Role } from '@/lib/rbac'
 
 function json(status: number, body: any) { return NextResponse.json(body, { status }) }
 
@@ -44,7 +45,7 @@ function ageOn(dob: string | null, today: string) {
 }
 
 type TargetAuth = {
-  member: { user_id: string; first_name: string | null; last_name: string | null; date_of_birth: string | null }
+  member: { user_id: string; first_name: string | null; last_name: string | null; date_of_birth: string | null; role: Role | null }
   requester: 'self' | 'guardian'
   guardianMinorAllowed: boolean
 }
@@ -52,7 +53,7 @@ type TargetAuth = {
 async function authorizeTarget(admin: any, authUserId: string, memberUserId: string, today: string): Promise<TargetAuth | null> {
   const { data: member } = await admin
     .from('profiles')
-    .select('user_id,first_name,last_name,date_of_birth')
+    .select('user_id,first_name,last_name,date_of_birth,role')
     .eq('user_id', memberUserId)
     .maybeSingle()
   if (!member) return null
@@ -86,6 +87,25 @@ async function loadEligibility(admin: any, authUserId: string, memberUserId: str
   if (!target) return { status: 403, body: { ok: false, error: 'You cannot request a freeze for this member.' } }
 
   const memberName = `${target.member.first_name ?? ''} ${target.member.last_name ?? ''}`.trim() || 'Member'
+
+  if (hasLifetimeGymAccess(normalizeRole(target.member.role))) {
+    return {
+      status: 200,
+      body: {
+        ok: true,
+        member: { id: memberUserId, name: memberName, date_of_birth: target.member.date_of_birth },
+        requester: target.requester,
+        can_request: false,
+        blocked_reason: 'Freeze is not available for permanent role-based gym access.',
+        subscription: null,
+        allowance: { allowed: 0, used: 0, remaining: 0 },
+        pending_request: null,
+        requests: [],
+        suggested_start_date: null,
+        suggested_end_date: null,
+      },
+    }
+  }
 
   const { data: subs, error: subsErr } = await admin
     .from('subscriptions')

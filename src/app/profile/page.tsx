@@ -271,8 +271,10 @@ export default async function ProfilePage() {
 
   const canManagePhoto = ['member', 'coach', 'assistant_coach'].includes(me.role)
   const rows = subs ?? []
-  const summary = buildMembershipSummary(p.role ?? me.role ?? 'member', rows, cairoToday())
-  const historyRows = summary.currentId ? rows.filter((s) => s.id !== summary.currentId) : rows
+  const profileRole = p.role ?? me.role ?? 'member'
+  const lifetimeAccess = hasLifetimeGymAccess(profileRole)
+  const summary = buildMembershipSummary(profileRole, rows, cairoToday())
+  const historyRows = lifetimeAccess ? [] : (summary.currentId ? rows.filter((s) => s.id !== summary.currentId) : rows)
 
   return (
     <main>
@@ -370,7 +372,7 @@ export default async function ProfilePage() {
               </div>
             </section>
 
-            {p.member_id ? (
+            {p.member_id && !lifetimeAccess ? (
               <div id="freeze-request" className="scroll-mt-24">
                 <FreezeRequestForm
                   memberUserId={p.user_id}
@@ -421,6 +423,7 @@ export default async function ProfilePage() {
           </details>
         ) : null}
 
+        {!lifetimeAccess ? (
         <section className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-5 shadow-soft space-y-4">
           <div>
             <h2 className="font-semibold">Membership history</h2>
@@ -517,6 +520,7 @@ export default async function ProfilePage() {
             </details>
           )}
         </section>
+        ) : null}
       </Section>
     </main>
   )
