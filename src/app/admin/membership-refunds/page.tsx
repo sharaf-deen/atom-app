@@ -10,6 +10,7 @@ import MembershipRefundForm from '@/components/members/MembershipRefundForm'
 import MembershipRefundWorkflowActions from '@/components/members/MembershipRefundWorkflowActions'
 import MembershipRefundSubscriptionImpactActions from '@/components/members/MembershipRefundSubscriptionImpactActions'
 import { getSessionUser } from '@/lib/session'
+import { canAccessMembershipRefunds } from '@/lib/rbac'
 import { getSupabaseAdminClientCached } from '@/lib/requestCache'
 
 type MemberRow = {
@@ -223,7 +224,7 @@ export default async function AdminMembershipRefundsPage({
   const me = await getSessionUser()
   if (!me) redirect(`/login?next=${encodeURIComponent(currentPath)}`)
 
-  const canView = me.role === 'admin' || me.role === 'super_admin'
+  const canView = canAccessMembershipRefunds(me.role)
   const canWrite = me.role === 'super_admin'
 
   if (!canView) {

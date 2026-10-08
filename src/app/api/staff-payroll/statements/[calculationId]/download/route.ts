@@ -108,7 +108,7 @@ export async function GET(
     }
 
     const role = profile?.role ?? 'member'
-    if (role !== 'admin' && role !== 'super_admin') {
+    if (role !== 'super_admin') {
       return json(403, { ok: false, error: 'FORBIDDEN' })
     }
 

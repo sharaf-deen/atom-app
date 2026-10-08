@@ -50,7 +50,7 @@ export async function GET(req: Request) {
     if (meErr) return json(500, { ok: false, error: 'PROFILE_LOOKUP_FAILED', details: meErr.message })
 
     const role = me?.role ?? 'member'
-    const canView = role === 'admin' || role === 'super_admin'
+    const canView = role === 'super_admin'
     if (!canView) return json(403, { ok: false, error: 'FORBIDDEN' })
 
     const url = new URL(req.url)

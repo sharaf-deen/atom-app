@@ -96,7 +96,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     }
 
     const actorRole = String(actorProfile?.role ?? '')
-    if (actorRole !== 'admin' && actorRole !== 'super_admin') {
+    if (actorRole !== 'super_admin') {
       return noStore(NextResponse.json({ ok: false, error: 'FORBIDDEN' }, { status: 403 }))
     }
 

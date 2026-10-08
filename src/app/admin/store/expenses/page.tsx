@@ -338,8 +338,8 @@ export default async function StoreExpensesPage({ searchParams }: { searchParams
         title="Store Expenses"
         subtitle="Access restricted."
         signedInAs={me.email}
-        message="Only admin and super admin roles can access store expenses."
-        allowed="admin, super_admin"
+        message="Only Super Admin can access this financial workspace."
+        allowed="super_admin"
         nextPath="/admin/store/expenses"
         actions={[{ href: '/admin/store/dashboard', label: 'Go to Store Dashboard' }]}
         showBackHome
@@ -531,7 +531,7 @@ export default async function StoreExpensesPage({ searchParams }: { searchParams
 
         {!canManage ? (
           <InlineAlert variant="info" title="Read-only">
-            Admin can review store expenses. Only super admin can add, edit, or delete store expenses.
+            Store expense data is restricted to Super Admin.
           </InlineAlert>
         ) : null}
 

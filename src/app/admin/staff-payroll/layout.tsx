@@ -1,10 +1,33 @@
 import Link from 'next/link'
+import { redirect } from 'next/navigation'
+import { getSessionUser } from '@/lib/session'
+import AccessDeniedCard from '@/components/AccessDeniedCard'
+import { canAccessStaffPayroll } from '@/lib/rbac'
 
-export default function StaffPayrollLayout({
+export default async function StaffPayrollLayout({
   children,
 }: {
   children: React.ReactNode
 }) {
+  const me = await getSessionUser()
+  if (!me) redirect('/login?next=/admin/staff-payroll')
+  if (!canAccessStaffPayroll(me.role)) {
+    return (
+      <main className="p-6">
+        <h1 className="text-2xl font-bold">Staff Payroll</h1>
+        <div className="mt-4 max-w-2xl">
+          <AccessDeniedCard
+            title="Forbidden"
+            message="Only Super Admin can access salary and payroll data."
+            nextPath="/admin/staff-payroll"
+            showBackHome
+            signedInAs={me.email}
+          />
+        </div>
+      </main>
+    )
+  }
+
   return (
     <>
       <div className="mx-auto max-w-6xl px-4 pt-4 sm:px-6 sm:pt-6">
