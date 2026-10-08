@@ -24,6 +24,7 @@ type Props = {
   labelByKey: Record<string, string>
   returnQueryString?: string
   focusExpenseId?: string
+  canManage?: boolean
 }
 
 type EditableExpense = {
@@ -90,7 +91,7 @@ function parseErrorMessage(data: any, fallback: string) {
   return data?.details || data?.error || fallback
 }
 
-export default function ExpensesTableClient({ expenses, labelByKey, returnQueryString = '', focusExpenseId = '' }: Props) {
+export default function ExpensesTableClient({ expenses, labelByKey, returnQueryString = '', focusExpenseId = '', canManage = true }: Props) {
   const router = useRouter()
   const [previewOpen, setPreviewOpen] = useState(false)
   const [editOpen, setEditOpen] = useState(false)
@@ -295,20 +296,24 @@ export default function ExpensesTableClient({ expenses, labelByKey, returnQueryS
                     )}
 
                     <div className="ml-auto flex items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={() => openEdit(e)}
-                        className="rounded-xl border border-[hsl(var(--border))] px-3 py-2 text-xs font-medium hover:bg-[hsl(var(--bg))]/80"
-                      >
-                        Edit
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => openDelete(e)}
-                        className="rounded-xl border border-rose-200 px-3 py-2 text-xs font-medium text-rose-700 hover:bg-rose-50"
-                      >
-                        Delete
-                      </button>
+                      {canManage ? (
+                        <button
+                          type="button"
+                          onClick={() => openEdit(e)}
+                          className="rounded-xl border border-[hsl(var(--border))] px-3 py-2 text-xs font-medium hover:bg-[hsl(var(--bg))]/80"
+                        >
+                          Edit
+                        </button>
+                      ) : null}
+                      {canManage ? (
+                        <button
+                          type="button"
+                          onClick={() => openDelete(e)}
+                          className="rounded-xl border border-rose-200 px-3 py-2 text-xs font-medium text-rose-700 hover:bg-rose-50"
+                        >
+                          Delete
+                        </button>
+                      ) : null}
                     </div>
                   </div>
                 </div>

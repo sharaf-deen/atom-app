@@ -6,6 +6,7 @@ export const revalidate = 0
 import { NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { createSupabaseServerActionClient } from '@/lib/supabaseServer'
+import { canAccessInvoices } from '@/lib/rbac'
 
 type Role = 'member' | 'assistant_coach' | 'coach' | 'reception' | 'admin' | 'super_admin'
 
@@ -43,7 +44,7 @@ export async function GET(_req: Request, ctx: { params: { id: string } }) {
       .maybeSingle<{ role: Role | null }>()
 
     const role: Role = (me?.role as Role) ?? 'member'
-    const isStaff = role === 'super_admin'
+    const isStaff = canAccessInvoices(role as any)
 
     // Fetch invoice row with service role (then authorize manually)
     const { data: inv, error: invErr } = await admin

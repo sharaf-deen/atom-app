@@ -62,7 +62,7 @@ async function getActorFromSession() {
 
   if (meErr) return { ok: false as const, status: 500, error: 'PROFILE_LOOKUP_FAILED', details: meErr.message }
   const role = (me?.role ?? '').toLowerCase()
-  if (!role || (role !== 'admin' && role !== 'super_admin')) {
+  if (role !== 'super_admin') {
     return { ok: false as const, status: 403, error: 'FORBIDDEN' }
   }
 
