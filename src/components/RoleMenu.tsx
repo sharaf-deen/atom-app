@@ -26,6 +26,7 @@ import {
 import type { LucideIcon } from 'lucide-react'
 import type { IconKey, MenuItem } from './AppNav'
 import type { Role } from '@/lib/rbac'
+import SignOutButton from '@/components/SignOutButton'
 
 const ICONS: Record<IconKey, LucideIcon> = {
   home: House,
@@ -42,8 +43,6 @@ const ICONS: Record<IconKey, LucideIcon> = {
   'file-text': FileText,
 }
 
-const VISIBLE_POLL_MS = 5_000
-const HIDDEN_POLL_MS = 30_000
 
 const STRUCTURED_ROLES: Role[] = ['reception', 'admin', 'super_admin']
 const LITE_MENU_ROLES: Role[] = [
@@ -103,21 +102,74 @@ function normalizeMenuItems(items: MenuItem[]) {
   )
 }
 
-function pickQuick(items: MenuItem[]) {
-  const priority = [
-    '/admin',
-    '/reception',
-    '/members',
-    '/admin/members/family-operations',
-    '/admin/payments',
-    '/schedule/operations',
-    '/admin/private-coaching',
-    '/admin/store/dashboard',
-    '/scan',
-    '/notifications',
+function quickPriorityForRole(role?: Role) {
+  if (role === 'super_admin') {
+    return [
+      '/admin',
+      '/members',
+      '/admin/payments',
+      '/admin/banking',
+      '/admin/store',
+      '/admin/staff-payroll',
+    ]
+  }
+
+  if (role === 'admin') {
+    return [
+      '/admin',
+      '/reception',
+      '/members',
+      '/admin/payments',
+      '/expenses',
+      '/admin/store',
+    ]
+  }
+
+  if (role === 'reception') {
+    return [
+      '/reception',
+      '/scan',
+      '/members',
+      '/kiosk',
+      '/admin/crm',
+      '/admin/visitors',
+    ]
+  }
+
+  if (role === 'head_coach') {
+    return [
+      '/training-useful',
+      '/schedule/operations',
+      '/head-coach/athletes',
+      '/head-coach/private-coaching',
+      '/coach-operations/curriculum',
+      '/notifications',
+    ]
+  }
+
+  if (role === 'coach' || role === 'assistant_coach') {
+    return [
+      '/training-useful',
+      '/schedule/operations',
+      '/schedule',
+      '/coach-operations/curriculum',
+      '/coach-operations/incidents',
+      '/profile',
+    ]
+  }
+
+  return [
     '/schedule',
     '/profile',
+    '/private-coaching',
+    '/notifications',
+    '/store',
+    '/packages-and-promos',
   ]
+}
+
+function pickQuick(items: MenuItem[], role?: Role) {
+  const priority = quickPriorityForRole(role)
 
   const byHref = new Map(items.map((item) => [item.href, item] as const))
   const quick: MenuItem[] = []
@@ -275,9 +327,11 @@ function itemIsActive(pathname: string, href: string) {
 export default function RoleMenu({
   items,
   role,
+  userLabel,
 }: {
   items: MenuItem[]
   role?: Role
+  userLabel?: string | null
 }) {
   const pathname = usePathname()
   const [open, setOpen] = useState(false)
@@ -289,7 +343,7 @@ export default function RoleMenu({
   const panelRef = useRef<HTMLDivElement | null>(null)
 
   const menuItems = useMemo(() => normalizeMenuItems(items), [items])
-  const quickItems = useMemo(() => pickQuick(menuItems), [menuItems])
+  const quickItems = useMemo(() => pickQuick(menuItems, role), [menuItems, role])
   const sections = useMemo(() => groupItems(menuItems), [menuItems])
 
   const isStructuredRole = !!role && STRUCTURED_ROLES.includes(role)
@@ -310,7 +364,6 @@ export default function RoleMenu({
   )
 
   const [unreadCount, setUnreadCount] = useState(0)
-  const timerRef = useRef<number | null>(null)
   const inFlightRef = useRef(false)
 
   useBodyScrollLock(open)
@@ -338,59 +391,20 @@ export default function RoleMenu({
     }
   }
 
-  function currentPollMs() {
-    const visible =
-      typeof document !== 'undefined' &&
-      document.visibilityState === 'visible'
-
-    return visible ? VISIBLE_POLL_MS : HIDDEN_POLL_MS
-  }
-
-  function setTimer(ms: number) {
-    if (timerRef.current) {
-      window.clearInterval(timerRef.current)
-    }
-
-    timerRef.current = null
-
-    if (!hasNotifications) return
-    if (ms > 0) {
-      timerRef.current = window.setInterval(refreshUnread, ms)
-    }
-  }
-
   useEffect(() => {
-    refreshUnread()
-    setTimer(currentPollMs())
+    if (!hasNotifications) {
+      setUnreadCount(0)
+      return
+    }
 
     const onUpdate = () => refreshUnread()
 
-    function onVisibility() {
-      if (document.visibilityState === 'visible') {
-        refreshUnread()
-      }
-      setTimer(currentPollMs())
-    }
-
     window.addEventListener('notifications:updated', onUpdate)
     window.addEventListener('atom:notifications:changed', onUpdate as any)
-    document.addEventListener('visibilitychange', onVisibility)
-    window.addEventListener('focus', onVisibility)
 
     return () => {
       window.removeEventListener('notifications:updated', onUpdate)
-      window.removeEventListener(
-        'atom:notifications:changed',
-        onUpdate as any
-      )
-      document.removeEventListener('visibilitychange', onVisibility)
-      window.removeEventListener('focus', onVisibility)
-
-      if (timerRef.current) {
-        window.clearInterval(timerRef.current)
-      }
-
-      timerRef.current = null
+      window.removeEventListener('atom:notifications:changed', onUpdate as any)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hasNotifications])
@@ -674,7 +688,16 @@ export default function RoleMenu({
           </div>
 
           <div className="border-t border-black/10 px-4 py-3 dark:border-white/10">
-            <div className="flex items-center justify-between gap-3 text-xs text-black/50 dark:text-white/50">
+            <div className="sm:hidden">
+              <div className="mb-2 min-w-0">
+                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-black/45 dark:text-white/45">Signed in as</div>
+                <div className="mt-0.5 truncate text-sm font-medium">{userLabel || roleLabel(role)}</div>
+                <div className="text-xs text-black/45 dark:text-white/45">{roleLabel(role)}</div>
+              </div>
+              <SignOutButton className="w-full justify-center" />
+            </div>
+
+            <div className="hidden items-center justify-between gap-3 text-xs text-black/50 dark:text-white/50 sm:flex">
               <span>Role-aware navigation</span>
               <span>Esc to close</span>
             </div>
@@ -713,11 +736,20 @@ export default function RoleMenu({
               </button>
             </div>
 
-            <nav className="max-h-[70vh] space-y-1 overflow-y-auto px-2 pb-4">
+            <nav className="max-h-[60vh] space-y-1 overflow-y-auto px-2 pb-3">
               {menuItems.map((item) => (
                 <MenuItemLink key={item.href} item={item} />
               ))}
             </nav>
+
+            <div className="border-t border-black/10 px-4 pb-4 pt-3 dark:border-white/10">
+              <div className="mb-2 min-w-0">
+                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-black/45 dark:text-white/45">Signed in as</div>
+                <div className="mt-0.5 truncate text-sm font-medium">{userLabel || roleLabel(role)}</div>
+                <div className="text-xs text-black/45 dark:text-white/45">{roleLabel(role)}</div>
+              </div>
+              <SignOutButton className="w-full justify-center" />
+            </div>
           </div>
         </div>
 
