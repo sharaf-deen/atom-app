@@ -183,9 +183,9 @@ function buildMembershipSnapshot(role: Role, subs: SubscriptionLite[], today: st
   if (hasLifetimeGymAccess(role)) {
     return {
       tone: 'success',
-      eyebrow: 'Always active access',
-      title: 'Role-based access',
-      meta: 'Your access is active in the gym without a standard renewal flow.',
+      eyebrow: 'Permanent access',
+      title: 'ATOM access active',
+      meta: 'No membership renewal required.',
       extra: null,
     }
   }
@@ -501,6 +501,80 @@ async function getTodaySchedule(): Promise<{ dayName: string; sessions: TodaySch
     if (!content) return null
     const dayName = cairoDayName()
     return { dayName, sessions: extractTodaySchedule(content, dayName) }
+  } catch {
+    return null
+  }
+}
+
+type StructuredHomeSession = {
+  id: string
+  session_date: string
+  start_time: string
+  name_snapshot: string
+  level_snapshot: string
+  activity_type_snapshot: string
+  uniform_snapshot: string
+  status: string
+}
+
+function formatStructuredHomeTime(value: string | null | undefined) {
+  const match = String(value || '').match(/^(\d{2}):(\d{2})/)
+  if (!match) return String(value || '')
+  const hours = Number(match[1])
+  const minutes = match[2]
+  const suffix = hours >= 12 ? 'PM' : 'AM'
+  const hour12 = hours % 12 || 12
+  return `${hour12}:${minutes} ${suffix}`
+}
+
+function structuredHomeText(row: StructuredHomeSession) {
+  const activityLabels: Record<string, string> = {
+    jiu_jitsu: 'Jiu-Jitsu',
+    competition: 'Competition',
+    open_drills: 'Open Drills',
+    open_mat: 'Open Mat',
+    physical_preparation: 'Physical Preparation',
+    wrestling: 'Wrestling',
+  }
+  const uniformLabels: Record<string, string> = {
+    gi: 'Gi',
+    nogi: 'NoGi',
+    gi_nogi: 'Gi & NoGi',
+  }
+
+  const meta = [
+    row.level_snapshot,
+    activityLabels[row.activity_type_snapshot] || null,
+    uniformLabels[row.uniform_snapshot] || null,
+  ].filter(Boolean)
+
+  const cancelled = row.status === 'cancelled' ? ' · Cancelled' : ''
+  return `${row.name_snapshot}${meta.length ? ` · ${meta.join(' · ')}` : ''}${cancelled}`
+}
+
+async function getMemberStructuredTodaySchedule(): Promise<{ dayName: string; sessions: TodayScheduleSession[] } | null> {
+  try {
+    const supabase = createSupabaseRSC()
+    const today = cairoToday()
+    const { data, error } = await supabase.rpc('get_member_schedule_sessions', {
+      p_from_date: today,
+      p_to_date: today,
+    })
+
+    if (error) return null
+
+    const rows = (Array.isArray(data) ? data : []) as StructuredHomeSession[]
+    return {
+      dayName: cairoDayName(),
+      sessions: rows
+        .slice()
+        .sort((a, b) => String(a.start_time || '').localeCompare(String(b.start_time || '')))
+        .map((row) => ({
+          section: 'other' as const,
+          time: formatStructuredHomeTime(row.start_time),
+          text: structuredHomeText(row),
+        })),
+    }
   } catch {
     return null
   }
@@ -1124,24 +1198,13 @@ function HomeLogoutShortcut() {
 }
 
 
-function memberActions(role: Role): QuickAction[] {
-  const actions: QuickAction[] = [
+function memberActions(_role: Role): QuickAction[] {
+  return [
+    { href: '/schedule', label: 'Schedule', desc: 'See today and the next classes.', icon: CalendarDays },
     { href: '/profile', label: 'My profile', desc: 'Identity, access details and QR code.', icon: IdCard },
     { href: '/private-coaching', label: 'Private coaching', desc: 'Request and book private coaching sessions.', icon: UserCog },
-    { href: '/store', label: 'Store', desc: 'Browse available products and equipment.', icon: ShoppingBag },
-    { href: '/notifications?thread=admin', label: 'Contact admin', desc: 'Message the ATOM team.', icon: UserCog },
+    { href: '/notifications?thread=admin', label: 'Contact ATOM', desc: 'Message the ATOM team.', icon: MessageSquare },
   ]
-
-  if (!hasLifetimeGymAccess(role)) {
-    actions.unshift({
-      href: '/profile#freeze-request',
-      label: 'Request freeze',
-      desc: 'Submit or review a membership freeze request.',
-      icon: Clock3,
-    })
-  }
-
-  return actions
 }
 
 function coachActions(role: Role): QuickAction[] {
@@ -1240,21 +1303,28 @@ export default async function HomePage() {
   }
 
   const displayName = await getDisplayName(user)
-  const showHomeTodaySchedule = isMemberLikeRole(user.role) || user.role === 'coach' || user.role === 'assistant_coach' || user.role === 'head_coach'
+  const memberLike = isMemberLikeRole(user.role)
+  const showCoachTodaySchedule = user.role === 'coach' || user.role === 'assistant_coach' || user.role === 'head_coach'
   const [profile, unreadNotificationsCount, trainingProfile, homeTodaySchedule] = await Promise.all([
     getProfileLite(user.id),
     getUnreadNotificationsCount(user.id),
-    showHomeTodaySchedule ? getTrainingProfileLite(user.id) : Promise.resolve(null),
-    showHomeTodaySchedule ? getTodaySchedule() : Promise.resolve(null),
+    showCoachTodaySchedule ? getTrainingProfileLite(user.id) : Promise.resolve(null),
+    memberLike
+      ? getMemberStructuredTodaySchedule()
+      : showCoachTodaySchedule
+        ? getTodaySchedule()
+        : Promise.resolve(null),
   ])
 
   const homeScheduleAudience = inferScheduleAudience(user.role, profile?.date_of_birth ?? null)
   const homeScheduleProgram = normalizeProgramLevel(trainingProfile?.program_level ?? null)
   const filteredHomeTodaySchedule = homeTodaySchedule
-    ? {
-        dayName: homeTodaySchedule.dayName,
-        sessions: filterTodayScheduleForProfile(homeTodaySchedule.sessions, homeScheduleAudience, homeScheduleProgram),
-      }
+    ? memberLike
+      ? homeTodaySchedule
+      : {
+          dayName: homeTodaySchedule.dayName,
+          sessions: filterTodayScheduleForProfile(homeTodaySchedule.sessions, homeScheduleAudience, homeScheduleProgram),
+        }
     : null
 
   const avatarPath = user.id_photo_path ?? profile?.id_photo_path ?? null
@@ -1297,12 +1367,6 @@ export default async function HomePage() {
         {isMemberLikeRole(user.role) ? (
           <>
             {filteredHomeTodaySchedule ? <TodayScheduleSection dayName={filteredHomeTodaySchedule.dayName} sessions={filteredHomeTodaySchedule.sessions} /> : null}
-
-            <PriorityGrid
-              title="Your access today"
-              subtitle="The essentials only. Open what matters next."
-              items={buildMemberPriorities(memberSnapshot!, unreadNotificationsCount, Boolean(qrCode))}
-            />
 
             <div className="grid gap-4 lg:grid-cols-[1.2fr_0.8fr]">
               <MembershipCard snapshot={memberSnapshot!} />
