@@ -95,6 +95,11 @@ function shouldShowAthleteProfileOnSelfProfile(role?: Role | null) {
   return role === 'member' || role === 'coach' || role === 'assistant_coach' || role === 'vip' || role === 'champion'
 }
 
+function humanRole(role?: Role | null) {
+  const value = String(role || 'member').replace(/_/g, ' ')
+  return value.charAt(0).toUpperCase() + value.slice(1)
+}
+
 function humanPlan(p?: Plan | null) {
   switch (p) {
     case '1w':
@@ -137,9 +142,9 @@ function buildMembershipSummary(role: Role, subs: SubRow[], today: string): Memb
   if (hasLifetimeGymAccess(role)) {
     return {
       tone: 'success',
-      eyebrow: 'Always active access',
-      title: 'Access active',
-      meta: 'Your role keeps your gym access active without a standard renewal flow.',
+      eyebrow: 'Permanent access',
+      title: 'ATOM access active',
+      meta: 'No membership renewal required.',
       extra: null,
       currentId: null,
     }
@@ -278,7 +283,7 @@ export default async function ProfilePage() {
 
   return (
     <main>
-      <PageHeader title="Profile" subtitle="Identity, access and QR." />
+      <PageHeader title="Profile" subtitle="Your identity, access, QR and membership details." />
 
       <Section className="space-y-5">
         {hasFamilyAccount ? (
@@ -296,79 +301,21 @@ export default async function ProfilePage() {
 
         <section className="grid gap-4 lg:grid-cols-[1fr_320px]">
           <div className="space-y-4">
-            {canManagePhoto ? (
-              <section className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-5 shadow-soft">
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <h2 className="font-semibold">Profile photo</h2>
-                    <p className="mt-1 text-sm text-[hsl(var(--muted))]">Keep your photo clear and up to date.</p>
-                  </div>
-                </div>
-                <div className="mt-4">
-                  <ProfileIdPhoto userId={me.id} idPhotoPath={p.id_photo_path} />
-                </div>
-              </section>
-            ) : null}
-
-            <section className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-5 shadow-soft">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <h2 className="font-semibold">Identity</h2>
-                  <p className="mt-1 text-sm text-[hsl(var(--muted))]">Your main details at a glance.</p>
-                </div>
-              </div>
-
-              <div className="mt-4 grid gap-4 md:grid-cols-2">
-                <dl className="grid gap-3 text-sm">
-                  <div>
-                    <dt className="text-[hsl(var(--muted))]">Name</dt>
-                    <dd className="font-medium">
-                      {(p.first_name || p.last_name) ? `${p.first_name ?? ''} ${p.last_name ?? ''}`.trim() : '—'}
-                    </dd>
-                  </div>
-                  <div>
-                    <dt className="text-[hsl(var(--muted))]">Member ID</dt>
-                    <dd className="font-medium">{p.member_id ?? '—'}</dd>
-                  </div>
-                  <div>
-                    <dt className="text-[hsl(var(--muted))]">Role</dt>
-                    <dd className="font-medium">{p.role ?? 'member'}</dd>
-                  </div>
-                  <div>
-                    <dt className="text-[hsl(var(--muted))]">Joined</dt>
-                    <dd className="font-medium">{fmtDate(p.created_at)}</dd>
-                  </div>
-                </dl>
-
-                <dl className="grid gap-3 text-sm">
-                  <div>
-                    <dt className="text-[hsl(var(--muted))]">Email</dt>
-                    <dd className="font-medium break-all">{p.email ?? '—'}</dd>
-                  </div>
-                  <div>
-                    <dt className="text-[hsl(var(--muted))]">Phone</dt>
-                    <dd className="font-medium">{p.phone ?? '—'}</dd>
-                  </div>
-                  <div>
-                    <dt className="text-[hsl(var(--muted))]">Date of birth</dt>
-                    <dd className="font-medium">{fmtDate(p.date_of_birth)}</dd>
-                  </div>
-                  <div>
-                    <dt className="text-[hsl(var(--muted))]">Category</dt>
-                    <dd className="font-medium">
-                      {ageGroup(p.date_of_birth) ? `${ageGroup(p.date_of_birth)} (${ageYears(p.date_of_birth)}y)` : '—'}
-                    </dd>
-                  </div>
-                </dl>
-              </div>
-            </section>
-
             <section className={`rounded-2xl border p-5 shadow-soft ${toneClasses(summary.tone)}`}>
-              <div className="space-y-1">
-                <div className="text-xs font-medium uppercase tracking-[0.16em] opacity-80">{summary.eyebrow}</div>
-                <h2 className="text-lg font-semibold">{summary.title}</h2>
-                <p className="text-sm opacity-90">{summary.meta}</p>
-                {summary.extra ? <p className="text-sm font-medium">{summary.extra}</p> : null}
+              <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                <div className="min-w-0">
+                  <div className="text-xs font-medium uppercase tracking-[0.16em] opacity-80">{summary.eyebrow}</div>
+                  <h2 className="mt-1 text-lg font-semibold">{summary.title}</h2>
+                  <p className="mt-1 text-sm opacity-90">{summary.meta}</p>
+                  {summary.extra ? <p className="mt-1 text-sm font-medium">{summary.extra}</p> : null}
+                </div>
+
+                <Link
+                  href="/schedule"
+                  className="inline-flex shrink-0 items-center justify-center rounded-xl border border-current/20 bg-white/70 px-3 py-2 text-sm font-medium transition hover:bg-white"
+                >
+                  View schedule
+                </Link>
               </div>
             </section>
 
@@ -383,21 +330,86 @@ export default async function ProfilePage() {
             ) : null}
           </div>
 
-          <section className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-5 shadow-soft flex items-center justify-center">
+          <section className="flex items-center justify-center rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-5 shadow-soft">
             {p.qr_code ? (
               <div className="text-center">
-                <div className="text-xs font-medium uppercase tracking-[0.16em] text-[hsl(var(--muted))]">Gym QR</div>
+                <div className="text-xs font-medium uppercase tracking-[0.16em] text-[hsl(var(--muted))]">My QR code</div>
                 <div className="mt-3 inline-flex rounded-2xl border border-[hsl(var(--border))] bg-white p-3">
                   <QrImage value={p.qr_code} size={180} />
                 </div>
-                <div className="mt-3 text-sm text-[hsl(var(--muted))]">Show this code at reception when needed.</div>
+                <div className="mt-3 text-sm text-[hsl(var(--muted))]">Show this code at reception for gym access.</div>
               </div>
             ) : (
               <div className="text-center">
-                <div className="text-xs font-medium uppercase tracking-[0.16em] text-[hsl(var(--muted))]">Gym QR</div>
-                <div className="mt-3 text-sm text-[hsl(var(--muted))]">No QR code yet.</div>
+                <div className="text-xs font-medium uppercase tracking-[0.16em] text-[hsl(var(--muted))]">My QR code</div>
+                <div className="mt-3 text-sm text-[hsl(var(--muted))]">No QR code available yet.</div>
               </div>
             )}
+          </section>
+        </section>
+
+        <section className={`grid gap-4 ${canManagePhoto ? 'lg:grid-cols-[320px_1fr]' : ''}`}>
+          {canManagePhoto ? (
+            <section className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-5 shadow-soft">
+              <div>
+                <h2 className="font-semibold">Profile photo</h2>
+                <p className="mt-1 text-sm text-[hsl(var(--muted))]">Keep your photo clear and up to date.</p>
+              </div>
+              <div className="mt-4">
+                <ProfileIdPhoto userId={me.id} idPhotoPath={p.id_photo_path} />
+              </div>
+            </section>
+          ) : null}
+
+          <section className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-5 shadow-soft">
+            <div>
+              <h2 className="font-semibold">Identity</h2>
+              <p className="mt-1 text-sm text-[hsl(var(--muted))]">Your main ATOM account details.</p>
+            </div>
+
+            <div className="mt-4 grid gap-4 md:grid-cols-2">
+              <dl className="grid gap-3 text-sm">
+                <div>
+                  <dt className="text-[hsl(var(--muted))]">Name</dt>
+                  <dd className="font-medium">
+                    {(p.first_name || p.last_name) ? `${p.first_name ?? ''} ${p.last_name ?? ''}`.trim() : '—'}
+                  </dd>
+                </div>
+                <div>
+                  <dt className="text-[hsl(var(--muted))]">Member ID</dt>
+                  <dd className="font-medium">{p.member_id ?? '—'}</dd>
+                </div>
+                <div>
+                  <dt className="text-[hsl(var(--muted))]">Role</dt>
+                  <dd className="font-medium">{humanRole(p.role)}</dd>
+                </div>
+                <div>
+                  <dt className="text-[hsl(var(--muted))]">Joined</dt>
+                  <dd className="font-medium">{fmtDate(p.created_at)}</dd>
+                </div>
+              </dl>
+
+              <dl className="grid gap-3 text-sm">
+                <div>
+                  <dt className="text-[hsl(var(--muted))]">Email</dt>
+                  <dd className="break-all font-medium">{p.email ?? '—'}</dd>
+                </div>
+                <div>
+                  <dt className="text-[hsl(var(--muted))]">Phone</dt>
+                  <dd className="font-medium">{p.phone ?? '—'}</dd>
+                </div>
+                <div>
+                  <dt className="text-[hsl(var(--muted))]">Date of birth</dt>
+                  <dd className="font-medium">{fmtDate(p.date_of_birth)}</dd>
+                </div>
+                <div>
+                  <dt className="text-[hsl(var(--muted))]">Category</dt>
+                  <dd className="font-medium">
+                    {ageGroup(p.date_of_birth) ? `${ageGroup(p.date_of_birth)} (${ageYears(p.date_of_birth)}y)` : '—'}
+                  </dd>
+                </div>
+              </dl>
+            </div>
           </section>
         </section>
 
