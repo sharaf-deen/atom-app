@@ -16,28 +16,11 @@ import NavLoginLink from '@/components/NavLoginLink'
 import RoleMenu from '@/components/RoleMenu'
 import NotificationsBell from '@/components/NotificationsBell'
 import HideMenuOnRoutes from '@/components/HideMenuOnRoutes'
-
-// Pages d’auth sur lesquelles on ne veut afficher ni Menu, ni Logout, ni lien Login
-const AUTH_ROUTES = ['/login', '/signup', '/reset-password']
+import { AUTH_SHELL_PREFIXES, AUTH_SHELL_ROUTES } from '@/lib/appShellRoutes'
 
 export default async function AppNav() {
   const user = await getSessionUserCached()
-  const roleItems = user ? getAppNavForRole(user.role) : []
-
-  const canSeeStaffPayroll =
-    user?.role === 'admin' || user?.role === 'super_admin'
-
-  const staffPayrollItem: MenuItem = {
-    label: 'Staff Payroll',
-    href: '/admin/staff-payroll',
-    icon: 'wallet',
-  }
-
-  const items =
-    canSeeStaffPayroll &&
-    !roleItems.some((item) => item.href === staffPayrollItem.href)
-      ? [...roleItems, staffPayrollItem]
-      : roleItems
+  const items = user ? getAppNavForRole(user.role) : []
 
   const hasNotifications = items.some(
     (item) => item.href === '/notifications'
@@ -68,7 +51,7 @@ export default async function AppNav() {
 
         {/* Bouton Menu — visible sur Home, caché seulement sur les pages d’auth */}
         {user && (
-          <HideMenuOnRoutes routes={AUTH_ROUTES}>
+          <HideMenuOnRoutes routes={[...AUTH_SHELL_ROUTES]} prefixes={[...AUTH_SHELL_PREFIXES]}>
             <RoleMenu items={items} role={user.role as Role} />
           </HideMenuOnRoutes>
         )}
@@ -76,7 +59,7 @@ export default async function AppNav() {
         {/* Right side */}
         {user ? (
           // Cache l’info user + bouton logout sur les pages d’auth
-          <HideMenuOnRoutes routes={AUTH_ROUTES}>
+          <HideMenuOnRoutes routes={[...AUTH_SHELL_ROUTES]} prefixes={[...AUTH_SHELL_PREFIXES]}>
             <div className="ml-auto flex items-center gap-3">
               {hasNotifications ? (
                 <NotificationsBell pollMs={5000} />
@@ -102,7 +85,7 @@ export default async function AppNav() {
           </HideMenuOnRoutes>
         ) : (
           // Cache le lien Login sur la page /login (sinon lien “Login” sur la page de login)
-          <HideMenuOnRoutes routes={AUTH_ROUTES}>
+          <HideMenuOnRoutes routes={[...AUTH_SHELL_ROUTES]} prefixes={[...AUTH_SHELL_PREFIXES]}>
             <div className="ml-auto">
               <NavLoginLink />
             </div>
