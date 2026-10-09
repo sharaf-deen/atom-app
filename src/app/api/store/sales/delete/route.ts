@@ -74,6 +74,28 @@ export async function POST(req: Request) {
       return noStore(NextResponse.json({ ok: false, error: 'SALE_NOT_FOUND' }, { status: 404 }))
     }
 
+    const { count: reconciliationCount, error: reconciliationErr } = await admin
+      .from('store_sale_reconciliations')
+      .select('id', { count: 'exact', head: true })
+      .eq('sale_id', saleId)
+
+    if (reconciliationErr) {
+      return noStore(NextResponse.json({ ok: false, error: 'RECONCILIATION_LOOKUP_FAILED', details: reconciliationErr.message }, { status: 500 }))
+    }
+
+    if ((reconciliationCount ?? 0) > 0) {
+      return noStore(
+        NextResponse.json(
+          {
+            ok: false,
+            error: 'SALE_HAS_RECONCILIATION',
+            details: 'Delete the linked Store reconciliation entry first, then delete the sale.',
+          },
+          { status: 409 }
+        )
+      )
+    }
+
     const { data: items, error: itemsErr } = await admin
       .from('store_sale_items')
       .select('sale_id,delivered_stock_applied')
@@ -106,6 +128,7 @@ export async function POST(req: Request) {
     try {
       revalidatePath('/admin/store')
       revalidatePath('/admin/store/sales')
+      revalidatePath('/admin/store/reconciliation')
       revalidatePath('/admin/store/dashboard')
     } catch {}
 
