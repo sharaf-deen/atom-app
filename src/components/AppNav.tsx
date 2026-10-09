@@ -52,7 +52,7 @@ export default async function AppNav() {
         {/* Bouton Menu — visible sur Home, caché seulement sur les pages d’auth */}
         {user && (
           <HideMenuOnRoutes routes={[...AUTH_SHELL_ROUTES]} prefixes={[...AUTH_SHELL_PREFIXES]}>
-            <RoleMenu items={items} role={user.role as Role} />
+            <RoleMenu items={items} role={user.role as Role} userLabel={user.full_name || user.email || 'User'} />
           </HideMenuOnRoutes>
         )}
 
@@ -80,7 +80,9 @@ export default async function AppNav() {
                 )}
               </span>
 
-              <SignOutButton />
+              <div className="hidden sm:block">
+                <SignOutButton />
+              </div>
             </div>
           </HideMenuOnRoutes>
         ) : (
