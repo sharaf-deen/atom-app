@@ -554,6 +554,14 @@ export function canManageStoreSales(role: Role | null | undefined) {
   return hasAnyRole(role, SUPER_ADMIN_ROLES)
 }
 
+export function canAccessStoreReconciliation(role: Role | null | undefined) {
+  return hasAnyRole(role, SUPER_ADMIN_ROLES)
+}
+
+export function canManageStoreReconciliation(role: Role | null | undefined) {
+  return hasAnyRole(role, SUPER_ADMIN_ROLES)
+}
+
 export function canAccessStoreExpenses(role: Role | null | undefined) {
   return hasAnyRole(role, STORE_EXPENSE_ROLES)
 }
@@ -990,6 +998,14 @@ const CAPABILITY_BLUEPRINTS: CapabilityBlueprint[] = [
     description: 'Record store sales, payment methods, and outstanding debts in store admin.',
     href: '/admin/store/sales',
     check: (role) => canManageStoreSales(role),
+  },
+  {
+    key: 'store_sales_reconciliation',
+    category: 'Store',
+    label: 'Store sales reconciliation',
+    description: 'Compare Store sales payment records with the amount actually received and validate the reconciliation.',
+    href: '/admin/store/reconciliation',
+    check: (role) => canAccessStoreReconciliation(role),
   },
   {
     key: 'store_expenses',

@@ -5,6 +5,7 @@ import {
   canAccessStoreDashboard,
   canAccessStoreExpenses,
   canAccessStoreFunding,
+  canAccessStoreReconciliation,
   canManageStoreCatalog,
   canManageStorePreorders,
   canManageStoreSales,
@@ -31,6 +32,9 @@ function getItems(role: Role | null | undefined) {
   }
   if (canManageStoreSales(role)) {
     items.push({ href: '/admin/store/sales', label: 'Sales' })
+  }
+  if (canAccessStoreReconciliation(role)) {
+    items.push({ href: '/admin/store/reconciliation', label: 'Reconciliation' })
   }
   if (canAccessStoreExpenses(role)) {
     items.push({ href: '/admin/store/expenses', label: 'Expenses' })
