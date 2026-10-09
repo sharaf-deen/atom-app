@@ -10,9 +10,9 @@ type Props = {
   desc?: string
   /** Initial count (server-rendered). */
   initialCount?: number
-  /** Polling interval in ms while the app is visible. Default: 5000 */
+  /** Kept for backward compatibility. Home no longer owns interval polling. */
   pollMs?: number
-  /** Polling interval in ms while the app is hidden/in background. Default: 30000 */
+  /** Kept for backward compatibility. Home no longer owns interval polling. */
   pollHiddenMs?: number
 }
 
@@ -27,11 +27,10 @@ export default function HomeNotificationsTile({
   label = 'Notifications',
   desc: _desc,
   initialCount = 0,
-  pollMs = 5000,
-  pollHiddenMs = 30000,
+  pollMs: _pollMs,
+  pollHiddenMs: _pollHiddenMs,
 }: Props) {
   const [count, setCount] = useState<number>(Number(initialCount) || 0)
-  const timerRef = useRef<number | null>(null)
   const inFlightRef = useRef(false)
 
   async function fetchCount() {
@@ -50,52 +49,20 @@ export default function HomeNotificationsTile({
     }
   }
 
-  function currentPollMs() {
-    const visible = typeof document !== 'undefined' && document.visibilityState === 'visible'
-    return visible ? pollMs : pollHiddenMs
-  }
-
-  function setTimer(ms: number) {
-    if (timerRef.current) window.clearInterval(timerRef.current)
-    timerRef.current = null
-    if (ms > 0) timerRef.current = window.setInterval(fetchCount, ms)
-  }
-
   useEffect(() => {
-    // First refresh + start eco timer
-    fetchCount()
-    setTimer(currentPollMs())
-
-    function onVisibility() {
-      // Eco mode: slow down in background; refresh immediately when visible
-      if (document.visibilityState === 'visible') fetchCount()
-      setTimer(currentPollMs())
-    }
-
-    function onFocus() {
-      fetchCount()
-      setTimer(currentPollMs())
-    }
-
     function onNotifChanged() {
       fetchCount()
     }
 
-    document.addEventListener('visibilitychange', onVisibility)
-    window.addEventListener('focus', onFocus)
     window.addEventListener('atom:notifications:changed', onNotifChanged as any)
     window.addEventListener('notifications:updated', onNotifChanged as any)
 
     return () => {
-      document.removeEventListener('visibilitychange', onVisibility)
-      window.removeEventListener('focus', onFocus)
       window.removeEventListener('atom:notifications:changed', onNotifChanged as any)
       window.removeEventListener('notifications:updated', onNotifChanged as any)
-      if (timerRef.current) window.clearInterval(timerRef.current)
-      timerRef.current = null
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pollMs, pollHiddenMs])
+  }, [])
 
   const unread = count > 0
 
