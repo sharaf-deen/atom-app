@@ -5,10 +5,8 @@ import { useEffect } from 'react'
 import { Capacitor } from '@capacitor/core'
 import type { PluginListenerHandle } from '@capacitor/core'
 
-// 🔁 Routes considérées comme "home"
-// → Sur ces routes, on propose de QUITTER l’app au lieu de revenir à la page précédente
-const HOME_ROUTES = ['/', '/profile']
-// Si tu veux seulement la vraie home : const HOME_ROUTES = ['/']
+// Only the real app home should offer exit instead of normal back navigation.
+const HOME_ROUTES = ['/']
 
 export default function BackButtonHandler({ children }: { children: React.ReactNode }) {
   useEffect(() => {
