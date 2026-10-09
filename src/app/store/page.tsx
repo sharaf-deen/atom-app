@@ -413,7 +413,7 @@ export default async function StorePage({
           isStoreAdmin
             ? 'Browse the model catalog or open Store Admin.'
             : canPreorder
-              ? 'Browse by model, pick the exact variant, then send your preorder quickly.'
+              ? 'Browse ATOM gear, choose your variant and send a preorder request.'
               : 'Browse the model catalog.'
         }
       />
@@ -437,64 +437,13 @@ export default async function StorePage({
           </Card>
         ) : null}
 
-        {canPreorder ? (
-          <Card>
-            <CardContent className="space-y-4 py-4">
-              <div className="flex flex-wrap items-start gap-3">
-                <div className="min-w-0 flex-1">
-                  <div className="font-semibold">Pre-order gear</div>
-                  <div className="mt-1 text-sm text-[hsl(var(--muted))]">
-                    Choose your model, then confirm the exact color and size before sending the request.
-                  </div>
-                </div>
-                <Link
-                  prefetch={false}
-                  href="#store-search"
-                  className="inline-flex items-center rounded-xl border px-3 py-2 text-sm font-medium hover:bg-gray-50"
-                >
-                  Browse catalog
-                </Link>
-              </div>
-
-              <div className="grid gap-2 text-sm sm:grid-cols-3">
-                <div className="rounded-2xl border border-[hsl(var(--border))] bg-white/70 px-3 py-3">
-                  <div className="font-medium">1. Choose model</div>
-                  <div className="mt-1 text-xs text-[hsl(var(--muted))]">Open the model you want from the selected category.</div>
-                </div>
-                <div className="rounded-2xl border border-[hsl(var(--border))] bg-white/70 px-3 py-3">
-                  <div className="font-medium">2. Choose color / size</div>
-                  <div className="mt-1 text-xs text-[hsl(var(--muted))]">Pick the exact color first, then the right size.</div>
-                </div>
-                <div className="rounded-2xl border border-[hsl(var(--border))] bg-white/70 px-3 py-3">
-                  <div className="font-medium">3. Send request</div>
-                  <div className="mt-1 text-xs text-[hsl(var(--muted))]">Confirm quantity, add an optional note, then pay later offline.</div>
-                </div>
-              </div>
-
-              <details className="group rounded-2xl border border-[hsl(var(--border))] bg-white/70 p-4">
-                <summary className="flex cursor-pointer list-none items-center gap-3">
-                  <div className="min-w-0 flex-1">
-                    <div className="font-medium">My preorders</div>
-                    <div className="text-xs text-[hsl(var(--muted))]">Track status, deposits and pickup readiness.</div>
-                  </div>
-                  <span className="text-xs font-medium text-[hsl(var(--muted))] transition group-open:rotate-180">⌄</span>
-                </summary>
-                <div className="pt-4">
-                  <StoreMyPreorders />
-                </div>
-              </details>
-
-            </CardContent>
-          </Card>
-        ) : null}
-
         <Card>
           <CardContent className="space-y-4 py-4">
             <div className="flex flex-wrap items-start gap-3">
               <div className="min-w-0 flex-1">
                 <div className="font-semibold">Browse catalog</div>
                 <div className="mt-1 text-sm text-[hsl(var(--muted))]">
-                  Model-first browsing by category, then exact color and size selection.
+                  Search or choose a category, then open a model to select color and size.
                 </div>
               </div>
               <div className="rounded-full border border-[hsl(var(--border))] bg-white px-3 py-1 text-xs font-medium text-[hsl(var(--muted))]">
@@ -564,6 +513,52 @@ export default async function StorePage({
             </div>
           </CardContent>
         </Card>
+
+        {canPreorder ? (
+          <details className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4 shadow-soft">
+            <summary className="cursor-pointer list-none">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <div className="font-semibold">My preorders</div>
+                  <div className="mt-1 text-sm text-[hsl(var(--muted))]">Track requests, deposits and pickup readiness.</div>
+                </div>
+                <span className="text-sm font-medium text-[hsl(var(--muted))]">Show</span>
+              </div>
+            </summary>
+            <div className="mt-4">
+              <StoreMyPreorders />
+            </div>
+          </details>
+        ) : null}
+
+        {canPreorder ? (
+          <details className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4 shadow-soft">
+            <summary className="cursor-pointer list-none">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <div className="font-semibold">How preorders work</div>
+                  <div className="mt-1 text-sm text-[hsl(var(--muted))]">A quick explanation if this is your first order.</div>
+                </div>
+                <span className="text-sm font-medium text-[hsl(var(--muted))]">Show</span>
+              </div>
+            </summary>
+
+            <div className="mt-4 grid gap-2 text-sm sm:grid-cols-3">
+              <div className="rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-3">
+                <div className="font-medium">1. Choose model</div>
+                <div className="mt-1 text-xs text-[hsl(var(--muted))]">Open the model you want.</div>
+              </div>
+              <div className="rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-3">
+                <div className="font-medium">2. Choose variant</div>
+                <div className="mt-1 text-xs text-[hsl(var(--muted))]">Select the exact color and size.</div>
+              </div>
+              <div className="rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-3">
+                <div className="font-medium">3. Send request</div>
+                <div className="mt-1 text-xs text-[hsl(var(--muted))]">Confirm quantity and submit your preorder.</div>
+              </div>
+            </div>
+          </details>
+        ) : null}
 
         {errorMsg ? (
           <Card>
