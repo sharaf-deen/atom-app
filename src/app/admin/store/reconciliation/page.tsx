@@ -9,6 +9,7 @@ import AccessDeniedPage from '@/components/AccessDeniedPage'
 import { Card, CardContent } from '@/components/ui/Card'
 import StoreAdminNav from '@/components/store/StoreAdminNav'
 import StoreSaleReconciliationForm from '@/components/store/StoreSaleReconciliationForm'
+import StoreSaleReconciliationEdit from '@/components/store/StoreSaleReconciliationEdit'
 import { formatCurrency } from '@/lib/money'
 import { canAccessStoreReconciliation, canManageStoreReconciliation } from '@/lib/rbac'
 import { getSessionUserCached, getSupabaseAdminClientCached } from '@/lib/requestCache'
@@ -264,6 +265,19 @@ export default async function StoreReconciliationPage({ searchParams }: { search
                       {currentChangedAfterValidation ? <div className="mt-2 text-xs font-medium text-rose-800">Recorded paid amount changed after the last validation. Reconcile this sale again.</div> : null}
                       {latest.reference ? <div className="mt-2 text-xs">Reference: {latest.reference}</div> : null}
                       {latest.note ? <div className="mt-1 text-xs">Note: {latest.note}</div> : null}
+
+                      {canManage ? (
+                        <StoreSaleReconciliationEdit
+                          reconciliationId={latest.id}
+                          recordedPaidCents={Number(latest.recorded_paid_cents_snapshot || 0)}
+                          actualReceivedCents={Number(latest.actual_received_cents || 0)}
+                          paymentMethod={latest.payment_method_snapshot}
+                          receivedDate={latest.received_date}
+                          reference={latest.reference}
+                          note={latest.note}
+                          currency={sale.currency}
+                        />
+                      ) : null}
                     </div>
                   ) : null}
 
