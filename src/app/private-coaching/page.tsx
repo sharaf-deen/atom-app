@@ -158,6 +158,13 @@ export default async function PrivateCoachingPage() {
   const pendingRequest = requests.find((request) => request.status === 'payment_pending') ?? null
   const latestRequest = requests[0] ?? null
   const totalRemaining = activePasses.reduce((sum, pass) => sum + Math.max(0, Number(pass.remaining_sessions ?? 0)), 0)
+  const bookedUpcoming = bookings
+    .filter((booking) => booking.status === 'booked')
+    .sort((a, b) => {
+      const dateCompare = String(a.slot_date || '').localeCompare(String(b.slot_date || ''))
+      return dateCompare !== 0 ? dateCompare : String(a.start_time || '').localeCompare(String(b.start_time || ''))
+    })
+  const nextBooking = bookedUpcoming[0] ?? null
 
   let availableSlots: SlotRow[] = []
   if (totalRemaining > 0) {
@@ -209,127 +216,189 @@ export default async function PrivateCoachingPage() {
     <main>
       <PageHeader
         title="Private coaching"
-        subtitle="Book private lessons with the head coach."
-        right={
-          <Button asChild variant="outline" href="/">
-            Home
-          </Button>
-        }
+        subtitle="Your sessions, bookings and private coaching requests."
       />
 
       <Section className="space-y-5">
-        <Card>
-          <CardHeader>
-            <CardTitle>Book a private lesson</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <p className="text-sm text-[hsl(var(--muted))]">
-              Choose a private coaching package, pay by cash at reception or Instapay, then wait for payment confirmation. Your sessions become available as tokens after confirmation.
-            </p>
-            <PrivateCoachingRequestForm coaches={coaches} hasPendingRequest={Boolean(pendingRequest)} />
-          </CardContent>
-        </Card>
-
-        <div className="grid gap-4 lg:grid-cols-2">
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           <Card>
-            <CardHeader>
-              <CardTitle>Your private sessions</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="rounded-3xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] p-4">
-                <div className="text-sm text-[hsl(var(--muted))]">Available tokens</div>
-                <div className="mt-1 text-3xl font-semibold tracking-tight">{totalRemaining}</div>
-                <p className="mt-2 text-sm text-[hsl(var(--muted))]">
-                  One booking uses one token. If the coach cancels a booking, the token is returned automatically.
-                </p>
-              </div>
-
-              {passes.length ? (
-                <div className="mt-4 space-y-2">
-                  {passes.map((pass) => (
-                    <div key={pass.id} className="rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm">
-                      <div className="flex items-center justify-between gap-3">
-                        <div>
-                          <div className="font-semibold">{pass.remaining_sessions}/{pass.total_sessions} session(s) left</div>
-                          <div className="text-xs text-[hsl(var(--muted))]">Activated {formatDate(pass.activated_at)} · {coachName(coachMap.get(pass.coach_id))}</div>
-                        </div>
-                        <span className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${pass.status === 'active' ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-slate-200 bg-slate-50 text-slate-700'}`}>
-                          {pass.status === 'active' ? 'Active' : 'Depleted'}
-                        </span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              ) : null}
+            <CardContent className="py-4">
+              <div className="text-sm text-[hsl(var(--muted))]">Sessions available</div>
+              <div className="mt-1 text-3xl font-semibold tracking-tight">{totalRemaining}</div>
+              <div className="mt-2 text-xs text-[hsl(var(--muted))]">1 booking uses 1 session.</div>
             </CardContent>
           </Card>
 
           <Card>
-            <CardHeader>
-              <CardTitle>Latest request</CardTitle>
-            </CardHeader>
-            <CardContent>
-              {latestRequest ? (
-                <div className="space-y-3 text-sm">
-                  <div className="flex items-center justify-between gap-3 rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] px-3 py-2">
-                    <span className="text-[hsl(var(--muted))]">Status</span>
-                    <span className="font-semibold">{privateCoachingStatusLabel(latestRequest.status)}</span>
-                  </div>
-                  <div className="flex items-center justify-between gap-3 rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] px-3 py-2">
-                    <span className="text-[hsl(var(--muted))]">Package</span>
-                    <span className="font-semibold">{latestRequest.package_sessions} session(s)</span>
-                  </div>
-                  <div className="flex items-center justify-between gap-3 rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] px-3 py-2">
-                    <span className="text-[hsl(var(--muted))]">Amount</span>
-                    <span className="font-semibold">{formatPrivateCoachingMoney(latestRequest.amount_cents)}</span>
-                  </div>
-                  <div className="flex items-center justify-between gap-3 rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] px-3 py-2">
-                    <span className="text-[hsl(var(--muted))]">Payment</span>
-                    <span className="font-semibold">{privateCoachingPaymentMethodLabel(latestRequest.payment_method)}</span>
-                  </div>
-                  {latestRequest.discount_amount_cents && Number(latestRequest.discount_amount_cents) > 0 ? (
-                    <>
-                      <div className="flex items-center justify-between gap-3 rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] px-3 py-2">
-                        <span className="text-[hsl(var(--muted))]">Original amount</span>
-                        <span className="font-semibold line-through">{formatPrivateCoachingMoney(latestRequest.original_amount_cents ?? latestRequest.amount_cents)}</span>
-                      </div>
-                      <div className="flex items-center justify-between gap-3 rounded-2xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-emerald-700">
-                        <span>Promo</span>
-                        <span className="font-semibold">{privateCoachingPromoSummary(latestRequest.discount_code, latestRequest.discount_percent, latestRequest.discount_amount_cents, latestRequest.discount_label)}</span>
-                      </div>
-                    </>
-                  ) : null}
-                </div>
-              ) : (
-                <div className="rounded-3xl border border-dashed border-[hsl(var(--border))] bg-white p-4 text-sm text-[hsl(var(--muted))]">
-                  No private coaching request yet.
-                </div>
-              )}
+            <CardContent className="py-4">
+              <div className="text-sm text-[hsl(var(--muted))]">Request status</div>
+              <div className="mt-1 text-lg font-semibold">
+                {latestRequest ? privateCoachingStatusLabel(latestRequest.status) : 'No request'}
+              </div>
+              <div className="mt-2 text-xs text-[hsl(var(--muted))]">
+                {pendingRequest ? 'Waiting for payment confirmation.' : latestRequest ? `Last request · ${latestRequest.package_sessions} session(s)` : 'Create a request when you need private sessions.'}
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardContent className="py-4">
+              <div className="text-sm text-[hsl(var(--muted))]">Next booking</div>
+              <div className="mt-1 text-lg font-semibold">
+                {nextBooking ? formatDate(nextBooking.slot_date) : 'None booked'}
+              </div>
+              <div className="mt-2 text-xs text-[hsl(var(--muted))]">
+                {nextBooking
+                  ? `${coachName(coachMap.get(nextBooking.coach_id))} · ${nextBooking.start_time.slice(0, 5)}`
+                  : totalRemaining > 0
+                    ? 'Choose an available slot below.'
+                    : 'Sessions unlock after payment confirmation.'}
+              </div>
             </CardContent>
           </Card>
         </div>
 
-        <Card>
-          <CardHeader>
-            <CardTitle>Book a coach slot</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <PrivateCoachingBookingClient
-              totalRemaining={totalRemaining}
-              availableSlots={availableSlotRows}
-              bookings={bookingRows}
-            />
-          </CardContent>
-        </Card>
+        {pendingRequest ? (
+          <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950 shadow-soft">
+            <div className="font-semibold">Payment confirmation pending</div>
+            <div className="mt-1">
+              Your latest request is waiting for confirmation. New sessions will appear automatically after payment is confirmed.
+            </div>
+          </div>
+        ) : null}
 
-        <Card>
-          <CardHeader>
-            <CardTitle>Your technical session history</CardTitle>
-          </CardHeader>
-          <CardContent>
+        {totalRemaining > 0 ? (
+          <Card>
+            <CardHeader>
+              <CardTitle>Book your next session</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <PrivateCoachingBookingClient
+                totalRemaining={totalRemaining}
+                availableSlots={availableSlotRows}
+                bookings={bookingRows}
+              />
+            </CardContent>
+          </Card>
+        ) : null}
+
+        {totalRemaining <= 0 && !pendingRequest ? (
+          <Card>
+            <CardHeader>
+              <CardTitle>Request private coaching</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <p className="text-sm text-[hsl(var(--muted))]">
+                Choose a package and payment method. Sessions become available after payment confirmation.
+              </p>
+              <PrivateCoachingRequestForm coaches={coaches} hasPendingRequest={false} />
+            </CardContent>
+          </Card>
+        ) : (
+          <details className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4 shadow-soft">
+            <summary className="cursor-pointer list-none">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <div className="font-semibold">{pendingRequest ? 'Request details' : 'Buy more private sessions'}</div>
+                  <div className="mt-1 text-sm text-[hsl(var(--muted))]">
+                    {pendingRequest
+                      ? 'Review the latest request and payment information.'
+                      : 'Open this when you want to add another private coaching package.'}
+                  </div>
+                </div>
+                <span className="text-sm font-medium text-[hsl(var(--muted))]">Show</span>
+              </div>
+            </summary>
+
+            <div className="mt-4 space-y-4">
+              {pendingRequest ? (
+                <div className="grid gap-2 text-sm sm:grid-cols-2">
+                  <div className="rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2">
+                    <div className="text-xs text-[hsl(var(--muted))]">Package</div>
+                    <div className="mt-1 font-semibold">{pendingRequest.package_sessions} session(s)</div>
+                  </div>
+                  <div className="rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2">
+                    <div className="text-xs text-[hsl(var(--muted))]">Amount</div>
+                    <div className="mt-1 font-semibold">{formatPrivateCoachingMoney(pendingRequest.amount_cents)}</div>
+                  </div>
+                  <div className="rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2">
+                    <div className="text-xs text-[hsl(var(--muted))]">Payment</div>
+                    <div className="mt-1 font-semibold">{privateCoachingPaymentMethodLabel(pendingRequest.payment_method)}</div>
+                  </div>
+                  <div className="rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-2">
+                    <div className="text-xs text-[hsl(var(--muted))]">Status</div>
+                    <div className="mt-1 font-semibold">{privateCoachingStatusLabel(pendingRequest.status)}</div>
+                  </div>
+                </div>
+              ) : (
+                <PrivateCoachingRequestForm coaches={coaches} hasPendingRequest={false} />
+              )}
+            </div>
+          </details>
+        )}
+
+        {totalRemaining <= 0 ? (
+          <Card>
+            <CardHeader>
+              <CardTitle>Bookings</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <PrivateCoachingBookingClient
+                totalRemaining={totalRemaining}
+                availableSlots={availableSlotRows}
+                bookings={bookingRows}
+              />
+            </CardContent>
+          </Card>
+        ) : null}
+
+        {passes.length ? (
+          <details className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4 shadow-soft">
+            <summary className="cursor-pointer list-none">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <div className="font-semibold">Session packages</div>
+                  <div className="mt-1 text-sm text-[hsl(var(--muted))]">See active and depleted private coaching passes.</div>
+                </div>
+                <span className="text-sm font-medium text-[hsl(var(--muted))]">Show</span>
+              </div>
+            </summary>
+
+            <div className="mt-4 space-y-2">
+              {passes.map((pass) => (
+                <div key={pass.id} className="rounded-2xl border border-[hsl(var(--border))] bg-white px-3 py-3 text-sm">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <div className="font-semibold">{pass.remaining_sessions}/{pass.total_sessions} session(s) left</div>
+                      <div className="mt-1 text-xs text-[hsl(var(--muted))]">
+                        Activated {formatDate(pass.activated_at)} · {coachName(coachMap.get(pass.coach_id))}
+                      </div>
+                    </div>
+                    <span className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${pass.status === 'active' ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-slate-200 bg-slate-50 text-slate-700'}`}>
+                      {pass.status === 'active' ? 'Active' : 'Used'}
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </details>
+        ) : null}
+
+        <details className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4 shadow-soft">
+          <summary className="cursor-pointer list-none">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <div className="font-semibold">Technical session history</div>
+                <div className="mt-1 text-sm text-[hsl(var(--muted))]">Review techniques, situations and coach notes from your private sessions.</div>
+              </div>
+              <span className="text-sm font-medium text-[hsl(var(--muted))]">Show</span>
+            </div>
+          </summary>
+
+          <div className="mt-4">
             <PrivateCoachingMemberSessionHistory />
-          </CardContent>
-        </Card>
+          </div>
+        </details>
       </Section>
     </main>
   )
