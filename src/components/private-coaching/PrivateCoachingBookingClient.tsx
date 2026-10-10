@@ -195,14 +195,6 @@ export default function PrivateCoachingBookingClient({ totalRemaining, available
     <div className="space-y-6">
       {status.message ? <InlineAlert variant={status.kind === 'error' ? 'error' : 'success'}>{status.message}</InlineAlert> : null}
 
-      <div className="rounded-3xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] p-4">
-        <div className="text-sm text-[hsl(var(--muted))]">Available tokens</div>
-        <div className="mt-1 text-3xl font-semibold tracking-tight">{totalRemaining}</div>
-        <p className="mt-2 text-sm text-[hsl(var(--muted))]">
-          Choose an available coach slot. Booking one slot uses one private coaching token.
-        </p>
-      </div>
-
       <PrivateCoachingSessionRequestsClient mode="member" />
 
       {backdatedSlots.length > 0 ? (
@@ -231,7 +223,10 @@ export default function PrivateCoachingBookingClient({ totalRemaining, available
 
       <div>
         <div className="mb-3 flex items-center justify-between gap-3">
-          <h4 className="text-base font-semibold tracking-tight">Available slots</h4>
+          <div>
+              <h4 className="text-base font-semibold tracking-tight">Available slots</h4>
+              <p className="mt-1 text-sm text-[hsl(var(--muted))]">Choose a time that works for you. One booking uses one session.</p>
+            </div>
           <span className="rounded-full border border-[hsl(var(--border))] bg-white px-3 py-1 text-xs font-semibold text-[hsl(var(--muted))]">
             {upcomingSlots.length} slot(s)
           </span>
@@ -255,8 +250,8 @@ export default function PrivateCoachingBookingClient({ totalRemaining, available
       <div>
         <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <h4 className="text-base font-semibold tracking-tight">Your bookings</h4>
-            <p className="text-sm text-[hsl(var(--muted))]">Upcoming sessions and private coaching history.</p>
+            <h4 className="text-base font-semibold tracking-tight">Bookings</h4>
+            <p className="text-sm text-[hsl(var(--muted))]">Upcoming, completed and cancelled sessions.</p>
           </div>
           <span className="rounded-full border border-[hsl(var(--border))] bg-white px-3 py-1 text-xs font-semibold text-[hsl(var(--muted))]">
             {bookings.length} booking(s)
