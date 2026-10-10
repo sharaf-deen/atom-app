@@ -245,22 +245,8 @@ function secondaryActions(role: Role): QuickLink[] {
     })
   }
 
-  if (role === 'head_coach') {
-    links.push(
-      {
-        href: '/head-coach/athletes',
-        label: 'Athletes',
-        desc: 'Progress, promotions and competition tracking.',
-        icon: Users,
-      },
-      {
-        href: '/head-coach/private-coaching',
-        label: 'Private coaching',
-        desc: 'Bookings, requests, availability and session follow-up.',
-        icon: UserRoundSearch,
-      },
-    )
-  }
+  // Head Coach-specific management tools are presented in their own hierarchy below.
+  // Keep this secondary list focused on shared coaching tools.
 
   return links
 }
@@ -430,9 +416,63 @@ export default async function TrainingUsefulPage() {
           </Surface>
         ) : null}
 
+        {user.role === 'head_coach' ? (
+          <Surface className="p-5 sm:p-6">
+            <div>
+              <h2 className="text-lg font-semibold tracking-tight">Head Coach workspace</h2>
+              <p className="mt-1 text-sm text-[hsl(var(--muted))]">
+                Athletes, technical direction, team oversight and private coaching.
+              </p>
+            </div>
+
+            <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+              {[
+                {
+                  href: '/head-coach/athletes',
+                  label: 'Athletes',
+                  desc: 'Progress, promotions and competition tracking.',
+                  icon: Users,
+                },
+                {
+                  href: '/coach-operations/curriculum',
+                  label: 'Technical direction',
+                  desc: 'Manage the curriculum and coaching references.',
+                  icon: BookOpen,
+                },
+                {
+                  href: '/coach-operations/oversight',
+                  label: 'Coach oversight',
+                  desc: 'Review assignments, QR attendance and completed logs.',
+                  icon: Activity,
+                },
+                {
+                  href: '/head-coach/private-coaching',
+                  label: 'Private coaching',
+                  desc: 'Bookings, requests, availability and session follow-up.',
+                  icon: UserRoundSearch,
+                },
+              ].map((item) => (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  className="group rounded-2xl border border-[hsl(var(--border))] bg-white p-4 shadow-soft transition hover:-translate-y-0.5 hover:shadow-md"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <div className="text-sm font-semibold">{item.label}</div>
+                      <div className="mt-1 text-sm text-[hsl(var(--muted))]">{item.desc}</div>
+                    </div>
+                    <item.icon size={18} className="mt-0.5 shrink-0" />
+                  </div>
+                </Link>
+              ))}
+            </div>
+          </Surface>
+        ) : null}
+
         <div className="grid gap-4 lg:grid-cols-[1.05fr_0.95fr]">
           <Surface className="p-5 sm:p-6">
-            <h2 className="text-lg font-semibold tracking-tight">More coaching tools</h2>
+            <h2 className="text-lg font-semibold tracking-tight">{user.role === 'head_coach' ? 'Shared coaching tools' : 'More coaching tools'}</h2>
             <div className="mt-4 grid gap-3 sm:grid-cols-2">
               {moreActions.map((item) => (
                 <Link
