@@ -14,7 +14,7 @@ import { Table } from '@/components/ui/Table'
 import { getSessionUserCached, getSupabaseAdminClientCached } from '@/lib/requestCache'
 import { addDays, cairoToday, diffDays, CAIRO_TZ } from '@/lib/cairoDate'
 import { canAccessReceptionDesk, canManageNotifications } from '@/lib/rbac'
-import { CalendarDays, IdCard, MessageSquare, Phone, ScanLine, UserPlus, Wallet } from 'lucide-react'
+import { IdCard, Phone, ScanLine, UserPlus, Users } from 'lucide-react'
 
 type SearchParams = Record<string, string | string[] | undefined>
 
@@ -528,20 +528,21 @@ export default async function ReceptionPage({ searchParams }: { searchParams?: S
         <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 xl:grid-cols-4">
           <SummaryCard label="Scans today" value={String(scansTodayRes.count ?? 0)} hint="Attendance recorded today." href="/scan" />
           <SummaryCard label="Action now" value={String(urgentCount)} hint="Urgent renewals, dues and desk-first cases." href={buildQS({ focus: 'now' })} />
-          <SummaryCard label="Expiring in 7d" value={String(expiringCountRes.count ?? 0)} hint="Renewals likely needed soon." href="/admin/expiring-soon" />
-          <SummaryCard label="Outstanding dues" value={queueValue} hint={`${dueCount} member(s) with money due.`} href="/admin/outstanding-dues" />
+          <SummaryCard label="Expiring in 7d" value={String(expiringCountRes.count ?? 0)} hint="Open the Front Desk renewal queue." href={buildQS({ focus: 'renewals' })} />
+          <SummaryCard label="Outstanding dues" value={queueValue} hint={`${dueCount} member(s) to review at the desk.`} href={buildQS({ focus: 'dues' })} />
         </div>
       </Section>
 
       <Section className="space-y-4">
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-          <ActionTile href="/scan" title="Scan" desc="Entrance validation and attendance." icon={ScanLine} />
-          <ActionTile href="/admin/expiring-soon" title="Renewals" desc="Open memberships ending soon." icon={CalendarDays} />
-          <ActionTile href="/admin/outstanding-dues" title="Outstanding dues" desc="Payment collection and due follow-up." icon={Wallet} />
-          <ActionTile href="/admin/crm" title="CRM queue" desc="Open the live contact queue." icon={MessageSquare} />
-          <ActionTile href="/kiosk" title="Create member" desc="Start a new member flow." icon={IdCard} />
-          <ActionTile href="/admin/members/family-operations" title="Family operations" desc="Intake, visitor conversion, family search and safe account updates." icon={UserPlus} />
-          <ActionTile href="/schedule" title="Schedule" desc="Keep today’s class times close." icon={CalendarDays} />
+        <div>
+          <div className="text-sm font-semibold tracking-tight">Desk actions</div>
+          <p className="mt-1 text-sm text-[hsl(var(--muted))]">The four fastest actions for someone standing at reception.</p>
+        </div>
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          <ActionTile href="/scan" title="Scan" desc="Check in a member and validate access." icon={ScanLine} />
+          <ActionTile href="/members" title="Find member" desc="Search and open a member account quickly." icon={Users} />
+          <ActionTile href="/kiosk" title="Create member" desc="Start a new membership registration." icon={IdCard} />
+          <ActionTile href="/admin/visitors" title="New visitor" desc="Register or manage a free trial visitor." icon={UserPlus} />
         </div>
       </Section>
 

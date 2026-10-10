@@ -818,18 +818,18 @@ function buildReceptionPriorities(ops: OpsKpis): PriorityItem[] {
       tone: ops.scansToday > 0 ? 'success' : 'warning',
     },
     {
-      href: '/admin/expiring-soon',
+      href: '/reception?focus=renewals',
       eyebrow: 'Renewals',
       title: ops.expiring7Count > 0 ? `${ops.expiring7Count} member(s) expiring soon` : 'No urgent renewal queue',
-      desc: ops.expiring7Count > 0 ? 'Review renewals first before the queue grows.' : 'The current renewal queue looks calm.',
+      desc: ops.expiring7Count > 0 ? 'Open the Front Desk renewal queue.' : 'The current renewal queue looks calm.',
       icon: Clock3,
       tone: ops.expiring7Count > 0 ? 'warning' : 'neutral',
     },
     {
-      href: '/admin/outstanding-dues',
+      href: '/reception?focus=dues',
       eyebrow: 'Money to collect',
       title: ops.outstandingCount > 0 ? `${ops.outstandingCount} member(s) with dues` : 'No outstanding due right now',
-      desc: ops.outstandingCount > 0 ? `${fmtMoneyEGP(ops.outstandingTotal)} still open across member balances.` : 'Outstanding balances are currently clear.',
+      desc: ops.outstandingCount > 0 ? `${fmtMoneyEGP(ops.outstandingTotal)} to review from the Front Desk queue.` : 'Outstanding balances are currently clear.',
       icon: Wallet,
       tone: ops.outstandingCount > 0 ? 'danger' : 'neutral',
     },
@@ -1422,8 +1422,8 @@ export default async function HomePage() {
             <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
               <SummaryCard label="1 Week active" value={opsKpis?.weeklyActiveCount ?? 0} hint="Current weekly memberships." href="/members" />
               <SummaryCard label="Scans today" value={opsKpis?.scansToday ?? 0} hint={`Attendance · ${cairoToday()}`} href="/scan" />
-              <SummaryCard label="Expiring soon" value={opsKpis?.expiring7Count ?? 0} hint="Members to renew soon." href="/admin/expiring-soon" />
-              <SummaryCard label="Outstanding dues" value={opsKpis?.outstandingCount ?? 0} hint={fmtMoneyEGP(opsKpis?.outstandingTotal ?? 0)} href="/admin/outstanding-dues" />
+              <SummaryCard label="Expiring soon" value={opsKpis?.expiring7Count ?? 0} hint="Members to renew soon." href="/reception?focus=renewals" />
+              <SummaryCard label="Outstanding dues" value={opsKpis?.outstandingCount ?? 0} hint={fmtMoneyEGP(opsKpis?.outstandingTotal ?? 0)} href="/reception?focus=dues" />
             </div>
 
             <QuickActions
