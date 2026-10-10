@@ -188,6 +188,7 @@ export default function CurriculumManager({
   const [school, setSchool] = React.useState<School | ''>('')
   const [trainingFormat, setTrainingFormat] = React.useState<TrainingFormat | ''>('')
   const [formatFilter, setFormatFilter] = React.useState<FormatFilter>('all')
+  const [searchQuery, setSearchQuery] = React.useState('')
   const [audiences, setAudiences] = React.useState<Audience[]>([])
   const [audienceFilter, setAudienceFilter] = React.useState<AudienceFilter>('all')
   const [opponentReaction, setOpponentReaction] = React.useState('')
@@ -197,10 +198,32 @@ export default function CurriculumManager({
   const [message, setMessage] = React.useState<string | null>(null)
   const [error, setError] = React.useState<string | null>(null)
 
-  const visibleTypes = React.useMemo(
-    () => (canManage ? types : types.filter((item) => item.is_active)),
-    [canManage, types],
-  )
+  const visibleTypes = React.useMemo(() => {
+    const base = canManage ? types : types.filter((item) => item.is_active)
+    const needle = searchQuery.trim().toLowerCase()
+    if (!needle) return base
+
+    const textMatches = (...values: Array<string | null | undefined>) =>
+      values.some((value) => String(value ?? '').toLowerCase().includes(needle))
+
+    return base.filter((type) => {
+      if (textMatches(type.name, type.description)) return true
+      const typeBlocks = blocks.filter((block) => block.type_id === type.id && (canManage || block.is_active))
+      return typeBlocks.some((block) => {
+        if (textMatches(block.name, block.description)) return true
+        const blockTechniques = techniques.filter((technique) => technique.block_id === block.id && (canManage || technique.is_active))
+        return blockTechniques.some((technique) => {
+          if (textMatches(technique.name, technique.description)) return true
+          return situations.some(
+            (situation) =>
+              situation.technique_id === technique.id
+              && (canManage || situation.is_active)
+              && textMatches(situation.name, situation.opponent_reaction, situation.coaching_response),
+          )
+        })
+      })
+    })
+  }, [blocks, canManage, searchQuery, situations, techniques, types])
 
   function resetFeedback() {
     setMessage(null)
@@ -411,12 +434,15 @@ export default function CurriculumManager({
 
   return (
     <div className="space-y-5">
-      <div className="grid gap-3 sm:grid-cols-4">
-        <SummaryCard label="Technical types" value={types.filter((item) => item.is_active).length} />
-        <SummaryCard label="Blocks" value={activeBlockCount} />
-        <SummaryCard label="Techniques" value={activeTechniqueCount} />
-        <SummaryCard label="Situations" value={activeSituationCount} />
-      </div>
+      <details className="rounded-2xl border border-[hsl(var(--border))] bg-white px-4 py-3 shadow-soft">
+        <summary className="cursor-pointer text-sm font-semibold">Curriculum overview</summary>
+        <div className="mt-3 grid gap-3 sm:grid-cols-4">
+          <SummaryCard label="Technical types" value={types.filter((item) => item.is_active).length} />
+          <SummaryCard label="Blocks" value={activeBlockCount} />
+          <SummaryCard label="Techniques" value={activeTechniqueCount} />
+          <SummaryCard label="Situations" value={activeSituationCount} />
+        </div>
+      </details>
       {canManage && techniquesNeedingSituations > 0 ? (
         <p className="text-sm text-amber-800">
           {techniquesNeedingSituations} active technique{techniquesNeedingSituations === 1 ? '' : 's'} need a second active opponent reaction.
@@ -441,7 +467,17 @@ export default function CurriculumManager({
         ) : null}
       </div>
 
-      <div className="space-y-2">
+      <div className="space-y-3">
+        <label className="block">
+          <span className="mb-1.5 block text-sm font-semibold">Find a technique or situation</span>
+          <input
+            type="search"
+            value={searchQuery}
+            onChange={(event) => setSearchQuery(event.target.value)}
+            placeholder="Technique, block, opponent reaction…"
+            className="min-h-[44px] w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-3.5 py-2.5 text-sm shadow-soft outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          />
+        </label>
         <div className="flex flex-wrap items-center gap-2" aria-label="Filter curriculum by training format">
           <span className="mr-1 text-sm font-medium">Training format:</span>
           {(['all', 'gi', 'nogi'] as const).map((value) => (
@@ -711,6 +747,7 @@ export default function CurriculumManager({
                         situations={situations}
                         formatFilter={formatFilter}
                         audienceFilter={audienceFilter}
+                        searchQuery={searchQuery}
                         isBodyForms={type.slug === 'body-forms'}
                         openCreate={openCreate}
                         openEdit={openEdit}
@@ -727,7 +764,7 @@ export default function CurriculumManager({
         })}
 
         {visibleTypes.length === 0 ? (
-          <EmptyState label="No active curriculum types are available yet." />
+          <EmptyState label={searchQuery.trim() ? 'No curriculum item matches this search.' : 'No active curriculum types are available yet.'} />
         ) : null}
       </div>
 
@@ -781,6 +818,7 @@ function BlockTree({
   situations,
   formatFilter,
   audienceFilter,
+  searchQuery,
   isBodyForms,
   openCreate,
   openEdit,
@@ -794,17 +832,40 @@ function BlockTree({
   situations: CurriculumSituation[]
   formatFilter: FormatFilter
   audienceFilter: AudienceFilter
+  searchQuery: string
   isBodyForms: boolean
   openCreate: (entity: Entity, parentId?: string, parentLabel?: string) => void
   openEdit: (entity: Entity, item: AnyItem) => void
   setToggleTarget: (target: ToggleTarget) => void
   setDeleteTarget: (target: DeleteTarget) => void
 }) {
-  const blockTechniques = techniques.filter(
-    (technique) => technique.block_id === block.id && (canManage || technique.is_active)
-      && matchesFormat(technique.training_format, formatFilter)
-      && matchesAudience(technique.audiences, audienceFilter),
-  )
+  const needle = searchQuery.trim().toLowerCase()
+  const blockMatchesSearch =
+    !needle
+    || block.name.toLowerCase().includes(needle)
+    || String(block.description ?? '').toLowerCase().includes(needle)
+
+  const blockTechniques = techniques.filter((technique) => {
+    if (technique.block_id !== block.id || (!canManage && !technique.is_active)) return false
+    if (!matchesFormat(technique.training_format, formatFilter) || !matchesAudience(technique.audiences, audienceFilter)) return false
+    if (blockMatchesSearch) return true
+
+    const techniqueMatches =
+      technique.name.toLowerCase().includes(needle)
+      || String(technique.description ?? '').toLowerCase().includes(needle)
+    if (techniqueMatches) return true
+
+    return situations.some(
+      (situation) =>
+        situation.technique_id === technique.id
+        && (canManage || situation.is_active)
+        && (
+          situation.name.toLowerCase().includes(needle)
+          || situation.opponent_reaction.toLowerCase().includes(needle)
+          || String(situation.coaching_response ?? '').toLowerCase().includes(needle)
+        ),
+    )
+  })
   const techniqueIds = new Set(blockTechniques.map((technique) => technique.id))
   const blockSituationCount = situations.filter(
     (situation) => techniqueIds.has(situation.technique_id) && (canManage || situation.is_active)
@@ -866,6 +927,7 @@ function BlockTree({
                 canManage={canManage}
                 situations={situations}
                 formatFilter={formatFilter}
+                searchQuery={searchQuery}
                 isBodyForms={isBodyForms}
                 openCreate={openCreate}
                 openEdit={openEdit}
@@ -887,6 +949,7 @@ function TechniqueTree({
   canDeletePermanent,
   situations,
   formatFilter,
+  searchQuery,
   isBodyForms,
   openCreate,
   openEdit,
@@ -898,15 +961,30 @@ function TechniqueTree({
   canDeletePermanent: boolean
   situations: CurriculumSituation[]
   formatFilter: FormatFilter
+  searchQuery: string
   isBodyForms: boolean
   openCreate: (entity: Entity, parentId?: string, parentLabel?: string) => void
   openEdit: (entity: Entity, item: AnyItem) => void
   setToggleTarget: (target: ToggleTarget) => void
   setDeleteTarget: (target: DeleteTarget) => void
 }) {
+  const needle = searchQuery.trim().toLowerCase()
+  const techniqueMatchesSearch =
+    !needle
+    || technique.name.toLowerCase().includes(needle)
+    || String(technique.description ?? '').toLowerCase().includes(needle)
+
   const techniqueSituations = situations.filter(
-    (situation) => situation.technique_id === technique.id && (canManage || situation.is_active)
-      && matchesFormat(situation.training_format, formatFilter),
+    (situation) =>
+      situation.technique_id === technique.id
+      && (canManage || situation.is_active)
+      && matchesFormat(situation.training_format, formatFilter)
+      && (
+        techniqueMatchesSearch
+        || situation.name.toLowerCase().includes(needle)
+        || situation.opponent_reaction.toLowerCase().includes(needle)
+        || String(situation.coaching_response ?? '').toLowerCase().includes(needle)
+      ),
   )
   const activeSituationCount = techniqueSituations.filter((situation) => situation.is_active).length
 
