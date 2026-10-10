@@ -5,6 +5,7 @@ import { redirect } from 'next/navigation'
 import AccessDeniedPage from '@/components/AccessDeniedPage'
 import PageHeader from '@/components/layout/PageHeader'
 import Section from '@/components/layout/Section'
+import Button from '@/components/ui/Button'
 import MemberIncidentsManager from '@/components/coach-operations/MemberIncidentsManager'
 import {
   canAccessCoachMemberIncidents,
@@ -84,12 +85,16 @@ export default async function CoachMemberIncidentsPage() {
     <main>
       <PageHeader
         title="Member Incidents"
-        subtitle="Internal coaching records for behaviour, safety and training incidents."
+        subtitle="Report and review factual coaching incidents."
+        right={<Button asChild variant="outline" href="/coach-operations/training-logs">Training Logs</Button>}
       />
       <Section className="max-w-6xl space-y-4">
-        <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950">
-          Internal coaching record. Members and family guardians cannot see these incidents. Do not use this page for emergency response or medical diagnosis.
-        </div>
+        <details className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950">
+          <summary className="cursor-pointer font-semibold">Incident record guidance</summary>
+          <p className="mt-2">
+            Internal coaching record. Members and family guardians cannot see these incidents. Do not use this page for emergency response or medical diagnosis.
+          </p>
+        </details>
 
         {loadError ? (
           <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">

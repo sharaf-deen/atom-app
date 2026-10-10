@@ -97,7 +97,7 @@ export default function MemberIncidentsManager({
   trainingLogs: TrainingLog[]
 }) {
   const router = useRouter()
-  const [showCreate, setShowCreate] = useState(false)
+  const [showCreate, setShowCreate] = useState(canCreate && incidents.length === 0)
   const [query, setQuery] = useState('')
   const [searching, setSearching] = useState(false)
   const [results, setResults] = useState<MemberSearchItem[]>([])
@@ -237,9 +237,9 @@ export default function MemberIncidentsManager({
       <div className="rounded-2xl border border-[hsl(var(--border))] bg-white p-4 shadow-soft">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h2 className="text-base font-semibold">Incident register</h2>
+            <h2 className="text-base font-semibold">Report an incident</h2>
             <p className="mt-1 text-sm text-[hsl(var(--muted))]">
-              Report factual internal incidents. Records are preserved; they are not shown to members or guardians.
+              Select the member, optionally link the training log, then record the facts.
             </p>
           </div>
           {canCreate ? (
@@ -393,7 +393,7 @@ export default function MemberIncidentsManager({
       <div className="rounded-2xl border border-[hsl(var(--border))] bg-white p-4 shadow-soft">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h2 className="text-base font-semibold">History</h2>
+            <h2 className="text-base font-semibold">Incident history</h2>
             <p className="mt-1 text-sm text-[hsl(var(--muted))]">{visible.length} incident(s) shown.</p>
           </div>
           <div className="flex flex-wrap gap-2">

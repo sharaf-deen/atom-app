@@ -5,6 +5,7 @@ import { redirect } from 'next/navigation'
 import AccessDeniedPage from '@/components/AccessDeniedPage'
 import PageHeader from '@/components/layout/PageHeader'
 import Section from '@/components/layout/Section'
+import Button from '@/components/ui/Button'
 import TrainingSessionLogsManager from '@/components/coach-operations/TrainingSessionLogsManager'
 import { canAccessCoachTrainingLogs, canCreateCoachTrainingLogs, canManageCoachTrainingLogs } from '@/lib/rbac'
 import { getSessionUser } from '@/lib/session'
@@ -261,7 +262,11 @@ export default async function CoachTrainingLogsPage() {
 
   return (
     <main>
-      <PageHeader title="Training Logs" subtitle="Record what was actually taught and link it to the real dated session when available." />
+      <PageHeader
+        title="Training Logs"
+        subtitle="Record what was actually taught and link it to the real dated session when available."
+        right={<Button asChild variant="outline" href="/coach-operations/incidents">Report incident</Button>}
+      />
       <Section className="max-w-6xl space-y-4">
         {loadError ? (
           <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">

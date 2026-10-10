@@ -5,6 +5,7 @@ import { redirect } from 'next/navigation'
 import AccessDeniedPage from '@/components/AccessDeniedPage'
 import PageHeader from '@/components/layout/PageHeader'
 import Section from '@/components/layout/Section'
+import Button from '@/components/ui/Button'
 import CurriculumManager from '@/components/coach-operations/CurriculumManager'
 import { canAccessCoachCurriculum, canManageCoachCurriculum } from '@/lib/rbac'
 import { getSessionUser } from '@/lib/session'
@@ -106,13 +107,17 @@ export default async function CoachCurriculumPage() {
     <main>
       <PageHeader
         title="Training Curriculum"
-        subtitle="Shared technical library for the ATOM coaching team."
+        subtitle="Find techniques, situations and coaching references."
+        right={<Button asChild variant="outline" href="/training-useful">Coach Today</Button>}
       />
 
       <Section className="max-w-6xl space-y-4">
-        <div className="rounded-2xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-950">
-          Structure: Technical type → Block → Technique → Situation / opponent reaction. Coaches and Assistant Coaches can read the shared curriculum. Head Coach and Super Admin can manage it.
-        </div>
+        <details className="rounded-2xl border border-[hsl(var(--border))] bg-white px-4 py-3 text-sm shadow-soft">
+          <summary className="cursor-pointer font-semibold">How the curriculum is organised</summary>
+          <p className="mt-2 text-[hsl(var(--muted))]">
+            Technical type → Block → Technique → Situation / opponent reaction. Coaches and Assistant Coaches can read the shared curriculum. Head Coach and Super Admin can manage it.
+          </p>
+        </details>
 
         {loadError ? (
           <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">
