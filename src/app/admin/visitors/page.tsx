@@ -509,8 +509,10 @@ export default async function VisitorTrialsPage({
     }
   })
 
+  const today = cairoTodayDateOnly()
   const summary = {
     total: enriched.length,
+    today: enriched.filter((row) => row.trial_date === today && row.computed_state !== 'closed' && row.computed_state !== 'converted').length,
     booked: enriched.filter((row) => row.computed_state === 'booked').length,
     attended: enriched.filter((row) => row.computed_state === 'attended').length,
     follow_up_due: enriched.filter((row) => row.computed_state === 'follow_up_due').length,
@@ -518,25 +520,16 @@ export default async function VisitorTrialsPage({
   }
 
   const visibleRows = state === 'all' ? enriched : enriched.filter((row) => row.computed_state === state)
-  const today = cairoTodayDateOnly()
 
   return (
     <main>
       <PageHeader
         title="Visitors"
-        subtitle="Free trial leads, 1-session rule, and J+7 follow-up."
+        subtitle="Register trials quickly, see who is coming today, and follow up when needed."
         right={
-          <div className="flex flex-wrap gap-2">
-            <Button asChild variant="outline" href="/reception">
-              Front desk
-            </Button>
-            <Button asChild variant="outline" href="/admin/members/family-operations">
-              Family operations
-            </Button>
-            <Button asChild variant="outline" href="/kiosk">
-              Create member
-            </Button>
-          </div>
+          <Button asChild href="#new-visitor">
+            New visitor
+          </Button>
         }
       />
 
@@ -549,19 +542,35 @@ export default async function VisitorTrialsPage({
           error={flashError}
         />
 
-        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
-          <SummaryCard label="Visitors" value={String(summary.total)} hint="Latest 200 rows after current search/source filter." />
-          <SummaryCard label="Booked" value={String(summary.booked)} hint="Trial planned but not yet attended." />
-          <SummaryCard label="Attended" value={String(summary.attended)} hint="Free trial used. Waiting for follow-up window." />
+        <div className="grid gap-4 sm:grid-cols-3">
+          <SummaryCard label="Today" value={String(summary.today)} hint="Trials scheduled for today and still active." />
           <SummaryCard label="Follow-up due" value={String(summary.follow_up_due)} hint="J+7 reached and still no subscription." />
-          <SummaryCard label="Converted" value={String(summary.converted)} hint="Linked member with at least one subscription." />
+          <SummaryCard label="Booked" value={String(summary.booked)} hint="Upcoming trial visitors not yet attended." />
         </div>
+
+        <details className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4 shadow-soft">
+          <summary className="cursor-pointer list-none">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <div className="font-semibold">Visitor overview</div>
+                <div className="mt-1 text-sm text-[hsl(var(--muted))]">Open the broader visitor pipeline totals when needed.</div>
+              </div>
+              <span className="text-sm font-medium text-[hsl(var(--muted))]">Show</span>
+            </div>
+          </summary>
+          <div className="mt-4 grid gap-3 sm:grid-cols-3">
+            <SummaryCard label="All visitors" value={String(summary.total)} hint="Latest 200 rows after current search/source filter." />
+            <SummaryCard label="Attended" value={String(summary.attended)} hint="Trial used and inside the follow-up window." />
+            <SummaryCard label="Converted" value={String(summary.converted)} hint="Linked member with at least one subscription." />
+          </div>
+        </details>
       </Section>
 
       <Section className="grid gap-4 xl:grid-cols-[380px_minmax(0,1fr)]">
-        <Card>
-          <CardHeader>
-            <CardTitle>New visitor trial</CardTitle>
+        <div id="new-visitor" className="scroll-mt-24">
+          <Card>
+            <CardHeader>
+              <CardTitle>New visitor</CardTitle>
           </CardHeader>
           <CardContent>
             <form action={addVisitorAction} className="grid gap-3">
@@ -594,12 +603,13 @@ export default async function VisitorTrialsPage({
               <div className="flex flex-wrap gap-2">
                 <Button type="submit">Save visitor</Button>
                 <Button asChild variant="outline" href="/kiosk">
-                  Open kiosk
+                  Create member
                 </Button>
               </div>
             </form>
-          </CardContent>
-        </Card>
+            </CardContent>
+          </Card>
+        </div>
 
         <div className="space-y-4">
           <Card>
@@ -722,7 +732,7 @@ export default async function VisitorTrialsPage({
                             </Button>
                           ) : (
                             <Button asChild href={buildCreateMemberHref(row)}>
-                              Convert in kiosk
+                              Create member
                             </Button>
                           )
                         ) : linkedHref ? (
