@@ -134,89 +134,118 @@ export default function MembersFilters({
 
   return (
     <form onSubmit={onSubmit} className={className ?? ''}>
-      <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-end">
-        <div className="min-w-0 flex-1 sm:min-w-[260px]">
-          <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search name, email, phone or member ID…" aria-label="Search members" />
-        </div>
-
-        <div className="w-full sm:w-44">
-          <Select label="Status" value={status} onChange={(e) => {
-            const v = normalizeStatus(e.target.value)
-            const nextReason = v === 'inactive' ? inactiveReason : 'all'
-            setStatus(v)
-            if (v !== 'inactive') setInactiveReason('all')
-            setQ('')
-            apply({ q: '', status: v, inactiveReason: nextReason, page: 1 })
-          }}>
-            <option value="all">All</option>
-            <option value="active">Active</option>
-            <option value="frozen">Frozen</option>
-            <option value="inactive">Inactive</option>
-          </Select>
-        </div>
-
-        {status === 'inactive' ? (
-          <div className="w-full sm:w-52">
-            <Select label="Inactive reason" value={inactiveReason} onChange={(e) => {
-              const v = normalizeInactiveReason(e.target.value)
-              setInactiveReason(v)
-              setQ('')
-              apply({ q: '', status: 'inactive', inactiveReason: v, page: 1 })
-            }}>
-              <option value="all">All inactive</option>
-              <option value="expired">Expired</option>
-              <option value="cancelled">Cancelled</option>
-              <option value="no_membership">No membership yet</option>
-              <option value="depleted_legacy">Depleted legacy</option>
-              <option value="other_inactive">Other inactive</option>
-            </Select>
+      <div className="rounded-2xl border border-[hsl(var(--border))] bg-white p-3 shadow-soft">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
+          <div className="min-w-0 flex-1">
+            <Input
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              placeholder="Search name, email, phone or member ID…"
+              aria-label="Search members"
+            />
           </div>
-        ) : null}
 
-        <div className="w-full sm:w-64">
-          <Select label="Program" value={program} onChange={(e) => {
-            const v = e.target.value
-            setProgram(v)
-            apply({ program: v, page: 1 })
-          }}>
-            <option value="">All programs</option>
-            <option value="__unassigned__">Program not set</option>
-            {programs.map((item) => (
-              <option key={item.key} value={item.key}>{item.name}</option>
-            ))}
-          </Select>
+          <div className="flex gap-2">
+            <Button type="submit" disabled={isPending}>
+              {isPending ? 'Searching…' : 'Search'}
+            </Button>
+            {(q || status !== 'all' || inactiveReason !== 'all' || program || legalStatus !== 'all' || pageSize !== 20) ? (
+              <Button type="button" variant="outline" disabled={isPending} onClick={onReset}>
+                Clear
+              </Button>
+            ) : null}
+          </div>
         </div>
 
-        <div className="w-full sm:w-52">
-          <Select label="Legal status" value={legalStatus} onChange={(e) => {
-            const v = normalizeLegalStatus(e.target.value)
-            setLegalStatus(v)
-            apply({ legalStatus: v, page: 1 })
-          }}>
-            <option value="all">All legal statuses</option>
-            <option value="complete">Complete</option>
-            <option value="action_required">Action required</option>
-          </Select>
-        </div>
+        <details className="mt-3 border-t border-[hsl(var(--border))] pt-3">
+          <summary className="cursor-pointer list-none text-sm font-semibold">
+            More filters
+            <span className="ml-2 text-xs font-normal text-[hsl(var(--muted))]">
+              Status, program, legal status and rows
+            </span>
+          </summary>
 
-        <div className="w-full sm:w-32">
-          <Select label="Rows" value={String(pageSize)} onChange={(e) => {
-            const v = clampInt(Number(e.target.value), 5, 200)
-            setPageSize(v)
-            apply({ pageSize: v, page: 1 })
-          }}>
-            <option value="10">10</option><option value="20">20</option><option value="50">50</option><option value="100">100</option><option value="200">200</option>
-          </Select>
-        </div>
+          <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end">
+            <div className="w-full sm:w-44">
+              <Select label="Status" value={status} onChange={(e) => {
+                const v = normalizeStatus(e.target.value)
+                const nextReason = v === 'inactive' ? inactiveReason : 'all'
+                setStatus(v)
+                if (v !== 'inactive') setInactiveReason('all')
+                setQ('')
+                apply({ q: '', status: v, inactiveReason: nextReason, page: 1 })
+              }}>
+                <option value="all">All</option>
+                <option value="active">Active</option>
+                <option value="frozen">Frozen</option>
+                <option value="inactive">Inactive</option>
+              </Select>
+            </div>
 
-        <div className="flex gap-2">
-          <Button type="submit" disabled={isPending}>{isPending ? 'Loading…' : 'Apply'}</Button>
-          <Button type="button" variant="outline" disabled={isPending} onClick={onReset}>Clear</Button>
-        </div>
+            {status === 'inactive' ? (
+              <div className="w-full sm:w-52">
+                <Select label="Inactive reason" value={inactiveReason} onChange={(e) => {
+                  const v = normalizeInactiveReason(e.target.value)
+                  setInactiveReason(v)
+                  setQ('')
+                  apply({ q: '', status: 'inactive', inactiveReason: v, page: 1 })
+                }}>
+                  <option value="all">All inactive</option>
+                  <option value="expired">Expired</option>
+                  <option value="cancelled">Cancelled</option>
+                  <option value="no_membership">No membership yet</option>
+                  <option value="depleted_legacy">Depleted legacy</option>
+                  <option value="other_inactive">Other inactive</option>
+                </Select>
+              </div>
+            ) : null}
+
+            <div className="w-full sm:w-64">
+              <Select label="Program" value={program} onChange={(e) => {
+                const v = e.target.value
+                setProgram(v)
+                apply({ program: v, page: 1 })
+              }}>
+                <option value="">All programs</option>
+                <option value="__unassigned__">Program not set</option>
+                {programs.map((item) => (
+                  <option key={item.key} value={item.key}>{item.name}</option>
+                ))}
+              </Select>
+            </div>
+
+            <div className="w-full sm:w-52">
+              <Select label="Legal status" value={legalStatus} onChange={(e) => {
+                const v = normalizeLegalStatus(e.target.value)
+                setLegalStatus(v)
+                apply({ legalStatus: v, page: 1 })
+              }}>
+                <option value="all">All legal statuses</option>
+                <option value="complete">Complete</option>
+                <option value="action_required">Action required</option>
+              </Select>
+            </div>
+
+            <div className="w-full sm:w-32">
+              <Select label="Rows" value={String(pageSize)} onChange={(e) => {
+                const v = clampInt(Number(e.target.value), 5, 200)
+                setPageSize(v)
+                apply({ pageSize: v, page: 1 })
+              }}>
+                <option value="10">10</option>
+                <option value="20">20</option>
+                <option value="50">50</option>
+                <option value="100">100</option>
+                <option value="200">200</option>
+              </Select>
+            </div>
+          </div>
+
+          <p className="mt-3 text-[11px] text-[hsl(var(--muted))]">
+            Legal status compares each member against the current active required legal-document versions.
+          </p>
+        </details>
       </div>
-      <p className="mt-2 text-[11px] text-[hsl(var(--muted))]">
-        Legal status compares each member against the current active required legal-document versions.
-      </p>
     </form>
   )
 }
