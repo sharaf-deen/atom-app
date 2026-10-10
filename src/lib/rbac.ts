@@ -149,7 +149,6 @@ const APP_NAV_BY_ROLE: MenuByRole = {
     { label: 'Visitors', href: '/admin/visitors', icon: 'users' },
     { label: 'Family Operations', href: '/admin/members/family-operations', icon: 'users' },
     { label: 'Coaches', href: '/coaches', icon: 'user-cog' },
-    { label: 'Athletes', href: '/head-coach/athletes', icon: 'users' },
     { label: 'Store Catalog', href: '/admin/store', icon: 'bag' },
     { label: 'Invoices', href: '/invoices', icon: 'file-text' },
     { label: 'Payments', href: '/admin/payments', icon: 'file-text' },
