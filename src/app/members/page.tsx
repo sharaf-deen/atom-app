@@ -117,7 +117,7 @@ export default async function MembersPage({ searchParams }: { searchParams?: Sea
 
   return (
     <main>
-      <PageHeader title="Members" subtitle="Search and manage members" />
+      <PageHeader title="Members" subtitle="Find a member fast, then use filters only when needed." />
       <Section className="space-y-4">
         <MembersFilters
           initialQ={q}
@@ -127,9 +127,6 @@ export default async function MembersPage({ searchParams }: { searchParams?: Sea
           initialLegalStatus={legalStatus}
           initialPageSize={pageSize}
         />
-        <Suspense fallback={<StatsCardsFallback />}>
-          <MembersStatsCards pageSize={pageSize} />
-        </Suspense>
         <Suspense fallback={<ResultsFallback />}>
           <MembersResults
             q={q}
@@ -141,6 +138,23 @@ export default async function MembersPage({ searchParams }: { searchParams?: Sea
             pageSize={pageSize}
           />
         </Suspense>
+
+        <details className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4 shadow-soft">
+          <summary className="cursor-pointer list-none">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <div className="font-semibold">Member overview</div>
+                <div className="mt-1 text-sm text-[hsl(var(--muted))]">Open aggregate membership and legal-status counts when you need them.</div>
+              </div>
+              <span className="text-sm font-medium text-[hsl(var(--muted))]">Show</span>
+            </div>
+          </summary>
+          <div className="mt-4">
+            <Suspense fallback={<StatsCardsFallback />}>
+              <MembersStatsCards pageSize={pageSize} />
+            </Suspense>
+          </div>
+        </details>
       </Section>
     </main>
   )
