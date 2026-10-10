@@ -24,10 +24,10 @@ export default async function KioskPage({
   if (!isStaff) {
     return (
       <AccessDeniedPage
-        title="Kiosk"
+        title="Create Member"
         subtitle="Access restricted."
         signedInAs={me.email}
-        message="Only Reception / Admin / Super Admin can access the kiosk."
+        message="Only Reception / Admin / Super Admin can create members from this page."
         allowed="reception, admin, super_admin"
         nextPath="/kiosk"
         actions={[{ href: '/members', label: 'Go to Members' }]}
@@ -47,7 +47,7 @@ export default async function KioskPage({
 
   return (
     <main>
-      <PageHeader title="Kiosk" subtitle="Create members fast" />
+      <PageHeader title="Create Member" subtitle="Register a new ATOM member and start their membership setup." />
       <Section className="max-w-2xl space-y-6">
         <CreateMemberForm initialValues={initialValues} />
       </Section>
