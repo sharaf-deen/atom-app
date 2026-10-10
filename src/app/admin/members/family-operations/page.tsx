@@ -498,13 +498,13 @@ export default async function FamilyOperationsPage({ searchParams }: { searchPar
     <main className="mx-auto max-w-6xl space-y-5 p-4 sm:p-6">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[hsl(var(--muted))]">Family Accounts 2D</p>
-          <h1 className="mt-1 text-2xl font-bold tracking-tight">Family Operations</h1>
+          <h1 className="text-2xl font-bold tracking-tight">Family Operations</h1>
           <p className="mt-1 max-w-3xl text-sm text-[hsl(var(--muted))]">
-            One front-desk workspace for family intake, visitor conversion, family lookup and safe Family Account operations.
+            Search families, guardians, visitors or members from one place, then open the right family action.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
+          <Button asChild href="/admin/members/family-intake">Start Family Intake</Button>
           <Button asChild variant="outline" href="/admin/visitors">Visitors</Button>
           <Button asChild variant="outline" href="/admin/members/families">Family Accounts</Button>
           <Button asChild variant="outline" href={me.role === 'reception' ? '/reception' : '/admin'}>
@@ -514,7 +514,7 @@ export default async function FamilyOperationsPage({ searchParams }: { searchPar
       </div>
 
       <div className="rounded-2xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900">
-        {roleNote(me.role)} Existing 2A–2C routes and permission checks remain the source of truth for every action.
+        {roleNote(me.role)}
       </div>
 
       {loadErrors.length ? (
@@ -523,75 +523,12 @@ export default async function FamilyOperationsPage({ searchParams }: { searchPar
         </div>
       ) : null}
 
-      <section>
-        <div className="mb-3 flex items-end justify-between gap-3">
-          <div>
-            <h2 className="text-lg font-semibold">Quick actions</h2>
-            <p className="text-sm text-[hsl(var(--muted))]">Start the common front-desk flows without hunting through separate pages.</p>
-          </div>
-        </div>
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-          <Card hover>
-            <CardHeader><CardTitle className="text-base">New Family Intake</CardTitle></CardHeader>
-            <CardContent>
-              <p className="min-h-10 text-sm text-[hsl(var(--muted))]">Guardian + several children, including trial or immediate enrollment.</p>
-              <Button asChild className="mt-4 w-full" href="/admin/members/family-intake">Start intake</Button>
-            </CardContent>
-          </Card>
-          <Card hover>
-            <CardHeader><CardTitle className="text-base">Find Family</CardTitle></CardHeader>
-            <CardContent>
-              <p className="min-h-10 text-sm text-[hsl(var(--muted))]">Search family name or guardian contact from one field below.</p>
-              <Button asChild variant="outline" className="mt-4 w-full" href="#family-search">Search here</Button>
-            </CardContent>
-          </Card>
-          <Card hover>
-            <CardHeader><CardTitle className="text-base">Find Visitor</CardTitle></CardHeader>
-            <CardContent>
-              <p className="min-h-10 text-sm text-[hsl(var(--muted))]">Find a trial visitor and open conversion when Family Intake is ready.</p>
-              <Button asChild variant="outline" className="mt-4 w-full" href="#family-search">Search here</Button>
-            </CardContent>
-          </Card>
-          <Card hover>
-            <CardHeader><CardTitle className="text-base">Find Member</CardTitle></CardHeader>
-            <CardContent>
-              <p className="min-h-10 text-sm text-[hsl(var(--muted))]">Search member name, email, phone or ATOM Member ID.</p>
-              <Button asChild variant="outline" className="mt-4 w-full" href="#family-search">Search here</Button>
-            </CardContent>
-          </Card>
-        </div>
-      </section>
-
-      <section className="grid gap-3 sm:grid-cols-3">
-        <Card>
-          <CardContent>
-            <div className="text-xs font-semibold uppercase tracking-wide text-[hsl(var(--muted))]">Visitors ready to convert</div>
-            <div className="mt-2 text-3xl font-bold">{readyCountResult.count ?? 0}</div>
-            <div className="mt-1 text-xs text-[hsl(var(--muted))]">Family Intake visitor with no linked Member yet.</div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent>
-            <div className="text-xs font-semibold uppercase tracking-wide text-[hsl(var(--muted))]">Active family intakes</div>
-            <div className="mt-2 text-3xl font-bold">{activeIntakeCountResult.count ?? 0}</div>
-            <div className="mt-1 text-xs text-[hsl(var(--muted))]">Open, family-created or needs-review intake.</div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent>
-            <div className="text-xs font-semibold uppercase tracking-wide text-[hsl(var(--muted))]">Total families</div>
-            <div className="mt-2 text-3xl font-bold">{familyCountResult.count ?? 0}</div>
-            <div className="mt-1 text-xs text-[hsl(var(--muted))]">Existing Family Account containers.</div>
-          </CardContent>
-        </Card>
-      </section>
-
       <section id="family-search" className="scroll-mt-24">
         <Card>
           <CardHeader>
             <div>
-              <CardTitle>Unified family search</CardTitle>
-              <p className="mt-1 text-sm text-[hsl(var(--muted))]">Guardian, Visitor, Member or Family · name, phone, email or Member ID.</p>
+              <CardTitle>Find family, guardian, visitor or member</CardTitle>
+              <p className="mt-1 text-sm text-[hsl(var(--muted))]">One search for family name, person name, phone, email or ATOM Member ID.</p>
             </div>
           </CardHeader>
           <CardContent>
@@ -694,6 +631,30 @@ export default async function FamilyOperationsPage({ searchParams }: { searchPar
                 </div>
               )
             ) : null}
+          </CardContent>
+        </Card>
+      </section>
+
+      <section className="grid gap-3 sm:grid-cols-3">
+        <Card>
+          <CardContent>
+            <div className="text-xs font-semibold uppercase tracking-wide text-[hsl(var(--muted))]">Visitors ready to convert</div>
+            <div className="mt-2 text-3xl font-bold">{readyCountResult.count ?? 0}</div>
+            <div className="mt-1 text-xs text-[hsl(var(--muted))]">Family Intake visitor with no linked Member yet.</div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent>
+            <div className="text-xs font-semibold uppercase tracking-wide text-[hsl(var(--muted))]">Active family intakes</div>
+            <div className="mt-2 text-3xl font-bold">{activeIntakeCountResult.count ?? 0}</div>
+            <div className="mt-1 text-xs text-[hsl(var(--muted))]">Open, family-created or needs-review intake.</div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent>
+            <div className="text-xs font-semibold uppercase tracking-wide text-[hsl(var(--muted))]">Total families</div>
+            <div className="mt-2 text-3xl font-bold">{familyCountResult.count ?? 0}</div>
+            <div className="mt-1 text-xs text-[hsl(var(--muted))]">Existing Family Account containers.</div>
           </CardContent>
         </Card>
       </section>

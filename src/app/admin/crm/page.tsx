@@ -287,8 +287,8 @@ export default async function AdminCrmPage({
   if (!canAccessCrm(me.role)) {
     return (
       <Forbidden
-        pageTitle="CRM"
-        subtitle="Front desk follow-up queue."
+        pageTitle="Follow-up CRM"
+        subtitle="Member contact and follow-up queue."
         nextPath={nextPath}
         allowed="reception, admin, super_admin"
         signedInAs={me.email}
@@ -518,7 +518,8 @@ export default async function AdminCrmPage({
   const dueCount = filtered.filter((i) => i.dueAmount > 0).length
   const expiringCount = filtered.filter((i) => i.daysLeft !== null && i.daysLeft >= 0 && i.daysLeft <= 7).length
 
-  const subtitle = `Who should be contacted today — Cairo time (${CAIRO_TZ}).`
+  const subtitle = `Contact members who need follow-up away from the desk — Cairo time (${CAIRO_TZ}).`
+  const canOpenAdminQueues = me.role === 'admin' || me.role === 'super_admin'
 
   const crmFollowupByMember = new Map(crmFollowups.map((row) => [row.member_id, row]))
   const crmActivitiesByMember = new Map<string, CrmActivityRow[]>()
@@ -562,26 +563,38 @@ export default async function AdminCrmPage({
   return (
     <main>
       <PageHeader
-        title="CRM / Follow-up queue"
+        title="Follow-up CRM"
         subtitle={subtitle}
         right={
           <div className="flex flex-wrap items-center gap-2">
+            <Button asChild variant="outline" href="/reception">
+              Front Desk
+            </Button>
             <Button asChild variant="outline" href="/members">
               Members
             </Button>
-            <Button asChild variant="outline" href="/admin/outstanding-dues">
-              Outstanding
-            </Button>
-            <Button asChild variant="outline" href="/admin/expiring-soon">
-              Expiring
-            </Button>
+            {canOpenAdminQueues ? (
+              <>
+                <Button asChild variant="outline" href="/admin/outstanding-dues">
+                  Outstanding
+                </Button>
+                <Button asChild variant="outline" href="/admin/expiring-soon">
+                  Expiring
+                </Button>
+              </>
+            ) : null}
           </div>
         }
       />
 
       <Section className="space-y-4">
+        <div className="rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-900">
+          <span className="font-semibold">Front Desk</span> is for the member standing in front of you.{' '}
+          <span className="font-semibold">Follow-up CRM</span> is for WhatsApp, calls and later contact.
+        </div>
+
         {loadError ? (
-          <InlineAlert variant="error" title="Could not load CRM queue">
+          <InlineAlert variant="error" title="Could not load follow-up queue">
             {loadError}
           </InlineAlert>
         ) : null}
@@ -592,8 +605,8 @@ export default async function AdminCrmPage({
 
         <div className="space-y-3">
           <div>
-            <h2 className="text-base font-semibold">Daily work queue</h2>
-            <p className="text-sm text-[hsl(var(--muted))]">Choose a queue to focus on the members who need attention first.</p>
+            <h2 className="text-base font-semibold">Contact queue</h2>
+            <p className="text-sm text-[hsl(var(--muted))]">Choose who needs to be contacted first, then record the follow-up.</p>
           </div>
 
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-6">
@@ -653,8 +666,13 @@ export default async function AdminCrmPage({
               {' · '}Showing {totalVisible} of {queue.length} member(s) in priority order.
             </span>
             <div className="flex flex-wrap gap-2">
-              <Button asChild size="sm" variant="ghost" href="/admin/outstanding-dues">Outstanding dues</Button>
-              <Button asChild size="sm" variant="ghost" href="/admin/expiring-soon">Expiring soon</Button>
+              <Button asChild size="sm" variant="ghost" href="/reception">Front Desk</Button>
+              {canOpenAdminQueues ? (
+                <>
+                  <Button asChild size="sm" variant="ghost" href="/admin/outstanding-dues">Outstanding dues</Button>
+                  <Button asChild size="sm" variant="ghost" href="/admin/expiring-soon">Expiring soon</Button>
+                </>
+              ) : null}
               {canManageNotifications(me.role) ? (
                 <Button asChild size="sm" variant="ghost" href="/notifications">Notifications</Button>
               ) : null}
@@ -780,7 +798,7 @@ export default async function AdminCrmPage({
 
         {!loadError && !paged.length ? (
           <InlineAlert variant="info" title="No members in this queue">
-            Nothing matches the current CRM queue and search.
+            Nothing matches the current follow-up queue and search.
           </InlineAlert>
         ) : null}
 
