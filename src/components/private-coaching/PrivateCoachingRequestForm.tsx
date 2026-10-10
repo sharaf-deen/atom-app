@@ -68,7 +68,7 @@ export default function PrivateCoachingRequestForm({ coaches, hasPendingRequest 
   const requestSummaryItems: ConfirmActionSummaryItem[] = [
     { label: 'Coach', value: selectedCoach?.full_name || '—' },
     { label: 'Package', value: selectedPackage.label },
-    { label: 'Sessions / tokens', value: `${selectedPackage.sessions} token(s) after payment confirmation` },
+    { label: 'Sessions', value: `${selectedPackage.sessions} session(s) after payment confirmation` },
     { label: 'Original amount', value: formatPrivateCoachingMoney(pricing.originalAmountCents) },
     {
       label: 'Promo code',
@@ -84,7 +84,7 @@ export default function PrivateCoachingRequestForm({ coaches, hasPendingRequest 
       value: paymentMethod === 'instapay' ? `Instapay ${PRIVATE_COACHING_INSTAPAY_NUMBER}` : 'Cash at reception',
     },
     { label: 'Request status', value: 'Payment pending' },
-    { label: 'Token impact', value: 'No token created until payment is confirmed' },
+    { label: 'Availability', value: 'Sessions become available after payment confirmation' },
   ]
 
   async function validatePromoCode(targetSessions = sessions) {
@@ -166,7 +166,7 @@ export default function PrivateCoachingRequestForm({ coaches, hasPendingRequest 
       }
 
       setConfirmOpen(false)
-      setStatus({ kind: 'success', message: 'Request sent. Your sessions will be available after payment confirmation.' })
+      setStatus({ kind: 'success', message: 'Request sent. Your private sessions will be available after payment confirmation.' })
       router.refresh()
     } catch (error: any) {
       setStatus({ kind: 'error', message: error?.message || 'Could not create private coaching request.' })
@@ -345,7 +345,7 @@ export default function PrivateCoachingRequestForm({ coaches, hasPendingRequest 
         pendingLabel="Sending…"
         pending={busy}
         summaryItems={requestSummaryItems}
-        warning="This will create a payment pending private coaching request. Tokens are created only after payment confirmation."
+        warning="This will create a payment-pending private coaching request. Sessions become available only after payment confirmation."
         onCancel={() => {
           if (!busy) setConfirmOpen(false)
         }}
