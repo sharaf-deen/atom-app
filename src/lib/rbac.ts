@@ -80,7 +80,7 @@ const APP_NAV_BY_ROLE: MenuByRole = {
     { label: 'Contact Admin', href: '/contact', icon: 'user-cog' },
   ],
   assistant_coach: [
-    { label: 'Training Useful', href: '/training-useful', icon: 'dashboard' },
+    { label: 'Coach Today', href: '/training-useful', icon: 'dashboard' },
     { label: 'Schedule Operations', href: '/schedule/operations', icon: 'calendar' },
     { label: 'Training Curriculum', href: '/coach-operations/curriculum', icon: 'file-text' },
     { label: 'Member Incidents', href: '/coach-operations/incidents', icon: 'file-text' },
@@ -91,7 +91,7 @@ const APP_NAV_BY_ROLE: MenuByRole = {
     { label: 'Store', href: '/store', icon: 'bag' },
   ],
   coach: [
-    { label: 'Training Useful', href: '/training-useful', icon: 'dashboard' },
+    { label: 'Coach Today', href: '/training-useful', icon: 'dashboard' },
     { label: 'Schedule Operations', href: '/schedule/operations', icon: 'calendar' },
     { label: 'Training Curriculum', href: '/coach-operations/curriculum', icon: 'file-text' },
     { label: 'Member Incidents', href: '/coach-operations/incidents', icon: 'file-text' },
@@ -102,11 +102,11 @@ const APP_NAV_BY_ROLE: MenuByRole = {
     { label: 'Store', href: '/store', icon: 'bag' },
   ],
   head_coach: [
-    { label: 'Training Useful', href: '/training-useful', icon: 'dashboard' },
+    { label: 'Coach Today', href: '/training-useful', icon: 'dashboard' },
     { label: 'Schedule Operations', href: '/schedule/operations', icon: 'calendar' },
+    { label: 'Athletes', href: '/head-coach/athletes', icon: 'users' },
     { label: 'Training Curriculum', href: '/coach-operations/curriculum', icon: 'file-text' },
     { label: 'Member Incidents', href: '/coach-operations/incidents', icon: 'file-text' },
-    { label: 'Athletes', href: '/head-coach/athletes', icon: 'users' },
     { label: 'Private Coaching', href: '/head-coach/private-coaching', icon: 'user-cog' },
     { label: 'Notifications', href: '/notifications', icon: 'bell' },
     { label: 'Schedule', href: '/schedule', icon: 'calendar' },
@@ -843,8 +843,8 @@ const CAPABILITY_BLUEPRINTS: CapabilityBlueprint[] = [
   {
     key: 'training_useful',
     category: 'Core',
-    label: 'Training useful hub',
-    description: 'Open the coach-facing hub with QR, schedule, staff updates and member lookup shortcuts.',
+    label: 'Coach Today',
+    description: 'Open the coach-facing daily hub with sessions, logs, attendance, QR and coaching actions.',
     href: '/training-useful',
     check: (role) => canAccessTrainingUseful(role),
   },

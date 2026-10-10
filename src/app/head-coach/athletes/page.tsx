@@ -634,9 +634,15 @@ export default async function HeadCoachAthletesPage({ searchParams }: { searchPa
     <main className="mx-auto flex w-full max-w-7xl flex-col gap-4 px-4 py-4 sm:px-6 lg:px-8">
       <PageHeader
         title="Head Coach Athletes"
-        subtitle="Analyse progression, manage programs, promotions, and competition tracking without touching front-desk critical flows."
+        subtitle="Progress, promotions, competition and athlete review."
         right={
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <Link
+              href="/training-useful"
+              className="inline-flex min-h-9 items-center justify-center rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm font-semibold text-black shadow-soft transition hover:bg-[hsl(var(--bg))]"
+            >
+              Coach Today
+            </Link>
             <TinyBadge>{totalAthletes} athletes</TinyBadge>
             <TinyBadge tone="warning">{actionNowCount} action now</TinyBadge>
             <TinyBadge>{deferredCount} deferred</TinyBadge>
