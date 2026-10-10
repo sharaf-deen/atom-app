@@ -6,20 +6,20 @@ import { redirect } from 'next/navigation'
 import type { LucideIcon } from 'lucide-react'
 import {
   Activity,
+  AlertTriangle,
   CalendarDays,
   ChevronRight,
   ClipboardCheck,
   ClipboardList,
   Eye,
-  FileText,
   LayoutGrid,
   ScanLine,
-  Settings2,
 } from 'lucide-react'
 import AccessDeniedPage from '@/components/AccessDeniedPage'
 import PageHeader from '@/components/layout/PageHeader'
 import Section from '@/components/layout/Section'
 import {
+  canAccessCoachMemberIncidents,
   canAccessCoachOversight,
   canAccessCoachStaffAttendance,
   canAccessCoachTrainingLogs,
@@ -108,8 +108,8 @@ export default async function ScheduleOperationsPage() {
     todayCards.push({
       title: canManageSchedule ? 'Scheduled Sessions' : 'My Assigned Sessions',
       description: canManageSchedule
-        ? 'Run dated classes, coach assignments, planned programs and one-off exceptions.'
-        : 'See the dated sessions where you are assigned as Primary or Assistant Coach.',
+        ? 'Open upcoming sessions, assignments and class changes.'
+        : 'Open the sessions where you are assigned to coach.',
       href: '/schedule/sessions',
       icon: CalendarDays,
       badge: canManageSchedule ? 'Manage' : 'My sessions',
@@ -119,7 +119,7 @@ export default async function ScheduleOperationsPage() {
   if (canAccessCoachTrainingLogs(me.role)) {
     todayCards.push({
       title: 'Training Logs',
-      description: 'Record what was actually taught and link the log to the real dated session.',
+      description: 'Record what was actually taught after class.',
       href: '/coach-operations/training-logs',
       icon: ClipboardCheck,
       badge: 'Actual',
@@ -130,18 +130,28 @@ export default async function ScheduleOperationsPage() {
     todayCards.push({
       title: 'Staff Attendance',
       description: canManageSchedule
-        ? 'Review coaching QR check-ins and their linked scheduled sessions.'
-        : 'Review your own staff QR check-ins and matched scheduled sessions.',
+        ? 'Review staff QR attendance and session matching.'
+        : 'Check your QR attendance and session match.',
       href: '/coach-operations/staff-attendance',
       icon: ScanLine,
       badge: 'QR',
     })
   }
 
+  if (canAccessCoachMemberIncidents(me.role)) {
+    todayCards.push({
+      title: 'Member Incidents',
+      description: 'Record a behaviour, safety, injury or training incident.',
+      href: '/coach-operations/incidents',
+      icon: AlertTriangle,
+      badge: 'Report',
+    })
+  }
+
   if (todayCards.length) {
     sections.push({
       title: 'Run the day',
-      description: 'The operational tools used around real dated training sessions.',
+      description: 'Sessions, logs, attendance and incident reporting.',
       cards: todayCards,
     })
   }
@@ -151,7 +161,7 @@ export default async function ScheduleOperationsPage() {
   if (canAccessScheduleClassTemplates(me.role)) {
     planningCards.push({
       title: 'Class Templates',
-      description: 'Maintain the recurring weekly timetable that generates dated sessions.',
+      description: 'Maintain the recurring weekly class timetable.',
       href: '/schedule/templates',
       icon: LayoutGrid,
       badge: 'Recurring',
@@ -162,8 +172,8 @@ export default async function ScheduleOperationsPage() {
     planningCards.push({
       title: 'Training Programs',
       description: canManageSchedule
-        ? 'Prepare and publish the technical plan that can be assigned to dated sessions.'
-        : 'Read the published technical program shared by the Head Coach.',
+        ? 'Prepare and publish the technical plan for upcoming classes.'
+        : 'Read the technical plan published by the Head Coach.',
       href: '/coach-operations/programs',
       icon: ClipboardList,
       badge: 'Planned',
@@ -174,8 +184,8 @@ export default async function ScheduleOperationsPage() {
     sections.push({
       title: 'Plan',
       description: canManageSchedule
-        ? 'Maintain the recurring timetable and the technical program before classes happen.'
-        : 'Review the technical plan prepared for the coaching team.',
+        ? 'Prepare the timetable and technical plan before class.'
+        : 'Review the technical plan for upcoming classes.',
       cards: planningCards,
     })
   }
@@ -183,7 +193,7 @@ export default async function ScheduleOperationsPage() {
   const reviewCards: HubCard[] = [
     {
       title: 'Member Schedule',
-      description: 'Open the same dated Schedule experience that members use.',
+      description: 'See the schedule exactly as members see it.',
       href: '/schedule',
       icon: Eye,
       badge: 'Member view',
@@ -193,7 +203,7 @@ export default async function ScheduleOperationsPage() {
   if (canAccessCoachOversight(me.role)) {
     reviewCards.push({
       title: 'Coach Oversight',
-      description: 'Review factual session obligations, QR evidence, timing deltas and Training Logs.',
+      description: 'Review session assignments, QR evidence and completed logs.',
       href: '/coach-operations/oversight',
       icon: Activity,
       badge: 'Oversight',
@@ -202,7 +212,7 @@ export default async function ScheduleOperationsPage() {
 
   sections.push({
     title: 'Review',
-    description: 'Check what members see and, when permitted, review factual coaching evidence.',
+    description: 'Check the member view and coaching follow-through.',
     cards: reviewCards,
   })
 
@@ -210,30 +220,28 @@ export default async function ScheduleOperationsPage() {
     <main>
       <PageHeader
         title="Schedule Operations"
-        subtitle="One role-aware home for ATOM's structured Schedule and coaching-session workflow."
+        subtitle="Sessions, logs, attendance, planning and review."
+        right={
+          <Link
+            href="/training-useful"
+            className="inline-flex min-h-10 items-center justify-center rounded-2xl border border-[hsl(var(--border))] bg-white px-4 py-2 text-sm font-semibold text-black shadow-soft transition hover:bg-[hsl(var(--surface-2))]"
+          >
+            Coach Today
+          </Link>
+        }
       />
 
       <Section className="max-w-6xl space-y-6">
-        <div className="rounded-3xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-5 shadow-soft">
-          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <div className="flex items-center gap-2 text-sm font-semibold text-black">
-                <Settings2 className="h-4 w-4" aria-hidden="true" />
-                Your operations workspace
-              </div>
-              <p className="mt-2 max-w-2xl text-sm leading-6 text-black/60">
-                You are signed in as <strong className="text-black">{roleLabel(me.role)}</strong>. This page only shows the tools your role can access; the existing route-level permissions remain unchanged.
-              </p>
-            </div>
-
-            <Link
-              href="/schedule"
-              className="inline-flex min-h-11 items-center justify-center gap-2 rounded-2xl border border-[hsl(var(--border))] bg-white px-4 py-2.5 text-sm font-semibold text-black shadow-soft transition hover:bg-[hsl(var(--surface-2))]"
-            >
-              <FileText className="h-4 w-4" aria-hidden="true" />
-              Open member Schedule
-            </Link>
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] px-4 py-3 shadow-soft">
+          <div className="text-sm text-black/60">
+            Signed in as <strong className="text-black">{roleLabel(me.role)}</strong>
           </div>
+          <Link
+            href="/schedule"
+            className="text-sm font-semibold text-black underline underline-offset-4"
+          >
+            Member schedule
+          </Link>
         </div>
 
         {sections.map((section) => (
@@ -251,15 +259,6 @@ export default async function ScheduleOperationsPage() {
           </section>
         ))}
 
-        {canManageSchedule ? (
-          <div className="rounded-2xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm leading-6 text-blue-950">
-            <strong>Structured Schedule 2A–2H:</strong> Class Templates generate dated sessions; Scheduled Sessions centralize coach assignments, planned programs and exceptions; Staff Attendance links QR evidence; Training Logs capture actual teaching; Coach Oversight reviews the resulting factual history.
-          </div>
-        ) : (
-          <div className="rounded-2xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm leading-6 text-blue-950">
-            Your workspace focuses on assigned sessions, published programs, actual Training Logs and your own Staff Attendance. Schedule-management and global oversight actions remain restricted to Head Coach / Super Admin.
-          </div>
-        )}
       </Section>
     </main>
   )
