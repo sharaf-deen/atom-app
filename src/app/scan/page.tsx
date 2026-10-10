@@ -101,45 +101,54 @@ export default async function ScanPage() {
   return (
     <main>
       <PageHeader
-        title="Scan — Check-in & Validity"
-        subtitle="Fast front-desk scanning with optional kiosk mode."
+        title="Scan"
+        subtitle="Scan a member QR for fast check-in and access validation."
       />
 
       <Section className="max-w-5xl space-y-5">
         <KioskHealthBadge />
 
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-          <QuickLink
-            href="/members"
-            label="Members"
-            desc="Find a member before or after a scan."
-            icon={<Users size={18} strokeWidth={2.1} />}
-          />
-          <QuickLink
-            href="/kiosk"
-            label="Create member"
-            desc="Open the front-desk member creation flow."
-            icon={<UserPlus size={18} strokeWidth={2.1} />}
-          />
-          <QuickLink
-            href="/scan?kiosk=1"
-            label="Enable kiosk mode"
-            desc="Keep kiosk mode available inside this page. Full screen stays manual."
-            icon={<ScanLine size={18} strokeWidth={2.1} />}
-          />
-          {showAudit ? (
-            <QuickLink
-              href="/admin/scan-audit"
-              label="Scan audit"
-              desc="Review scan history and device context."
-              icon={<ClipboardList size={18} strokeWidth={2.1} />}
-            />
-          ) : (
-            <div className="hidden xl:block" />
-          )}
-        </div>
-
         <KioskScanner size="md" ratio="1:1" />
+
+        <div className="border-t border-[hsl(var(--border))] pt-5">
+          <div className="mb-3">
+            <div className="text-sm font-semibold tracking-tight">Need another desk action?</div>
+            <p className="mt-1 text-sm text-[hsl(var(--muted))]">
+              Use these only when scanning is not the next step.
+            </p>
+          </div>
+
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            <QuickLink
+              href="/members"
+              label="Find member"
+              desc="Search and open a member account."
+              icon={<Users size={18} strokeWidth={2.1} />}
+            />
+            <QuickLink
+              href="/kiosk"
+              label="Create member"
+              desc="Start a new membership registration."
+              icon={<UserPlus size={18} strokeWidth={2.1} />}
+            />
+            <QuickLink
+              href="/scan?kiosk=1"
+              label="Scanner kiosk mode"
+              desc="Keep the scanner running in kiosk mode on this device."
+              icon={<ScanLine size={18} strokeWidth={2.1} />}
+            />
+            {showAudit ? (
+              <QuickLink
+                href="/admin/scan-audit"
+                label="Scan audit"
+                desc="Review scan history and device context."
+                icon={<ClipboardList size={18} strokeWidth={2.1} />}
+              />
+            ) : (
+              <div className="hidden xl:block" />
+            )}
+          </div>
+        </div>
       </Section>
     </main>
   )
