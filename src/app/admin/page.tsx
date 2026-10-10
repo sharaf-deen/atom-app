@@ -147,7 +147,7 @@ export default async function AdminPage() {
     supa.from('attendance').select('id', { count: 'exact', head: true }).eq('date', today),
   ])
 
-  // Outstanding totals are finance-sensitive and are only loaded for Super Admin.
+  // Outstanding totals are available to Admin and Super Admin under finance read permissions.
   let outstandingCount = 0
   let outstandingTotal = 0
   if (canSeeFinance) {
@@ -192,12 +192,12 @@ export default async function AdminPage() {
   return (
     <main>
       <PageHeader
-        title="Admin Dashboard"
-        subtitle={`Daily ops · Cairo time (${CAIRO_TZ}).`}
+        title="Admin Today"
+        subtitle={`Supervision, follow-up and admin review · Cairo time (${CAIRO_TZ}).`}
         right={
           <div className="flex flex-wrap items-center gap-2">
-            <Button asChild variant="outline" href="/scan?kiosk=1">
-              Scan
+            <Button asChild variant="outline" href="/reception">
+              Front Desk
             </Button>
             <Button asChild variant="outline" href="/members">
               Members
@@ -206,155 +206,179 @@ export default async function AdminPage() {
         }
       />
 
-      <Section>
-        <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-4">
+      <Section className="space-y-4">
+        <div>
+          <h2 className="text-lg font-semibold">Overview</h2>
+          <p className="mt-1 text-sm text-[hsl(var(--muted))]">
+            What needs attention across members, follow-up, finance and system health.
+          </p>
+        </div>
+
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <StatCard
             label="Active members"
             value={activeCount ?? 0}
-            hint={`Active subscriptions as of ${today}`}
+            hint="Current active memberships"
             href="/members"
           />
           <StatCard
             label="Expiring in 7 days"
             value={expiring7Count ?? 0}
-            hint={`Window: ${today} → ${next7}`}
+            hint="Renewal follow-up window"
             href="/admin/expiring-soon"
           />
-          {canSeeFinance ? (
-            <StatCard
-              label="Outstanding total"
-              value={fmtMoneyEGP(outstandingTotal)}
-              hint={`${outstandingCount} member(s) with dues`}
-              href="/admin/outstanding-dues"
-            />
-          ) : (
-            <StatCard
-              label="Health Monitor"
-              value={latestHealthLabel}
-              hint="Operational system status"
-              href="/admin/health-monitor"
-            />
-          )}
+          <StatCard
+            label="Outstanding total"
+            value={fmtMoneyEGP(outstandingTotal)}
+            hint={`${outstandingCount} member(s) with dues`}
+            href="/admin/outstanding-dues"
+          />
           <StatCard
             label="Scans today"
             value={scansToday}
-            hint={`Attendance — ${today}`}
+            hint="Attendance activity today"
             href="/admin/scan-audit"
           />
         </div>
       </Section>
 
       <Section className="space-y-4">
-        <h2 className="text-lg font-semibold">Today priorities</h2>
+        <div>
+          <h2 className="text-lg font-semibold">Action now</h2>
+          <p className="mt-1 text-sm text-[hsl(var(--muted))]">
+            Start with exceptions and follow-up instead of browsing every admin tool.
+          </p>
+        </div>
+
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
           <TodayCard
             href="/admin/crm"
             label="Follow-up"
-            title="Open CRM"
-            hint="Start with renewals, dues and low-attendance cases."
+            title="Contact queue"
+            hint="Renewals, payment dues and low-attendance follow-up."
             icon={<MessageSquare size={18} strokeWidth={2.1} />}
           />
           <TodayCard
-            href="/admin/health-monitor"
-            label="Health"
-            title={latestHealthLabel}
-            hint={latestHealthDate ? `Latest report saved ${new Date(latestHealthDate).toLocaleDateString('en-GB')}.` : 'Open Health Monitor to review or run a check.'}
-            icon={
-              latestHealthStatus === 'healthy' ? (
-                <ShieldCheck size={18} strokeWidth={2.1} />
-              ) : (
-                <ShieldAlert size={18} strokeWidth={2.1} />
-              )
-            }
+            href="/admin/expiring-soon"
+            label="Memberships"
+            title={expiring7Count ? `${expiring7Count} expiring soon` : 'No urgent expiry'}
+            hint="Review memberships ending during the next 7 days."
+            icon={<ShieldAlert size={18} strokeWidth={2.1} />}
           />
-          {canSeeFinance ? (
-            <TodayCard
-              href="/admin/payments"
-              label="Finance"
-              title={outstandingCount > 0 ? fmtMoneyEGP(outstandingTotal) : 'Payments clear'}
-              hint={outstandingCount > 0 ? `${outstandingCount} member(s) still have dues to settle.` : 'Open Payments or Cash Report for detail.'}
-              icon={<Wallet size={18} strokeWidth={2.1} />}
-            />
-          ) : (
-            <TodayCard
-              href="/admin/attendance"
-              label="Operations"
-              title="Attendance"
-              hint="Review attendance activity without financial data."
-              icon={<ShieldCheck size={18} strokeWidth={2.1} />}
-            />
-          )}
+          <TodayCard
+            href="/admin/outstanding-dues"
+            label={me.role === 'admin' ? 'Finance review' : 'Finance'}
+            title={outstandingCount > 0 ? fmtMoneyEGP(outstandingTotal) : 'No outstanding dues'}
+            hint={
+              me.role === 'admin'
+                ? 'Read-only review of members with outstanding balances.'
+                : 'Review members with outstanding balances and finance actions.'
+            }
+            icon={<Wallet size={18} strokeWidth={2.1} />}
+          />
           <TodayCard
             href={me.role === 'super_admin' ? '/admin/permissions-audit' : '/admin/account-activation'}
             label={me.role === 'super_admin' ? 'Control' : 'Accounts'}
             title={me.role === 'super_admin' ? 'Permissions audit' : 'Account activation'}
-            hint={me.role === 'super_admin' ? 'Review access in one place.' : 'Review member account activation and onboarding status.'}
+            hint={
+              me.role === 'super_admin'
+                ? 'Review role access and protected capabilities.'
+                : 'Review onboarding and account activation exceptions.'
+            }
             icon={<UserCog size={18} strokeWidth={2.1} />}
           />
         </div>
       </Section>
 
       <Section className="space-y-4">
-        <h2 className="text-lg font-semibold">Quick actions</h2>
+        <div>
+          <h2 className="text-lg font-semibold">Operations</h2>
+          <p className="mt-1 text-sm text-[hsl(var(--muted))]">
+            Use Front Desk for the member in front of you. Use Follow-up CRM for calls, WhatsApp and later contact.
+          </p>
+        </div>
+
         <div className="flex flex-wrap gap-2">
-          {me.role === 'super_admin' ? (
-            <Button asChild variant="outline" href="/head-coach/promotion-desk">
-              Promotion Desk
-            </Button>
-          ) : null}
-          <Button asChild variant="outline" href="/admin/crm">
-            CRM
-          </Button>
-          {me.role === 'super_admin' ? (
-            <Button asChild variant="outline" href="/admin/banking">
-              Banking
-            </Button>
-          ) : null}
-          <Button asChild variant="outline" href="/admin/payments">
-            Payments
-          </Button>
-          <Button asChild variant="outline" href="/admin/outstanding-dues">
-            Outstanding Dues
-          </Button>
-          <Button asChild variant="outline" href="/invoices">
-            Invoices
-          </Button>
-          <Button asChild variant="outline" href="/admin/membership-refunds">
-            Membership Refunds
-          </Button>
-          <Button asChild variant="outline" href="/admin/personal-funds">
-            Personal Funds
-          </Button>
-          <Button asChild variant="outline" href="/expenses">
-            Expenses
-          </Button>
-          <Button asChild variant="outline" href="/admin/external-income">
-            Other Income
-          </Button>
-          <Button asChild variant="outline" href="/admin/health-monitor">
-            Health Monitor
-          </Button>
-          <Button asChild variant="outline" href="/admin/account-activation">
-            Account Activation
-          </Button>
-          {me.role === 'super_admin' ? (
-            <Button asChild variant="outline" href="/admin/permissions-audit">
-              Permissions Audit
-            </Button>
+          <Button asChild variant="outline" href="/reception">Front Desk</Button>
+          <Button asChild variant="outline" href="/admin/crm">Follow-up CRM</Button>
+          <Button asChild variant="outline" href="/admin/prospects">Prospects</Button>
+          <Button asChild variant="outline" href="/admin/visitors">Visitors</Button>
+          <Button asChild variant="outline" href="/admin/members/family-operations">Family Operations</Button>
+          <Button asChild variant="outline" href="/admin/account-activation">Account Activation</Button>
+          <Button asChild variant="outline" href="/coaches">Coaches</Button>
+          <Button asChild variant="outline" href="/admin/store">Store Catalog</Button>
+        </div>
+      </Section>
+
+      <Section className="space-y-4">
+        <div className="flex flex-wrap items-end justify-between gap-3">
+          <div>
+            <h2 className="text-lg font-semibold">
+              {me.role === 'admin' ? 'Financial review' : 'Finance & control'}
+            </h2>
+            <p className="mt-1 text-sm text-[hsl(var(--muted))]">
+              {me.role === 'admin'
+                ? 'Read-only access. Financial changes remain reserved for Super Admin.'
+                : 'Review financial activity and open protected finance workspaces.'}
+            </p>
+          </div>
+          {me.role === 'admin' ? (
+            <span className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-semibold text-slate-700">
+              Read only
+            </span>
           ) : null}
         </div>
 
-        {canSeeFinance ? (
-          <div className={me.role === 'super_admin' ? 'grid gap-4 lg:grid-cols-2' : 'grid gap-4'}>
-            <AdminRevenue />
-            {me.role === 'super_admin' ? <AdminExports /> : null}
-          </div>
-        ) : null}
+        <div className="flex flex-wrap gap-2">
+          <Button asChild variant="outline" href="/admin/payments">Payments</Button>
+          <Button asChild variant="outline" href="/admin/outstanding-dues">Outstanding Dues</Button>
+          <Button asChild variant="outline" href="/invoices">Invoices</Button>
+          <Button asChild variant="outline" href="/admin/membership-refunds">Membership Refunds</Button>
+          <Button asChild variant="outline" href="/admin/personal-funds">Personal Funds</Button>
+          <Button asChild variant="outline" href="/expenses">Expenses</Button>
+          <Button asChild variant="outline" href="/admin/external-income">Other Income</Button>
+          {me.role === 'super_admin' ? (
+            <>
+              <Button asChild variant="outline" href="/admin/banking">Banking</Button>
+              <Button asChild variant="outline" href="/admin/cash-report">Cash Report</Button>
+              <Button asChild variant="outline" href="/admin/staff-payroll">Staff Payroll</Button>
+            </>
+          ) : null}
+        </div>
+
+        <div className={me.role === 'super_admin' ? 'grid gap-4 lg:grid-cols-2' : 'grid gap-4'}>
+          <AdminRevenue />
+          {me.role === 'super_admin' ? <AdminExports /> : null}
+        </div>
+      </Section>
+
+      <Section className="space-y-4">
+        <div>
+          <h2 className="text-lg font-semibold">System & review</h2>
+          <p className="mt-1 text-sm text-[hsl(var(--muted))]">
+            Attendance, scans and health are secondary review tools unless an exception needs attention.
+          </p>
+        </div>
+
+        <div className="flex flex-wrap gap-2">
+          <Button asChild variant="outline" href="/admin/attendance">Attendance</Button>
+          <Button asChild variant="outline" href="/admin/scan-audit">Scan Audit</Button>
+          <Button asChild variant="outline" href="/admin/health-monitor">Health Monitor</Button>
+          <Button asChild variant="outline" href="/admin/membership-activity">Membership Activity</Button>
+          {me.role === 'super_admin' ? (
+            <Button asChild variant="outline" href="/admin/permissions-audit">Permissions Audit</Button>
+          ) : null}
+        </div>
 
         <Card>
           <CardContent className="flex flex-wrap items-center gap-3 text-sm text-[hsl(var(--muted))]">
             <span className={`inline-flex rounded-full border px-3 py-1 text-xs font-semibold ${healthBadgeClass(latestHealthStatus)}`}>
               Health: {latestHealthLabel}
+            </span>
+            <span>
+              {latestHealthDate
+                ? `Latest report: ${new Date(latestHealthDate).toLocaleDateString('en-GB')}`
+                : 'No saved health report yet.'}
             </span>
             <Link href="/" className="ml-auto underline">
               Back to home
