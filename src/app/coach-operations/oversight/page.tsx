@@ -5,6 +5,7 @@ import { redirect } from 'next/navigation'
 import AccessDeniedPage from '@/components/AccessDeniedPage'
 import PageHeader from '@/components/layout/PageHeader'
 import Section from '@/components/layout/Section'
+import Button from '@/components/ui/Button'
 import CoachOversightDashboard from '@/components/coach-operations/CoachOversightDashboard'
 import { canAccessCoachOversight } from '@/lib/rbac'
 import { getSessionUser } from '@/lib/session'
@@ -217,7 +218,13 @@ export default async function CoachOversightPage() {
     <main>
       <PageHeader
         title="Coach Oversight"
-        subtitle="Factual scheduled obligations, staff QR evidence, timing deltas, Training Logs and Member Incidents."
+        subtitle="Review assignments, QR attendance, session timing, Training Logs and incidents."
+        right={
+          <div className="flex flex-wrap gap-2">
+            <Button asChild variant="outline" href="/training-useful">Coach Today</Button>
+            <Button asChild variant="outline" href="/head-coach/athletes">Athletes</Button>
+          </div>
+        }
       />
 
       <Section className="max-w-7xl space-y-4">
