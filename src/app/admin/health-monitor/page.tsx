@@ -398,13 +398,13 @@ export default async function HealthMonitorPage({ searchParams }: { searchParams
     <main>
       <PageHeader
         title="Health Monitor"
-        subtitle="Daily health view with one focus report."
+        subtitle="Review system health, prioritize warnings and open the affected admin area."
         right={
           <div className="flex flex-wrap items-center gap-2">
             <RunHealthMonitorButton />
             <RunHealthMonitorButton sendEmail />
             <Button asChild variant="outline" href="/admin">
-              Back to Admin
+              Admin Today
             </Button>
           </div>
         }
@@ -450,8 +450,8 @@ export default async function HealthMonitorPage({ searchParams }: { searchParams
           <Card>
             <CardContent className="space-y-4">
               <div>
-                <div className="text-sm font-medium">Live check</div>
-                <p className="mt-1 text-sm text-[hsl(var(--muted))]">The current run in one place, without repeating the same information below.</p>
+                <div className="text-sm font-medium">Needs attention</div>
+                <p className="mt-1 text-sm text-[hsl(var(--muted))]">Start with warnings that need an operational follow-up.</p>
               </div>
 
               <WarningActionList warnings={summary.warnings} />

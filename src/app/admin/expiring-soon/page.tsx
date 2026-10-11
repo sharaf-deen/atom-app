@@ -302,7 +302,9 @@ export default async function ExpiringSoonPage({
 
   const headerRight = (
     <div className="flex flex-wrap items-center gap-2">
-      {tabs}
+      <Button asChild variant="outline" size="sm" href="/admin">
+        Admin Today
+      </Button>
       <RunExpiryRemindersButton />
     </div>
   )
@@ -539,6 +541,8 @@ export default async function ExpiringSoonPage({
           </InlineAlert>
         ) : null}
 
+        {tabs}
+
         {form}
 
         {focusToggle}
@@ -552,7 +556,7 @@ export default async function ExpiringSoonPage({
         </div>
 
         <div className="rounded-2xl border border-[hsl(var(--border))] bg-white p-4 shadow-soft">
-          <div className="text-sm font-semibold">Action-needed triage</div>
+          <div className="text-sm font-semibold">Follow-up priority</div>
           <div className="mt-1 text-sm text-[hsl(var(--muted))]">Handle overdue or today first, then rows with due amounts, then rows missing a paid date.</div>
           <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-[hsl(var(--muted))]">
             <TinyBadge tone="danger">{overdueVisible} overdue</TinyBadge>
