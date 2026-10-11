@@ -87,6 +87,14 @@ const ADMIN_SECTION_ORDER: Array<{ key: SectionKey; label: string }> = [
   { key: 'administration', label: 'System' },
 ]
 
+const SUPER_ADMIN_SECTION_ORDER: Array<{ key: SectionKey; label: string }> = [
+  { key: 'overview', label: 'Daily Operations' },
+  { key: 'members', label: 'Members & Coaching' },
+  { key: 'finance', label: 'Finance & Reconciliation' },
+  { key: 'store', label: 'Store' },
+  { key: 'administration', label: 'Governance & System' },
+]
+
 function uniqByHref(items: MenuItem[]) {
   const out: MenuItem[] = []
   const seen = new Set<string>()
@@ -114,11 +122,11 @@ function quickPriorityForRole(role?: Role) {
   if (role === 'super_admin') {
     return [
       '/admin',
-      '/members',
       '/admin/payments',
       '/admin/banking',
-      '/admin/store',
       '/admin/staff-payroll',
+      '/members',
+      '/admin/store',
     ]
   }
 
@@ -205,6 +213,65 @@ function pickQuick(items: MenuItem[], role?: Role) {
 function sectionFor(item: MenuItem, role?: Role): SectionKey {
   const href = item.href
   const label = item.label.toLowerCase()
+
+  if (role === 'super_admin') {
+    if (
+      href === '/' ||
+      href === '/admin' ||
+      href === '/reception' ||
+      href === '/notifications' ||
+      href === '/profile' ||
+      href === '/schedule' ||
+      href === '/kiosk' ||
+      href === '/scan'
+    ) {
+      return 'overview'
+    }
+
+    if (
+      href === '/members' ||
+      href === '/coaches' ||
+      href === '/head-coach/athletes' ||
+      href.startsWith('/admin/members/') ||
+      href.startsWith('/admin/crm') ||
+      href.startsWith('/admin/prospects') ||
+      href.startsWith('/admin/visitors') ||
+      href.startsWith('/admin/freeze-requests') ||
+      href.startsWith('/admin/expiring-soon') ||
+      href.startsWith('/admin/membership-activity') ||
+      href.startsWith('/schedule/operations') ||
+      href.startsWith('/coach-operations/') ||
+      href.startsWith('/admin/private-coaching') ||
+      href.startsWith('/head-coach/private-coaching')
+    ) {
+      return 'members'
+    }
+
+    if (
+      href === '/invoices' ||
+      href === '/expenses' ||
+      href.startsWith('/admin/payments') ||
+      href.startsWith('/admin/banking') ||
+      href.startsWith('/admin/staff-payroll') ||
+      href.startsWith('/admin/membership-refunds') ||
+      href.startsWith('/admin/cash-report') ||
+      href.startsWith('/admin/outstanding-dues') ||
+      href.startsWith('/admin/personal-funds') ||
+      href.startsWith('/admin/external-income')
+    ) {
+      return 'finance'
+    }
+
+    if (
+      href === '/store' ||
+      href === '/packages-and-promos' ||
+      href.startsWith('/admin/store')
+    ) {
+      return 'store'
+    }
+
+    return 'administration'
+  }
 
   if (role === 'admin') {
     if (
@@ -337,7 +404,12 @@ function groupItems(items: MenuItem[], role?: Role): NavSection[] {
     groups.set(key, current)
   }
 
-  const sectionOrder = role === 'admin' ? ADMIN_SECTION_ORDER : SECTION_ORDER
+  const sectionOrder =
+    role === 'admin'
+      ? ADMIN_SECTION_ORDER
+      : role === 'super_admin'
+        ? SUPER_ADMIN_SECTION_ORDER
+        : SECTION_ORDER
 
   return sectionOrder.flatMap(({ key, label }) => {
     const sectionItems = groups.get(key) ?? []
@@ -599,7 +671,11 @@ export default function RoleMenu({
           <div className="flex items-center justify-between gap-3 border-b border-black/10 px-4 py-4 dark:border-white/10">
             <div className="min-w-0">
               <div className="text-xs font-semibold uppercase tracking-[0.16em] text-black/50 dark:text-white/50">
-                {role === 'admin' ? 'ATOM Admin Workspace' : 'ATOM Operations'}
+                {role === 'admin'
+                  ? 'ATOM Admin Workspace'
+                  : role === 'super_admin'
+                    ? 'ATOM Super Admin Workspace'
+                    : 'ATOM Operations'}
               </div>
               <div className="mt-1 flex items-center gap-2">
                 <div className="truncate text-lg font-semibold">
@@ -688,7 +764,7 @@ export default function RoleMenu({
 
                 <section>
                   <div className="mb-2 text-xs font-semibold uppercase tracking-[0.12em] text-black/45 dark:text-white/45">
-                    {role === 'admin' ? 'Workspaces' : 'All tools'}
+                    {role === 'admin' || role === 'super_admin' ? 'Workspaces' : 'All tools'}
                   </div>
 
                   <div className="space-y-2">
