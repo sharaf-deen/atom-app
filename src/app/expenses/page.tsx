@@ -7,6 +7,7 @@ import { getSessionUserCached, getSupabaseAdminClientCached } from '@/lib/reques
 import AccessDeniedPage from '@/components/AccessDeniedPage'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card'
 import InlineAlert from '@/components/ui/InlineAlert'
+import FinanceReadOnlyNotice from '@/components/finance/FinanceReadOnlyNotice'
 import ExpensesTableClient, { type ExpenseRow } from '@/components/ExpensesTableClient'
 import { canAccessExpenses, canManageExpenses } from '@/lib/rbac'
 import ExpenseSubmitButton from '@/components/ExpenseSubmitButton'
@@ -357,9 +358,14 @@ export default async function ExpensesPage({
   return (
     <main className="p-4 sm:p-6 max-w-6xl mx-auto space-y-6">
       <div className="space-y-1">
-        <h1 className="text-2xl font-semibold">Atom Expenses</h1>
-        <p className="text-sm text-[hsl(var(--muted))]">Mobile-first expense tracking with faster filters, clearer actions, and exports aligned with the current view.</p>
+        <h1 className="text-2xl font-semibold">ATOM Expenses</h1>
+        <p className="text-sm text-[hsl(var(--muted))]">Review expenses with filters, receipts and exports aligned with the current view.</p>
       </div>
+
+      <FinanceReadOnlyNotice
+        visible={!canWrite}
+        detail="You can review expenses, receipts and available exports. Adding, editing or deleting expenses remains reserved for Super Admin."
+      />
 
       {errorMsg ? (
         <InlineAlert variant="error" title="Error">

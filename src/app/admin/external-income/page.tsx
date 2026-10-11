@@ -13,6 +13,7 @@ import Input from '@/components/ui/Input'
 import Select from '@/components/ui/Select'
 import Textarea from '@/components/ui/Textarea'
 import InlineAlert from '@/components/ui/InlineAlert'
+import FinanceReadOnlyNotice from '@/components/finance/FinanceReadOnlyNotice'
 import { cairoTodayDateOnly, addDaysDateOnly, formatDateTimeInCairo } from '@/lib/cairoTime'
 import { getSessionUserCached, getSupabaseAdminClientCached } from '@/lib/requestCache'
 import { canAccessExternalIncome, canManageExternalIncome, normalizeRole, type Role } from '@/lib/rbac'
@@ -659,6 +660,11 @@ export default async function ExternalIncomePage({
       />
 
       <Section className="space-y-4">
+        <FinanceReadOnlyNotice
+          visible={!canWrite}
+          detail="You can review Other Income entries, attachments and filtered totals. Adding, editing or deleting income records remains reserved for Super Admin."
+        />
+
         {safeStr(searchParams.error) ? <InlineAlert variant="error">{safeStr(searchParams.error)}</InlineAlert> : null}
         {safeStr(searchParams.saved) === '1' ? <InlineAlert variant="success">Entry saved.</InlineAlert> : null}
         {safeStr(searchParams.updated) === '1' ? <InlineAlert variant="success">Entry updated.</InlineAlert> : null}

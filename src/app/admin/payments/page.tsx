@@ -9,6 +9,7 @@ import Badge from '@/components/ui/Badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card'
 import { Table } from '@/components/ui/Table'
 import EditPaymentDateButton from '@/components/EditPaymentDateButton'
+import FinanceReadOnlyNotice from '@/components/finance/FinanceReadOnlyNotice'
 import { addDaysDateOnly, cairoDayBoundsUTC, cairoTodayDateOnly, isISODateOnly } from '@/lib/cairoTime'
 import { canAccessPayments, canManagePayments } from '@/lib/rbac'
 import { getSessionUserCached, getSupabaseAdminClientCached } from '@/lib/requestCache'
@@ -428,6 +429,11 @@ export default async function AdminPaymentsPage({
           ) : null}
         </div>
       </div>
+
+      <FinanceReadOnlyNotice
+        visible={!canManage}
+        detail="You can review payments, use filters, open member records and download available exports. Editing payment dates, reconciliation and Cash Report actions remain reserved for Super Admin."
+      />
 
       <Card>
         <CardHeader>
