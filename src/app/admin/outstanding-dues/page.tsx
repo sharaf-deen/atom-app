@@ -6,6 +6,7 @@ import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { createClient } from '@supabase/supabase-js'
 import AccessDeniedCard from '@/components/AccessDeniedCard'
+import FinanceReadOnlyNotice from '@/components/finance/FinanceReadOnlyNotice'
 import { getSessionUser } from '@/lib/session'
 import { canAccessOutstandingDues, canManageOutstandingDues } from '@/lib/rbac'
 import OutstandingDuesClient from './_components/OutstandingDuesClient'
@@ -163,6 +164,11 @@ export default async function AdminOutstandingDuesPage() {
           </Link>
         </div>
       </div>
+
+      <FinanceReadOnlyNotice
+        visible={!canManage}
+        detail="You can review outstanding balances and open member records. Sending outstanding-payment reminders remains reserved for Super Admin."
+      />
 
       <OutstandingDuesClient initialRows={rows} />
     </main>

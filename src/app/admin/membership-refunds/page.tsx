@@ -4,6 +4,7 @@ export const revalidate = 0
 
 import { redirect } from 'next/navigation'
 import AccessDeniedCard from '@/components/AccessDeniedCard'
+import FinanceReadOnlyNotice from '@/components/finance/FinanceReadOnlyNotice'
 import Button from '@/components/ui/Button'
 import Badge from '@/components/ui/Badge'
 import MembershipRefundForm from '@/components/members/MembershipRefundForm'
@@ -366,14 +367,10 @@ export default async function AdminMembershipRefundsPage({
         </div>
       ) : null}
 
-      {!canWrite ? (
-        <div className="rounded-2xl border border-sky-200 bg-sky-50 p-3 text-sm text-sky-950">
-          <p className="font-semibold">Read-only access</p>
-          <p className="mt-1 text-xs">
-            Only Super Admin can create refund requests, upload refund proof, approve/reject, mark refunds as paid, cancel records, or apply subscription impact decisions.
-          </p>
-        </div>
-      ) : null}
+      <FinanceReadOnlyNotice
+        visible={!canWrite}
+        detail="You can review refund history and proof. Creating requests, uploading proof, approving or rejecting, marking refunds as paid, cancelling records and applying subscription impact decisions remain reserved for Super Admin."
+      />
 
       <section className="grid gap-3 md:grid-cols-5">
         <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 shadow-soft">

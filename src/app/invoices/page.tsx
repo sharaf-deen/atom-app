@@ -8,6 +8,7 @@ import { unstable_cache } from 'next/cache'
 import PageHeader from '@/components/layout/PageHeader'
 import Section from '@/components/layout/Section'
 import AccessDeniedPage from '@/components/AccessDeniedPage'
+import FinanceReadOnlyNotice from '@/components/finance/FinanceReadOnlyNotice'
 import { Card, CardContent } from '@/components/ui/Card'
 import { getSessionUserCached, getSupabaseAdminClientCached } from '@/lib/requestCache'
 import { type Role } from '@/lib/session'
@@ -90,8 +91,8 @@ export default async function InvoicesPage({
         title="Invoices"
         subtitle="Access restricted."
         signedInAs={me.email}
-        message="Only Super Admin can view the full invoice register."
-        allowed="super_admin"
+        message="Only Admin / Super Admin can view the full invoice register."
+        allowed="admin, super_admin"
         nextPath={nextPath}
         showBackHome
         showProfile
@@ -124,9 +125,13 @@ export default async function InvoicesPage({
 
   return (
     <main>
-      <PageHeader title="Invoices" subtitle="Download PDFs" showReload={false} />
+      <PageHeader title="Invoices" subtitle="Review invoice records and download PDFs." showReload={false} />
 
       <Section className="space-y-4">
+        <FinanceReadOnlyNotice
+          visible={me.role === 'admin'}
+          detail="You can search, review and download invoice PDFs. Financial record changes remain reserved for Super Admin."
+        />
         {/* Filters (server-first via GET) */}
         <Card>
           <CardContent>
