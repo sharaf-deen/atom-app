@@ -79,6 +79,14 @@ const SECTION_ORDER: Array<{ key: SectionKey; label: string }> = [
   { key: 'administration', label: 'Administration' },
 ]
 
+const ADMIN_SECTION_ORDER: Array<{ key: SectionKey; label: string }> = [
+  { key: 'overview', label: 'Daily Operations' },
+  { key: 'members', label: 'Members & Follow-up' },
+  { key: 'finance', label: 'Finance Review' },
+  { key: 'store', label: 'Store' },
+  { key: 'administration', label: 'System' },
+]
+
 function uniqByHref(items: MenuItem[]) {
   const out: MenuItem[] = []
   const seen = new Set<string>()
@@ -119,8 +127,8 @@ function quickPriorityForRole(role?: Role) {
       '/admin',
       '/reception',
       '/members',
+      '/admin/crm',
       '/admin/payments',
-      '/expenses',
       '/admin/store',
     ]
   }
@@ -194,9 +202,57 @@ function pickQuick(items: MenuItem[], role?: Role) {
   return quick
 }
 
-function sectionFor(item: MenuItem): SectionKey {
+function sectionFor(item: MenuItem, role?: Role): SectionKey {
   const href = item.href
   const label = item.label.toLowerCase()
+
+  if (role === 'admin') {
+    if (
+      href === '/admin' ||
+      href === '/reception' ||
+      href === '/notifications' ||
+      href === '/profile' ||
+      href === '/schedule' ||
+      href === '/kiosk' ||
+      href === '/scan'
+    ) {
+      return 'overview'
+    }
+
+    if (
+      href === '/members' ||
+      href.startsWith('/admin/members/') ||
+      href.startsWith('/admin/crm') ||
+      href.startsWith('/admin/prospects') ||
+      href.startsWith('/admin/visitors') ||
+      href.startsWith('/admin/expiring-soon') ||
+      href.startsWith('/admin/membership-activity')
+    ) {
+      return 'members'
+    }
+
+    if (
+      href === '/invoices' ||
+      href === '/expenses' ||
+      href.startsWith('/admin/payments') ||
+      href.startsWith('/admin/membership-refunds') ||
+      href.startsWith('/admin/outstanding-dues') ||
+      href.startsWith('/admin/personal-funds') ||
+      href.startsWith('/admin/external-income')
+    ) {
+      return 'finance'
+    }
+
+    if (
+      href === '/packages-and-promos' ||
+      href === '/store' ||
+      href.startsWith('/admin/store')
+    ) {
+      return 'store'
+    }
+
+    return 'administration'
+  }
 
   if (
     href === '/' ||
@@ -271,17 +327,19 @@ function sectionFor(item: MenuItem): SectionKey {
   return 'administration'
 }
 
-function groupItems(items: MenuItem[]): NavSection[] {
+function groupItems(items: MenuItem[], role?: Role): NavSection[] {
   const groups = new Map<SectionKey, MenuItem[]>()
 
   for (const item of items) {
-    const key = sectionFor(item)
+    const key = sectionFor(item, role)
     const current = groups.get(key) ?? []
     current.push(item)
     groups.set(key, current)
   }
 
-  return SECTION_ORDER.flatMap(({ key, label }) => {
+  const sectionOrder = role === 'admin' ? ADMIN_SECTION_ORDER : SECTION_ORDER
+
+  return sectionOrder.flatMap(({ key, label }) => {
     const sectionItems = groups.get(key) ?? []
     return sectionItems.length ? [{ key, label, items: sectionItems }] : []
   })
@@ -344,7 +402,7 @@ export default function RoleMenu({
 
   const menuItems = useMemo(() => normalizeMenuItems(items), [items])
   const quickItems = useMemo(() => pickQuick(menuItems, role), [menuItems, role])
-  const sections = useMemo(() => groupItems(menuItems), [menuItems])
+  const sections = useMemo(() => groupItems(menuItems, role), [menuItems, role])
 
   const isStructuredRole = !!role && STRUCTURED_ROLES.includes(role)
   const isLiteMenu = !!role && LITE_MENU_ROLES.includes(role)
@@ -541,7 +599,7 @@ export default function RoleMenu({
           <div className="flex items-center justify-between gap-3 border-b border-black/10 px-4 py-4 dark:border-white/10">
             <div className="min-w-0">
               <div className="text-xs font-semibold uppercase tracking-[0.16em] text-black/50 dark:text-white/50">
-                ATOM Operations
+                {role === 'admin' ? 'ATOM Admin Workspace' : 'ATOM Operations'}
               </div>
               <div className="mt-1 flex items-center gap-2">
                 <div className="truncate text-lg font-semibold">
@@ -630,7 +688,7 @@ export default function RoleMenu({
 
                 <section>
                   <div className="mb-2 text-xs font-semibold uppercase tracking-[0.12em] text-black/45 dark:text-white/45">
-                    All tools
+                    {role === 'admin' ? 'Workspaces' : 'All tools'}
                   </div>
 
                   <div className="space-y-2">
