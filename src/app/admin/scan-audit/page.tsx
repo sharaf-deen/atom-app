@@ -107,7 +107,7 @@ export default async function ScanAuditPage({ searchParams }: { searchParams: Se
           <div>
             <h1 className="text-2xl font-semibold tracking-tight">Scan Audit</h1>
             <p className="mt-1 text-sm text-[hsl(var(--muted))]">
-              Refine the audit, then review exactly this scan history.
+              Review scan history, exceptions and the staff or device behind each check-in.
             </p>
             {truncated ? (
               <p className="mt-1 text-xs text-amber-700">
@@ -116,15 +116,23 @@ export default async function ScanAuditPage({ searchParams }: { searchParams: Se
             ) : null}
           </div>
 
-          <div className="flex flex-col items-end gap-1">
-            <a
-              href={exportHref}
-              className="rounded-xl border px-3 py-2 text-sm font-semibold hover:bg-black/[0.03] dark:hover:bg-white/[0.06]"
-              title="Export CSV"
+          <div className="flex flex-wrap items-start justify-end gap-2">
+            <Link
+              href="/admin"
+              className="rounded-xl border px-3 py-2 text-sm font-semibold hover:bg-black/[0.03]"
             >
-              Export CSV
-            </a>
-            <span className="text-xs text-[hsl(var(--muted))]">Uses current filters</span>
+              Admin Today
+            </Link>
+            <div className="flex flex-col items-end gap-1">
+              <a
+                href={exportHref}
+                className="rounded-xl border px-3 py-2 text-sm font-semibold hover:bg-black/[0.03] dark:hover:bg-white/[0.06]"
+                title="Export CSV"
+              >
+                Export CSV
+              </a>
+              <span className="text-xs text-[hsl(var(--muted))]">Uses current filters</span>
+            </div>
           </div>
         </div>
 

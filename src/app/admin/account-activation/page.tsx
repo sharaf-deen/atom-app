@@ -177,7 +177,7 @@ export default async function AccountActivationPage({ searchParams }: { searchPa
     <main>
       <PageHeader
         title="Account Activation"
-        subtitle="Read-only reporting and follow-up overview for member app account activation."
+        subtitle="Review account activation issues and follow up on pending member access."
         right={
           <div className="flex items-center gap-2">
             <Button asChild variant="outline" href={exportHref}>
@@ -187,7 +187,7 @@ export default async function AccountActivationPage({ searchParams }: { searchPa
               </span>
             </Button>
             <Button asChild variant="outline" href="/admin">
-              Back to Admin
+              Admin Today
             </Button>
           </div>
         }
@@ -234,13 +234,8 @@ export default async function AccountActivationPage({ searchParams }: { searchPa
         </div>
 
         <Card>
-          <CardContent className="space-y-2 text-sm text-[hsl(var(--muted))]">
-            <p>Use filters, sorting, and CSV export to review the backlog more quickly.</p>
-            <ul className="space-y-1 pl-5 list-disc">
-              <li><span className="font-medium text-black">Invite pending</span> → resend invite directly from this page</li>
-              <li><span className="font-medium text-black">Pending 7+ / 30+ days</span> → focus your follow-up priorities</li>
-              <li><span className="font-medium text-black">Export CSV</span> → exports the current filtered view</li>
-            </ul>
+          <CardContent className="text-sm text-[hsl(var(--muted))]">
+            Work the pending and auth-issue cases first. Resend an invite when appropriate, then open the member record for anything that needs deeper review.
           </CardContent>
         </Card>
 
