@@ -5,6 +5,7 @@ import { redirect } from 'next/navigation'
 import Link from 'next/link'
 import { randomUUID } from 'crypto'
 import AccessDeniedPage from '@/components/AccessDeniedPage'
+import FinanceReadOnlyNotice from '@/components/finance/FinanceReadOnlyNotice'
 import PageHeader from '@/components/layout/PageHeader'
 import Section from '@/components/layout/Section'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card'
@@ -936,6 +937,13 @@ export default async function PersonalFundsPage({
           </div>
         }
       />
+
+      <Section className="pb-0">
+        <FinanceReadOnlyNotice
+          visible={!canWrite}
+          detail="You can review balances, entries, people and available receipts. Adding, editing or deleting Personal Funds records remains reserved for Super Admin."
+        />
+      </Section>
 
       <ScrollToSavedItem targetId={focusId ? `personal-fund-entry-${focusId}` : ''} />
 
