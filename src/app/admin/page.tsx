@@ -192,8 +192,12 @@ export default async function AdminPage() {
   return (
     <main>
       <PageHeader
-        title="Admin Today"
-        subtitle={`Supervision, follow-up and admin review · Cairo time (${CAIRO_TZ}).`}
+        title={me.role === 'super_admin' ? 'Super Admin Today' : 'Admin Today'}
+        subtitle={
+          me.role === 'super_admin'
+            ? `Operations, finance and control · Cairo time (${CAIRO_TZ}).`
+            : `Supervision, follow-up and admin review · Cairo time (${CAIRO_TZ}).`
+        }
         right={
           <div className="flex flex-wrap items-center gap-2">
             <Button asChild variant="outline" href="/reception">
@@ -277,15 +281,15 @@ export default async function AdminPage() {
             icon={<Wallet size={18} strokeWidth={2.1} />}
           />
           <TodayCard
-            href={me.role === 'super_admin' ? '/admin/permissions-audit' : '/admin/account-activation'}
-            label={me.role === 'super_admin' ? 'Control' : 'Accounts'}
-            title={me.role === 'super_admin' ? 'Permissions audit' : 'Account activation'}
+            href={me.role === 'super_admin' ? '/admin/payments/reconciliation' : '/admin/account-activation'}
+            label={me.role === 'super_admin' ? 'Finance control' : 'Accounts'}
+            title={me.role === 'super_admin' ? 'Payments reconciliation' : 'Account activation'}
             hint={
               me.role === 'super_admin'
-                ? 'Review role access and protected capabilities.'
+                ? 'Validate recorded payments before banking, cash position and payroll review.'
                 : 'Review onboarding and account activation exceptions.'
             }
-            icon={<UserCog size={18} strokeWidth={2.1} />}
+            icon={me.role === 'super_admin' ? <ShieldCheck size={18} strokeWidth={2.1} /> : <UserCog size={18} strokeWidth={2.1} />}
           />
         </div>
       </Section>
@@ -314,36 +318,91 @@ export default async function AdminPage() {
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div>
             <h2 className="text-lg font-semibold">
-              {me.role === 'admin' ? 'Financial review' : 'Finance & control'}
+              {me.role === 'admin' ? 'Financial review' : 'Finance priority flow'}
             </h2>
             <p className="mt-1 text-sm text-[hsl(var(--muted))]">
               {me.role === 'admin'
                 ? 'Read-only access. Financial changes remain reserved for Super Admin.'
-                : 'Review financial activity and open protected finance workspaces.'}
+                : 'Move from recorded money to validation, bank review, liquidity and payroll.'}
             </p>
           </div>
           {me.role === 'admin' ? (
             <span className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-semibold text-slate-700">
               Read only
             </span>
-          ) : null}
+          ) : (
+            <span className="inline-flex rounded-full border border-black/10 bg-black px-3 py-1 text-xs font-semibold text-white">
+              Super Admin only
+            </span>
+          )}
         </div>
 
-        <div className="flex flex-wrap gap-2">
-          <Button asChild variant="outline" href="/admin/payments">Payments</Button>
-          <Button asChild variant="outline" href="/admin/outstanding-dues">Outstanding Dues</Button>
-          <Button asChild variant="outline" href="/invoices">Invoices</Button>
-          <Button asChild variant="outline" href="/admin/membership-refunds">Membership Refunds</Button>
-          <Button asChild variant="outline" href="/admin/personal-funds">Personal Funds</Button>
-          <Button asChild variant="outline" href="/expenses">Expenses</Button>
-          <Button asChild variant="outline" href="/admin/external-income">Other Income</Button>
-          {me.role === 'super_admin' ? (
-            <>
-              <Button asChild variant="outline" href="/admin/banking">Banking</Button>
-              <Button asChild variant="outline" href="/admin/cash-report">Cash Report</Button>
-              <Button asChild variant="outline" href="/admin/staff-payroll">Staff Payroll</Button>
-            </>
-          ) : null}
+        {me.role === 'super_admin' ? (
+          <div className="space-y-3">
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+              <TodayCard
+                href="/admin/payments"
+                label="1 · Record"
+                title="Payments"
+                hint="Review the money recorded in ATOM before validation."
+                icon={<Wallet size={18} strokeWidth={2.1} />}
+              />
+              <TodayCard
+                href="/admin/payments/reconciliation"
+                label="2 · Validate"
+                title="Payments reconciliation"
+                hint="Confirm recorded payments against actual receipts."
+                icon={<ShieldCheck size={18} strokeWidth={2.1} />}
+              />
+              <TodayCard
+                href="/admin/banking"
+                label="3 · Bank"
+                title="Banking"
+                hint="Review bank inflows, outflows and transaction classification."
+                icon={<Wallet size={18} strokeWidth={2.1} />}
+              />
+              <TodayCard
+                href="/admin/banking/cash-position"
+                label="4 · Liquidity"
+                title="Cash position"
+                hint="Review current liquidity after bank and cash movements."
+                icon={<Wallet size={18} strokeWidth={2.1} />}
+              />
+              <TodayCard
+                href="/admin/staff-payroll"
+                label="5 · Close"
+                title="Staff Payroll"
+                hint="Calculate and close payroll after finance review is ready."
+                icon={<UserCog size={18} strokeWidth={2.1} />}
+              />
+            </div>
+
+            <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] px-4 py-3 text-sm text-[hsl(var(--muted))]">
+              Recommended order: review recorded payments → reconcile receipts → review banking → check cash position → process payroll.
+            </div>
+          </div>
+        ) : null}
+
+        <div>
+          <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-[hsl(var(--muted))]">
+            {me.role === 'super_admin' ? 'Supporting finance workspaces' : 'Finance workspaces'}
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Button asChild variant="outline" href="/admin/payments">Payments</Button>
+            <Button asChild variant="outline" href="/admin/outstanding-dues">Outstanding Dues</Button>
+            <Button asChild variant="outline" href="/invoices">Invoices</Button>
+            <Button asChild variant="outline" href="/admin/membership-refunds">Membership Refunds</Button>
+            <Button asChild variant="outline" href="/admin/personal-funds">Personal Funds</Button>
+            <Button asChild variant="outline" href="/expenses">Expenses</Button>
+            <Button asChild variant="outline" href="/admin/external-income">Other Income</Button>
+            {me.role === 'super_admin' ? (
+              <>
+                <Button asChild variant="outline" href="/admin/cash-report">Cash Report</Button>
+                <Button asChild variant="outline" href="/admin/store/dashboard">Store Finance</Button>
+                <Button asChild variant="outline" href="/admin/store/reconciliation">Store Reconciliation</Button>
+              </>
+            ) : null}
+          </div>
         </div>
 
         <div className={me.role === 'super_admin' ? 'grid gap-4 lg:grid-cols-2' : 'grid gap-4'}>
@@ -366,7 +425,10 @@ export default async function AdminPage() {
           <Button asChild variant="outline" href="/admin/health-monitor">Health Monitor</Button>
           <Button asChild variant="outline" href="/admin/membership-activity">Membership Activity</Button>
           {me.role === 'super_admin' ? (
-            <Button asChild variant="outline" href="/admin/permissions-audit">Permissions Audit</Button>
+            <>
+              <Button asChild variant="outline" href="/admin/permissions-audit">Permissions Audit</Button>
+              <Button asChild variant="outline" href="/admin/banking">Banking</Button>
+            </>
           ) : null}
         </div>
 
