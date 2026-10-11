@@ -344,10 +344,13 @@ export default async function MembershipActivityLogPage({
     <main>
       <PageHeader
         title="Membership Activity Log"
-        subtitle="Subscriptions, invites and status changes."
+        subtitle="Review membership, invite and account changes in one audit history."
         showReload={false}
         right={
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <Button asChild variant="outline" size="sm" href="/admin">
+              Admin Today
+            </Button>
             <Badge className="text-[11px]">{total} rows</Badge>
             <Badge className="text-[11px]">
               Page {page}/{totalPages}

@@ -373,11 +373,16 @@ export default async function AttendanceDashboard({
   })
 
   const headerRight = (
-    <div className="flex flex-col items-end gap-1">
-      <Button asChild variant="outline" size="sm">
-        <a href={exportHref}>Export CSV</a>
+    <div className="flex flex-wrap items-center justify-end gap-2">
+      <Button asChild variant="outline" size="sm" href="/admin">
+        Admin Today
       </Button>
-      <span className="text-xs text-[hsl(var(--muted))]">Uses current filters</span>
+      <div className="flex flex-col items-end gap-1">
+        <Button asChild variant="outline" size="sm">
+          <a href={exportHref}>Export CSV</a>
+        </Button>
+        <span className="text-xs text-[hsl(var(--muted))]">Uses current filters</span>
+      </div>
     </div>
   )
 
@@ -385,7 +390,7 @@ export default async function AttendanceDashboard({
     <main>
       <PageHeader
         title="Attendance"
-        subtitle={`Focus the dashboard before reviewing attendance and inactivity.`}
+        subtitle="Review check-ins and members who may need attendance follow-up."
         right={headerRight}
       />
       <Section className="space-y-5">
@@ -424,10 +429,6 @@ export default async function AttendanceDashboard({
           <InactiveNotifyClient members={inactiveMembers} inactiveDays={inactiveDays} />
         </div>
 
-        <div className="text-xs text-[hsl(var(--muted))]">
-          Note: attendance is recorded when staff uses Scan / Kiosk. If you want “today” to match Cairo midnight exactly,
-          keep scan date in Cairo time (already patched).
-        </div>
       </Section>
     </main>
   )

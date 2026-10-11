@@ -8,6 +8,7 @@ import { canAccessCoaches } from '@/lib/rbac'
 import AccessDeniedPage from '@/components/AccessDeniedPage'
 import PageHeader from '@/components/layout/PageHeader'
 import Section from '@/components/layout/Section'
+import Button from '@/components/ui/Button'
 import CoachesManager from '@/components/CoachesManager'
 
 export default async function CoachesPage() {
@@ -32,7 +33,15 @@ export default async function CoachesPage() {
 
   return (
     <main>
-      <PageHeader title="Coaches" subtitle="Manage coaches" />
+      <PageHeader
+        title="Coaches"
+        subtitle="Review coach accounts and staff profiles."
+        right={
+          <Button asChild variant="outline" href="/admin">
+            Admin Today
+          </Button>
+        }
+      />
       <Section className="max-w-5xl">
         <CoachesManager viewerRole={sessionUser.role} />
       </Section>
