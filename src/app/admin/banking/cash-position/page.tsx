@@ -4,6 +4,7 @@ export const revalidate = 0
 import { redirect } from 'next/navigation'
 import AccessDeniedCard from '@/components/AccessDeniedCard'
 import Button from '@/components/ui/Button'
+import FinanceReconciliationNav from '@/components/finance/FinanceReconciliationNav'
 import CashCommitmentsManager, { type CashCommitment } from '@/components/admin/banking/CashCommitmentsManager'
 import { getSessionUserCached, getSupabaseAdminClientCached } from '@/lib/requestCache'
 
@@ -188,15 +189,16 @@ export default async function BankingCashPositionPage(){
       <div>
         <h1 className="text-2xl font-bold">Banking · Cash Position</h1>
         <p className="mt-1 max-w-3xl text-sm text-[hsl(var(--muted))]">
-          Separate reported bank cash from committed obligations to see what ATOM can actually use.
+          Review reported bank cash against committed obligations after reconciliation.
         </p>
       </div>
       <div className="flex flex-wrap gap-2">
+        <Button asChild variant="outline" href="/admin">Super Admin Today</Button>
         <Button asChild variant="outline" href="/admin/banking">Bank feed</Button>
-        <Button asChild variant="outline" href="/admin/banking/reconciliation">Income reconciliation</Button>
-        <Button asChild variant="outline" href="/admin/banking/outflows">Outflow reconciliation</Button>
       </div>
     </div>
+
+    <FinanceReconciliationNav current="/admin/banking/cash-position" />
 
     {loadError?<div className="rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800">Could not fully calculate cash position: {loadError}</div>:null}
 

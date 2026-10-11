@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import AccessDeniedCard from '@/components/AccessDeniedCard'
 import Button from '@/components/ui/Button'
+import FinanceReconciliationNav from '@/components/finance/FinanceReconciliationNav'
 import BankOutflowMatcher, {
   type OutflowMatch,
   type OutflowSource,
@@ -190,15 +191,16 @@ export default async function BankingOutflowsPage({
       <div>
         <h1 className="text-2xl font-bold">Banking · Outflow Reconciliation</h1>
         <p className="mt-1 max-w-3xl text-sm text-[hsl(var(--muted))]">
-          Match real bank debits to existing ATOM expenses, staff payroll payments and paid membership refunds.
+          Match real bank debits to expenses, payroll payments and paid membership refunds already recorded in ATOM.
         </p>
       </div>
       <div className="flex flex-wrap gap-2">
+        <Button asChild variant="outline" href="/admin">Super Admin Today</Button>
         <Button asChild variant="outline" href="/admin/banking">Bank feed</Button>
-        <Button asChild variant="outline" href="/admin/banking/reconciliation">Income reconciliation</Button>
-        <Button asChild variant="outline" href="/expenses">Expenses</Button>
       </div>
     </div>
+
+    <FinanceReconciliationNav current="/admin/banking/outflows" />
 
     {loadError?<div className="rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800">Could not load outflow reconciliation data: {loadError}</div>:null}
 
