@@ -397,9 +397,70 @@ export default async function MembershipActivityLogPage({
           </CardContent>
         </Card>
 
-        <Card>
-          <CardContent className="p-0 overflow-x-auto">
-            <table className="min-w-[980px] w-full text-sm">
+        <Card className="p-0">
+          <CardContent>
+            <div className="space-y-3 p-3 sm:hidden">
+              {rows.length === 0 ? (
+                <div className="px-2 py-8 text-center text-sm text-[hsl(var(--muted-foreground))]">
+                  No activity found for the selected filters.
+                </div>
+              ) : null}
+
+              {rows.map((r) => {
+                const member = profilesById.get(r.target_user_id) ?? null
+                const actorP = r.actor_user_id ? profilesById.get(r.actor_user_id) ?? null : null
+                const meta = actionMeta(r.action, r.action_details)
+                const badgeCls = `${TONE_CLS[meta.tone]} text-[11px]`
+                return (
+                  <article key={r.id} className="rounded-2xl border border-[hsl(var(--border))] bg-white p-4 shadow-soft">
+                    <div className="flex flex-wrap items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <div className="font-semibold">{displayName(member)}</div>
+                        <div className="dense-mobile-value mt-0.5 text-xs text-[hsl(var(--muted-foreground))]">
+                          {member?.email ?? r.target_user_id}
+                        </div>
+                      </div>
+                      <Badge className={badgeCls}>{meta.label}</Badge>
+                    </div>
+
+                    {meta.subtitle ? (
+                      <div className="dense-mobile-value mt-3 text-xs text-[hsl(var(--muted-foreground))]">{meta.subtitle}</div>
+                    ) : null}
+
+                    <dl className="mt-3 grid gap-2 text-sm">
+                      <div className="grid grid-cols-[80px_minmax(0,1fr)] gap-3">
+                        <dt className="text-xs text-[hsl(var(--muted-foreground))]">When</dt>
+                        <dd className="text-right font-medium">{fmtWhen(r.created_at)}</dd>
+                      </div>
+                      <div className="grid grid-cols-[80px_minmax(0,1fr)] gap-3">
+                        <dt className="text-xs text-[hsl(var(--muted-foreground))]">Actor</dt>
+                        <dd className="dense-mobile-value text-right">
+                          <div className="font-medium">
+                            {actorP ? displayName(actorP) : r.actor_user_id ? r.actor_user_id.slice(0, 8) : 'system'}
+                          </div>
+                          {actorP?.email ? <div className="text-xs text-[hsl(var(--muted-foreground))]">{actorP.email}</div> : null}
+                        </dd>
+                      </div>
+                      {shortJSON(r.action_details) ? (
+                        <div className="grid grid-cols-[80px_minmax(0,1fr)] gap-3">
+                          <dt className="text-xs text-[hsl(var(--muted-foreground))]">Details</dt>
+                          <dd className="dense-mobile-value text-right text-xs text-[hsl(var(--muted-foreground))]">{shortJSON(r.action_details)}</dd>
+                        </div>
+                      ) : null}
+                    </dl>
+
+                    <div className="mt-3 border-t border-[hsl(var(--border))] pt-3">
+                      <Button asChild size="sm" variant="outline" href={`/members/${r.target_user_id}`} className="w-full">
+                        Member
+                      </Button>
+                    </div>
+                  </article>
+                )
+              })}
+            </div>
+
+            <div className="hidden overflow-x-auto sm:block">
+<table className="min-w-[980px] w-full text-sm">
               <thead className="sticky top-0 bg-[hsl(var(--bg))] border-b border-[hsl(var(--border))]">
                 <tr className="text-left">
                   <th className="px-4 py-3 w-[170px]">When</th>
@@ -459,6 +520,7 @@ export default async function MembershipActivityLogPage({
                 })}
               </tbody>
             </table>
+            </div>
           </CardContent>
         </Card>
 
