@@ -6,6 +6,7 @@ import { NextResponse } from 'next/server'
 import { revalidatePath, revalidateTag } from 'next/cache'
 import { createClient } from '@supabase/supabase-js'
 import { createSupabaseServerActionClient } from '@/lib/supabaseServer'
+import { canCreateSubscription, normalizeRole } from '@/lib/rbac'
 import { generateInvoicePdfBytes, makeInvoiceNumber, type InvoiceSnapshot } from '@/lib/invoices'
 
 function json(status: number, body: any) {
@@ -111,8 +112,8 @@ export async function POST(req: Request) {
     .eq('user_id', actorId)
     .maybeSingle<{ role: string | null }>()
 
-  const role = prof?.role ?? 'member'
-  const isStaff = ['admin', 'super_admin'].includes(role)
+  const role = normalizeRole(prof?.role)
+  const canHandleDeskPayment = canCreateSubscription(role)
 
   const admin = makeAdminClient()
   if (!admin) return json(500, { ok: false, error: 'Missing service role key' })
@@ -141,8 +142,8 @@ export async function POST(req: Request) {
   if (curErr) return json(500, { ok: false, error: curErr.message })
   if (!current) return json(404, { ok: false, error: 'Subscription not found' })
 
-  // Only admin/super_admin can settle dues
-  if (!isStaff) {
+  // Front desk roles can settle member dues, matching the Reception/member-detail workflow.
+  if (!canHandleDeskPayment) {
     return json(403, { ok: false, error: 'Forbidden' })
   }
 

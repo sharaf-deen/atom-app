@@ -6,6 +6,7 @@ export const revalidate = 0
 import { NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { createSupabaseServerActionClient } from '@/lib/supabaseServer'
+import { canManageSubscriptions, normalizeRole } from '@/lib/rbac'
 
 function json(status: number, body: any) {
   const res = NextResponse.json(body, { status })
@@ -39,9 +40,8 @@ export async function POST(req: Request) {
 
     if (meErr) return json(500, { ok: false, error: 'PROFILE_LOOKUP_FAILED', details: meErr.message })
 
-    const role = me?.role ?? 'member'
-    const canManage = ['admin', 'super_admin'].includes(role)
-    if (!canManage) return json(403, { ok: false, error: 'FORBIDDEN' })
+    const role = normalizeRole(me?.role)
+    if (!canManageSubscriptions(role)) return json(403, { ok: false, error: 'FORBIDDEN' })
 
     const admin = makeAdminClient()
     if (!admin) {

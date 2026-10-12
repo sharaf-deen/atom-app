@@ -7,6 +7,7 @@ import { NextResponse } from 'next/server'
 import { revalidateTag, revalidatePath } from 'next/cache'
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 import { createSupabaseServerActionClient } from '@/lib/supabaseServer'
+import { canCreateSubscription, normalizeRole } from '@/lib/rbac'
 import { generateInvoicePdfBytes, makeInvoiceNumber, type InvoiceSnapshot } from '@/lib/invoices'
 import { getMemberLegalCompliance } from '@/lib/legalConsentEnforcement'
 
@@ -284,9 +285,8 @@ export async function POST(req: Request) {
 
     if (meErr) return json(500, { ok: false, error: 'PROFILE_LOOKUP_FAILED', details: meErr.message })
 
-    const role = me?.role ?? 'member'
-    const canManage = ['admin', 'super_admin'].includes(role)
-    if (!canManage) return json(403, { ok: false, error: 'FORBIDDEN' })
+    const role = normalizeRole(me?.role)
+    if (!canCreateSubscription(role)) return json(403, { ok: false, error: 'FORBIDDEN' })
 
     // Service role client (to bypass notifications RLS, and triggers if any)
     const admin = makeAdminClient()

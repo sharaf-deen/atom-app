@@ -6,6 +6,7 @@ import { NextResponse } from 'next/server'
 import { revalidateTag, revalidatePath } from 'next/cache'
 import { createClient } from '@supabase/supabase-js'
 import { createSupabaseServerActionClient } from '@/lib/supabaseServer'
+import { canManageSubscriptions, normalizeRole } from '@/lib/rbac'
 import { generateInvoicePdfBytes, makeInvoiceNumber, type InvoiceSnapshot } from '@/lib/invoices'
 
 function json(status: number, body: any) {
@@ -100,8 +101,8 @@ export async function POST(req: Request) {
     .eq('user_id', actorId)
     .maybeSingle<{ role: string | null }>()
 
-  const role = prof?.role ?? 'member'
-  if (role !== 'admin' && role !== 'super_admin') {
+  const role = normalizeRole(prof?.role)
+  if (!canManageSubscriptions(role)) {
     return json(403, { ok: false, error: 'Forbidden' })
   }
 
