@@ -9,9 +9,9 @@ export default function PageHeaderText({
 }) {
   return (
     <div className="min-w-0">
-      <h1 className="text-2xl font-semibold tracking-tight text-[hsl(var(--fg))]">{title}</h1>
+      <h1 className="break-words text-xl font-semibold leading-tight tracking-tight text-[hsl(var(--fg))] sm:text-2xl">{title}</h1>
       {subtitle ? (
-        <p className="mt-1 max-w-3xl text-sm leading-6 text-[hsl(var(--muted))]">
+        <p className="mt-1 max-w-3xl text-sm leading-5 text-[hsl(var(--muted))] sm:leading-6">
           {subtitle}
         </p>
       ) : null}

@@ -223,7 +223,7 @@ export default async function BankingReconciliationPage({
             Match real bank credits to payment batches that have already been validated in ATOM.
           </p>
         </div>
-        <div className="flex flex-wrap gap-2">
+        <div className="page-header-actions flex flex-wrap gap-2">
           <Button asChild variant="outline" href="/admin">Super Admin Today</Button>
           <Button asChild variant="outline" href="/admin/banking">Bank feed</Button>
         </div>
