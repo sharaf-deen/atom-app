@@ -379,29 +379,27 @@ export async function POST(req: Request) {
     if (exErr) return json(500, { ok: false, error: 'PROFILE_CHECK_FAILED', details: exErr.message })
     if (!exists) return json(404, { ok: false, error: 'MEMBER_NOT_FOUND' })
 
-    if (role !== 'super_admin') {
-      try {
-        const legalCompliance = await getMemberLegalCompliance(admin, memberId)
-        if (!legalCompliance.complete) {
-          return json(409, {
-            ok: false,
-            error: 'LEGAL_CONSENT_REQUIRED',
-            details: 'Current legal consent must be completed before renewing or extending a subscription.',
-            missing_documents: legalCompliance.missingDocuments.map((doc) => ({
-              key: doc.document_key,
-              title: doc.title,
-              version: doc.version_label,
-              url: doc.published_url,
-            })),
-          })
-        }
-      } catch (legalError: any) {
-        return json(500, {
+    try {
+      const legalCompliance = await getMemberLegalCompliance(admin, memberId)
+      if (!legalCompliance.complete) {
+        return json(409, {
           ok: false,
-          error: 'LEGAL_CONSENT_CHECK_FAILED',
-          details: legalError?.message || String(legalError),
+          error: 'LEGAL_CONSENT_REQUIRED',
+          details: 'Current legal consent must be completed before renewing or extending a subscription.',
+          missing_documents: legalCompliance.missingDocuments.map((doc) => ({
+            key: doc.document_key,
+            title: doc.title,
+            version: doc.version_label,
+            url: doc.published_url,
+          })),
         })
       }
+    } catch (legalError: any) {
+      return json(500, {
+        ok: false,
+        error: 'LEGAL_CONSENT_CHECK_FAILED',
+        details: legalError?.message || String(legalError),
+      })
     }
 
     // Renewal policy:
