@@ -3,7 +3,7 @@ export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
 import { NextResponse } from 'next/server'
-import { canAccessKiosk, normalizeRole, type Role } from '@/lib/rbac'
+import { canManageMemberAccountAccess, normalizeRole } from '@/lib/rbac'
 import { createSupabaseServerActionClient } from '@/lib/supabaseServer'
 import { createClient } from '@supabase/supabase-js'
 import { extractActionLink, sendMemberInviteEmailWithQr } from '@/lib/memberInviteEmail'
@@ -185,7 +185,7 @@ export async function POST(req: Request, ctx: { params: { id: string } }) {
     }
 
     const role = normalizeRole(me?.role)
-    if (!canAccessKiosk(role)) {
+    if (!canManageMemberAccountAccess(role)) {
       return noStore(
         NextResponse.json(
           {

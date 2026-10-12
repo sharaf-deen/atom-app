@@ -293,8 +293,12 @@ export function canCreateSubscription(role: Role | null | undefined) {
   return canAccessMembersList(role)
 }
 
-export function canResendInvite(role: Role | null | undefined) {
+export function canManageMemberAccountAccess(role: Role | null | undefined) {
   return canAccessMembersList(role)
+}
+
+export function canResendInvite(role: Role | null | undefined) {
+  return canManageMemberAccountAccess(role)
 }
 
 export function canManageRoles(role: Role | null | undefined) {
