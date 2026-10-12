@@ -559,7 +559,7 @@ export default async function StaffPayrollDashboardPage({
           <div className="max-w-3xl">
             <div className="flex flex-wrap items-center gap-2">
               <span className="rounded-full bg-black px-3 py-1 text-xs font-semibold text-white">
-                Staff Payroll 2L
+                Closeout History
               </span>
               <span
                 className={
@@ -573,10 +573,10 @@ export default async function StaffPayrollDashboardPage({
               </span>
             </div>
             <h1 className="mt-3 text-2xl font-bold sm:text-3xl">
-              Payroll Dashboard & Monthly Close Summary
+              Payroll Closeout & History
             </h1>
             <p className="mt-2 text-sm text-[hsl(var(--muted))] sm:text-base">
-              One read-only operational view of payroll health, payment completion, closeout status and recent monthly trends.
+              Review approval, salary payment completion, final closeout status and recent monthly history in one place.
             </p>
           </div>
 
