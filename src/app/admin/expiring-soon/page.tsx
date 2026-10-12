@@ -273,7 +273,7 @@ export default async function ExpiringSoonPage({
   }
 
   const tabs = (
-    <div className="flex flex-wrap items-center gap-2">
+    <div className="mobile-chip-scroll flex flex-wrap items-center gap-2">
       {(
         [
           { key: 'today', label: 'Today' },
@@ -338,7 +338,7 @@ export default async function ExpiringSoonPage({
         </Select>
       </div>
 
-      <div className="flex gap-2">
+      <div className="filter-action-bar flex gap-2">
         <Button type="submit">Apply</Button>
         <Link
           href={nextPath + buildQS({ view })}
@@ -351,7 +351,7 @@ export default async function ExpiringSoonPage({
   )
 
   const focusToggle = (
-    <div className="flex flex-wrap items-center gap-2 text-xs text-[hsl(var(--muted))]">
+    <div className="mobile-chip-scroll flex flex-wrap items-center gap-2 text-xs text-[hsl(var(--muted))]">
       <span className="font-medium">Desk focus</span>
       <Link
         href={nextPath + buildQS({ ...baseQS, focus: undefined, page: undefined })}

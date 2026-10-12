@@ -441,7 +441,7 @@ export default async function AdminPaymentsPage({
           <div className="text-sm text-[hsl(var(--muted))]">Refine the view, then export exactly this selection.</div>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="flex flex-wrap gap-2">
+          <div className="mobile-chip-scroll flex flex-wrap gap-2">
             <Link prefetch={false} href={quickLinks.today} className="inline-flex items-center justify-center rounded-2xl border border-[hsl(var(--border))] bg-white px-4 py-2 text-sm font-medium hover:bg-[hsl(var(--bg))]/80">
               Today
             </Link>
@@ -519,7 +519,7 @@ export default async function AdminPaymentsPage({
               />
             </label>
 
-            <div className="sm:col-span-2 xl:col-span-6 flex flex-wrap items-center gap-2 pt-1">
+            <div className="filter-action-bar sm:col-span-2 xl:col-span-6 flex flex-wrap items-center gap-2 pt-1 sm:flex">
               <button className="inline-flex items-center justify-center rounded-2xl bg-black text-white px-4 py-2 text-sm font-medium hover:opacity-95">
                 Apply filters
               </button>
@@ -529,7 +529,7 @@ export default async function AdminPaymentsPage({
               <a href={`/api/admin/payments/export-pdf?${exportQS}`} className="inline-flex items-center justify-center rounded-2xl shadow-soft border border-[hsl(var(--border))] bg-white px-4 py-2 text-sm font-medium hover:bg-[hsl(var(--bg))]/80">
                 Export PDF
               </a>
-              <span className="text-xs text-[hsl(var(--muted))]">Uses current filters</span>
+              <span className="filter-action-meta text-xs text-[hsl(var(--muted))] sm:w-auto">Uses current filters</span>
               <Link
                 prefetch={false}
                 href="/admin/payments"

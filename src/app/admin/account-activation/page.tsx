@@ -288,7 +288,7 @@ export default async function AccountActivationPage({ searchParams }: { searchPa
             <option value="member_za">Member Z → A</option>
           </select>
 
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="filter-action-bar flex flex-wrap items-center gap-2">
             <button type="submit" className="rounded-xl bg-black px-4 py-2 text-sm font-semibold text-white hover:opacity-90">
               Apply
             </button>
@@ -301,7 +301,7 @@ export default async function AccountActivationPage({ searchParams }: { searchPa
                 CSV
               </span>
             </Button>
-            <span className="ml-auto text-sm text-[hsl(var(--muted))]">
+            <span className="filter-action-meta ml-auto text-sm text-[hsl(var(--muted))]">
               {filteredRows.length} result(s) · {accountActivationAgeFilterLabel(age)}
             </span>
           </div>
