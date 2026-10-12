@@ -438,7 +438,7 @@ export default async function StaffPayrollOverviewPage({
           <div className="max-w-3xl">
             <div className="flex flex-wrap items-center gap-2">
               <span className="rounded-full bg-black px-3 py-1 text-xs font-semibold text-white">
-                Staff Payroll 2M
+                Month Closeout
               </span>
               <span
                 className={
@@ -451,9 +451,9 @@ export default async function StaffPayrollOverviewPage({
                 {canWrite ? 'Super Admin · payroll control' : 'Admin · read-only'}
               </span>
             </div>
-            <h1 className="mt-3 text-2xl font-bold sm:text-3xl">Monthly Payroll Overview</h1>
+            <h1 className="mt-3 text-2xl font-bold sm:text-3xl">Payroll Month Closeout</h1>
             <p className="mt-2 text-sm text-[hsl(var(--muted))] sm:text-base">
-              Follow the complete monthly payroll workflow, identify blockers and continue directly to the next action.
+              Review finance first, complete payroll inputs, approve the month, record salary payments and finish closeout.
             </p>
           </div>
 
@@ -484,6 +484,79 @@ export default async function StaffPayrollOverviewPage({
           Staff Payroll overview could not load completely: {loadError}
         </div>
       ) : null}
+
+      <section className="rounded-3xl border border-black/10 bg-white p-4 sm:p-5">
+        <div className="mb-5 grid gap-2 sm:grid-cols-2 xl:grid-cols-5">
+          <Link href={`/admin/staff-payroll/monthly-tasks?month=${selectedMonth}`} className="rounded-2xl border border-black/10 p-3">
+            <div className="text-xs font-semibold text-[hsl(var(--muted))]">Phase 1</div>
+            <div className="mt-1 font-bold">Preparation</div>
+            <div className="mt-1 text-xs text-[hsl(var(--muted))]">Tasks, coaching, rates and adjustments.</div>
+          </Link>
+          <Link href={`/admin/staff-payroll/calculation?month=${selectedMonth}`} className={`rounded-2xl border p-3 ${snapshot?.status === 'draft' ? 'border-amber-300 bg-amber-50' : 'border-black/10'}`}>
+            <div className="text-xs font-semibold text-[hsl(var(--muted))]">Phase 2</div>
+            <div className="mt-1 font-bold">Draft calculation</div>
+            <div className="mt-1 text-xs text-[hsl(var(--muted))]">{snapshot?.status === 'draft' ? 'Draft currently active.' : 'Calculate before approval.'}</div>
+          </Link>
+          <Link href={`/admin/staff-payroll/calculation?month=${selectedMonth}`} className={`rounded-2xl border p-3 ${snapshot?.status === 'approved' ? 'border-emerald-300 bg-emerald-50' : 'border-black/10'}`}>
+            <div className="text-xs font-semibold text-[hsl(var(--muted))]">Phase 3</div>
+            <div className="mt-1 font-bold">Approved & locked</div>
+            <div className="mt-1 text-xs text-[hsl(var(--muted))]">{snapshot?.status === 'approved' ? `Version ${currentVersionNo} locked.` : 'Approval still required.'}</div>
+          </Link>
+          <Link href={`/admin/staff-payroll/payments?month=${selectedMonth}`} className={`rounded-2xl border p-3 ${snapshot?.status === 'approved' && remainingDue <= 0 ? 'border-emerald-300 bg-emerald-50' : 'border-black/10'}`}>
+            <div className="text-xs font-semibold text-[hsl(var(--muted))]">Phase 4</div>
+            <div className="mt-1 font-bold">Salary payments</div>
+            <div className="mt-1 text-xs text-[hsl(var(--muted))]">{snapshot?.status === 'approved' ? `${money(remainingDue)} remaining.` : 'Available after approval.'}</div>
+          </Link>
+          <Link href={`/admin/staff-payroll/dashboard?month=${selectedMonth}`} className="rounded-2xl border border-black/10 p-3">
+            <div className="text-xs font-semibold text-[hsl(var(--muted))]">Phase 5</div>
+            <div className="mt-1 font-bold">Closeout & history</div>
+            <div className="mt-1 text-xs text-[hsl(var(--muted))]">Verify closeout status and prior months.</div>
+          </Link>
+        </div>
+
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <div className="text-xs font-semibold uppercase tracking-[0.12em] text-[hsl(var(--muted))]">
+              Before salary calculation
+            </div>
+            <h2 className="mt-1 text-xl font-bold">Finance review</h2>
+            <p className="mt-1 max-w-3xl text-sm text-[hsl(var(--muted))]">
+              Confirm the month&apos;s recorded receipts, bank movements, expenses and liquidity before approving payroll.
+            </p>
+          </div>
+          <Link href="/admin/payments/reconciliation" className="rounded-xl bg-black px-4 py-2 text-sm font-semibold text-white">
+            Start finance review
+          </Link>
+        </div>
+
+        <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+          <Link href="/admin/payments/reconciliation" className="rounded-2xl border border-black/10 p-3 hover:bg-black/[0.02]">
+            <div className="text-xs font-semibold text-[hsl(var(--muted))]">1 · Receipts</div>
+            <div className="mt-1 font-bold">Payment validation</div>
+            <div className="mt-1 text-xs text-[hsl(var(--muted))]">Confirm ATOM receipts.</div>
+          </Link>
+          <Link href="/admin/banking/reconciliation" className="rounded-2xl border border-black/10 p-3 hover:bg-black/[0.02]">
+            <div className="text-xs font-semibold text-[hsl(var(--muted))]">2 · Income</div>
+            <div className="mt-1 font-bold">Bank income match</div>
+            <div className="mt-1 text-xs text-[hsl(var(--muted))]">Match validated income.</div>
+          </Link>
+          <Link href="/admin/banking/outflows" className="rounded-2xl border border-black/10 p-3 hover:bg-black/[0.02]">
+            <div className="text-xs font-semibold text-[hsl(var(--muted))]">3 · Outflows</div>
+            <div className="mt-1 font-bold">Bank outflow match</div>
+            <div className="mt-1 text-xs text-[hsl(var(--muted))]">Review expenses and paid obligations.</div>
+          </Link>
+          <Link href="/expenses" className="rounded-2xl border border-black/10 p-3 hover:bg-black/[0.02]">
+            <div className="text-xs font-semibold text-[hsl(var(--muted))]">4 · Costs</div>
+            <div className="mt-1 font-bold">Expenses</div>
+            <div className="mt-1 text-xs text-[hsl(var(--muted))]">Confirm operating expenses are current.</div>
+          </Link>
+          <Link href="/admin/banking/cash-position" className="rounded-2xl border border-black/10 p-3 hover:bg-black/[0.02]">
+            <div className="text-xs font-semibold text-[hsl(var(--muted))]">5 · Liquidity</div>
+            <div className="mt-1 font-bold">Cash position</div>
+            <div className="mt-1 text-xs text-[hsl(var(--muted))]">Check available cash before payroll.</div>
+          </Link>
+        </div>
+      </section>
 
       <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <div className="rounded-2xl border border-black/10 bg-white p-4">
