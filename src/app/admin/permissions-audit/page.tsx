@@ -107,22 +107,41 @@ export default async function PermissionsAuditPage() {
   }))
 
   const totalCapabilities = capabilities.length
-  const adminOnly = capabilities.filter(
-    (cap) => cap.allowedRoles.includes('admin') && !cap.allowedRoles.includes('reception') && !cap.allowedRoles.includes('head_coach') && !cap.allowedRoles.includes('coach') && !cap.allowedRoles.includes('assistant_coach') && !cap.allowedRoles.includes('vip') && !cap.allowedRoles.includes('champion') && !cap.allowedRoles.includes('member'),
-  ).length
-  const superAdminOnly = capabilities.filter(
+  const adminAccess = capabilities.filter((cap) => cap.allowedRoles.includes('admin')).length
+  const superAdminOnlyCapabilities = capabilities.filter(
     (cap) => cap.allowedRoles.length === 1 && cap.allowedRoles[0] === 'super_admin',
-  ).length
+  )
+  const superAdminOnly = superAdminOnlyCapabilities.length
+  const financeControls = superAdminOnlyCapabilities.filter((cap) => cap.category === 'Finance')
+  const governanceControls = superAdminOnlyCapabilities.filter((cap) => cap.category === 'Admin ops')
+  const sensitiveRows = superAdminOnlyCapabilities.map((cap) => ({
+    key: cap.key,
+    control: (
+      <div className="space-y-1 min-w-0">
+        <div className="font-medium">{cap.label}</div>
+        <div className="text-xs text-[hsl(var(--muted))]">{cap.description}</div>
+      </div>
+    ),
+    area: <Badge>{cap.category}</Badge>,
+    access: <Badge className="bg-black text-white border-black">Super Admin only</Badge>,
+    route: cap.href ? (
+      <Link href={cap.href} className="underline underline-offset-2">
+        Open
+      </Link>
+    ) : (
+      <span className="text-[hsl(var(--muted))]">No direct page</span>
+    ),
+  }))
 
   return (
     <main>
       <PageHeader
-        title="Permissions Audit"
-        subtitle="Who can access what — internal role matrix for protected pages and APIs."
+        title="Governance & Permissions"
+        subtitle="Review role access, sensitive controls and Super Admin-only capabilities."
         right={
           <div className="flex flex-wrap items-center gap-2">
             <Button asChild variant="outline" href="/admin">
-              Back to Admin
+              Super Admin Today
             </Button>
           </div>
         }
@@ -134,28 +153,28 @@ export default async function PermissionsAuditPage() {
             <CardContent>
               <div className="text-sm text-[hsl(var(--muted))]">Protected capabilities</div>
               <div className="mt-1 text-2xl font-semibold">{totalCapabilities}</div>
-              <div className="mt-1 text-xs text-[hsl(var(--muted))]">Pages / actions currently tracked by RBAC</div>
+              <div className="mt-1 text-xs text-[hsl(var(--muted))]">Protected pages and actions included in this governance view</div>
             </CardContent>
           </Card>
           <Card>
             <CardContent>
-              <div className="text-sm text-[hsl(var(--muted))]">Current role</div>
-              <div className="mt-2">{roleBadge(currentRole, currentRole)}</div>
-              <div className="mt-2 text-xs text-[hsl(var(--muted))]">Signed in as {me.email || 'current user'}</div>
+              <div className="text-sm text-[hsl(var(--muted))]">Admin access</div>
+              <div className="mt-1 text-2xl font-semibold">{adminAccess}</div>
+              <div className="mt-1 text-xs text-[hsl(var(--muted))]">Capabilities available to the Admin role</div>
             </CardContent>
           </Card>
           <Card>
             <CardContent>
-              <div className="text-sm text-[hsl(var(--muted))]">Admin-only items</div>
-              <div className="mt-1 text-2xl font-semibold">{adminOnly}</div>
-              <div className="mt-1 text-xs text-[hsl(var(--muted))]">Capabilities available to Admin but not front desk or coaches</div>
+              <div className="text-sm text-[hsl(var(--muted))]">Finance controls</div>
+              <div className="mt-1 text-2xl font-semibold">{financeControls.length}</div>
+              <div className="mt-1 text-xs text-[hsl(var(--muted))]">Finance capabilities reserved exclusively for Super Admin</div>
             </CardContent>
           </Card>
           <Card>
             <CardContent>
-              <div className="text-sm text-[hsl(var(--muted))]">Super admin only</div>
+              <div className="text-sm text-[hsl(var(--muted))]">Super Admin only</div>
               <div className="mt-1 text-2xl font-semibold">{superAdminOnly}</div>
-              <div className="mt-1 text-xs text-[hsl(var(--muted))]">Reserved for governance actions such as role change and delete user</div>
+              <div className="mt-1 text-xs text-[hsl(var(--muted))]">{governanceControls.length} governance/system control(s) included</div>
             </CardContent>
           </Card>
         </div>
@@ -163,9 +182,9 @@ export default async function PermissionsAuditPage() {
         <Card>
           <CardContent className="space-y-3">
             <div>
-              <div className="text-sm font-medium">How to read this page</div>
+              <div className="text-sm font-medium">Governance view</div>
               <div className="mt-1 text-sm text-[hsl(var(--muted))]">
-                This audit is the current RBAC source of truth used by nav, page guards, and key protected APIs. “Yes” means the role is allowed. “No” means the role should be blocked.
+                Use this page to verify who can access sensitive areas. Start with Super Admin-only controls, then use the full matrix when a role or access question needs deeper review.
               </div>
             </div>
             <div className="flex flex-wrap gap-2">
@@ -178,9 +197,32 @@ export default async function PermissionsAuditPage() {
       </Section>
 
       <Section className="space-y-4">
+        <div className="flex flex-wrap items-end justify-between gap-3">
+          <div>
+            <h2 className="text-lg font-semibold">Sensitive controls</h2>
+            <p className="mt-1 text-sm text-[hsl(var(--muted))]">
+              These capabilities are currently reserved exclusively for Super Admin.
+            </p>
+          </div>
+          <Badge className="bg-black text-white border-black">{superAdminOnly} protected</Badge>
+        </div>
+        <Table
+          columns={[
+            { key: 'control', header: 'Control', tdClassName: 'whitespace-normal' },
+            { key: 'area', header: 'Area', thClassName: 'w-28' },
+            { key: 'access', header: 'Access', thClassName: 'w-40' },
+            { key: 'route', header: 'Workspace', thClassName: 'w-32' },
+          ]}
+          rows={sensitiveRows}
+          keyField="key"
+          stickyTopClassName="top-0"
+        />
+      </Section>
+
+      <Section className="space-y-4">
         <div className="flex items-center justify-between gap-3">
           <h2 className="text-lg font-semibold">Role summary</h2>
-          <div className="text-xs text-[hsl(var(--muted))]">Quick count of protected capabilities by role</div>
+          <div className="text-xs text-[hsl(var(--muted))]">Access footprint by role</div>
         </div>
         <Table
           columns={[
@@ -196,8 +238,13 @@ export default async function PermissionsAuditPage() {
 
       <Section className="space-y-4">
         <div className="flex items-center justify-between gap-3">
-          <h2 className="text-lg font-semibold">Capability matrix</h2>
-          <div className="text-xs text-[hsl(var(--muted))]">Desktop/tablet uses sticky headers with the safe top offset fix.</div>
+          <div>
+            <h2 className="text-lg font-semibold">Full role matrix</h2>
+            <p className="mt-1 text-sm text-[hsl(var(--muted))]">
+              Use the detailed matrix to verify a specific role, capability or protected workspace.
+            </p>
+          </div>
+          <div className="text-xs text-[hsl(var(--muted))]">Yes = access allowed · No = access blocked</div>
         </div>
         <Table
           columns={[

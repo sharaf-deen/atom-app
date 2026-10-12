@@ -413,9 +413,13 @@ export default async function AdminPage() {
 
       <Section className="space-y-4">
         <div>
-          <h2 className="text-lg font-semibold">System & review</h2>
+          <h2 className="text-lg font-semibold">
+            {me.role === 'super_admin' ? 'Governance & system' : 'System & review'}
+          </h2>
           <p className="mt-1 text-sm text-[hsl(var(--muted))]">
-            Attendance, scans and health are secondary review tools unless an exception needs attention.
+            {me.role === 'super_admin'
+              ? 'Review permissions, system health and operational audit trails from one governance area.'
+              : 'Attendance, scans and health are secondary review tools unless an exception needs attention.'}
           </p>
         </div>
 
@@ -425,10 +429,7 @@ export default async function AdminPage() {
           <Button asChild variant="outline" href="/admin/health-monitor">Health Monitor</Button>
           <Button asChild variant="outline" href="/admin/membership-activity">Membership Activity</Button>
           {me.role === 'super_admin' ? (
-            <>
-              <Button asChild variant="outline" href="/admin/permissions-audit">Permissions Audit</Button>
-              <Button asChild variant="outline" href="/admin/banking">Banking</Button>
-            </>
+            <Button asChild variant="outline" href="/admin/permissions-audit">Governance & Permissions</Button>
           ) : null}
         </div>
 
