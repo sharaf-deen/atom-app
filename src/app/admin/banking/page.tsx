@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import AccessDeniedCard from '@/components/AccessDeniedCard'
 import Button from '@/components/ui/Button'
+import FinanceReconciliationNav from '@/components/finance/FinanceReconciliationNav'
 import BankStatementImporter from '@/components/admin/banking/BankStatementImporter'
 import BankTransactionClassifier, { type BankCategory } from '@/components/admin/banking/BankTransactionClassifier'
 import BankSuggestAllButton from '@/components/admin/banking/BankSuggestAllButton'
@@ -276,18 +277,16 @@ export default async function AdminBankingPage({
         <div>
           <h1 className="text-2xl font-bold">Banking</h1>
           <p className="mt-1 max-w-3xl text-sm text-[hsl(var(--muted))]">
-            Read-only bank feed for ATOM. Import statements, review inflows/outflows and maintain a clean transaction history.
+            Import and review ATOM bank transactions, then continue to income or outflow matching.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Button asChild variant="outline" href="/admin/banking/reconciliation">Income reconciliation</Button>
-          <Button asChild variant="outline" href="/admin/banking/outflows">Outflow reconciliation</Button>
-          <Button asChild variant="outline" href="/admin/banking/cash-position">Cash position</Button>
           <Button asChild variant="outline" href="/admin/banking/classification-rules">Smart rules</Button>
-          <Button asChild variant="outline" href="/admin/payments/reconciliation">Payments reconciliation</Button>
-          <Button asChild variant="outline" href="/admin">Admin</Button>
+          <Button asChild variant="outline" href="/admin">Super Admin Today</Button>
         </div>
       </div>
+
+      <FinanceReconciliationNav current="/admin/banking" />
 
       {loadError ? (
         <div className="rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800">
@@ -506,9 +505,6 @@ export default async function AdminBankingPage({
         </div>
       </section>
 
-      <p className="text-xs text-[hsl(var(--muted))]">
-        Banking 1B adds internal transaction classification only. It remains read-only with respect to the bank and still does not modify Payments, Expenses, Store or Payroll.
-      </p>
     </main>
   )
 }

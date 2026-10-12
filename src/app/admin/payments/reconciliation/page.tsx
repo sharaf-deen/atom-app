@@ -7,6 +7,7 @@ import { redirect } from 'next/navigation'
 import AccessDeniedCard from '@/components/AccessDeniedCard'
 import Badge from '@/components/ui/Badge'
 import Button from '@/components/ui/Button'
+import FinanceReconciliationNav from '@/components/finance/FinanceReconciliationNav'
 import ConfirmSubmitButton from '@/components/ui/ConfirmSubmitButton'
 import InlineAlert from '@/components/ui/InlineAlert'
 import Input from '@/components/ui/Input'
@@ -1070,9 +1071,9 @@ export default async function AdminPaymentsReconciliationPage({
                   {canCreateValidations ? 'Can validate' : 'Read-only'}
                 </Badge>
               </div>
-              <h1 className="text-2xl font-semibold sm:text-3xl">Admin · Payments Reconciliation</h1>
+              <h1 className="text-2xl font-semibold sm:text-3xl">Payments Reconciliation</h1>
               <p className="text-sm text-[hsl(var(--muted))] sm:text-base">
-                Validate one Cairo business day at a time, separately for Cash, Instapay, Card and Bank transfer. Payments before 01/08/2026 are treated as already validated historical records.
+                Validate recorded ATOM receipts by Cairo business day before matching them to the bank feed.
               </p>
               <div className="text-sm text-[hsl(var(--muted))]">
                 Signed in as <span className="font-medium text-[hsl(var(--fg))]">{me.email || 'unknown'}</span> · {approverHelperText(canCreateValidations, me.role)}
@@ -1081,16 +1082,10 @@ export default async function AdminPaymentsReconciliationPage({
 
             <div className="flex gap-2 flex-wrap">
               <Link prefetch={false} href="/admin" className="border px-4 py-2 rounded-xl hover:bg-gray-50">
-                ← Admin
+                Super Admin Today
               </Link>
               <Link prefetch={false} href="/admin/payments" className="border px-4 py-2 rounded-xl hover:bg-gray-50">
                 Payments
-              </Link>
-              <Link prefetch={false} href="/admin/banking/reconciliation" className="border px-4 py-2 rounded-xl hover:bg-gray-50">
-                Bank reconciliation
-              </Link>
-              <Link prefetch={false} href="/admin/external-income" className="border px-4 py-2 rounded-xl hover:bg-gray-50">
-                Other Income
               </Link>
             </div>
           </div>
@@ -1105,6 +1100,8 @@ export default async function AdminPaymentsReconciliationPage({
           </div>
         </CardContent>
       </Card>
+
+      <FinanceReconciliationNav current="/admin/payments/reconciliation" />
 
       {flashError ? (
         <InlineAlert variant="error" title="Validation failed">
