@@ -301,7 +301,7 @@ export default async function ProfilePage() {
 
         <section className="grid gap-4 lg:grid-cols-[1fr_320px]">
           <div className="space-y-4">
-            <section className={`rounded-2xl border p-5 shadow-soft ${toneClasses(summary.tone)}`}>
+            <section className={`rounded-2xl border p-4 shadow-soft sm:p-5 ${toneClasses(summary.tone)}`}>
               <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
                 <div className="min-w-0">
                   <div className="text-xs font-medium uppercase tracking-[0.16em] opacity-80">{summary.eyebrow}</div>
@@ -312,7 +312,7 @@ export default async function ProfilePage() {
 
                 <Link
                   href="/schedule"
-                  className="inline-flex shrink-0 items-center justify-center rounded-xl border border-current/20 bg-white/70 px-3 py-2 text-sm font-medium transition hover:bg-white"
+                  className="mobile-action-full inline-flex shrink-0 items-center justify-center rounded-xl border border-current/20 bg-white/70 px-3 py-2 text-sm font-medium transition hover:bg-white sm:w-auto"
                 >
                   View schedule
                 </Link>
@@ -330,7 +330,7 @@ export default async function ProfilePage() {
             ) : null}
           </div>
 
-          <section className="flex items-center justify-center rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-5 shadow-soft">
+          <section className="flex items-center justify-center rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4 shadow-soft sm:p-5">
             {p.qr_code ? (
               <div className="text-center">
                 <div className="text-xs font-medium uppercase tracking-[0.16em] text-[hsl(var(--muted))]">My QR code</div>
@@ -350,7 +350,7 @@ export default async function ProfilePage() {
 
         <section className={`grid gap-4 ${canManagePhoto ? 'lg:grid-cols-[320px_1fr]' : ''}`}>
           {canManagePhoto ? (
-            <section className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-5 shadow-soft">
+            <section className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4 shadow-soft sm:p-5">
               <div>
                 <h2 className="font-semibold">Profile photo</h2>
                 <p className="mt-1 text-sm text-[hsl(var(--muted))]">Keep your photo clear and up to date.</p>
@@ -361,7 +361,7 @@ export default async function ProfilePage() {
             </section>
           ) : null}
 
-          <section className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-5 shadow-soft">
+          <section className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4 shadow-soft sm:p-5">
             <div>
               <h2 className="font-semibold">Identity</h2>
               <p className="mt-1 text-sm text-[hsl(var(--muted))]">Your main ATOM account details.</p>
@@ -414,7 +414,7 @@ export default async function ProfilePage() {
         </section>
 
         {shouldShowAthleteProfileOnSelfProfile(p.role ?? me.role ?? 'member') ? (
-          <details className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-5 shadow-soft">
+          <details className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4 shadow-soft sm:p-5">
             <summary className="cursor-pointer list-none">
               <div>
                 <h2 className="font-semibold">Athlete profile</h2>
@@ -436,7 +436,7 @@ export default async function ProfilePage() {
         ) : null}
 
         {!lifetimeAccess ? (
-        <section className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-5 shadow-soft space-y-4">
+        <section className="space-y-4 rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4 shadow-soft sm:p-5">
           <div>
             <h2 className="font-semibold">Membership history</h2>
             <p className="mt-1 text-sm text-[hsl(var(--muted))]">Older plans and renewals.</p>

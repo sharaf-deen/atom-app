@@ -281,7 +281,7 @@ export default async function TrainingUsefulPage() {
       />
 
       <Section className="space-y-5">
-        <Surface className="p-5 sm:p-6">
+        <Surface className="p-4 sm:p-6">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
             <div>
               <div className="flex flex-wrap items-center gap-2">
@@ -290,7 +290,7 @@ export default async function TrainingUsefulPage() {
                   <Badge className="bg-[hsl(var(--bg))] text-[hsl(var(--muted))]">Today first</Badge>
                 ) : null}
               </div>
-              <h2 className="mt-3 text-2xl font-semibold tracking-tight">
+              <h2 className="mt-3 text-xl font-semibold tracking-tight sm:text-2xl">
                 {upcomingSessions.length
                   ? upcomingSessions[0].session_date === today
                     ? 'Your coaching day is ready'
@@ -339,7 +339,7 @@ export default async function TrainingUsefulPage() {
         </Surface>
 
         {coachingRole ? (
-          <Surface className="p-5 sm:p-6">
+          <Surface className="p-4 sm:p-6">
             <div className="flex flex-wrap items-end justify-between gap-3">
               <div>
                 <h2 className="text-lg font-semibold tracking-tight">Sessions</h2>
@@ -349,7 +349,7 @@ export default async function TrainingUsefulPage() {
                     : 'Your assigned sessions for the next 7 days.'}
                 </p>
               </div>
-              <Button asChild href="/schedule/sessions" size="sm" variant="outline">Open all sessions</Button>
+              <Button asChild href="/schedule/sessions" size="sm" variant="outline" className="w-full sm:w-auto">Open all sessions</Button>
             </div>
 
             {upcomingSessions.length ? (
@@ -386,7 +386,7 @@ export default async function TrainingUsefulPage() {
         ) : null}
 
         {primaryActions.length ? (
-          <Surface className="p-5 sm:p-6">
+          <Surface className="p-4 sm:p-6">
             <div>
               <h2 className="text-lg font-semibold tracking-tight">Do next</h2>
               <p className="mt-1 text-sm text-[hsl(var(--muted))]">The coaching actions used around today’s sessions.</p>
@@ -417,7 +417,7 @@ export default async function TrainingUsefulPage() {
         ) : null}
 
         {user.role === 'head_coach' ? (
-          <Surface className="p-5 sm:p-6">
+          <Surface className="p-4 sm:p-6">
             <div>
               <h2 className="text-lg font-semibold tracking-tight">Head Coach workspace</h2>
               <p className="mt-1 text-sm text-[hsl(var(--muted))]">
@@ -471,7 +471,7 @@ export default async function TrainingUsefulPage() {
         ) : null}
 
         <div className="grid gap-4 lg:grid-cols-[1.05fr_0.95fr]">
-          <Surface className="p-5 sm:p-6">
+          <Surface className="p-4 sm:p-6">
             <h2 className="text-lg font-semibold tracking-tight">{user.role === 'head_coach' ? 'Shared coaching tools' : 'More coaching tools'}</h2>
             <div className="mt-4 grid gap-3 sm:grid-cols-2">
               {moreActions.map((item) => (
