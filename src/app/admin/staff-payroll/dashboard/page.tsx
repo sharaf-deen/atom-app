@@ -886,8 +886,34 @@ export default async function StaffPayrollDashboardPage({
           </div>
         </div>
 
-        <div className="overflow-x-auto">
-          <table className="min-w-[900px] w-full text-left text-sm">
+        <div className="space-y-3 p-4 sm:hidden">
+          {history.map((row) => (
+            <Link
+              key={row.month}
+              href={`/admin/staff-payroll/dashboard?month=${row.month}`}
+              className="block rounded-2xl border border-black/10 bg-white p-4"
+            >
+              <div className="flex flex-wrap items-start justify-between gap-2">
+                <div className="font-semibold">{shortMonthLabel(row.month)}</div>
+                <span className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-semibold ${statusClass(row.status.tone)}`}>
+                  {row.status.label}
+                </span>
+              </div>
+              <div className="mt-3 grid grid-cols-2 gap-3 text-sm">
+                <div><div className="text-xs text-[hsl(var(--muted))]">Net revenue</div><div className="mt-1 font-medium">{row.snapshot ? money(Number(row.snapshot.net_membership_revenue ?? 0)) : '—'}</div></div>
+                <div><div className="text-xs text-[hsl(var(--muted))]">Payroll</div><div className="mt-1 font-semibold">{row.snapshot ? money(row.payroll) : '—'}</div></div>
+                <div><div className="text-xs text-[hsl(var(--muted))]">Paid</div><div className="mt-1 font-medium">{row.snapshot?.status === 'approved' ? money(row.paid) : '—'}</div></div>
+                <div><div className="text-xs text-[hsl(var(--muted))]">Remaining</div><div className="mt-1 font-medium">{row.snapshot?.status === 'approved' ? money(row.remaining) : '—'}</div></div>
+              </div>
+              <div className="mt-3 border-t border-black/10 pt-3 text-xs text-[hsl(var(--muted))]">
+                Payroll / net revenue: <span className="font-semibold text-black">{percent(row.payrollRatio)}</span>
+              </div>
+            </Link>
+          ))}
+        </div>
+
+        <div className="hidden overflow-x-auto sm:block">
+<table className="min-w-[900px] w-full text-left text-sm">
             <thead className="border-b border-black/10 bg-black/[0.015] text-xs text-[hsl(var(--muted))]">
               <tr>
                 <th className="px-4 py-3">Month</th>
