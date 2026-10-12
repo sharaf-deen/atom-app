@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import AccessDeniedCard from '@/components/AccessDeniedCard'
 import Button from '@/components/ui/Button'
+import FinanceReconciliationNav from '@/components/finance/FinanceReconciliationNav'
 import BankPaymentMatcher, {
   type BankPaymentBatch,
   type BankPaymentMatch,
@@ -217,16 +218,18 @@ export default async function BankingReconciliationPage({
     <main className="mx-auto max-w-7xl space-y-4 p-4 sm:p-6">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <h1 className="text-2xl font-bold">Banking · Payment Reconciliation</h1>
+          <h1 className="text-2xl font-bold">Banking · Income Reconciliation</h1>
           <p className="mt-1 max-w-3xl text-sm text-[hsl(var(--muted))]">
-            Match real bank credits from the Banking feed to validated ATOM payment batches. Matches are auditable and reversible.
+            Match real bank credits to payment batches that have already been validated in ATOM.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
+          <Button asChild variant="outline" href="/admin">Super Admin Today</Button>
           <Button asChild variant="outline" href="/admin/banking">Bank feed</Button>
-          <Button asChild variant="outline" href="/admin/payments/reconciliation">Payments reconciliation</Button>
         </div>
       </div>
+
+      <FinanceReconciliationNav current="/admin/banking/reconciliation" />
 
       {loadError ? (
         <div className="rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800">

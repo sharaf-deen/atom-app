@@ -7,6 +7,7 @@ import PageHeader from '@/components/layout/PageHeader'
 import Section from '@/components/layout/Section'
 import AccessDeniedPage from '@/components/AccessDeniedPage'
 import { Card, CardContent } from '@/components/ui/Card'
+import Button from '@/components/ui/Button'
 import StoreAdminNav from '@/components/store/StoreAdminNav'
 import StoreSaleReconciliationForm from '@/components/store/StoreSaleReconciliationForm'
 import StoreSaleReconciliationEdit from '@/components/store/StoreSaleReconciliationEdit'
@@ -169,8 +170,18 @@ export default async function StoreReconciliationPage({ searchParams }: { search
   return (
     <main>
       <PageHeader
-        title="Store Admin — Sales Reconciliation"
-        subtitle="Confirm the amount actually received against Store sales. Active reconciliation starts 01 Sep 2026."
+        title="Store Sales Reconciliation"
+        subtitle="Store-specific control: compare recorded Store sales with the amount actually received."
+        right={
+          <div className="flex flex-wrap items-center gap-2">
+            <Button asChild variant="outline" href="/admin/payments/reconciliation">
+              Main Finance Flow
+            </Button>
+            <Button asChild variant="outline" href="/admin">
+              Super Admin Today
+            </Button>
+          </div>
+        }
       />
 
       <Section className="space-y-4">
