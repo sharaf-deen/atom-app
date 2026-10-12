@@ -66,9 +66,9 @@ export function Table({
                 {/* Info */}
                 <div className="space-y-2">
                   {infoCols.map((col) => (
-                    <div key={col.key} className="flex items-start justify-between gap-3">
-                      <div className="text-[11px] font-medium text-[hsl(var(--muted))] shrink-0">{col.header}</div>
-                      <div className="min-w-0 text-right text-[13px] font-medium break-words whitespace-normal">
+                    <div key={col.key} className="grid grid-cols-[minmax(72px,auto)_minmax(0,1fr)] items-start gap-3">
+                      <div className="text-[11px] font-medium text-[hsl(var(--muted))]">{col.header}</div>
+                      <div className="min-w-0 break-words text-right text-[13px] font-medium whitespace-normal [overflow-wrap:anywhere]">
                         {row[col.key]}
                       </div>
                     </div>
@@ -77,7 +77,7 @@ export function Table({
 
                 {/* Actions */}
                 {actionCols.length ? (
-                  <div className="mt-3 flex flex-wrap items-center justify-end gap-2 border-t border-[hsl(var(--border))] pt-3">
+                  <div className="table-mobile-actions mt-3 grid gap-2 border-t border-[hsl(var(--border))] pt-3">
                     {actionCols.map((col) => (
                       <React.Fragment key={col.key}>{row[col.key]}</React.Fragment>
                     ))}
@@ -95,7 +95,7 @@ export function Table({
         </div>
 
         {/* Tablet/Desktop table */}
-        <div className="hidden sm:block rounded-2xl border border-[hsl(var(--border))] bg-white dark:bg-black shadow-soft overflow-hidden">
+        <div className="hidden overflow-x-auto rounded-2xl border border-[hsl(var(--border))] bg-white shadow-soft dark:bg-black sm:block">
           <table className="w-full text-[13px] leading-5">
             <thead className="text-left">
               <tr>
@@ -141,7 +141,7 @@ export function Table({
                         .filter(Boolean)
                         .join(' ')}
                     >
-                      <div className="max-w-[60vw] lg:max-w-none truncate">{row[col.key]}</div>
+                      <div className="max-w-[32rem] whitespace-normal break-words [overflow-wrap:anywhere] lg:max-w-none">{row[col.key]}</div>
                     </td>
                   ))}
                 </tr>

@@ -153,3 +153,21 @@ body.kiosk-mode main {
   }
 }
 
+/* ===== DENSE WORKSPACE MOBILE CARDS ===== */
+@media (max-width: 639px) {
+  .table-mobile-actions > a,
+  .table-mobile-actions > button,
+  .table-mobile-actions > div {
+    width: 100%;
+  }
+
+  .table-mobile-actions > a,
+  .table-mobile-actions > button {
+    justify-content: center;
+  }
+
+  .dense-mobile-value {
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+}
