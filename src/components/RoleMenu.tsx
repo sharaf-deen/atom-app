@@ -821,7 +821,7 @@ export default function RoleMenu({
             )}
           </div>
 
-          <div className="border-t border-black/10 px-4 py-3 dark:border-white/10">
+          <div className="mobile-nav-safe-bottom border-t border-black/10 px-4 py-3 dark:border-white/10">
             <div className="sm:hidden">
               <div className="mb-2 min-w-0">
                 <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-black/45 dark:text-white/45">Signed in as</div>
@@ -876,7 +876,7 @@ export default function RoleMenu({
               ))}
             </nav>
 
-            <div className="border-t border-black/10 px-4 pb-4 pt-3 dark:border-white/10">
+            <div className="mobile-nav-safe-bottom border-t border-black/10 px-4 pb-4 pt-3 dark:border-white/10">
               <div className="mb-2 min-w-0">
                 <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-black/45 dark:text-white/45">Signed in as</div>
                 <div className="mt-0.5 truncate text-sm font-medium">{userLabel || roleLabel(role)}</div>
