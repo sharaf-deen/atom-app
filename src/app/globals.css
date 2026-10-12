@@ -105,3 +105,51 @@ body.kiosk-mode main {
   }
 }
 
+/* ===== MOBILE FILTER & ACTION BARS =====
+   Shared responsive behavior for dense filter controls without changing
+   filter logic, query parameters or desktop layouts. */
+@media (max-width: 639px) {
+  .filter-action-bar {
+    display: grid;
+    width: 100%;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0.5rem;
+  }
+
+  .filter-action-bar > a,
+  .filter-action-bar > button {
+    width: 100%;
+  }
+
+  .filter-action-bar > div {
+    width: 100%;
+  }
+
+  .filter-action-meta {
+    width: 100%;
+    margin-left: 0 !important;
+    text-align: left;
+  }
+
+  .mobile-chip-scroll {
+    margin-left: -1rem;
+    margin-right: -1rem;
+    display: flex;
+    flex-wrap: nowrap;
+    gap: 0.5rem;
+    overflow-x: auto;
+    padding-left: 1rem;
+    padding-right: 1rem;
+    padding-bottom: 0.25rem;
+    scrollbar-width: none;
+  }
+
+  .mobile-chip-scroll::-webkit-scrollbar {
+    display: none;
+  }
+
+  .mobile-chip-scroll > * {
+    flex: 0 0 auto;
+  }
+}
+

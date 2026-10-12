@@ -145,7 +145,7 @@ export default function MembersFilters({
             />
           </div>
 
-          <div className="flex gap-2">
+          <div className="filter-action-bar flex gap-2 sm:w-auto">
             <Button type="submit" disabled={isPending}>
               {isPending ? 'Searching…' : 'Search'}
             </Button>
