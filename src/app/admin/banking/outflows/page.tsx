@@ -194,7 +194,7 @@ export default async function BankingOutflowsPage({
           Match real bank debits to expenses, payroll payments and paid membership refunds already recorded in ATOM.
         </p>
       </div>
-      <div className="flex flex-wrap gap-2">
+      <div className="page-header-actions flex flex-wrap gap-2">
         <Button asChild variant="outline" href="/admin">Super Admin Today</Button>
         <Button asChild variant="outline" href="/admin/banking">Bank feed</Button>
       </div>
