@@ -81,7 +81,7 @@ export default async function StaffPayrollCalculationPage({
   if (!canView) {
     return (
       <main className="p-6">
-        <h1 className="text-2xl font-bold">Staff Payroll Â· Salary Calculation</h1>
+        <h1 className="text-2xl font-bold">Staff Payroll · Salary Calculation</h1>
         <div className="mt-4 max-w-2xl">
           <AccessDeniedCard
             title="Forbidden"
