@@ -830,9 +830,8 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
     legalComplianceCheckFailed = true
   }
 
-  const canBypassLegalSubscriptionGate = me.role === 'super_admin'
   const legalSubscriptionBlocked =
-    !canBypassLegalSubscriptionGate && (legalComplianceCheckFailed || !legalCompliance.complete)
+    legalComplianceCheckFailed || !legalCompliance.complete
   const legalSubscriptionBlockedReason = legalComplianceCheckFailed
     ? 'Legal consent status is temporarily unavailable. Verify Legal & consents before creating or renewing a subscription.'
     : !legalCompliance.complete
