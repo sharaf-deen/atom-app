@@ -115,7 +115,7 @@ export default function CoachesManager({ viewerRole }: { viewerRole: string }) {
     setErr('')
 
     try {
-      const r = await fetch('/api/coaches/update-role', {
+      const r = await fetch('/api/admin/users/role', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
