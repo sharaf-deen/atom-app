@@ -192,7 +192,7 @@ export default async function BankingCashPositionPage(){
           Review reported bank cash against committed obligations after reconciliation.
         </p>
       </div>
-      <div className="flex flex-wrap gap-2">
+      <div className="page-header-actions flex flex-wrap gap-2">
         <Button asChild variant="outline" href="/admin">Super Admin Today</Button>
         <Button asChild variant="outline" href="/admin/banking">Bank feed</Button>
       </div>

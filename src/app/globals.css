@@ -76,3 +76,32 @@ body.kiosk-mode main {
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.001ms !important; animation-iteration-count: 1 !important; transition-duration: 0.001ms !important; scroll-behavior: auto !important; }
 }
+
+/* ===== MOBILE PAGE HEADER ACTIONS =====
+   Keep header actions predictable on narrow screens without changing
+   the underlying button/link components or desktop layouts. */
+@media (max-width: 639px) {
+  .page-header-actions {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .page-header-actions > a,
+  .page-header-actions > button {
+    width: 100%;
+  }
+
+  .page-header-actions > div {
+    display: grid;
+    width: 100%;
+    min-width: 0;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0.5rem;
+  }
+
+  .page-header-actions > div > a,
+  .page-header-actions > div > button {
+    width: 100%;
+  }
+}
+

@@ -280,7 +280,7 @@ export default async function AdminBankingPage({
             Import and review ATOM bank transactions, then continue to income or outflow matching.
           </p>
         </div>
-        <div className="flex flex-wrap gap-2">
+        <div className="page-header-actions flex flex-wrap gap-2">
           <Button asChild variant="outline" href="/admin/banking/classification-rules">Smart rules</Button>
           <Button asChild variant="outline" href="/admin">Super Admin Today</Button>
         </div>
