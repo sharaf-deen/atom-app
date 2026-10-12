@@ -652,7 +652,7 @@ export default async function AdminCrmPage({
                 spellCheck={false}
               />
             </label>
-            <div className="flex gap-2">
+            <div className="filter-action-bar flex gap-2">
               <Button type="submit" variant="outline">Search</Button>
               {(q || segment !== 'action') ? (
                 <Button asChild variant="ghost" href="/admin/crm">Clear</Button>
@@ -665,7 +665,7 @@ export default async function AdminCrmPage({
               Queue: <strong className="text-[hsl(var(--foreground))]">{segmentLabel}</strong>
               {' · '}Showing {totalVisible} of {queue.length} member(s) in priority order.
             </span>
-            <div className="flex flex-wrap gap-2">
+            <div className="filter-action-bar flex flex-wrap gap-2">
               <Button asChild size="sm" variant="ghost" href="/reception">Front Desk</Button>
               {canOpenAdminQueues ? (
                 <>

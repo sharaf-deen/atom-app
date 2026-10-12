@@ -375,21 +375,23 @@ export default async function MembershipActivityLogPage({
               <Input label="From" type="date" name="from" defaultValue={from} className="md:col-span-1" />
               <Input label="To" type="date" name="to" defaultValue={to} className="md:col-span-1" />
 
-              <div className="md:col-span-6 flex flex-wrap items-end gap-2 pt-1">
-                <Select label="Page size" name="pageSize" defaultValue={String(pageSize)} className="w-[150px]">
+              <div className="md:col-span-6 flex flex-col gap-2 pt-1 sm:flex-row sm:flex-wrap sm:items-end">
+                <Select label="Page size" name="pageSize" defaultValue={String(pageSize)} className="w-full sm:w-[150px]">
                   <option value="25">25</option>
                   <option value="50">50</option>
                   <option value="100">100</option>
                   <option value="200">200</option>
                 </Select>
 
-                <div className="flex-1" />
-                <Button type="submit">Apply</Button>
-                <Link href="/admin/membership-activity">
-                  <Button type="button" variant="outline">
-                    Reset
-                  </Button>
-                </Link>
+                <div className="hidden flex-1 sm:block" />
+                <div className="filter-action-bar flex gap-2 sm:w-auto">
+                  <Button type="submit">Apply</Button>
+                  <Link href="/admin/membership-activity">
+                    <Button type="button" variant="outline" className="w-full">
+                      Reset
+                    </Button>
+                  </Link>
+                </div>
               </div>
             </form>
           </CardContent>
