@@ -171,3 +171,15 @@ body.kiosk-mode main {
     word-break: break-word;
   }
 }
+
+/* ===== CROSS-ROLE FINAL RESPONSIVE POLISH ===== */
+@media (max-width: 639px) {
+  .mobile-nav-safe-bottom {
+    padding-bottom: max(1rem, env(safe-area-inset-bottom));
+  }
+
+  .mobile-action-full {
+    width: 100%;
+    justify-content: center;
+  }
+}

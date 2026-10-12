@@ -297,7 +297,7 @@ export default async function PrivateCoachingPage() {
         ) : (
           <details className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4 shadow-soft">
             <summary className="cursor-pointer list-none">
-              <div className="flex items-center justify-between gap-3">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                 <div>
                   <div className="font-semibold">{pendingRequest ? 'Request details' : 'Buy more private sessions'}</div>
                   <div className="mt-1 text-sm text-[hsl(var(--muted))]">
@@ -306,7 +306,7 @@ export default async function PrivateCoachingPage() {
                       : 'Open this when you want to add another private coaching package.'}
                   </div>
                 </div>
-                <span className="text-sm font-medium text-[hsl(var(--muted))]">Show</span>
+                <span className="text-sm font-medium text-[hsl(var(--muted))] sm:shrink-0">Show</span>
               </div>
             </summary>
 

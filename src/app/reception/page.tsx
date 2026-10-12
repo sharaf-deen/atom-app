@@ -555,7 +555,7 @@ export default async function ReceptionPage({ searchParams }: { searchParams?: S
                 Start with <span className="font-medium text-black">Action now</span>, then narrow to <span className="font-medium text-black">Renewals</span>, <span className="font-medium text-black">Dues</span> or <span className="font-medium text-black">Follow-up</span>.
               </p>
             </div>
-            <div className="flex flex-wrap items-center gap-2 text-sm">
+            <div className="mobile-chip-scroll flex flex-wrap items-center gap-2 text-sm">
               {([
                 ['now', 'Action now'],
                 ['renewals', 'Renewals'],
@@ -589,11 +589,11 @@ export default async function ReceptionPage({ searchParams }: { searchParams?: S
                   className="h-11 w-full rounded-2xl border border-[hsl(var(--border))] bg-white px-4 text-sm outline-none focus:ring-2 focus:ring-ring"
                 />
               </div>
-              <Button type="submit" variant="outline">
+              <Button type="submit" variant="outline" className="w-full sm:w-auto">
                 Search
               </Button>
               {q ? (
-                <Button asChild variant="ghost" href={buildQS({ focus })}>
+                <Button asChild variant="ghost" href={buildQS({ focus })} className="w-full sm:w-auto">
                   Reset
                 </Button>
               ) : null}
