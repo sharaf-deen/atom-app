@@ -6,7 +6,7 @@ import { NextResponse } from 'next/server'
 import { revalidatePath, revalidateTag } from 'next/cache'
 import { createClient } from '@supabase/supabase-js'
 import { createSupabaseServerActionClient } from '@/lib/supabaseServer'
-import { canCreateSubscription, normalizeRole } from '@/lib/rbac'
+import { canCreateSubscription, canManagePayments, normalizeRole } from '@/lib/rbac'
 import { generateInvoicePdfBytes, makeInvoiceNumber, type InvoiceSnapshot } from '@/lib/invoices'
 
 function json(status: number, body: any) {
@@ -104,6 +104,10 @@ export async function POST(req: Request) {
   const invoiceEmailRequested = body?.invoice?.email === true
   const noteRaw = body?.note
   const paymentDateRaw = body?.payment_date ?? body?.paymentDate ?? body?.paid_at ?? body?.paidAt
+  const hasPaymentDateInput =
+    paymentDateRaw !== undefined &&
+    paymentDateRaw !== null &&
+    String(paymentDateRaw).trim() !== ''
 
   // Role (to allow staff to settle for any member)
   const { data: prof } = await supabase
@@ -114,6 +118,7 @@ export async function POST(req: Request) {
 
   const role = normalizeRole(prof?.role)
   const canHandleDeskPayment = canCreateSubscription(role)
+  const canDirectlyAdjustDue = canManagePayments(role)
 
   const admin = makeAdminClient()
   if (!admin) return json(500, { ok: false, error: 'Missing service role key' })
@@ -169,9 +174,16 @@ export async function POST(req: Request) {
     if (paidNow <= 0) return json(400, { ok: false, error: 'amount_paid must be > 0' })
     if (paidNow > due) return json(400, { ok: false, error: 'amount_paid cannot exceed current due' })
     newDue = Math.max(0, due - paidNow)
-    effectivePaidAt = parsePaidAtInput(paymentDateRaw) ?? new Date().toISOString()
+    const parsedPaidAt = parsePaidAtInput(paymentDateRaw)
+    if (hasPaymentDateInput && !parsedPaidAt) {
+      return json(400, { ok: false, error: 'INVALID_PAYMENT_DATE', details: 'payment_date must be a valid YYYY-MM-DD date or timestamp.' })
+    }
+    effectivePaidAt = parsedPaidAt ?? new Date().toISOString()
   } else if (amountDueRaw !== undefined && amountDueRaw !== null && String(amountDueRaw) !== '') {
-    // Direct set (staff only)
+    // Manual due adjustment is a finance-only correction, not a front-desk payment.
+    if (!canDirectlyAdjustDue) {
+      return json(403, { ok: false, error: 'FINANCE_WRITE_FORBIDDEN', details: 'Direct due adjustments require Super Admin.' })
+    }
     if (!isFiniteNumber(amountDueRaw)) return json(400, { ok: false, error: 'Invalid amount_due' })
     const d = Number(amountDueRaw)
     if (d < 0) return json(400, { ok: false, error: 'amount_due must be >= 0' })
@@ -182,7 +194,7 @@ export async function POST(req: Request) {
     return json(400, { ok: false, error: 'Missing amount_paid (or amount_due)' })
   }
 
-  // Payment method (optional)
+  // A real due payment must always carry an explicit valid payment method.
   let payment_method: string | null = null
   if (paymentMethodRaw !== undefined && paymentMethodRaw !== null && String(paymentMethodRaw) !== '') {
     const pm = String(paymentMethodRaw)
@@ -190,6 +202,9 @@ export async function POST(req: Request) {
       return json(400, { ok: false, error: 'Invalid payment_method' })
     }
     payment_method = pm
+  }
+  if (paidNow && paidNow > 0 && !payment_method) {
+    return json(400, { ok: false, error: 'PAYMENT_METHOD_REQUIRED' })
   }
 
   const update: any = { amount_due: newDue }
@@ -206,53 +221,74 @@ export async function POST(req: Request) {
     .from('subscriptions')
     .update(update)
     .eq('id', id)
+    .eq('amount_due', due)
     .select(
       'id, member_id, subscription_type, plan, start_date, end_date, sessions_total, amount, amount_due, payment_method, paid_at'
     )
     .maybeSingle()
 
-  
+  if (updErr) return json(500, { ok: false, error: updErr.message })
+  if (!updated) {
+    return json(409, {
+      ok: false,
+      error: 'SUBSCRIPTION_CHANGED_RETRY',
+      details: 'The subscription balance changed before this payment was saved. Refresh and try again.',
+    })
+  }
 
-// Audit log (best-effort)
-await safeAudit(admin, {
-  actor_user_id: actorId,
-  target_user_id: current.member_id,
-  action: ACTION_SUB_DUE_SETTLE,
-  action_details: {
-    subscription_id: id,
-    paid_now: paidNow ?? null,
-    old_due: due,
-    new_due: newDue,
-    payment_method: payment_method ?? current.payment_method ?? null,
-    paid_at: effectivePaidAt,
-    invoice_requested: invoiceRequested,
-    invoice_email_requested: invoiceEmailRequested,
-  },
-})
-
-
-
-if (updErr) return json(500, { ok: false, error: updErr.message })
-
-
-// Record payment in history (best-effort)
-if (paidNow && paidNow > 0) {
-  try {
+  // Payment history is part of the financial mutation. If ledger insertion fails,
+  // restore the previous subscription balance instead of reporting a false payment.
+  if (paidNow && paidNow > 0) {
     const note = typeof noteRaw === 'string' ? noteRaw.trim().slice(0, 500) : null
-    const pm = String(payment_method ?? current.payment_method ?? 'cash')
-    await admin.from('subscription_payments').insert({
+    const { error: historyError } = await admin.from('subscription_payments').insert({
       subscription_id: id,
       member_id: current.member_id,
       amount: paidNow,
-      payment_method: pm,
+      payment_method: payment_method!,
       note: note || null,
       paid_at: effectivePaidAt ?? new Date().toISOString(),
       created_by: actorId,
     })
-  } catch {
-    // history must never break settlement
+
+    if (historyError) {
+      const { error: rollbackError } = await admin
+        .from('subscriptions')
+        .update({
+          amount: current.amount,
+          amount_due: current.amount_due,
+          payment_method: current.payment_method,
+          paid_at: current.paid_at,
+        })
+        .eq('id', id)
+        .eq('amount_due', newDue)
+
+      return json(500, {
+        ok: false,
+        error: 'PAYMENT_HISTORY_WRITE_FAILED',
+        details: historyError.message,
+        subscription_rolled_back: !rollbackError,
+        ...(rollbackError ? { rollback_error: rollbackError.message } : {}),
+      })
+    }
   }
-}
+
+  // Audit only after the subscription mutation and payment ledger are consistent.
+  await safeAudit(admin, {
+    actor_user_id: actorId,
+    target_user_id: current.member_id,
+    action: ACTION_SUB_DUE_SETTLE,
+    action_details: {
+      subscription_id: id,
+      paid_now: paidNow ?? null,
+      old_due: due,
+      new_due: newDue,
+      payment_method: payment_method ?? current.payment_method ?? null,
+      paid_at: effectivePaidAt,
+      direct_adjustment: paidNow === null,
+      invoice_requested: invoiceRequested,
+      invoice_email_requested: invoiceEmailRequested,
+    },
+  })
 
 
   // Optional invoice generation (re-issue / overwrite)

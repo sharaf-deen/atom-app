@@ -1739,6 +1739,7 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
                         <SubscriptionManageRowActions
                           sub={s}
                           canManageFreeze={me.role === 'super_admin'}
+                            canManageFinancials={me.role === 'super_admin'}
                           freezeSummary={freezeSummary ? { allowed: freezeSummary.allowed, used: freezeSummary.used, remaining: freezeSummary.remaining, hasOpenFreeze: !!freezeSummary.active, activeState: freezeSummary.activeState } : null}
                           freezeHistory={freezeSummary?.history ?? []}
                         />
