@@ -31,9 +31,10 @@ function isPlan(v: unknown): v is Plan {
   return v === '1w' || v === '1m' || v === '3m' || v === '6m' || v === '12m' || v === 'sessions'
 }
 
-function parsePaymentMethod(v: unknown): SubscriptionPaymentMethod {
-  const s = typeof v === 'string' ? (v.trim() as SubscriptionPaymentMethod) : 'cash'
-  return (ALLOWED_PAYMENT_METHODS.has(s) ? s : 'cash') as SubscriptionPaymentMethod
+function parsePaymentMethod(v: unknown): SubscriptionPaymentMethod | null {
+  const raw = typeof v === 'string' ? v.trim() : ''
+  if (!ALLOWED_PAYMENT_METHODS.has(raw as SubscriptionPaymentMethod)) return null
+  return raw as SubscriptionPaymentMethod
 }
 
 function isISODateOnly(s?: string | null) {
@@ -173,7 +174,7 @@ function makeAdminClient(): SupabaseClient<any, any, any, any, any> | null {
   })
 }
 
-const ACTION_SUB_CREATE = 'subscription_create'
+const ACTION_SUB_RENEW = 'subscription_renew'
 
 async function safeAudit(admin: SupabaseClient<any, any, any, any, any>, row: any) {
   try {
@@ -327,7 +328,15 @@ export async function POST(req: Request) {
     }
     const amount = amountNum
 
-    const payment_method = parsePaymentMethod(body?.payment_method ?? body?.paymentMethod)
+    const paymentMethodRaw = body?.payment_method ?? body?.paymentMethod
+    const payment_method = parsePaymentMethod(paymentMethodRaw)
+    if (!payment_method) {
+      return json(400, {
+        ok: false,
+        error: 'INVALID_PAYMENT_METHOD',
+        details: 'payment_method must be cash, instapay, card, or bank_transfer.',
+      })
+    }
 
     const amountDueNum = Number(body?.amount_due ?? body?.amountDue ?? 0)
     if (!Number.isFinite(amountDueNum) || amountDueNum < 0) {
@@ -430,9 +439,20 @@ try {
 }
 
 // 4) Build insert payload
-    const paid_at =
-      parsePaidAtInput(body?.payment_date ?? body?.paymentDate ?? body?.paid_at ?? body?.paidAt) ??
-      new Date().toISOString()
+    const paymentDateRaw = body?.payment_date ?? body?.paymentDate ?? body?.paid_at ?? body?.paidAt
+    const hasPaymentDateInput =
+      paymentDateRaw !== undefined &&
+      paymentDateRaw !== null &&
+      String(paymentDateRaw).trim() !== ''
+    const parsedPaidAt = parsePaidAtInput(paymentDateRaw)
+    if (hasPaymentDateInput && !parsedPaidAt) {
+      return json(400, {
+        ok: false,
+        error: 'INVALID_PAYMENT_DATE',
+        details: 'payment_date must be a valid YYYY-MM-DD date or timestamp.',
+      })
+    }
+    const paid_at = parsedPaidAt ?? new Date().toISOString()
     const subscription_type = plan === 'sessions' ? 'sessions' : 'time'
     const status = 'active' as const
 
@@ -485,21 +505,30 @@ payload.sessions_used = null
       return json(formatted.status, formatted.body)
     }
 
-// 5.5) Insert initial payment history (best-effort)
-// In this app: amount = paid now, amount_due = remaining due, total = amount + amount_due
+// 5.5) Initial payment history is part of the financial write.
+// If it cannot be recorded, remove the newly-created subscription so the
+// membership record cannot claim money that is missing from payment history.
 if (inserted?.id && amount > 0) {
-  try {
-    await admin.from('subscription_payments').insert({
-      subscription_id: inserted.id,
-      member_id: memberId,
-      amount,
-      payment_method,
-      paid_at,
-      note: 'Initial payment',
-      created_by: auth.user.id,
+  const { error: paymentHistoryError } = await admin.from('subscription_payments').insert({
+    subscription_id: inserted.id,
+    member_id: memberId,
+    amount,
+    payment_method,
+    paid_at,
+    note: 'Initial payment',
+    created_by: auth.user.id,
+  })
+
+  if (paymentHistoryError) {
+    const { error: rollbackError } = await admin.from('subscriptions').delete().eq('id', inserted.id)
+
+    return json(500, {
+      ok: false,
+      error: 'PAYMENT_HISTORY_WRITE_FAILED',
+      details: paymentHistoryError.message,
+      subscription_rolled_back: !rollbackError,
+      ...(rollbackError ? { rollback_error: rollbackError.message } : {}),
     })
-  } catch {
-    // payments history must never break subscription creation
   }
 }
 
@@ -509,7 +538,7 @@ if (inserted?.id && amount > 0) {
 await safeAudit(admin, {
   actor_user_id: auth.user.id,
   target_user_id: memberId,
-  action: ACTION_SUB_CREATE,
+  action: ACTION_SUB_RENEW,
   action_details: {
     subscription_id: inserted?.id ?? null,
     plan,
