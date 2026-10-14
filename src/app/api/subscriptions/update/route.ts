@@ -175,6 +175,22 @@ export async function POST(req: Request) {
   if (curErr) return json(500, { ok: false, error: curErr.message })
   if (!current) return json(404, { ok: false, error: 'Subscription not found' })
 
+  // Functional 1B.4: subscription coverage cannot be silently recalculated while
+  // consumptive freeze history exists. This also prevents changing plans to 1w/1m.
+  if (patch.plan !== undefined || patch.start_date !== undefined || patch.end_date !== undefined) {
+    const { data: freezes, error: freezesError } = await admin
+      .from('subscription_freezes')
+      .select('id')
+      .eq('subscription_id', id)
+      .is('cleared_at', null)
+      .limit(1)
+    if (freezesError) return json(500, { ok: false, error: freezesError.message })
+    if ((freezes ?? []).length > 0) {
+      return json(409, { ok: false, error: 'FREEZE_HISTORY_CONFLICT',
+        details: 'Clear the subscription freezes before changing plan, start date, or end date.' })
+    }
+  }
+
   const update: any = {}
 
   // Amount
