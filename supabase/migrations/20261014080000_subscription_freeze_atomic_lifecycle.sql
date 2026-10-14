@@ -124,6 +124,3 @@ begin
     'freeze_tokens_used',v_used,'freeze_tokens_allowed',v_allowed);
 end;
 $$;
-
-revoke all on function public.manage_subscription_freeze_atomic(uuid,text,uuid,date,date,uuid) from public, anon, authenticated;
-grant execute on function public.manage_subscription_freeze_atomic(uuid,text,uuid,date,date,uuid) to service_role;
