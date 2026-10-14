@@ -6,7 +6,7 @@ import { NextResponse } from 'next/server'
 import { revalidateTag, revalidatePath } from 'next/cache'
 import { createClient } from '@supabase/supabase-js'
 import { createSupabaseServerActionClient } from '@/lib/supabaseServer'
-import { canManageSubscriptions, normalizeRole } from '@/lib/rbac'
+import { canManagePayments, canManageSubscriptions, normalizeRole } from '@/lib/rbac'
 import { generateInvoicePdfBytes, makeInvoiceNumber, type InvoiceSnapshot } from '@/lib/invoices'
 
 function json(status: number, body: any) {
@@ -105,6 +105,7 @@ export async function POST(req: Request) {
   if (!canManageSubscriptions(role)) {
     return json(403, { ok: false, error: 'Forbidden' })
   }
+  const canManageFinancialFields = canManagePayments(role)
 
   const admin = makeAdminClient()
   if (!admin) return json(500, { ok: false, error: 'Missing service role key' })
@@ -123,6 +124,29 @@ export async function POST(req: Request) {
 
   if (!id) return json(400, { ok: false, error: 'Missing subscription id' })
   if (!patch || typeof patch !== 'object') return json(400, { ok: false, error: 'Missing patch' })
+
+  const financialMutationRequested =
+    patch.amount !== undefined ||
+    patch.amount_due !== undefined ||
+    patch.amountDue !== undefined ||
+    patch.payment_method !== undefined ||
+    patch.paymentMethod !== undefined
+
+  if (financialMutationRequested && !canManageFinancialFields) {
+    return json(403, {
+      ok: false,
+      error: 'FINANCE_WRITE_FORBIDDEN',
+      details: 'Amount, due balance and payment method changes require Super Admin.',
+    })
+  }
+
+  if ((invoiceRequested || invoiceEmailRequested) && !canManageFinancialFields) {
+    return json(403, {
+      ok: false,
+      error: 'INVOICE_WRITE_FORBIDDEN',
+      details: 'Invoice re-issue requires Super Admin.',
+    })
+  }
 
   // Read current subscription to apply safe rules (plan -> end_date, etc.)
   const { data: current, error: curErr } = await admin

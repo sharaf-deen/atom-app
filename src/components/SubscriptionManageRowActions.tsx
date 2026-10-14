@@ -91,6 +91,7 @@ function daysBetweenUTC(fromDateOnly: string, toDateOnly: string) {
 export default function SubscriptionManageRowActions({
   sub,
   canManageFreeze = false,
+  canManageFinancials = false,
   freezeSummary,
   freezeHistory,
 }: {
@@ -112,6 +113,7 @@ export default function SubscriptionManageRowActions({
     payment_method?: string | null
   }
   canManageFreeze?: boolean
+  canManageFinancials?: boolean
   freezeSummary?: {
     allowed: number
     used: number
@@ -266,11 +268,13 @@ export default function SubscriptionManageRowActions({
 
 
   function validateSubscriptionUpdateForConfirmation() {
-    const amountNum = Number(amount)
-    if (!Number.isFinite(amountNum) || amountNum < 0) {
-      setStatus({ kind: 'error', msg: 'Amount must be a valid number.' })
-      toast.error('Save failed')
-      return false
+    if (canManageFinancials) {
+      const amountNum = Number(amount)
+      if (!Number.isFinite(amountNum) || amountNum < 0) {
+        setStatus({ kind: 'error', msg: 'Amount must be a valid number.' })
+        toast.error('Save failed')
+        return false
+      }
     }
 
     if (isTime) {
@@ -348,14 +352,18 @@ export default function SubscriptionManageRowActions({
     setStatus({ kind: 'info', msg: 'Saving…' })
 
     try {
-      const amountNum = Number(amount)
-      if (!Number.isFinite(amountNum) || amountNum < 0) {
-        setStatus({ kind: 'error', msg: 'Amount must be a valid number.' })
-        toast.error('Save failed')
-        return
-      }
+      const patch: any = {}
 
-      const patch: any = { amount: amountNum, payment_method: paymentMethod }
+      if (canManageFinancials) {
+        const amountNum = Number(amount)
+        if (!Number.isFinite(amountNum) || amountNum < 0) {
+          setStatus({ kind: 'error', msg: 'Amount must be a valid number.' })
+          toast.error('Save failed')
+          return
+        }
+        patch.amount = amountNum
+        patch.payment_method = paymentMethod
+      }
 
       if (isTime) {
         if (!isISODateOnly(startDate)) {
@@ -376,7 +384,7 @@ export default function SubscriptionManageRowActions({
         patch.sessions_total = Math.floor(st)
       }
 
-      const invoice = reissueInvoice ? { generate: true, email: !!emailInvoice } : null
+      const invoice = canManageFinancials && reissueInvoice ? { generate: true, email: !!emailInvoice } : null
 
       const r = await fetch('/api/subscriptions/update', {
         method: 'POST',
@@ -606,10 +614,14 @@ export default function SubscriptionManageRowActions({
         { label: 'New start date', value: isTime ? startDate || '—' : sub.start_date ?? '—' },
         { label: 'New end preview', value: isTime ? previewEnd ?? '—' : sub.end_date ?? '—' },
         { label: 'Sessions total', value: isTime ? '—' : sessionsTotal || '—' },
-        { label: 'Amount', value: formatEGP(amount) },
-        { label: 'Payment method', value: humanPaymentMethod(paymentMethod) },
-        { label: 'Invoice', value: reissueInvoice ? (emailInvoice ? 'Generate + send by email' : 'Generate PDF') : 'No new invoice' },
-        { label: 'Impact', value: 'Updates member access/subscription details.' },
+        ...(canManageFinancials
+          ? [
+              { label: 'Amount', value: formatEGP(amount) },
+              { label: 'Payment method', value: humanPaymentMethod(paymentMethod) },
+              { label: 'Invoice', value: reissueInvoice ? (emailInvoice ? 'Generate + send by email' : 'Generate PDF') : 'No new invoice' },
+            ]
+          : []),
+        { label: 'Impact', value: canManageFinancials ? 'Updates subscription/access and permitted financial fields.' : 'Updates member access/subscription details only.' },
       ]
     }
 
@@ -718,15 +730,17 @@ export default function SubscriptionManageRowActions({
         </Button>
       ) : null}
 
-      <Button
-        size="sm"
-        variant="outline"
-        onClick={requestSubscriptionDeleteConfirmation}
-        disabled={!canEdit}
-        className="border-rose-300 text-rose-700 hover:bg-rose-50"
-      >
-        Delete
-      </Button>
+      {canManageFinancials ? (
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={requestSubscriptionDeleteConfirmation}
+          disabled={!canEdit}
+          className="border-rose-300 text-rose-700 hover:bg-rose-50"
+        >
+          Delete
+        </Button>
+      ) : null}
 
       {/* Edit modal */}
       {openEdit && (
@@ -756,25 +770,29 @@ export default function SubscriptionManageRowActions({
                   </div>
                 ) : null}
 
-                <div>
-                  <div className="text-sm font-medium mb-1">Amount</div>
-                  <Input value={amount} onChange={(e) => setAmount(e.target.value)} disabled={busy} />
-                </div>
+                {canManageFinancials ? (
+                  <>
+                    <div>
+                      <div className="text-sm font-medium mb-1">Amount</div>
+                      <Input value={amount} onChange={(e) => setAmount(e.target.value)} disabled={busy} />
+                    </div>
 
-                <div>
-                  <div className="text-sm font-medium mb-1">Payment method</div>
-                  <Select
-                    value={paymentMethod}
-                    onChange={(e) => setPaymentMethod(e.target.value as PaymentMethod)}
-                    disabled={busy}
-                  >
-                    {paymentMethodOptions.map((o) => (
-                      <option key={o.value} value={o.value}>
-                        {o.label}
-                      </option>
-                    ))}
-                  </Select>
-                </div>
+                    <div>
+                      <div className="text-sm font-medium mb-1">Payment method</div>
+                      <Select
+                        value={paymentMethod}
+                        onChange={(e) => setPaymentMethod(e.target.value as PaymentMethod)}
+                        disabled={busy}
+                      >
+                        {paymentMethodOptions.map((o) => (
+                          <option key={o.value} value={o.value}>
+                            {o.label}
+                          </option>
+                        ))}
+                      </Select>
+                    </div>
+                  </>
+                ) : null}
               </div>
 
               {isTime ? (
@@ -805,7 +823,8 @@ export default function SubscriptionManageRowActions({
                 </div>
               )}
 
-              {/* Invoice re-issue (controlled) */}
+              {/* Invoice re-issue is finance-sensitive and Super Admin only. */}
+              {canManageFinancials ? (
               <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))]/40 p-4">
                 <label className="flex items-start gap-3">
                   <input
@@ -838,6 +857,7 @@ export default function SubscriptionManageRowActions({
                   </label>
                 </div>
               </div>
+              ) : null}
 
               <div className="flex justify-end gap-2 pt-2">
                 <Button variant="outline" onClick={() => setOpenEdit(false)} disabled={busy}>
