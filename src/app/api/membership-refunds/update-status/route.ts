@@ -167,6 +167,7 @@ export async function POST(req: Request) {
       .from('membership_refunds')
       .update(patch)
       .eq('id', refundId)
+      .eq('status', currentStatus)
       .select('id, member_id, subscription_id, amount, refund_method, status, approved_at, rejected_at, paid_at, cancelled_at')
       .maybeSingle()
 
@@ -180,6 +181,14 @@ export async function POST(req: Request) {
         })
       }
       return json(500, { ok: false, error: 'REFUND_UPDATE_FAILED', details: message })
+    }
+
+    if (!updated) {
+      return json(409, {
+        ok: false,
+        error: 'REFUND_STATUS_CHANGED',
+        details: 'Refund status was changed by another operation. Refresh and try again.',
+      })
     }
 
     await safeAudit(admin, {
