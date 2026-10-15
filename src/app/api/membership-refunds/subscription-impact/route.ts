@@ -8,7 +8,7 @@ import { revalidatePath } from 'next/cache'
 import { createClient } from '@supabase/supabase-js'
 import { createSupabaseServerActionClient } from '@/lib/supabaseServer'
 
-type ImpactAction = 'keep_active' | 'cancel_subscription' | 'shorten_subscription'
+
 
 type ImpactAction = 'keep_active' | 'cancel_subscription' | 'shorten_subscription'
 const IMPACT_ACTIONS = new Set<ImpactAction>(['keep_active', 'cancel_subscription', 'shorten_subscription'])
