@@ -545,6 +545,19 @@ export async function POST(req: Request) {
 
     const existingId = existingAttendance?.id ?? null
     const alreadyValidToday = !!existingAttendance?.valid
+
+    // FUNCTIONAL_1C2D_VALID_SCAN_GUARD
+    // Preserve the original accepted check-in and its audit attribution.
+    // A repeated scan must never rewrite scanned_at, scanned_by or device_tag.
+    if (alreadyValidToday) {
+      return json(meta, 200, {
+        ok: true,
+        valid: true,
+        member_id: memberId,
+        message: 'Already checked in today',
+      })
+    }
+
     if (hasLifetimeGymAccess(memberRole)) {
       await persistAttendance(admin, existingId, {
         member_id: memberId,
