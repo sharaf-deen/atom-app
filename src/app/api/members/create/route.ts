@@ -295,6 +295,37 @@ export async function POST(req: Request) {
       }
     }
 
+    // 1C.1B: verify visitor identity and conversion state BEFORE inviting Auth.
+    if (visitor_trial_id) {
+      const { data: visitor, error: visitorError } = await admin
+        .from('visitor_trials')
+        .select('id,email,linked_member_id,family_intake_id')
+        .eq('id', visitor_trial_id)
+        .maybeSingle()
+
+      if (visitorError) {
+        return noStore(NextResponse.json({ ok: false, error: 'VISITOR_LOOKUP_FAILED', details: visitorError.message }, { status: 500 }))
+      }
+      if (!visitor) {
+        return noStore(NextResponse.json({ ok: false, error: 'VISITOR_NOT_FOUND' }, { status: 404 }))
+      }
+      if (visitor.linked_member_id) {
+        return noStore(NextResponse.json({ ok: false, error: 'VISITOR_ALREADY_LINKED_TO_MEMBER' }, { status: 409 }))
+      }
+      if (visitor.family_intake_id) {
+        return noStore(NextResponse.json({
+          ok: false, error: 'VISITOR_FAMILY_INTAKE_REQUIRES_FAMILY_CONVERSION',
+          details: 'Use the Family Intake conversion for this visitor.',
+        }, { status: 409 }))
+      }
+      if (visitor.email && String(visitor.email).trim().toLowerCase() !== email) {
+        return noStore(NextResponse.json({
+          ok: false, error: 'VISITOR_EMAIL_MISMATCH',
+          details: 'Visitor and Member emails differ. Review Visitor data before conversion.',
+        }, { status: 409 }))
+      }
+    }
+
     // 5) URL de redirection pour compléter l’invitation
     const APP_URL =
       process.env.NEXT_PUBLIC_APP_URL ||
@@ -535,21 +566,31 @@ export async function POST(req: Request) {
     }
 
     if (visitor_trial_id) {
-      const { error: visitorLinkError } = await admin
+      // Compare-and-set prevents overwriting a member linked by another conversion.
+      const { data: visitorLink, error: visitorLinkError } = await admin
         .from('visitor_trials')
         .update({
           linked_member_id: userId,
           updated_by: actor.id,
         })
         .eq('id', visitor_trial_id)
+        .is('linked_member_id', null)
+        .is('family_intake_id', null)
+        .select('id')
+        .maybeSingle()
 
       if (visitorLinkError) {
-        return noStore(
-          NextResponse.json(
-            { ok: false, error: `VISITOR_TRIAL_LINK_FAILED: ${visitorLinkError.message}` },
-            { status: 500 },
-          ),
-        )
+        return noStore(NextResponse.json({
+          ok: false, error: 'VISITOR_TRIAL_LINK_FAILED', details: visitorLinkError.message,
+          user_id: userId, next_action: 'review_existing_member',
+        }, { status: 500 }))
+      }
+      if (!visitorLink) {
+        return noStore(NextResponse.json({
+          ok: false, error: 'VISITOR_CONVERSION_CONFLICT',
+          details: 'Visitor was converted or moved into Family Intake during this request. Review the created member and visitor links before retrying.',
+          user_id: userId, next_action: 'review_existing_member',
+        }, { status: 409 }))
       }
     }
 
