@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 
 import { getSessionUser } from '@/lib/session'
-import { canAccessMembersList } from '@/lib/rbac'
+import { canAccessMembersList, MEMBER_LIKE_ROLES } from '@/lib/rbac'
 import { createSupabaseAdminClient } from '@/lib/supabaseAdmin'
 
 export const dynamic = 'force-dynamic'
@@ -93,9 +93,12 @@ export async function POST(req: Request) {
   const markReviewed = Boolean(body?.mark_reviewed)
   const admin = createSupabaseAdminClient()
 
-  const { data: member, error: memberError } = await admin.from('profiles').select('user_id').eq('user_id', memberId).maybeSingle()
+  const { data: member, error: memberError } = await admin.from('profiles').select('user_id,role').eq('user_id', memberId).maybeSingle()
   if (memberError) return NextResponse.json({ ok: false, error: 'MEMBER_LOOKUP_FAILED', details: memberError.message }, { status: 500 })
   if (!member) return NextResponse.json({ ok: false, error: 'MEMBER_NOT_FOUND' }, { status: 404 })
+  if (!(MEMBER_LIKE_ROLES as readonly string[]).includes(String(member.role ?? ''))) {
+    return NextResponse.json({ ok: false, error: 'INACTIVE_FOLLOWUP_TARGET_ROLE_FORBIDDEN' }, { status: 403 })
+  }
 
   if (assignedTo) {
     const { data: staff, error: staffError } = await admin.from('profiles').select('user_id,role').eq('user_id', assignedTo).maybeSingle()
@@ -173,6 +176,17 @@ export async function PATCH(req: Request) {
   const action = String(body?.action ?? '').trim()
   const actorId = String((access.me as any)?.id ?? (access.me as any)?.user_id ?? '') || null
   const admin = createSupabaseAdminClient()
+
+  const { data: target, error: targetError } = await admin
+    .from('profiles')
+    .select('user_id,role')
+    .eq('user_id', memberId)
+    .maybeSingle()
+  if (targetError) return NextResponse.json({ ok: false, error: 'MEMBER_LOOKUP_FAILED', details: targetError.message }, { status: 500 })
+  if (!target) return NextResponse.json({ ok: false, error: 'MEMBER_NOT_FOUND' }, { status: 404 })
+  if (!(MEMBER_LIKE_ROLES as readonly string[]).includes(String(target.role ?? ''))) {
+    return NextResponse.json({ ok: false, error: 'INACTIVE_FOLLOWUP_TARGET_ROLE_FORBIDDEN' }, { status: 403 })
+  }
 
   if (action === 'note') {
     const note = sanitizeText(body?.note, 2000)
