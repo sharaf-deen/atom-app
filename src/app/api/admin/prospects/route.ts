@@ -78,6 +78,12 @@ export async function PATCH(req: NextRequest) {
   const id = uuidOrNull(body?.prospect_id)
   if (!id) return json({ ok: false, error: 'INVALID_PROSPECT_ID' }, 400)
 
+  // 1C.3B: require a concurrency token for CRM editing, never for activity logging.
+  const expectedUpdatedAt = typeof body?.expected_updated_at === 'string' ? body.expected_updated_at.trim() : ''
+  if (!expectedUpdatedAt || Number.isNaN(Date.parse(expectedUpdatedAt))) {
+    return json({ ok: false, error: 'EXPECTED_UPDATED_AT_REQUIRED' }, 400)
+  }
+
   const admin = adminClient()
   const { data: current, error: currentError } = await admin
     .from('prospects')
@@ -179,13 +185,13 @@ export async function PATCH(req: NextRequest) {
 
   try {
     // Compare-and-set: protect against a concurrent conversion after the initial lookup.
-    let updateQuery = admin.from('prospects').update(update).eq('id', id)
+    let updateQuery = admin.from('prospects').update(update).eq('id', id).eq('updated_at', expectedUpdatedAt)
     if (Object.prototype.hasOwnProperty.call(update, 'status') && update.status !== 'joined') {
       updateQuery = updateQuery.is('linked_member_id', null)
     }
     const { data, error } = await updateQuery.select('*').maybeSingle()
     if (!error && !data) {
-      return json({ ok: false, error: 'PROSPECT_CONCURRENT_CONVERSION', details: 'Prospect was linked or changed before this status update. Refresh and review.' }, 409)
+      return json({ ok: false, error: 'PROSPECT_STALE_WRITE', details: 'This prospect was updated by another operation. Refresh the CRM and review the latest values before saving.' }, 409)
     }
 
     if (error) {
