@@ -81,7 +81,7 @@ export async function PATCH(req: NextRequest) {
   const admin = adminClient()
   const { data: current, error: currentError } = await admin
     .from('prospects')
-    .select('id,full_name,email,phone,status,lost_reason,assigned_to,next_follow_up_at,last_contacted_at,updated_at')
+    .select('id,full_name,email,phone,status,lost_reason,assigned_to,next_follow_up_at,last_contacted_at,updated_at,linked_member_id')
     .eq('id', id)
     .maybeSingle()
 
@@ -149,6 +149,11 @@ export async function PATCH(req: NextRequest) {
     update.next_follow_up_at = followUp
   }
 
+  // Linked members are authoritative: a manual CRM edit cannot demote a converted prospect.
+  if (current.linked_member_id && Object.prototype.hasOwnProperty.call(update, 'status') && update.status !== 'joined') {
+    return json({ ok: false, error: 'LINKED_PROSPECT_STATUS_LOCKED', details: 'This prospect is linked to a Member. Keep the joined status.' }, 409)
+  }
+
   const effectiveStatus = (update.status ?? current.status) as string
   const effectiveLostReason = Object.prototype.hasOwnProperty.call(update, 'lost_reason')
     ? update.lost_reason
@@ -173,12 +178,15 @@ export async function PATCH(req: NextRequest) {
   }
 
   try {
-    const { data, error } = await admin
-      .from('prospects')
-      .update(update)
-      .eq('id', id)
-      .select('*')
-      .single()
+    // Compare-and-set: protect against a concurrent conversion after the initial lookup.
+    let updateQuery = admin.from('prospects').update(update).eq('id', id)
+    if (Object.prototype.hasOwnProperty.call(update, 'status') && update.status !== 'joined') {
+      updateQuery = updateQuery.is('linked_member_id', null)
+    }
+    const { data, error } = await updateQuery.select('*').maybeSingle()
+    if (!error && !data) {
+      return json({ ok: false, error: 'PROSPECT_CONCURRENT_CONVERSION', details: 'Prospect was linked or changed before this status update. Refresh and review.' }, 409)
+    }
 
     if (error) {
       const message = String(error.message ?? '')
