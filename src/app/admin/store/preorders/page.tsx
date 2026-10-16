@@ -527,7 +527,7 @@ export default async function AdminStorePreordersPage({
           <Card>
             <CardHeader>
               <CardTitle>Create preorder</CardTitle>
-              <div className="text-xs text-[hsl(var(--muted))]">Super admin only. This creates a reservation for an existing member and does not reduce stock.</div>
+              <div className="text-xs text-[hsl(var(--muted))]">Super admin only. This creates a reservation for an existing member or staff account and does not reduce stock.</div>
             </CardHeader>
             <CardContent>
               <AdminPreorderForm products={productOptions} />
