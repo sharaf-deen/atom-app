@@ -50,7 +50,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
 
   const { data: existing, error: existingError } = await admin
     .from('profiles')
-    .select('user_id')
+    .select('user_id, role')
     .eq('user_id', targetUserId)
     .maybeSingle()
 
@@ -60,6 +60,10 @@ export async function POST(req: Request, { params }: { params: { id: string } })
 
   if (!existing) {
     return NextResponse.json({ error: 'Member not found' }, { status: 404 })
+  }
+
+  if (me.role !== 'super_admin' && !['member', 'champion', 'vip'].includes(String(existing.role ?? ''))) {
+    return NextResponse.json({ error: 'TARGET_ACCOUNT_RESTRICTED' }, { status: 403 })
   }
 
   const { error } = await admin

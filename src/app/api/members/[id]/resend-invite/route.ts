@@ -262,6 +262,10 @@ export async function POST(req: Request, ctx: { params: { id: string } }) {
       )
     }
 
+    if (role !== 'super_admin' && !['member', 'champion', 'vip'].includes(String(prof.role ?? ''))) {
+      return noStore(NextResponse.json({ ok: false, error: 'TARGET_ACCOUNT_RESTRICTED' }, { status: 403 }))
+    }
+
     const targetEmail = normalizeEmail(prof.email)
     if (!targetEmail) {
       return noStore(
