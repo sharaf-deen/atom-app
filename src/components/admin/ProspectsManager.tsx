@@ -525,6 +525,7 @@ export default function ProspectsManager({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           prospect_id: row.id,
+          expected_updated_at: row.updated_at,
           status: draft.status,
           lost_reason: draft.status === 'lost' ? draft.lost_reason : null,
           assigned_to: draft.assigned_to || null,
@@ -532,7 +533,12 @@ export default function ProspectsManager({
         }),
       })
       const data = await res.json()
-      if (!res.ok || !data?.ok) throw new Error(data?.error || 'Update failed.')
+      if (!res.ok || !data?.ok) {
+        if (res.status === 409 && data?.error === 'PROSPECT_STALE_WRITE') {
+          throw new Error('This prospect was updated elsewhere. Refresh the page and review the latest status, assignment and follow-up before saving.')
+        }
+        throw new Error(data?.error || 'Update failed.')
+      }
 
       mergeProspect(data.prospect as ProspectRow)
       setFlash(`${row.full_name} updated.`)
