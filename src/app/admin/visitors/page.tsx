@@ -345,16 +345,30 @@ async function markFollowedUpAction(formData: FormData) {
   if (!id) redirect(withFlash(returnQS, { error: 'Missing visitor id.' }))
 
   const admin = getSupabaseAdminClientCached()
-  const { error } = await admin
+  const now = new Date().toISOString()
+  // One-time follow-up. A linked Member without a subscription may still
+  // require follow-up, so linked_member_id is intentionally allowed.
+  const { data: changed, error } = await admin
     .from('visitor_trials')
     .update({
       status: 'followed_up',
-      follow_up_sent_at: new Date().toISOString(),
+      follow_up_sent_at: now,
       updated_by: me.id,
     })
     .eq('id', id)
+    .eq('status', 'attended')
+    .eq('free_trial_used', true)
+    .is('follow_up_sent_at', null)
+    .lte('follow_up_due_at', now)
+    .select('id')
+    .maybeSingle()
 
   if (error) redirect(withFlash(returnQS, { error: error.message || 'Could not save follow-up.' }))
+  if (!changed) {
+    redirect(withFlash(returnQS, {
+      error: 'VISITOR_FOLLOW_UP_NOT_ELIGIBLE: already followed up, not yet due, closed, or changed. Refresh the page.',
+    }))
+  }
   redirect(withFlash(returnQS, { followed_up: '1' }))
 }
 
@@ -370,15 +384,25 @@ async function closeVisitorAction(formData: FormData) {
   if (!id) redirect(withFlash(returnQS, { error: 'Missing visitor id.' }))
 
   const admin = getSupabaseAdminClientCached()
-  const { error } = await admin
+  // A linked Visitor must retain Member association and original trial history.
+  const { data: changed, error } = await admin
     .from('visitor_trials')
     .update({
       status: 'closed',
       updated_by: me.id,
     })
     .eq('id', id)
+    .is('linked_member_id', null)
+    .in('status', ['new', 'booked', 'attended', 'followed_up'])
+    .select('id')
+    .maybeSingle()
 
   if (error) redirect(withFlash(returnQS, { error: error.message || 'Could not close visitor.' }))
+  if (!changed) {
+    redirect(withFlash(returnQS, {
+      error: 'VISITOR_CLOSE_NOT_ELIGIBLE: Visitor is already closed, linked to a Member, or changed. Refresh the page.',
+    }))
+  }
   redirect(withFlash(returnQS, { closed: '1' }))
 }
 
