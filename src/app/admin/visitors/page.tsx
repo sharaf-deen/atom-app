@@ -305,7 +305,9 @@ async function markAttendedAction(formData: FormData) {
   const now = new Date()
   const due = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000)
   const admin = getSupabaseAdminClientCached()
-  const { error } = await admin
+  // One-time conditional mutation: repeated or concurrent attendance cannot
+  // overwrite the original attendance timestamp or restart follow-up.
+  const { data: changed, error } = await admin
     .from('visitor_trials')
     .update({
       status: 'attended',
@@ -315,8 +317,19 @@ async function markAttendedAction(formData: FormData) {
       updated_by: me.id,
     })
     .eq('id', id)
+    .eq('free_trial_used', false)
+    .is('trial_attended_at', null)
+    .is('linked_member_id', null)
+    .in('status', ['new', 'booked'])
+    .select('id')
+    .maybeSingle()
 
   if (error) redirect(withFlash(returnQS, { error: error.message || 'Could not mark attended.' }))
+  if (!changed) {
+    redirect(withFlash(returnQS, {
+      error: 'VISITOR_TRIAL_ALREADY_USED: this trial was already attended, converted, or is not eligible. Refresh the page.',
+    }))
+  }
   redirect(withFlash(returnQS, { attended: '1' }))
 }
 
