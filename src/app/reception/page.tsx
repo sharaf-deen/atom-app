@@ -320,13 +320,30 @@ export default async function ReceptionPage({ searchParams }: { searchParams?: S
       .or(`frozen_until.is.null,frozen_until.lt.${today}`),
   ])
 
+  // 1C.4A: coverage and outstanding dues must remain independent.
+  // A newer active subscription must never conceal an older unpaid subscription.
   const subsByMember = new Map<string, SubscriptionRow>()
+  const duesByMember = new Map<string, number>()
+  const historicDuesByMember = new Set<string>()
   const activeRows = ((activeRes.data ?? []) as RawSubscriptionRow[]).map(normalizeSubscriptionRow)
   const dueRows = ((dueRes.data ?? []) as RawSubscriptionRow[]).map(normalizeSubscriptionRow)
 
-  for (const row of [...activeRows, ...dueRows]) {
+  for (const row of activeRows) {
     if (!row?.member_id) continue
     subsByMember.set(row.member_id, chooseSubscription(subsByMember.get(row.member_id), row, today))
+  }
+
+  // Keep an expired subscription visible only if no active coverage was found.
+  for (const row of dueRows) {
+    if (!row?.member_id) continue
+    if (!subsByMember.has(row.member_id)) {
+      subsByMember.set(row.member_id, chooseSubscription(subsByMember.get(row.member_id), row, today))
+    }
+    const amount = Number(row.amount_due ?? 0)
+    if (Number.isFinite(amount) && amount > 0) {
+      duesByMember.set(row.member_id, (duesByMember.get(row.member_id) ?? 0) + amount)
+      if (row.status !== 'active') historicDuesByMember.add(row.member_id)
+    }
   }
 
   const memberIds = [...subsByMember.keys()]
@@ -344,8 +361,11 @@ export default async function ReceptionPage({ searchParams }: { searchParams?: S
       const subscription = subsByMember.get(memberId)
       if (!subscription) return null
       const profile = subscription.profiles ?? null
-      const dueAmount = Math.max(Number(subscription.amount_due ?? 0), 0)
-      const daysLeft = subscription.end_date ? diffDays(today, subscription.end_date) : null
+      const dueAmount = duesByMember.get(memberId) ?? 0
+      const historicDue = historicDuesByMember.has(memberId)
+      // Placeholder end dates for lifetime-type access are not renewal deadlines.
+      const isLifetimeDate = !!subscription.end_date && subscription.end_date >= '2090-01-01'
+      const daysLeft = subscription.end_date && !isLifetimeDate ? diffDays(today, subscription.end_date) : null
       const attendance = attendanceByMember.get(memberId) ?? []
       const validAttendance = attendance.filter((row) => row.valid)
       const lastValidAttendanceDate = validAttendance[0]?.date ?? null
@@ -357,7 +377,7 @@ export default async function ReceptionPage({ searchParams }: { searchParams?: S
       let priority = 0
 
       if (dueAmount > 0) {
-        reasons.push({ label: `Due ${fmtMoneyEGP(dueAmount)}`, tone: dueAmount >= 1000 ? 'danger' : 'warning' })
+        reasons.push({ label: `${historicDue ? 'Historical due' : 'Due'} ${fmtMoneyEGP(dueAmount)}`, tone: historicDue ? 'warning' : dueAmount >= 1000 ? 'danger' : 'warning' })
         priority += 140 + Math.min(dueAmount, 5000) / 100
       }
 
@@ -391,7 +411,7 @@ export default async function ReceptionPage({ searchParams }: { searchParams?: S
 
       const nextStep =
         dueAmount > 0
-          ? 'Settle due first'
+          ? (historicDue ? 'Review historical balance' : 'Settle due first')
           : daysLeft !== null && daysLeft <= 7
             ? 'Renew now'
             : noAttendance14d
@@ -473,7 +493,7 @@ export default async function ReceptionPage({ searchParams }: { searchParams?: S
             {statusLabel(item.subscription, today)}
             {item.daysLeft !== null ? ` · ${item.daysLeft < 0 ? 'Expired' : `${item.daysLeft} day(s) left`}` : ''}
           </div>
-          <div className="mt-1 text-xs text-[hsl(var(--muted))]">{item.dueAmount > 0 ? `Due ${fmtMoneyEGP(item.dueAmount)}` : 'No due balance'}</div>
+          <div className="mt-1 text-xs text-[hsl(var(--muted))]">{item.dueAmount > 0 ? `Outstanding ${fmtMoneyEGP(item.dueAmount)} · review payment history` : 'No due balance'}</div>
         </div>
       ),
       last_seen: (
@@ -485,7 +505,7 @@ export default async function ReceptionPage({ searchParams }: { searchParams?: S
       actions: (
         <div className="flex flex-wrap justify-end gap-2">
           <Button asChild size="sm" variant={item.dueAmount > 0 || ((item.daysLeft ?? 999) <= 7) ? 'solid' : 'outline'} href={memberHref}>
-            {item.dueAmount > 0 ? 'Settle due' : (item.daysLeft ?? 999) <= 7 ? 'Renew' : 'Open member'}
+            {item.dueAmount > 0 ? 'Review due' : (item.daysLeft ?? 999) <= 7 ? 'Renew' : 'Open member'}
           </Button>
           {canManageNotifications(me.role) ? (
             <Button asChild size="sm" variant="outline" href={notifyHref}>
@@ -529,7 +549,7 @@ export default async function ReceptionPage({ searchParams }: { searchParams?: S
           <SummaryCard label="Scans today" value={String(scansTodayRes.count ?? 0)} hint="Attendance recorded today." href="/scan" />
           <SummaryCard label="Action now" value={String(urgentCount)} hint="Urgent renewals, dues and desk-first cases." href={buildQS({ focus: 'now' })} />
           <SummaryCard label="Expiring in 7d" value={String(expiringCountRes.count ?? 0)} hint="Open the Front Desk renewal queue." href={buildQS({ focus: 'renewals' })} />
-          <SummaryCard label="Outstanding dues" value={queueValue} hint={`${dueCount} member(s) to review at the desk.`} href={buildQS({ focus: 'dues' })} />
+          <SummaryCard label="Outstanding dues" value={queueValue} hint={`${dueCount} member(s) with recorded balances; verify historical amounts before collection.`} href={buildQS({ focus: 'dues' })} />
         </div>
       </Section>
 
