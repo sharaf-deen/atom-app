@@ -165,6 +165,17 @@ export async function POST(req: Request) {
         .maybeSingle()
 
       if (familyLink?.family_id) {
+        // Do not report success for a visitor linked to a different Family
+        // than the Family Intake already established by Reception.
+        const { data: originalIntake, error: originalIntakeError } = await admin
+          .from('family_intakes')
+          .select('family_id')
+          .eq('id', visitor.family_intake_id)
+          .maybeSingle()
+        if (originalIntakeError) throw new Error('FAMILY_INTAKE_LOOKUP_FAILED: ' + originalIntakeError.message)
+        if (!originalIntake || (originalIntake.family_id && originalIntake.family_id !== familyLink.family_id)) {
+          return noStore({ ok: false, error: 'FAMILY_INTAKE_CONVERTED_FAMILY_MISMATCH' }, { status: 409 })
+        }
         const { data: family } = await admin
           .from('families')
           .select('id,name')
@@ -228,6 +239,9 @@ export async function POST(req: Request) {
         .eq('member_id', intakeChild.member_id)
         .maybeSingle()
       if (member && familyLink?.family_id) {
+        if (intake.family_id && intake.family_id !== familyLink.family_id) {
+          return noStore({ ok: false, error: 'FAMILY_INTAKE_CONVERTED_FAMILY_MISMATCH' }, { status: 409 })
+        }
         const { data: family } = await admin.from('families').select('id,name').eq('id', familyLink.family_id).maybeSingle()
         return noStore({
           ok: true,
