@@ -7,7 +7,7 @@ import { NextResponse } from 'next/server'
 import { revalidateTag, revalidatePath } from 'next/cache'
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 import { createSupabaseServerActionClient } from '@/lib/supabaseServer'
-import { canCreateSubscription, normalizeRole } from '@/lib/rbac'
+import { canCreateSubscription, canManagePayments, normalizeRole } from '@/lib/rbac'
 import { generateInvoicePdfBytes, makeInvoiceNumber, type InvoiceSnapshot } from '@/lib/invoices'
 import { getMemberLegalCompliance } from '@/lib/legalConsentEnforcement'
 
@@ -440,6 +440,22 @@ export async function POST(req: Request) {
         error: 'INVALID_PAYMENT_DATE',
         details: 'payment_date must be a valid YYYY-MM-DD date or timestamp.',
       })
+    }
+    // Functional 1C.2C: only Super Admin may record historical/future payment dates.
+    if (hasPaymentDateInput && !canManagePayments(role)) {
+      const cairoDate = (date: Date) => {
+        const parts = new Intl.DateTimeFormat('en-US', {
+          timeZone: 'Africa/Cairo', year: 'numeric', month: '2-digit', day: '2-digit',
+        }).formatToParts(date);
+        const part = (type: string) => parts.find((item) => item.type === type)?.value ?? '';
+        return `${part('year')}-${part('month')}-${part('day')}`;
+      };
+      if (cairoDate(new Date(parsedPaidAt!)) !== cairoDate(new Date())) {
+        return json(403, {
+          ok: false, error: 'PAYMENT_DATE_FINANCE_WRITE_FORBIDDEN',
+          details: 'Historical or future payment dates require Super Admin. Use today for front desk payments.',
+        });
+      }
     }
     const paid_at = parsedPaidAt ?? new Date().toISOString()
     const subscription_type = plan === 'sessions' ? 'sessions' : 'time'

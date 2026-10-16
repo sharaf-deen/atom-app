@@ -178,6 +178,22 @@ export async function POST(req: Request) {
     if (hasPaymentDateInput && !parsedPaidAt) {
       return json(400, { ok: false, error: 'INVALID_PAYMENT_DATE', details: 'payment_date must be a valid YYYY-MM-DD date or timestamp.' })
     }
+    // Functional 1C.2C: only Super Admin may record historical/future payment dates.
+    if (hasPaymentDateInput && !canManagePayments(role)) {
+      const cairoDate = (date: Date) => {
+        const parts = new Intl.DateTimeFormat('en-US', {
+          timeZone: 'Africa/Cairo', year: 'numeric', month: '2-digit', day: '2-digit',
+        }).formatToParts(date);
+        const part = (type: string) => parts.find((item) => item.type === type)?.value ?? '';
+        return `${part('year')}-${part('month')}-${part('day')}`;
+      };
+      if (cairoDate(new Date(parsedPaidAt!)) !== cairoDate(new Date())) {
+        return json(403, {
+          ok: false, error: 'PAYMENT_DATE_FINANCE_WRITE_FORBIDDEN',
+          details: 'Historical or future payment dates require Super Admin. Use today for front desk payments.',
+        });
+      }
+    }
     effectivePaidAt = parsedPaidAt ?? new Date().toISOString()
   } else if (amountDueRaw !== undefined && amountDueRaw !== null && String(amountDueRaw) !== '') {
     // Manual due adjustment is a finance-only correction, not a front-desk payment.
