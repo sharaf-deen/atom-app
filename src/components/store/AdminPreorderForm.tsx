@@ -150,7 +150,7 @@ export default function AdminPreorderForm({ products }: { products: ProductOptio
     const timer = window.setTimeout(async () => {
       setBuyerSearchBusy(true)
       try {
-        const r = await fetch(`/api/members/search?q=${encodeURIComponent(q)}&limit=8`, { cache: 'no-store' })
+        const r = await fetch(`/api/store/preorders/buyer-search?q=${encodeURIComponent(q)}&limit=8`, { cache: 'no-store' })
         const j = await r.json().catch(() => ({}))
         if (!alive) return
         if (!r.ok || !j?.ok) {
@@ -236,7 +236,7 @@ export default function AdminPreorderForm({ products }: { products: ProductOptio
       return
     }
     if (!selectedBuyer) {
-      toast.error('Select a member for the preorder')
+      toast.error('Select a buyer for the preorder')
       return
     }
     if (!Number.isFinite(qty) || qty < 1) {
@@ -305,7 +305,7 @@ export default function AdminPreorderForm({ products }: { products: ProductOptio
     <>
       <form onSubmit={openCreateConfirmation} className="grid gap-4">
         <InlineAlert compact variant="info">
-          Admin preorders must be linked to an existing member. They do not reduce stock. Use Complete & create sale when the item is delivered.
+          Admin preorders must be linked to an existing member or staff account. They do not reduce stock. Use Complete & create sale when the item is delivered.
         </InlineAlert>
 
         <div className="rounded-3xl border border-[hsl(var(--border))] bg-white p-3 shadow-sm">
@@ -336,14 +336,14 @@ export default function AdminPreorderForm({ products }: { products: ProductOptio
 
             <div className="relative">
               <Input
-                label="Member buyer *"
+                label="Buyer *"
                 value={buyerQuery}
                 onChange={(e) => {
                   setBuyerQuery(e.target.value)
                   setSelectedBuyer(null)
                 }}
                 disabled={busy}
-                placeholder="Search member by name, email, phone, or ID"
+                placeholder="Search member or staff by name, email, phone, or ID"
                 autoComplete="off"
                 required
               />
@@ -352,7 +352,7 @@ export default function AdminPreorderForm({ products }: { products: ProductOptio
                   {buyerSearchBusy ? (
                     <div className="px-3 py-2 text-sm text-[hsl(var(--muted))]">Searching…</div>
                   ) : buyerResults.length === 0 ? (
-                    <div className="px-3 py-2 text-sm text-[hsl(var(--muted))]">No member found.</div>
+                    <div className="px-3 py-2 text-sm text-[hsl(var(--muted))]">No account found.</div>
                   ) : (
                     buyerResults.map((buyer) => (
                       <button
@@ -385,11 +385,11 @@ export default function AdminPreorderForm({ products }: { products: ProductOptio
           {selectedBuyer ? (
             <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-950">
               <div className="min-w-0">
-                <div className="font-semibold">Selected member: {buyerName(selectedBuyer)}</div>
+                <div className="font-semibold">Selected buyer: {buyerName(selectedBuyer)}</div>
                 <div className="truncate text-xs text-emerald-800">{buyerMeta(selectedBuyer) || 'No contact details'}</div>
               </div>
               <Button type="button" variant="outline" size="sm" onClick={clearBuyer} disabled={busy}>
-                Clear member
+                Clear buyer
               </Button>
             </div>
           ) : null}
