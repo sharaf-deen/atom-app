@@ -57,7 +57,16 @@ export async function POST(req: Request) {
     if (!id) return json(400, { ok: false, error: 'MISSING_ID' })
 
     const { error } = await admin.from('subscriptions').delete().eq('id', id)
-    if (error) return json(500, { ok: false, error: 'DELETE_FAILED', details: error.message })
+    if (error) {
+      if (error.code === '23514') {
+        return json(409, {
+          ok: false,
+          error: 'SUBSCRIPTION_HISTORY_PROTECTED',
+          details: error.message,
+        })
+      }
+      return json(500, { ok: false, error: 'DELETE_FAILED', details: error.message })
+    }
 
     return json(200, { ok: true })
   } catch (e: any) {
