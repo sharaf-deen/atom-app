@@ -68,7 +68,7 @@ export async function GET(req: Request, ctx: { params: { id: string } }) {
     // 3) Profile exists?
     const { data: prof, error: profErr } = await admin
       .from('profiles')
-      .select('user_id, email')
+      .select('user_id, email, role')
       .eq('user_id', memberUserId)
       .maybeSingle()
 
@@ -77,6 +77,10 @@ export async function GET(req: Request, ctx: { params: { id: string } }) {
     }
     if (!prof?.user_id) {
       return noStore(NextResponse.json({ ok: false, status: 'not_found' as InviteStatus }, { status: 404 }))
+    }
+
+    if (role !== 'super_admin' && !['member', 'champion', 'vip'].includes(String(prof.role ?? ''))) {
+      return noStore(NextResponse.json({ ok: false, error: 'TARGET_ACCOUNT_RESTRICTED' }, { status: 403 }))
     }
 
     // 4) Auth user by id

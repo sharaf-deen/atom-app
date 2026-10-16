@@ -182,7 +182,7 @@ export async function POST(req: Request, ctx: { params: { id: string } }) {
 
     const { data: prof, error: profErr } = await admin
       .from('profiles')
-      .select('user_id, email, first_name, last_name')
+      .select('user_id, email, first_name, last_name, role')
       .eq('user_id', memberUserId)
       .maybeSingle()
 
@@ -196,6 +196,9 @@ export async function POST(req: Request, ctx: { params: { id: string } }) {
     }
     if (!prof?.user_id) {
       return noStore(NextResponse.json({ ok: false, error: 'NOT_FOUND' }, { status: 404 }))
+    }
+    if (role !== 'super_admin' && !['member', 'champion', 'vip'].includes(String(prof.role ?? ''))) {
+      return noStore(NextResponse.json({ ok: false, error: 'TARGET_ACCOUNT_RESTRICTED' }, { status: 403 }))
     }
 
     {
