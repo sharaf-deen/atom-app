@@ -161,6 +161,47 @@ export async function POST(req: Request) {
       })
     }
 
+    // Functional 1B.5C: linked refunds use one transaction for capacity + paid transition.
+    if (action === 'mark_paid' && existing.subscription_id) {
+      const { data: paid, error: paidError } = await admin.rpc('mark_linked_membership_refund_paid_atomic', {
+        p_refund_id: refundId,
+        p_actor: actorId,
+      })
+      if (paidError) {
+        const status = paidError.code === '42501' ? 403
+          : paidError.code === 'P0002' ? 404
+          : paidError.code === '23514' || paidError.code === '23505' ? 409
+          : paidError.code === '22023' ? 400 : 500
+        return json(status, {
+          ok: false,
+          error: paidError.code === 'PGRST202' ? 'MIGRATION_REQUIRED' : 'REFUND_FINANCIAL_CHECK_FAILED',
+          details: paidError.message,
+        })
+      }
+      if (!paid?.ok) return json(500, { ok: false, error: 'INVALID_RPC_RESPONSE' })
+      await safeAudit(admin, {
+        actor_user_id: actorId,
+        target_user_id: existing.member_id,
+        action: 'membership_refund_mark_paid',
+        action_details: {
+          refund_id: refundId,
+          member_id: existing.member_id,
+          subscription_id: existing.subscription_id,
+          amount: existing.amount,
+          previous_status: currentStatus,
+          new_status: 'paid',
+          received_amount: paid.received_amount,
+          already_refunded: paid.already_refunded,
+          remaining_refundable: paid.remaining_refundable,
+          note: 'Atomic financial capacity check; no original payment mutation.',
+        },
+      })
+      revalidatePath('/admin/membership-refunds')
+      revalidatePath('/admin/members')
+      if (existing.member_id) revalidatePath(`/members/${existing.member_id}`)
+      return json(200, { ok: true, refund: { ...existing, status: 'paid', paid_at: new Date().toISOString() } })
+    }
+
     const patch = patchForAction(action, actorId, reason)
 
     const { data: updated, error: updateErr } = await admin
