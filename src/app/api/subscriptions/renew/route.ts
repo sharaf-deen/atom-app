@@ -1,3 +1,4 @@
+import { parseSubscriptionRequestKey, subscriptionRequestFingerprint } from '@/lib/subscriptionIdempotency'
 // src/app/api/subscriptions/renew/route.ts
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -305,6 +306,9 @@ export async function POST(req: Request) {
 
     // 2) Parse payload
     const body = await req.json().catch(() => ({} as any))
+    const requestKey = parseSubscriptionRequestKey(body?.idempotency_key)
+    if (!requestKey) return json(400, { ok: false, error: 'IDEMPOTENCY_KEY_REQUIRED' })
+    const requestHash = subscriptionRequestFingerprint(body)
 
     const planRaw = body?.plan
     if (String(planRaw ?? '') === 'sessions') {
@@ -387,6 +391,28 @@ export async function POST(req: Request) {
 
     if (exErr) return json(500, { ok: false, error: 'PROFILE_CHECK_FAILED', details: exErr.message })
     if (!exists) return json(404, { ok: false, error: 'MEMBER_NOT_FOUND' })
+
+    // A retry recovers its original transaction before active-subscription/renewal calculations.
+    // Actor and request fingerprint must match: a different request cannot reuse the key.
+    const { data: priorId, error: priorErr } = await admin.rpc(
+      'atom_subscription_idempotency_lookup',
+      { p_request_key: requestKey, p_operation: 'renew', p_member_id: memberId,
+        p_actor_id: auth.user.id, p_request_hash: requestHash }
+    )
+    if (priorErr) {
+      if (priorErr.message?.includes('SUBSCRIPTION_IDEMPOTENCY_CONFLICT')) {
+        return json(409, { ok: false, error: 'SUBSCRIPTION_IDEMPOTENCY_CONFLICT' })
+      }
+      return json(500, { ok: false, error: 'IDEMPOTENCY_LOOKUP_FAILED', details: priorErr.message })
+    }
+    if (priorId) {
+      const { data: original, error: originalErr } = await admin.from('subscriptions')
+        .select('*').eq('id', priorId).eq('member_id', memberId).maybeSingle()
+      if (originalErr || !original) {
+        return json(500, { ok: false, error: 'IDEMPOTENCY_RESULT_MISSING' })
+      }
+      return json(200, { ok: true, id: priorId, ...original, replayed: true })
+    }
 
     try {
       const legalCompliance = await getMemberLegalCompliance(admin, memberId)
@@ -511,16 +537,29 @@ payload.sessions_used = null
 
     // Functional 1C.5A.1: one PostgreSQL transaction for subscription + initial payment.
     // Existing API authentication, permissions, legal consent and payload validation remain upstream.
-    const { data: insertedId, error: insErr } = await admin.rpc(
-      'atom_create_subscription_with_initial_payment',
-      { p_payload: payload, p_actor_id: auth.user.id }
+    const { data: atomicResult, error: insErr } = await admin.rpc(
+      'atom_create_subscription_idempotent',
+      { p_payload: payload, p_actor_id: auth.user.id, p_request_key: requestKey,
+        p_request_hash: requestHash, p_operation: 'renew' }
     )
     if (insErr) {
+      if (insErr.message?.includes('SUBSCRIPTION_IDEMPOTENCY_CONFLICT') ||
+          insErr.message?.includes('ACTIVE_SUBSCRIPTION_EXISTS') ||
+          insErr.message?.includes('RENEWAL_START_OVERLAP')) {
+        return json(409, { ok: false, error: insErr.message })
+      }
       const formatted = formatSubscriptionInsertError(insErr)
       return json(formatted.status, formatted.body)
     }
+    const insertedId = atomicResult?.subscription_id
     if (typeof insertedId !== 'string' || !insertedId) {
       return json(500, { ok: false, error: 'ATOMIC_SUBSCRIPTION_RESULT_MISSING' })
+    }
+    if (atomicResult?.replayed === true) {
+      const { data: original, error: originalErr } = await admin.from('subscriptions')
+        .select('*').eq('id', insertedId).eq('member_id', memberId).maybeSingle()
+      if (originalErr || !original) return json(500, { ok: false, error: 'IDEMPOTENCY_RESULT_MISSING' })
+      return json(200, { ok: true, id: insertedId, ...original, replayed: true })
     }
     const inserted = { id: insertedId }
 

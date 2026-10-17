@@ -1,11 +1,12 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 
 type Props = { memberId: string; memberName?: string }
 
 export default function SubscribeAction({ memberId, memberName }: Props) {
   const [open, setOpen] = useState(false)
+  const requestRef = useRef<{ signature: string; key: string } | null>(null)
   const [plan, setPlan] = useState<'1w'|'1m'|'3m'|'6m'|'12m'>('1m')
   const [amount, setAmount] = useState<string>('')
   const [paidAt, setPaidAt] = useState<string>(() => {
@@ -21,12 +22,17 @@ export default function SubscribeAction({ memberId, memberName }: Props) {
     try {
       setPending(true)
       setMsg('')
+      const signature = JSON.stringify({ memberId, plan, amount, paidAt })
+      if (!requestRef.current || requestRef.current.signature !== signature) {
+        requestRef.current = { signature, key: crypto.randomUUID() }
+      }
       const res = await fetch('/api/subscriptions/create', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           memberId,
           plan,
+          idempotency_key: requestRef.current.key,
           amount: amount ? Number(amount) : undefined,
           paidAt: paidAt ? new Date(paidAt).toISOString() : undefined,
         }),
