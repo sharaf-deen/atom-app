@@ -136,7 +136,3 @@ BEGIN
        || v_details;
 END;
 $$;
-
-REVOKE ALL ON FUNCTION public.atom_atomic_member_scan(uuid, uuid, text) FROM PUBLIC, anon, authenticated;
-GRANT EXECUTE ON FUNCTION public.atom_atomic_member_scan(uuid, uuid, text) TO service_role;
-
