@@ -1,4 +1,4 @@
-﻿-- Functional 1C.4B: atomic member scan. Staff-session scans remain in existing API path.
+-- Functional 1C.4B: atomic member scan. Staff-session scans remain in existing API path.
 -- No historical attendance rows are altered by this migration.
 
 CREATE OR REPLACE FUNCTION public.atom_atomic_member_scan(
