@@ -509,45 +509,20 @@ payload.sessions_used = null
 
     }
 
-    // 5) Insert subscription with service role (bypasses RLS + any trigger that inserts notifications)
-    const { data: inserted, error: insErr } = await admin
-      .from('subscriptions')
-      .insert(payload)
-      .select('id')
-      .maybeSingle()
-
+    // Functional 1C.5A.1: one PostgreSQL transaction for subscription + initial payment.
+    // Existing API authentication, permissions, legal consent and payload validation remain upstream.
+    const { data: insertedId, error: insErr } = await admin.rpc(
+      'atom_create_subscription_with_initial_payment',
+      { p_payload: payload, p_actor_id: auth.user.id }
+    )
     if (insErr) {
       const formatted = formatSubscriptionInsertError(insErr)
       return json(formatted.status, formatted.body)
     }
-
-// 5.5) Initial payment history is part of the financial write.
-// If it cannot be recorded, remove the newly-created subscription so the
-// membership record cannot claim money that is missing from payment history.
-if (inserted?.id && amount > 0) {
-  const { error: paymentHistoryError } = await admin.from('subscription_payments').insert({
-    subscription_id: inserted.id,
-    member_id: memberId,
-    amount,
-    payment_method,
-    paid_at,
-    note: 'Initial payment',
-    created_by: auth.user.id,
-  })
-
-  if (paymentHistoryError) {
-    const { error: rollbackError } = await admin.from('subscriptions').delete().eq('id', inserted.id)
-
-    return json(500, {
-      ok: false,
-      error: 'PAYMENT_HISTORY_WRITE_FAILED',
-      details: paymentHistoryError.message,
-      subscription_rolled_back: !rollbackError,
-      ...(rollbackError ? { rollback_error: rollbackError.message } : {}),
-    })
-  }
-}
-
+    if (typeof insertedId !== 'string' || !insertedId) {
+      return json(500, { ok: false, error: 'ATOMIC_SUBSCRIPTION_RESULT_MISSING' })
+    }
+    const inserted = { id: insertedId }
 
 
 // 5bis) Audit log (best-effort, never blocks)
