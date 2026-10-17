@@ -1,7 +1,7 @@
 // src/components/SubscribeDialog.tsx
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 
@@ -128,6 +128,7 @@ export default function SubscribeDialog({
   const router = useRouter()
 
   const [open, setOpen] = useState(false)
+  const requestRef = useRef<{ signature: string; key: string } | null>(null)
   const [plan, setPlan] = useState<Plan>(() => normalizeSellablePlan(defaultPlan))
   const [sessions, setSessions] = useState<number>(Math.min(Math.max(defaultSessions ?? 10, 1), 10))
   const [amount, setAmount] = useState<string>('0')
@@ -151,6 +152,7 @@ export default function SubscribeDialog({
     setBusy(false)
     setConfirmOpen(false)
     setStatus({ kind: '', msg: '' })
+    requestRef.current = null
   }, [defaultPlan, defaultSessions, defaultStartDate, open])
 
   useEffect(() => {
@@ -260,6 +262,13 @@ export default function SubscribeDialog({
         body.sessions_total = Math.floor(sessions)
         body.start_date = dateOk ? startDate : todayLocalDateStr()
       }
+
+      // Keep the same key while retrying an identical operation after a network error.
+      const signature = JSON.stringify({ mode, ...body })
+      if (!requestRef.current || requestRef.current.signature !== signature) {
+        requestRef.current = { signature, key: crypto.randomUUID() }
+      }
+      body.idempotency_key = requestRef.current.key
 
       const endpoint = mode === 'renew' ? '/api/subscriptions/renew' : '/api/subscriptions/create'
       const r = await fetch(endpoint, {
