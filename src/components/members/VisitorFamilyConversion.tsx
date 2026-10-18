@@ -55,6 +55,13 @@ type ConversionResult = {
   guardian_account_created?: boolean
   guardian_invite_sent?: boolean
   guardian_invite_warning?: string | null
+  legal_consent?: {
+    complete: boolean | null
+    required_count: number | null
+    accepted_count: number | null
+    missing_document_titles: string[]
+    error?: string
+  }
   message?: string
 }
 
@@ -98,7 +105,7 @@ export default function VisitorFamilyConversion({
             No second Member will be created.
           </InlineAlert>
           <div className="mt-4 flex flex-wrap gap-2">
-            {memberUserId ? <Button asChild href={`/members/${memberUserId}`}>Open member</Button> : null}
+            {memberUserId ? <Button asChild href={`/members/${memberUserId}#legal-consents`}>Review legal consents</Button> : null}
             <Button asChild variant="outline" href="/admin/visitors">Back to Visitors</Button>
           </div>
         </CardContent>
@@ -174,6 +181,18 @@ export default function VisitorFamilyConversion({
           </InlineAlert>
         ) : null}
 
+        {result.legal_consent?.complete === false ? (
+          <InlineAlert variant="warning">
+            Legal consent is incomplete ({result.legal_consent.accepted_count ?? 0}/{result.legal_consent.required_count ?? 0} current required documents). A parent or legal guardian must review and accept the documents for this child before a new subscription can be created or renewed. Conversion and trial history are preserved.
+          </InlineAlert>
+        ) : result.legal_consent?.complete !== true ? (
+          <InlineAlert variant="warning">
+            The legal consent status could not be verified. Open the Member Legal &amp; consents section and confirm the current documents before starting a subscription.
+          </InlineAlert>
+        ) : (
+          <InlineAlert variant="success">Current required legal consents are complete.</InlineAlert>
+        )}
+
         <Card>
           <CardHeader><CardTitle>Conversion complete</CardTitle></CardHeader>
           <CardContent>
@@ -185,8 +204,8 @@ export default function VisitorFamilyConversion({
             </div>
 
             <div className="mt-4 flex flex-wrap gap-2">
-              <Button asChild href={`/members/${result.member_user_id}`}>
-                Open member & add membership
+              <Button asChild href={`/members/${result.member_user_id}#legal-consents`}>
+                {result.legal_consent?.complete === true ? 'Open member profile' : 'Review & record guardian legal consent'}
               </Button>
               <Button asChild variant="outline" href="/admin/visitors">
                 Back to Visitors
@@ -277,7 +296,8 @@ export default function VisitorFamilyConversion({
               <li>create one family-managed Member profile with Member ID and QR;</li>
               <li>reuse or create the Family Account and guardian login safely;</li>
               <li>preserve the original Visitor/trial history;</li>
-              <li>never create an Auth/login account for the child.</li>
+              <li>never create an Auth/login account for the child;</li>
+              <li>check current legal consent status after conversion. A parent/guardian must accept missing required documents individually for this child before a new membership purchase.</li>
             </ul>
           </div>
           <div className="mt-4 flex flex-wrap gap-2">

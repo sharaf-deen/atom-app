@@ -82,7 +82,7 @@ export default async function VisitorFamilyConversionPage({
     <main>
       <PageHeader
         title="Convert Visitor to Family Member"
-        subtitle="Create the child Member without duplicate Auth, Family or Visitor records."
+        subtitle="Preserve Visitor and Family records, then confirm each child’s current legal consent before a new subscription."
         right={
           <div className="flex flex-wrap gap-2">
             <Button asChild variant="outline" href="/admin/members/family-operations">Family Operations</Button>

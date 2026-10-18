@@ -5,6 +5,7 @@ export const revalidate = 0
 import { NextResponse } from 'next/server'
 import { revalidatePath, revalidateTag } from 'next/cache'
 import { canAccessFamilyIntake, normalizeRole } from '@/lib/rbac'
+import { getMemberLegalCompliance } from '@/lib/legalConsentEnforcement'
 import { extractActionLink, sendFamilyParentInviteEmail } from '@/lib/memberInviteEmail'
 import { createSupabaseAdminClient } from '@/lib/supabaseAdmin'
 import { createSupabaseServerActionClient } from '@/lib/supabaseServer'
@@ -499,6 +500,34 @@ export async function POST(req: Request) {
       .eq('id', familyId)
       .maybeSingle()
 
+    // Conversion has committed. A missing legal acceptance does not roll back the
+    // Family or Visitor history; it must be collected from the actual guardian.
+    // An inability to check compliance must never be presented as "complete".
+    let legalConsent: {
+      complete: boolean | null
+      required_count: number | null
+      accepted_count: number | null
+      missing_document_titles: string[]
+      error?: string
+    }
+    try {
+      const compliance = await getMemberLegalCompliance(admin, memberUserId)
+      legalConsent = {
+        complete: compliance.complete,
+        required_count: compliance.requiredCount,
+        accepted_count: compliance.acceptedCount,
+        missing_document_titles: compliance.missingDocuments.map((doc) => `${doc.title} v${doc.version_label}`),
+      }
+    } catch {
+      legalConsent = {
+        complete: null,
+        required_count: null,
+        accepted_count: null,
+        missing_document_titles: [],
+        error: 'LEGAL_CONSENT_STATUS_UNAVAILABLE',
+      }
+    }
+
     revalidateFamilyViews(memberUserId)
 
     return noStore({
@@ -512,6 +541,7 @@ export async function POST(req: Request) {
       guardian_account_created: Boolean(createdAuthUserId),
       guardian_invite_sent: guardianInviteSent,
       guardian_invite_warning: guardianInviteWarning,
+      legal_consent: legalConsent,
       message: conversion?.already_converted
         ? 'Visitor was already converted to this family Member. No duplicate was created.'
         : 'Visitor converted to a family-managed Member. Trial history was preserved.',
