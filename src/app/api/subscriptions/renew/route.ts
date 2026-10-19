@@ -543,6 +543,9 @@ payload.sessions_used = null
         p_request_hash: requestHash, p_operation: 'renew' }
     )
     if (insErr) {
+      if (insErr.message?.includes('LEGAL_CONSENT_REQUIRED')) {
+        return json(409, { ok: false, error: 'LEGAL_CONSENT_REQUIRED' })
+      }
       if (insErr.message?.includes('SUBSCRIPTION_IDEMPOTENCY_CONFLICT') ||
           insErr.message?.includes('ACTIVE_SUBSCRIPTION_EXISTS') ||
           insErr.message?.includes('RENEWAL_START_OVERLAP')) {
