@@ -14,12 +14,26 @@ function ageFromDob(dob?: string | null) {
   if (!dob || !/^\d{4}-\d{2}-\d{2}$/.test(dob)) return null
   const [y, m, d] = dob.split('-').map(Number)
   const born = new Date(Date.UTC(y, m - 1, d))
-  if (Number.isNaN(born.getTime())) return null
+  if (
+    Number.isNaN(born.getTime()) ||
+    born.getUTCFullYear() !== y ||
+    born.getUTCMonth() !== m - 1 ||
+    born.getUTCDate() !== d
+  ) return null
 
-  const now = new Date()
-  let age = now.getUTCFullYear() - born.getUTCFullYear()
-  const mm = now.getUTCMonth() - born.getUTCMonth()
-  if (mm < 0 || (mm === 0 && now.getUTCDate() < born.getUTCDate())) age--
+  // Match the Cairo calendar date used by server-side legal validation.
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Africa/Cairo',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(new Date())
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]))
+  const ty = Number(values.year)
+  const tm = Number(values.month)
+  const td = Number(values.day)
+  let age = ty - y
+  if (tm < m || (tm === m && td < d)) age--
   return age >= 0 ? age : null
 }
 
@@ -30,7 +44,6 @@ export default function LegalConsentBackfillForm({
   requiredDocuments,
   acceptedDocumentIds,
   isSelf,
-  canStaffRecord,
 }: {
   memberUserId: string
   memberDateOfBirth: string | null
@@ -38,7 +51,6 @@ export default function LegalConsentBackfillForm({
   requiredDocuments: LegalDocument[]
   acceptedDocumentIds: string[]
   isSelf: boolean
-  canStaffRecord: boolean
 }) {
   const router = useRouter()
   const age = useMemo(() => ageFromDob(memberDateOfBirth), [memberDateOfBirth])
@@ -53,10 +65,12 @@ export default function LegalConsentBackfillForm({
   const [relationship, setRelationship] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [success, setSuccess] = useState<string | null>(null)
 
   if (missingDocuments.length === 0) return null
 
-  const minorSelfBlocked = isMinor === true && isSelf && !canStaffRecord
+  // The API rejects self-acceptance for all minors, regardless of staff role.
+  const minorSelfBlocked = isMinor === true && isSelf
   const identityOk =
     isMinor === false
       ? capacity === 'participant' && acceptorName.trim().length >= 2
@@ -80,6 +94,7 @@ export default function LegalConsentBackfillForm({
     if (!canSubmit) return
     setBusy(true)
     setError(null)
+    setSuccess(null)
 
     try {
       const response = await fetch(`/api/members/${memberUserId}/legal-consents`, {
@@ -98,6 +113,10 @@ export default function LegalConsentBackfillForm({
       if (!response.ok || data?.ok !== true) {
         throw new Error(data?.details || data?.error || 'LEGAL_CONSENT_FAILED')
       }
+      // Refresh the server-rendered history; do not claim success if nothing was inserted.
+      setSuccess(Number(data.inserted ?? 0) > 0
+        ? 'Acceptance recorded. Refreshing legal status…'
+        : 'No new acceptance recorded. Refreshing legal status…')
       router.refresh()
     } catch (cause: any) {
       setError(String(cause?.message || cause))
@@ -196,6 +215,10 @@ export default function LegalConsentBackfillForm({
               </label>
             ) : null}
           </div>
+
+          {success ? (
+            <div role="status" className="mt-3 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-900">{success}</div>
+          ) : null}
 
           {error ? (
             <div className="mt-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-800">{error}</div>
