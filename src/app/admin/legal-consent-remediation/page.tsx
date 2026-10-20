@@ -49,7 +49,7 @@ async function fetchActiveMemberIds(admin: ReturnType<typeof createSupabaseAdmin
 export default async function LegalConsentRemediationPage({
   searchParams,
 }: {
-  searchParams?: { q?: string | string[]; group?: string | string[]; page?: string | string[] }
+  searchParams?: { q?: string | string[]; group?: string | string[]; progress?: string | string[]; order?: string | string[]; page?: string | string[] }
 }) {
   const me = await getSessionUser()
   if (!me) redirect('/login?next=/admin/legal-consent-remediation')
@@ -60,6 +60,10 @@ export default async function LegalConsentRemediationPage({
   const q = (first(searchParams?.q) ?? '').trim().slice(0, 100)
   const rawGroup = first(searchParams?.group) ?? 'all'
   const group = ['all', 'minor', 'adult', 'unknown'].includes(rawGroup) ? rawGroup : 'all'
+  const rawProgress = first(searchParams?.progress) ?? 'all'
+  const progress = ['all', 'not_started', 'partial'].includes(rawProgress) ? rawProgress : 'all'
+  const rawOrder = first(searchParams?.order) ?? 'priority'
+  const order = ['priority', 'name'].includes(rawOrder) ? rawOrder : 'priority'
   const rawPage = Number(first(searchParams?.page) ?? 1)
   const page = Number.isSafeInteger(rawPage) ? Math.max(1, Math.min(rawPage, 10000)) : 1
   const today = cairoToday()
@@ -69,6 +73,8 @@ export default async function LegalConsentRemediationPage({
   let requiredCount = 0
   let unknownCount = 0
   let minorCount = 0
+  let notStartedCount = 0
+  let partialCount = 0
   let errorMessage: string | null = null
   try {
     const admin = createSupabaseAdminClient()
@@ -110,9 +116,18 @@ export default async function LegalConsentRemediationPage({
       const kind: Candidate['group'] = age === null ? 'unknown' : age < 18 ? 'minor' : 'adult'
       if (kind === 'minor') minorCount++
       if (kind === 'unknown') unknownCount++
+      if (accepted.size === 0) notStartedCount++
+      else partialCount++
       candidates.push({ profile, missing, accepted: docs.length - missing.length, group: kind })
     }
     candidates.sort((a, b) => {
+      const priority = (item: Candidate) => item.group === 'unknown' ? 0 : item.group === 'minor' ? 1 : 2
+      if (order === 'priority') {
+        const byCategory = priority(a) - priority(b)
+        if (byCategory) return byCategory
+        const byProgress = a.accepted - b.accepted
+        if (byProgress) return byProgress
+      }
       const an = `${a.profile.first_name ?? ''} ${a.profile.last_name ?? ''}`.trim()
       const bn = `${b.profile.first_name ?? ''} ${b.profile.last_name ?? ''}`.trim()
       return an.localeCompare(bn) || (a.profile.member_id ?? '').localeCompare(b.profile.member_id ?? '')
@@ -123,6 +138,8 @@ export default async function LegalConsentRemediationPage({
 
   const filtered = candidates.filter((candidate) => {
     if (group !== 'all' && candidate.group !== group) return false
+    if (progress === 'not_started' && candidate.accepted !== 0) return false
+    if (progress === 'partial' && candidate.accepted === 0) return false
     if (!q) return true
     return `${candidate.profile.member_id ?? ''} ${candidate.profile.first_name ?? ''} ${candidate.profile.last_name ?? ''}`
       .toLocaleLowerCase().includes(q.toLocaleLowerCase())
@@ -134,6 +151,8 @@ export default async function LegalConsentRemediationPage({
     const params = new URLSearchParams()
     if (q) params.set('q', q)
     if (group !== 'all') params.set('group', group)
+    if (progress !== 'all') params.set('progress', progress)
+    if (order !== 'priority') params.set('order', order)
     params.set('page', String(p))
     return `/admin/legal-consent-remediation?${params.toString()}`
   }
@@ -143,6 +162,14 @@ export default async function LegalConsentRemediationPage({
       <PageHeader title="Legal Consent Remediation" subtitle="Read-only follow-up of active members who need current legal documents accepted." />
       <Section className="space-y-5">
         <p className="text-sm text-[hsl(var(--muted))]">Only record a real acceptance in the member profile, after the member or guardian has reviewed the required documents. Historical memberships remain unchanged.</p>
+        <div className="rounded-2xl border border-[hsl(var(--border))] bg-white p-4 text-sm">
+          <div className="font-semibold">Reception procedure</div>
+          <ol className="mt-2 list-decimal space-y-1 pl-5 text-[hsl(var(--muted))]">
+            <li>Confirm the member identity and date of birth; fix missing or invalid DOB before accepting.</li>
+            <li>For minors, have the parent or legal guardian review the required documents in person.</li>
+            <li>Open Legal &amp; Consents, record only the actual acceptance, and return here to confirm the updated status.</li>
+          </ol>
+        </div>
         {errorMessage ? (
           <div role="alert" className="rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800">{errorMessage} No compliance results are displayed until the lookup succeeds.</div>
         ) : (
@@ -160,9 +187,12 @@ export default async function LegalConsentRemediationPage({
                 </div>
               ))}
             </div>
-            <form method="GET" className="grid gap-3 rounded-2xl border border-[hsl(var(--border))] bg-white p-4 sm:grid-cols-[1fr_auto_auto] sm:items-end">
+            <div className="text-sm text-[hsl(var(--muted))]">Not started: <strong>{notStartedCount}</strong> · Partially accepted: <strong>{partialCount}</strong>. Priority order shows missing/invalid DOB first, then minors, then adults.</div>
+            <form method="GET" className="grid gap-3 rounded-2xl border border-[hsl(var(--border))] bg-white p-4 sm:grid-cols-2 lg:grid-cols-5 sm:items-end">
               <label className="grid gap-1 text-sm"><span>Member name or ATOM ID</span><input name="q" defaultValue={q} maxLength={100} placeholder="Search members…" className="rounded-xl border border-[hsl(var(--border))] px-3 py-2" /></label>
               <label className="grid gap-1 text-sm"><span>Category</span><select name="group" defaultValue={group} className="rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2"><option value="all">All incomplete</option><option value="minor">Minors</option><option value="adult">Adults</option><option value="unknown">DOB to review</option></select></label>
+              <label className="grid gap-1 text-sm"><span>Progress</span><select name="progress" defaultValue={progress} className="rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2"><option value="all">All progress</option><option value="not_started">Not started</option><option value="partial">Partially accepted</option></select></label>
+              <label className="grid gap-1 text-sm"><span>Order</span><select name="order" defaultValue={order} className="rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2"><option value="priority">Operational priority</option><option value="name">Member name</option></select></label>
               <button type="submit" className="rounded-xl bg-black px-4 py-2 text-sm font-semibold text-white">Apply filters</button>
             </form>
             <p className="text-sm text-[hsl(var(--muted))]">{filtered.length} matching member(s) · {requiredCount} current required document(s) · {today} (Cairo)</p>
@@ -171,13 +201,13 @@ export default async function LegalConsentRemediationPage({
                 <div key={profile.user_id} className="flex flex-col gap-3 rounded-2xl border border-[hsl(var(--border))] bg-white p-4 sm:flex-row sm:items-center sm:justify-between">
                   <div className="min-w-0">
                     <div className="font-semibold">{`${profile.first_name ?? ''} ${profile.last_name ?? ''}`.trim() || 'Unnamed member'}</div>
-                    <div className="mt-1 text-xs text-[hsl(var(--muted))]">{profile.member_id ?? 'No ATOM ID'} · {kind === 'minor' ? 'Parent/guardian required' : kind === 'unknown' ? 'Date of birth needs review' : 'Adult'} · {accepted}/{requiredCount} accepted</div>
+                    <div className="mt-1 text-xs text-[hsl(var(--muted))]">{profile.member_id ?? 'No ATOM ID'} · {kind === 'minor' ? 'Parent/guardian required' : kind === 'unknown' ? 'Date of birth needs review' : 'Adult'} · {accepted}/{requiredCount} accepted · {accepted === 0 ? 'Not started' : 'Partially accepted'}</div>
                     <div className="mt-2 text-sm">Missing: {missing.map((doc) => `${doc.title} (v${doc.version_label})`).join(', ')}</div>
                   </div>
                   <Link href={`/members/${profile.user_id}#legal-consents`} className="inline-flex shrink-0 items-center justify-center rounded-xl border border-[hsl(var(--border))] px-4 py-2 text-sm font-semibold hover:bg-gray-50">Open Legal &amp; Consents →</Link>
                 </div>
               ))}
-              {filtered.length === 0 && <div className="rounded-2xl border p-5 text-sm">No matching members need legal consent follow-up.</div>}
+              {filtered.length === 0 && <div className="rounded-2xl border p-5 text-sm">No incomplete members match these filters. Clear the filters to review the complete remediation queue.</div>}
             </div>
             {pages > 1 && (
               <nav aria-label="Pagination" className="flex items-center justify-between gap-3 text-sm">
