@@ -58,7 +58,6 @@ export default async function MemberLegalConsentsSection({
   const canView = isSelf || ['reception', 'admin', 'super_admin', 'head_coach'].includes(String(viewerRole))
   if (!canView) return null
 
-  const canStaffRecord = ['reception', 'admin', 'super_admin', 'head_coach'].includes(String(viewerRole))
   const admin = createSupabaseAdminClient()
 
   const [
@@ -198,7 +197,6 @@ export default async function MemberLegalConsentsSection({
           requiredDocuments={requiredDocuments}
           acceptedDocumentIds={requiredDocuments.filter((doc) => acceptedByVersion.has(doc.id)).map((doc) => doc.id)}
           isSelf={isSelf}
-          canStaffRecord={canStaffRecord}
         />
       ) : null}
 
