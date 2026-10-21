@@ -26,11 +26,13 @@ export async function issueRegistrationEmailVerification(
   const token = randomBytes(TOKEN_BYTES).toString('hex')
   const expiresAt = new Date(Date.now() + TOKEN_MINUTES * 60_000).toISOString()
   const now = new Date().toISOString()
+  const cutoff = new Date(Date.now() - 5 * 60_000).toISOString()
   const { data, error } = await admin
     .from('atom_public_registration_requests')
     .update({
       verification_token_hash: digest(token),
       verification_expires_at: expiresAt,
+      verification_issued_at: now,
       // Database-side snapshot is filled from the request's authoritative email
       // after initial loading; checked again under the conditional update below.
     })
@@ -38,6 +40,7 @@ export async function issueRegistrationEmailVerification(
     .eq('status', 'pending_verification')
     .is('identity_verified_at', null)
     .gt('expires_at', now)
+    .or(`verification_issued_at.is.null,verification_issued_at.lt.${cutoff}`)
     .select('id,account_email,guardian_email,is_minor')
     .maybeSingle()
   if (error) throw new Error('REGISTRATION_VERIFICATION_ISSUE_FAILED')
