@@ -26,13 +26,15 @@ export async function checkPublicRegistrationProvisioningReadiness(
 
   const { data: request, error } = await admin
     .from('atom_public_registration_requests')
-    .select('id,status,expires_at,identity_verified_at,account_email,guardian_email,guardian_full_name,guardian_relationship,is_minor,member_user_id,family_id')
+    .select('id,status,expires_at,identity_verified_at,verified_account_email,account_email,guardian_email,guardian_full_name,guardian_relationship,is_minor,member_user_id,family_id')
     .eq('id', requestId)
     .maybeSingle()
   if (error) throw new Error('REGISTRATION_REQUEST_LOOKUP_FAILED')
   if (!request) return { ready: false, reason: 'REGISTRATION_REQUEST_NOT_FOUND' }
   if (request.status !== 'under_review') return { ready: false, reason: 'REGISTRATION_NOT_APPROVED_FOR_REVIEW' }
-  if (!request.identity_verified_at) return { ready: false, reason: 'ACCOUNT_EMAIL_NOT_VERIFIED' }
+  if (!request.identity_verified_at || normalizedEmail(request.verified_account_email) !== normalizedEmail(request.account_email)) {
+    return { ready: false, reason: 'ACCOUNT_EMAIL_NOT_VERIFIED' }
+  }
   if (!request.expires_at || Date.parse(request.expires_at) <= Date.now()) return { ready: false, reason: 'REGISTRATION_REQUEST_EXPIRED' }
   if (request.member_user_id || request.family_id) return { ready: false, reason: 'REGISTRATION_ALREADY_LINKED' }
 
