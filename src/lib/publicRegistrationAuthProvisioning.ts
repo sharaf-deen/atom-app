@@ -26,6 +26,7 @@ export async function provisionNewRegistrationAuth(admin: any, requestId: string
   const { data: created, error: authError } = await admin.auth.admin.createUser({
     email: audit.accountEmail,
     email_confirm: true,
+    ...(audit.isMinor ? { user_metadata: { account_type: 'family_parent' } } : {}),
     app_metadata: { atom_registration_request_id: requestId, atom_registration_claim_id: claimId },
   })
   if (authError || !created?.user?.id)
