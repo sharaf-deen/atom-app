@@ -561,7 +561,7 @@ export default async function ReceptionPage({ searchParams }: { searchParams?: S
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
           <ActionTile href="/scan" title="Scan" desc="Check in a member and validate access." icon={ScanLine} />
           <ActionTile href="/members" title="Find member" desc="Search and open a member account quickly." icon={Users} />
-          <ActionTile href="/kiosk" title="Create member" desc="Start a new membership registration." icon={IdCard} />
+          <ActionTile href="/reception/registrations" title="Registrations" desc="Adult and parent/child registration follow-up." icon={IdCard} />
           <ActionTile href="/admin/visitors" title="New visitor" desc="Register or manage a free trial visitor." icon={UserPlus} />
         </div>
       </Section>
