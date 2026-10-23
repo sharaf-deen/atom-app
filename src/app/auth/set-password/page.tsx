@@ -65,12 +65,44 @@ export default function SetPasswordPage() {
 
     setBusy(true)
 
-    const { error: updErr } = await supabase.auth.updateUser({ password })
-
-    if (updErr) {
+    // Registration identities use an authenticated server-side password mutation
+    // and an atomic DB finalization. Other password-change flows remain unchanged.
+    const { data: identity, error: identityError } = await supabase.auth.getUser()
+    if (identityError || !identity.user) {
       setBusy(false)
-      setError(updErr.message)
+      setError('Your session has expired. Please open your invitation again.')
       return
+    }
+    const isRegistration = Boolean(identity.user.app_metadata?.atom_registration_request_id)
+    if (isRegistration) {
+      let complete: { ok?: boolean; code?: string } = {}
+      try {
+        const response = await fetch('/api/public-registration/activation/complete', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'same-origin',
+          body: JSON.stringify({ password }),
+        })
+        complete = await response.json().catch(() => ({}))
+        if (!response.ok || !complete.ok) {
+          setBusy(false)
+          setError(complete.code === 'PASSWORD_UPDATED_ACTIVATION_REVIEW_REQUIRED'
+            ? 'Your password was saved, but activation needs staff review. Please contact ATOM reception.'
+            : 'Account activation is unavailable. Please contact ATOM reception before trying again.')
+          return
+        }
+      } catch {
+        setBusy(false)
+        setError('Unable to confirm activation. Please contact ATOM reception.')
+        return
+      }
+    } else {
+      const { error: updErr } = await supabase.auth.updateUser({ password })
+      if (updErr) {
+        setBusy(false)
+        setError(updErr.message)
+        return
+      }
     }
 
     // Resync cookies server side (safe)
