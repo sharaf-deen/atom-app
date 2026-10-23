@@ -83,6 +83,18 @@ export default function SetPasswordPage() {
       }).catch(() => {})
     }
 
+    // An advisory checkpoint only: never treat this as proof of legal acceptance.
+    // A failed report must not undo a password already successfully changed.
+    try {
+      await fetch('/api/public-registration/activation/report', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+      })
+    } catch {
+      // Existing non-registration password flows must continue uninterrupted.
+    }
+
     setBusy(false)
     setSuccess('Password set successfully. Redirecting…')
 
