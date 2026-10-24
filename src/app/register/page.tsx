@@ -19,7 +19,7 @@ type LegalDocument = { id: string; title: string; version: string; url: string }
 export default async function PublicRegistrationPage() {
   // Do not advertise or activate this page until the secure public registration
   // endpoint, email verification and rate limits are deployed (1D.1B/1D.1C).
-  if (process.env.ATOM_PUBLIC_REGISTRATION_PREVIEW !== 'true') {
+  if (process.env.ATOM_PUBLIC_REGISTRATION_PREVIEW !== 'true' && process.env.ATOM_PUBLIC_REGISTRATION_SUBMIT_ENABLED !== 'true') {
     return (
       <main className="mx-auto max-w-xl px-5 py-16 text-center">
         <h1 className="text-2xl font-semibold">ATOM Member Registration</h1>
@@ -46,7 +46,7 @@ export default async function PublicRegistrationPage() {
     }))
     if (!documents.length || !programs.length) throw new Error('PUBLIC_REGISTRATION_CONFIGURATION_INCOMPLETE')
 
-    return <PublicRegistrationForm programs={programs} documents={documents} />
+    return <PublicRegistrationForm programs={programs} documents={documents} submitEnabled={process.env.ATOM_PUBLIC_REGISTRATION_SUBMIT_ENABLED === 'true'} />
   } catch {
     return (
       <main className="mx-auto max-w-xl px-5 py-16 text-center">

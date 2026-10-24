@@ -6,7 +6,7 @@ import type { MemberProgramOption } from '@/lib/memberPrograms'
 
 type LegalDocument = { id: string; title: string; version: string; url: string }
 
-type Props = { programs: MemberProgramOption[]; documents: LegalDocument[] }
+type Props = { programs: MemberProgramOption[]; documents: LegalDocument[]; submitEnabled: boolean }
 
 function validAge(dob: string): number | null {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(dob)) return null
@@ -22,7 +22,10 @@ function validAge(dob: string): number | null {
   return age >= 0 ? age : null
 }
 
-export default function PublicRegistrationForm({ programs, documents }: Props) {
+export default function PublicRegistrationForm({ programs, documents, submitEnabled }: Props) {
+  const [submitting, setSubmitting] = useState(false)
+  const [submitted, setSubmitted] = useState(false)
+  const [submitError, setSubmitError] = useState('')
   const [firstName, setFirstName] = useState('')
   const [lastName, setLastName] = useState('')
   const [email, setEmail] = useState('')
@@ -41,6 +44,29 @@ export default function PublicRegistrationForm({ programs, documents }: Props) {
   const className = 'w-full rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-black'
   const allAccepted = documents.every(d => accepted.includes(d.id))
 
+  async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault()
+    if (!submitEnabled || submitting || age === null || !selectedProgram || !allAccepted) return
+    setSubmitError('')
+    setSubmitting(true)
+    try {
+      const res = await fetch('/api/public-registration/submit', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          request_key: crypto.randomUUID(), first_name: firstName, last_name: lastName,
+          email, phone, date_of_birth: dob, program_key: selectedProgram,
+          ...(isMinor ? { guardian_name: guardianName, guardian_email: guardianEmail, guardian_relationship: guardianRelationship } : {}),
+          accepted_document_version_ids: accepted,
+        }),
+      })
+      if (!res.ok) { setSubmitError(res.status === 400 ? 'Please review your details and legal documents.' : 'Registration is temporarily unavailable. Please contact ATOM Reception.'); return }
+      setSubmitted(true)
+    } catch { setSubmitError('Connection error. Please try again or contact ATOM Reception.') }
+    finally { setSubmitting(false) }
+  }
+
+  if (submitted) return <main className="mx-auto max-w-xl px-4 py-16 text-center"><h1 className="text-2xl font-semibold">Registration request received</h1><p className="mt-4" role="status">If eligible, ATOM Reception will review your request and arrange email verification. No member account or paid subscription has been created.</p><Link href="/" className="mt-6 inline-block underline">Home</Link></main>
+
   return (
     <main className="mx-auto max-w-2xl px-4 py-8 sm:py-12">
       <div className="mb-6 flex items-center justify-between gap-3">
@@ -50,10 +76,10 @@ export default function PublicRegistrationForm({ programs, documents }: Props) {
         </div>
         <Link href="/" className="text-sm underline underline-offset-4">Home</Link>
       </div>
-      <div className="mb-5 rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-950" role="status">
+      {!submitEnabled && <div className="mb-5 rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-950" role="status">
         <strong>Registration preview.</strong> This form is not accepting submissions yet. No account, membership or invitation email will be created in this phase.
-      </div>
-      <form className="space-y-5 rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4 sm:p-6" onSubmit={e => e.preventDefault()}>
+      </div>}
+      <form className="space-y-5 rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4 sm:p-6" onSubmit={handleSubmit}>
         <div className="grid gap-4 sm:grid-cols-2">
           <label className="block text-sm font-medium">First name *
             <input className={className} required autoComplete="given-name" maxLength={100} value={firstName} onChange={e => setFirstName(e.target.value)} />
@@ -109,8 +135,9 @@ export default function PublicRegistrationForm({ programs, documents }: Props) {
           ))}
         </fieldset>
         <p className="text-xs text-[hsl(var(--muted))]">An account will only be created after server-side verification and explicit confirmation. Submitting this form will not activate a paid membership.</p>
-        <button type="button" disabled className="w-full cursor-not-allowed rounded-xl bg-black px-5 py-3 font-semibold text-white opacity-50">Submit registration — available soon</button>
-        <p className="text-center text-xs text-[hsl(var(--muted))]">Preview only · {allAccepted ? 'Documents checked' : 'Document review incomplete'} · No data is sent</p>
+        {submitError && <p role="alert" className="text-sm text-red-700">{submitError}</p>}
+        <button type={submitEnabled ? 'submit' : 'button'} disabled={!submitEnabled || submitting || age === null || !selectedProgram || !allAccepted} className="w-full rounded-xl bg-black px-5 py-3 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50">{!submitEnabled ? 'Submit registration — available soon' : submitting ? 'Submitting…' : 'Submit registration request'}</button>
+        <p className="text-center text-xs text-[hsl(var(--muted))]">{submitEnabled ? 'Reception will review eligible requests before email verification.' : 'Preview only · No data is sent'} · {allAccepted ? 'Documents checked' : 'Document review incomplete'}</p>
       </form>
     </main>
   )
