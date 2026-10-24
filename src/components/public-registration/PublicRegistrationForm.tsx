@@ -33,6 +33,7 @@ export default function PublicRegistrationForm({ programs, documents, submitEnab
   const [dob, setDob] = useState('')
   const [program, setProgram] = useState('')
   const [accepted, setAccepted] = useState<string[]>([])
+  const [signerConfirmed, setSignerConfirmed] = useState(false)
   const [guardianName, setGuardianName] = useState('')
   const [guardianEmail, setGuardianEmail] = useState('')
   const [guardianRelationship, setGuardianRelationship] = useState('')
@@ -46,7 +47,7 @@ export default function PublicRegistrationForm({ programs, documents, submitEnab
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
-    if (!submitEnabled || submitting || age === null || !selectedProgram || !allAccepted) return
+    if (!submitEnabled || submitting || age === null || !selectedProgram || !allAccepted || !signerConfirmed) return
     setSubmitError('')
     setSubmitting(true)
     try {
@@ -94,7 +95,7 @@ export default function PublicRegistrationForm({ programs, documents, submitEnab
             <input className={className} type="tel" autoComplete="tel" maxLength={30} value={phone} onChange={e => setPhone(e.target.value)} />
           </label>
           <label className="block text-sm font-medium">Date of birth *
-            <input className={className} type="date" required value={dob} onChange={e => { setDob(e.target.value); setProgram(''); setAccepted([]) }} />
+            <input className={className} type="date" required value={dob} onChange={e => { setDob(e.target.value); setProgram(''); setAccepted([]); setSignerConfirmed(false) }} />
             {dob && age === null ? <span className="mt-1 block text-xs text-red-700">Enter a valid date of birth.</span> : null}
           </label>
           <label className="block text-sm font-medium">Academy program *
@@ -134,9 +135,16 @@ export default function PublicRegistrationForm({ programs, documents, submitEnab
             </div>
           ))}
         </fieldset>
+        <label className="flex items-start gap-3 rounded-xl border border-[hsl(var(--border))] p-3 text-sm">
+          <input type="checkbox" className="mt-1" required checked={signerConfirmed}
+            onChange={e => setSignerConfirmed(e.target.checked)} />
+          <span>{isMinor
+            ? 'I confirm that I am the parent or legal guardian named above and that I personally selected the legal documents above. My identity and authority will be verified before legal consent can be finalized.'
+            : 'I confirm I am the adult participant named above and that I personally selected the legal documents above. These selections will be verified before legal consent can be finalized.'}</span>
+        </label>
         <p className="text-xs text-[hsl(var(--muted))]">An account will only be created after server-side verification and explicit confirmation. Submitting this form will not activate a paid membership.</p>
         {submitError && <p role="alert" className="text-sm text-red-700">{submitError}</p>}
-        <button type={submitEnabled ? 'submit' : 'button'} disabled={!submitEnabled || submitting || age === null || !selectedProgram || !allAccepted} className="w-full rounded-xl bg-black px-5 py-3 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50">{!submitEnabled ? 'Submit registration — available soon' : submitting ? 'Submitting…' : 'Submit registration request'}</button>
+        <button type={submitEnabled ? 'submit' : 'button'} disabled={!submitEnabled || submitting || age === null || !selectedProgram || !allAccepted || !signerConfirmed} className="w-full rounded-xl bg-black px-5 py-3 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50">{!submitEnabled ? 'Submit registration — available soon' : submitting ? 'Submitting…' : 'Submit registration request'}</button>
         <p className="text-center text-xs text-[hsl(var(--muted))]">{submitEnabled ? 'Reception will review eligible requests before email verification.' : 'Preview only · No data is sent'} · {allAccepted ? 'Documents checked' : 'Document review incomplete'}</p>
       </form>
     </main>
