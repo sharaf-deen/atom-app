@@ -5,7 +5,7 @@ import { redirect } from 'next/navigation'
 import Forbidden from '@/components/Forbidden'
 import PageHeader from '@/components/layout/PageHeader'
 import Section from '@/components/layout/Section'
-import { canAccessReceptionDesk } from '@/lib/rbac'
+import { canAccessReceptionDesk, normalizeRole } from '@/lib/rbac'
 import { getSessionUserCached, getSupabaseAdminClientCached } from '@/lib/requestCache'
 import RegistrationDeskClient from './RegistrationDeskClient'
 import { registrationDeskDisplay, type RegistrationDeskCheckpoint } from '@/lib/registrationDeskIntegrity'
@@ -52,7 +52,7 @@ export default async function RegistrationDeskPage() {
         <div className="rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-950" role="status">
           <strong>Safe preview.</strong> Online submission and account provisioning are not enabled here. No invitation, registration or payment is triggered by this page.
         </div>
-        <RegistrationDeskClient rows={displayRows} loadError={Boolean(result.error)} />
+        <RegistrationDeskClient rows={displayRows} loadError={Boolean(result.error)} isSuperAdmin={normalizeRole(me.role) === 'super_admin'} />
       </Section>
     </main>
   )
