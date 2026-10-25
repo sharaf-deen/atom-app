@@ -2,6 +2,7 @@
 
 import Link from 'next/link'
 import { useMemo, useState } from 'react'
+import RegistrationAdminActions from './RegistrationAdminActions'
 
 type Row = { id: string; name: string; kind: 'adult' | 'family'; status: string; tone: string; date: string; needsReview: boolean; nextAction: string }
 type Filter = 'all' | 'adult' | 'family' | 'attention'
@@ -19,7 +20,7 @@ const steps = {
   ],
 }
 
-export default function RegistrationDeskClient({ rows, loadError }: { rows: Row[]; loadError: boolean }) {
+export default function RegistrationDeskClient({ rows, loadError, isSuperAdmin }: { rows: Row[]; loadError: boolean; isSuperAdmin: boolean }) {
   const [journey, setJourney] = useState<'adult' | 'family'>('adult')
   const [query, setQuery] = useState('')
   const [filter, setFilter] = useState<Filter>('all')
@@ -55,7 +56,7 @@ export default function RegistrationDeskClient({ rows, loadError }: { rows: Row[
         <input id="registration-search" type="search" value={query} onChange={e => setQuery(e.target.value)} placeholder="Member or child name" className="mt-2 min-h-[44px] w-full rounded-xl border border-[hsl(var(--border))] bg-transparent px-3 py-2 text-base" />
         <div role="group" aria-label="Filter registrations" className="mt-3 flex flex-wrap gap-2">{cards.map(card => <button key={card.key} type="button" aria-pressed={filter === card.key} onClick={() => setFilter(card.key)} className={`min-h-[44px] rounded-xl border px-3 py-2 text-sm font-medium ${filter === card.key ? 'border-black bg-black text-white' : 'border-[hsl(var(--border))]'}`}>{card.label} ({card.count})</button>)}</div>
         <p role="status" className="mt-3 text-xs text-[hsl(var(--muted))]">Showing {filtered.length} of {rows.length} recent requests</p>
-        {filtered.length === 0 ? <p className="mt-4 rounded-xl bg-slate-50 p-4 text-sm">No matching requests in the latest 30. Try another name or filter.</p> : <ul className="mt-3 space-y-2">{filtered.map(row => <li key={row.id} className="flex flex-col gap-2 rounded-xl border border-[hsl(var(--border))] p-3 sm:flex-row sm:items-center sm:justify-between"><div className="min-w-0"><p className="break-words font-medium">{row.name}</p><p className="text-xs text-[hsl(var(--muted))]">{row.kind === 'adult' ? 'Adult' : 'Parent & child'} · {row.date}</p><p className="mt-1 text-xs text-[hsl(var(--muted))]">Next: {row.nextAction}</p></div><span className={`inline-flex self-start rounded-full px-3 py-1 text-xs font-semibold sm:self-auto ${row.tone}`}>{row.status}</span></li>)}</ul>}
+        {filtered.length === 0 ? <p className="mt-4 rounded-xl bg-slate-50 p-4 text-sm">No matching requests in the latest 30. Try another name or filter.</p> : <ul className="mt-3 space-y-2">{filtered.map(row => <li key={row.id} className="flex flex-col gap-2 rounded-xl border border-[hsl(var(--border))] p-3 sm:flex-row sm:items-center sm:justify-between"><div className="min-w-0"><p className="break-words font-medium">{row.name}</p><p className="text-xs text-[hsl(var(--muted))]">{row.kind === 'adult' ? 'Adult' : 'Parent & child'} · {row.date}</p><p className="mt-1 text-xs text-[hsl(var(--muted))]">Next: {row.nextAction}</p></div><span className={`inline-flex self-start rounded-full px-3 py-1 text-xs font-semibold sm:self-auto ${row.tone}`}>{row.status}</span>{isSuperAdmin && <RegistrationAdminActions requestId={row.id} />}</li>)}</ul>}
       </>}
     </section>
     <Link href="/reception" className="inline-flex min-h-[44px] items-center text-sm underline underline-offset-4">← Reception home</Link>
