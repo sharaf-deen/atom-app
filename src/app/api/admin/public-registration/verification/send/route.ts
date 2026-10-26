@@ -36,7 +36,21 @@ export async function POST(req: Request) {
     const result = await deliverRegistrationEmailVerification(requestId)
     if (result === 'not_eligible') return json({ ok: false, error: 'NOT_ELIGIBLE_OR_COOLDOWN' }, 409)
     return json({ ok: true, status: 'sent' }, 200)
-  } catch {
+  } catch (error) {
+    // Only emit allowlisted internal diagnostic codes. Never log request payloads,
+    // email addresses, verification tokens, provider responses or credentials.
+    const known = new Set([
+      'REGISTRATION_EMAIL_PROVIDER_NOT_CONFIGURED',
+      'REGISTRATION_APP_ORIGIN_NOT_CONFIGURED',
+      'REGISTRATION_APP_ORIGIN_INVALID',
+      'REGISTRATION_APP_HTTPS_REQUIRED',
+      'REGISTRATION_VERIFICATION_ISSUE_FAILED',
+      'REGISTRATION_VERIFICATION_SNAPSHOT_FAILED',
+      'REGISTRATION_VERIFICATION_DELIVERY_FAILED',
+    ])
+    const code = error instanceof Error && known.has(error.message)
+      ? error.message : 'REGISTRATION_VERIFICATION_UNEXPECTED_FAILURE'
+    console.error('[registration-verification/send] failed', { code })
     return json({ ok: false, error: 'EMAIL_VERIFICATION_UNAVAILABLE' }, 503)
   }
 }
