@@ -1,0 +1,101 @@
+{
+  "previewUrl": "",
+  "productionUrl": "",
+  "testSupabaseProjectRef": "",
+  "productionSupabaseProjectRef": "",
+  "previewDeploymentSha": "",
+  "testEnvironmentConfirmed": false,
+  "previewEnvReviewed": false,
+  "productionFlagsRemainOff": false,
+  "testEmailControlled": false,
+  "testStaffIdentitiesConfirmed": false,
+  "migrationsVerifiedOnTest": false,
+  "emailProviderTestModeVerified": false,
+  "cleanUpPlanApproved": false,
+  "evidence": {
+    "A01": {
+      "status": "NOT_RUN",
+      "evidenceRef": "",
+      "observedAt": "",
+      "tester": "",
+      "notes": ""
+    },
+    "A02": {
+      "status": "NOT_RUN",
+      "evidenceRef": "",
+      "observedAt": "",
+      "tester": "",
+      "notes": ""
+    },
+    "A03": {
+      "status": "NOT_RUN",
+      "evidenceRef": "",
+      "observedAt": "",
+      "tester": "",
+      "notes": ""
+    },
+    "A04": {
+      "status": "NOT_RUN",
+      "evidenceRef": "",
+      "observedAt": "",
+      "tester": "",
+      "notes": ""
+    },
+    "A05": {
+      "status": "NOT_RUN",
+      "evidenceRef": "",
+      "observedAt": "",
+      "tester": "",
+      "notes": ""
+    },
+    "A06": {
+      "status": "NOT_RUN",
+      "evidenceRef": "",
+      "observedAt": "",
+      "tester": "",
+      "notes": ""
+    },
+    "A07": {
+      "status": "NOT_RUN",
+      "evidenceRef": "",
+      "observedAt": "",
+      "tester": "",
+      "notes": ""
+    },
+    "A08": {
+      "status": "NOT_RUN",
+      "evidenceRef": "",
+      "observedAt": "",
+      "tester": "",
+      "notes": ""
+    },
+    "A09": {
+      "status": "NOT_RUN",
+      "evidenceRef": "",
+      "observedAt": "",
+      "tester": "",
+      "notes": ""
+    },
+    "A10": {
+      "status": "NOT_RUN",
+      "evidenceRef": "",
+      "observedAt": "",
+      "tester": "",
+      "notes": ""
+    },
+    "A11": {
+      "status": "NOT_RUN",
+      "evidenceRef": "",
+      "observedAt": "",
+      "tester": "",
+      "notes": ""
+    },
+    "A12": {
+      "status": "NOT_RUN",
+      "evidenceRef": "",
+      "observedAt": "",
+      "tester": "",
+      "notes": ""
+    }
+  }
+}
