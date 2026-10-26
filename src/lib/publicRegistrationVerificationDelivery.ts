@@ -46,8 +46,15 @@ export async function deliverRegistrationEmailVerification(requestId: string): P
       signal: AbortSignal.timeout(12_000),
     })
   } catch {
+    console.error('[registration-verification/delivery] provider request failed', { phase: 'network' })
     throw new Error('REGISTRATION_VERIFICATION_DELIVERY_FAILED')
   }
-  if (!response.ok) throw new Error('REGISTRATION_VERIFICATION_DELIVERY_FAILED')
+  if (!response.ok) {
+    // HTTP status is diagnostic; never log Resend's potentially sensitive body.
+    console.error('[registration-verification/delivery] provider rejected request', {
+      httpStatus: response.status,
+    })
+    throw new Error('REGISTRATION_VERIFICATION_DELIVERY_FAILED')
+  }
   return 'sent'
 }
