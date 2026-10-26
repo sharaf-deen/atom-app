@@ -74,7 +74,7 @@ export async function GET() {
     const c = await context()
     if ('code' in c) return reply({ ok: false, code: c.code }, c.status)
     const compliance = await getMemberLegalCompliance(c.admin, c.member.user_id)
-    return reply({ ok: true, member_id: c.member.user_id, is_minor: c.minor, ...compliance })
+    return reply({ ok: true, member_id: c.member.user_id, is_minor: c.minor, signer_name: c.minor ? null : c.signerName, ...compliance })
   } catch { return reply({ ok: false, code: 'CHECK_UNAVAILABLE' }, 503) }
 }
 
