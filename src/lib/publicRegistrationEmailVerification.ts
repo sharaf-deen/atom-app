@@ -43,7 +43,12 @@ export async function issueRegistrationEmailVerification(
     .or(`verification_issued_at.is.null,verification_issued_at.lt.${cutoff}`)
     .select('id,account_email,guardian_email,is_minor')
     .maybeSingle()
-  if (error) throw new Error('REGISTRATION_VERIFICATION_ISSUE_FAILED')
+  if (error) {
+    console.error('[registration-verification/issue] database update failed', {
+      dbCode: typeof error.code === 'string' ? error.code.slice(0, 12) : 'UNKNOWN',
+    })
+    throw new Error('REGISTRATION_VERIFICATION_ISSUE_FAILED')
+  }
   if (!data) return null
   const email = String(data.account_email || '').trim().toLowerCase()
   if (!email || (data.is_minor && String(data.guardian_email || '').trim().toLowerCase() !== email)) {
@@ -62,7 +67,12 @@ export async function issueRegistrationEmailVerification(
     .eq('status', 'pending_verification')
     .select('id')
     .maybeSingle()
-  if (snapshotError) throw new Error('REGISTRATION_VERIFICATION_SNAPSHOT_FAILED')
+  if (snapshotError) {
+    console.error('[registration-verification/snapshot] database update failed', {
+      dbCode: typeof snapshotError.code === 'string' ? snapshotError.code.slice(0, 12) : 'UNKNOWN',
+    })
+    throw new Error('REGISTRATION_VERIFICATION_SNAPSHOT_FAILED')
+  }
   if (!updated) return null
   return { token, email, expiresAt }
 }
