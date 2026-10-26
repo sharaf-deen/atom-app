@@ -131,7 +131,9 @@ export default function SetPasswordPage() {
     setSuccess('Password set successfully. Redirecting…')
 
     setTimeout(() => {
-      window.location.replace(nextUrl || '/')
+      window.location.replace(isRegistration
+        ? `/auth/registration-consent?next=${encodeURIComponent(nextUrl === '/' ? '/profile' : nextUrl)}`
+        : (nextUrl || '/'))
     }, 900)
   }
 
