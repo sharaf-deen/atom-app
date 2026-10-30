@@ -7,6 +7,7 @@ import { createSupabaseServerActionClient } from '@/lib/supabaseServer'
 import { createSupabaseAdminClient } from '@/lib/supabaseAdmin'
 import { validateRegistrationLegalAcceptance, recordMemberLegalAcceptances, type RegistrationLegalAcceptanceInput } from '@/lib/legalConsent'
 import { getMemberLegalCompliance } from '@/lib/legalConsentEnforcement'
+import { guardianAuthorityDecision } from '@/lib/guardianAuthorityDecision'
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 const email = (x: unknown) => typeof x === 'string' ? x.trim().toLowerCase() : ''
@@ -74,7 +75,12 @@ export async function GET() {
     const c = await context()
     if ('code' in c) return reply({ ok: false, code: c.code }, c.status)
     const compliance = await getMemberLegalCompliance(c.admin, c.member.user_id)
-    return reply({ ok: true, member_id: c.member.user_id, is_minor: c.minor, signer_name: c.signerName, guardian_relationship: c.minor ? c.relationship : null, guardian_review_required: c.minor, ...compliance })
+    // F07.2B guardian-authorized finalization: disabled by default, fail closed on lookup errors.
+    const authority = c.minor && process.env.ATOM_GUARDIAN_LEGAL_UNLOCK_ENABLED === 'true'
+      ? await guardianAuthorityDecision(c.admin, c.request.family_id!, c.user.id, c.member.user_id)
+      : 'requires_review'
+    const unlocked = c.minor && authority === 'verified'
+    return reply({ ok: true, member_id: c.member.user_id, is_minor: c.minor, signer_name: c.signerName, guardian_relationship: c.minor ? c.relationship : null, guardian_review_required: c.minor && !unlocked, guardian_authority_status: c.minor ? authority : null, ...compliance })
   } catch { return reply({ ok: false, code: 'CHECK_UNAVAILABLE' }, 503) }
 }
 
@@ -91,18 +97,27 @@ export async function POST(req: Request) {
   try {
     const c = await context()
     if ('code' in c) return reply({ ok: false, code: c.code }, c.status)
-    // F07.1 fail-closed: a declared Family relationship is not proof of legal authority.
-    // No minor legal acceptance can be recorded until a separate, audited staff-review workflow is implemented.
-    if (c.minor) return reply({ ok: false, code: 'GUARDIAN_AUTHORITY_REVIEW_REQUIRED' }, 409)
+    // F07.2B: a declared Family link never substitutes for the latest audited decision.
+    if (c.minor) {
+      if (process.env.ATOM_GUARDIAN_LEGAL_UNLOCK_ENABLED !== 'true')
+        return reply({ ok: false, code: 'GUARDIAN_AUTHORITY_REVIEW_REQUIRED' }, 409)
+      const authority = await guardianAuthorityDecision(c.admin, c.request.family_id!, c.user.id, c.member.user_id)
+      if (authority !== 'verified') return reply({ ok: false, code: 'GUARDIAN_AUTHORITY_REVIEW_REQUIRED' }, 409)
+    }
     const validation = await validateRegistrationLegalAcceptance(c.admin, String(c.member.date_of_birth).slice(0, 10), acceptance)
     if (!validation.ok) return reply({ ok: false, code: validation.error }, validation.status)
     if (!validation.normalized || validation.required.length === 0)
       return reply({ ok: false, code: 'NO_ACTIVE_REQUIRED_DOCUMENTS_REVIEW_REQUIRED' }, 409)
     if (!c.signerName || validation.normalized.acceptor_name.trim().replace(/\s+/g, ' ').toLowerCase() !== c.signerName.replace(/\s+/g, ' ').toLowerCase())
       return reply({ ok: false, code: 'SIGNER_IDENTITY_MISMATCH' }, 409)
-    // Minor registrations are already rejected above, before validation and mutation.
-    // This branch is reachable only for an authenticated adult participant.
-    if (validation.normalized.acceptor_capacity !== 'participant')
+    if (c.minor) {
+      const capacity = c.relationship === 'guardian' || c.relationship === 'legal_guardian' ? 'legal_guardian' : 'parent'
+      if (validation.normalized.acceptor_capacity !== capacity || validation.normalized.guardian_relationship !== c.relationship)
+        return reply({ ok: false, code: 'GUARDIAN_CAPACITY_MISMATCH' }, 409)
+      // Recheck immediately before the write. This is not an atomic DB lock; see README.
+      if (await guardianAuthorityDecision(c.admin, c.request.family_id!, c.user.id, c.member.user_id) !== 'verified')
+        return reply({ ok: false, code: 'GUARDIAN_AUTHORITY_REVIEW_REQUIRED' }, 409)
+    } else if (validation.normalized.acceptor_capacity !== 'participant')
       return reply({ ok: false, code: 'PARTICIPANT_ACCEPTANCE_REQUIRED' }, 400)
     const { error, data } = await recordMemberLegalAcceptances({
       admin: c.admin, memberUserId: c.member.user_id, actorUserId: c.user.id,

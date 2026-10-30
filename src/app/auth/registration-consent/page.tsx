@@ -38,7 +38,7 @@ function ConsentContent() {
         if (!identity.user) { router.replace('/login'); return }
         const state: Compliance = await status.json().catch(() => ({}))
         if (!status.ok || state.ok !== true) { setMessage(`Legal setup unavailable (${state.code || status.status}). Contact ATOM reception.`); return }
-        if (state.is_minor) {
+        if (state.is_minor && state.guardian_review_required !== false) {
           setCompliance(state)
           setMessage('A staff review of parental or legal guardian authority is required before legal consent can be recorded. No document is accepted automatically.')
           return
@@ -67,7 +67,9 @@ function ConsentContent() {
         method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ legal_acceptance: {
           accepted_document_version_ids: accepted,
-          acceptor_name: signer.trim(), acceptor_capacity: 'participant',
+          acceptor_name: signer.trim(),
+          acceptor_capacity: compliance?.is_minor ? (['guardian', 'legal_guardian'].includes(compliance.guardian_relationship || '') ? 'legal_guardian' : 'parent') : 'participant',
+          guardian_relationship: compliance?.is_minor ? compliance.guardian_relationship : null,
         } }),
       })
       const result = await response.json().catch(() => ({}))
@@ -91,7 +93,7 @@ function ConsentContent() {
         <p className="mt-2 text-sm text-gray-600">Read each required document using its link, then accept each current version separately. Nothing is preselected.</p>
         {loading && <p className="mt-5 text-sm" role="status">Checking legal requirements…</p>}
         {message && <div className="mt-5 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900" role="alert">{message}</div>}
-        {!loading && compliance?.is_minor && (
+        {!loading && compliance?.is_minor && compliance.guardian_review_required !== false && (
           <div className="mt-5 rounded-xl border border-gray-200 bg-white p-4 text-sm">
             <p className="font-semibold">Parent / guardian review pending</p>
             <p className="mt-2">The parent account and child membership have been created, but guardian authority has not yet been independently verified by ATOM staff.</p>
@@ -99,6 +101,9 @@ function ConsentContent() {
             <p className="mt-1">Declared relationship: {compliance.guardian_relationship || 'Not available'}</p>
             <p className="mt-2 text-gray-600">Please contact ATOM reception for identity and legal authority review. Legal acceptance remains pending.</p>
           </div>
+        )}
+        {!loading && compliance?.is_minor && compliance.guardian_review_required === false && (
+          <p className="mt-5 text-sm text-gray-700">Verified parent / guardian: {compliance.signer_name}. Relationship: {compliance.guardian_relationship}. Please review every document before signing for the child.</p>
         )}
         {!loading && compliance && documents.length > 0 && (
           <form onSubmit={submit} className="mt-6 space-y-4">
