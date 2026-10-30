@@ -74,7 +74,7 @@ export async function GET() {
     const c = await context()
     if ('code' in c) return reply({ ok: false, code: c.code }, c.status)
     const compliance = await getMemberLegalCompliance(c.admin, c.member.user_id)
-    return reply({ ok: true, member_id: c.member.user_id, is_minor: c.minor, signer_name: c.minor ? null : c.signerName, ...compliance })
+    return reply({ ok: true, member_id: c.member.user_id, is_minor: c.minor, signer_name: c.signerName, guardian_relationship: c.minor ? c.relationship : null, guardian_review_required: c.minor, ...compliance })
   } catch { return reply({ ok: false, code: 'CHECK_UNAVAILABLE' }, 503) }
 }
 
@@ -91,22 +91,18 @@ export async function POST(req: Request) {
   try {
     const c = await context()
     if ('code' in c) return reply({ ok: false, code: c.code }, c.status)
+    // F07.1 fail-closed: a declared Family relationship is not proof of legal authority.
+    // No minor legal acceptance can be recorded until a separate, audited staff-review workflow is implemented.
+    if (c.minor) return reply({ ok: false, code: 'GUARDIAN_AUTHORITY_REVIEW_REQUIRED' }, 409)
     const validation = await validateRegistrationLegalAcceptance(c.admin, String(c.member.date_of_birth).slice(0, 10), acceptance)
     if (!validation.ok) return reply({ ok: false, code: validation.error }, validation.status)
     if (!validation.normalized || validation.required.length === 0)
       return reply({ ok: false, code: 'NO_ACTIVE_REQUIRED_DOCUMENTS_REVIEW_REQUIRED' }, 409)
     if (!c.signerName || validation.normalized.acceptor_name.trim().replace(/\s+/g, ' ').toLowerCase() !== c.signerName.replace(/\s+/g, ' ').toLowerCase())
       return reply({ ok: false, code: 'SIGNER_IDENTITY_MISMATCH' }, 409)
-    if (c.minor) {
-      if (validation.normalized.acceptor_capacity !== 'parent' && validation.normalized.acceptor_capacity !== 'legal_guardian')
-        return reply({ ok: false, code: 'GUARDIAN_ACCEPTANCE_REQUIRED' }, 400)
-      // The guardian's declared role must agree with the linked role.
-      if (c.relationship === 'guardian' || c.relationship === 'legal_guardian') {
-        if (validation.normalized.acceptor_capacity !== 'legal_guardian')
-          return reply({ ok: false, code: 'GUARDIAN_CAPACITY_MISMATCH' }, 409)
-      } else if (validation.normalized.acceptor_capacity !== 'parent')
-        return reply({ ok: false, code: 'GUARDIAN_CAPACITY_MISMATCH' }, 409)
-    } else if (validation.normalized.acceptor_capacity !== 'participant')
+    // Minor registrations are already rejected above, before validation and mutation.
+    // This branch is reachable only for an authenticated adult participant.
+    if (validation.normalized.acceptor_capacity !== 'participant')
       return reply({ ok: false, code: 'PARTICIPANT_ACCEPTANCE_REQUIRED' }, 400)
     const { error, data } = await recordMemberLegalAcceptances({
       admin: c.admin, memberUserId: c.member.user_id, actorUserId: c.user.id,

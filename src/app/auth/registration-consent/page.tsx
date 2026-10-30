@@ -6,7 +6,7 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import { createSupabaseBrowserClient } from '@/lib/supabaseBrowser'
 
 type Document = { id: string; title: string; version: string; url: string; status: string; required: boolean }
-type Compliance = { ok?: boolean; code?: string; complete?: boolean; is_minor?: boolean; signer_name?: string | null; requiredCount?: number; missingDocuments?: { id: string }[] }
+type Compliance = { ok?: boolean; code?: string; complete?: boolean; is_minor?: boolean; signer_name?: string | null; guardian_relationship?: string | null; guardian_review_required?: boolean; requiredCount?: number; missingDocuments?: { id: string }[] }
 function safeNext(value: string | null) {
   if (!value || !value.startsWith('/') || value.startsWith('//') || value.includes('\\') || value.includes('://') || value.startsWith('/auth/')) return '/profile'
   return value
@@ -38,7 +38,11 @@ function ConsentContent() {
         if (!identity.user) { router.replace('/login'); return }
         const state: Compliance = await status.json().catch(() => ({}))
         if (!status.ok || state.ok !== true) { setMessage(`Legal setup unavailable (${state.code || status.status}). Contact ATOM reception.`); return }
-        if (state.is_minor) { setMessage('Parent and child legal consent requires a separate review. Please contact ATOM reception.'); return }
+        if (state.is_minor) {
+          setCompliance(state)
+          setMessage('A staff review of parental or legal guardian authority is required before legal consent can be recorded. No document is accepted automatically.')
+          return
+        }
         if (state.complete && Number(state.requiredCount) > 0) { router.replace(destination); return }
         const result = await docsResponse.json().catch(() => ({}))
         if (!docsResponse.ok || result.ok !== true) { setMessage('Unable to load legal documents. Please try again later.'); return }
@@ -87,6 +91,15 @@ function ConsentContent() {
         <p className="mt-2 text-sm text-gray-600">Read each required document using its link, then accept each current version separately. Nothing is preselected.</p>
         {loading && <p className="mt-5 text-sm" role="status">Checking legal requirements…</p>}
         {message && <div className="mt-5 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900" role="alert">{message}</div>}
+        {!loading && compliance?.is_minor && (
+          <div className="mt-5 rounded-xl border border-gray-200 bg-white p-4 text-sm">
+            <p className="font-semibold">Parent / guardian review pending</p>
+            <p className="mt-2">The parent account and child membership have been created, but guardian authority has not yet been independently verified by ATOM staff.</p>
+            <p className="mt-2">Declared guardian: {compliance.signer_name || 'Not available'}</p>
+            <p className="mt-1">Declared relationship: {compliance.guardian_relationship || 'Not available'}</p>
+            <p className="mt-2 text-gray-600">Please contact ATOM reception for identity and legal authority review. Legal acceptance remains pending.</p>
+          </div>
+        )}
         {!loading && compliance && documents.length > 0 && (
           <form onSubmit={submit} className="mt-6 space-y-4">
             {documents.map(doc => (
