@@ -55,7 +55,7 @@ export default function PublicRegistrationForm({ programs, documents, submitEnab
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           request_key: crypto.randomUUID(), first_name: firstName, last_name: lastName,
-          email, phone, date_of_birth: dob, program_key: selectedProgram,
+          email: isMinor ? '' : email, phone, date_of_birth: dob, program_key: selectedProgram,
           ...(isMinor ? { guardian_name: guardianName, guardian_email: guardianEmail, guardian_relationship: guardianRelationship } : {}),
           accepted_document_version_ids: accepted,
         }),
@@ -88,9 +88,11 @@ export default function PublicRegistrationForm({ programs, documents, submitEnab
           <label className="block text-sm font-medium">Last name *
             <input className={className} required autoComplete="family-name" maxLength={100} value={lastName} onChange={e => setLastName(e.target.value)} />
           </label>
-          <label className="block text-sm font-medium">Email *
-            <input className={className} type="email" required autoComplete="email" maxLength={254} value={email} onChange={e => setEmail(e.target.value)} />
-          </label>
+          {!isMinor && (
+            <label className="block text-sm font-medium">Email *
+              <input className={className} type="email" required autoComplete="email" maxLength={254} value={email} onChange={e => setEmail(e.target.value)} />
+            </label>
+          )}
           <label className="block text-sm font-medium">Phone
             <input className={className} type="tel" autoComplete="tel" maxLength={30} value={phone} onChange={e => setPhone(e.target.value)} />
           </label>
