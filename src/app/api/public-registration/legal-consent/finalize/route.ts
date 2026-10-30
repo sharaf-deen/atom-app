@@ -8,6 +8,7 @@ import { createSupabaseAdminClient } from '@/lib/supabaseAdmin'
 import { validateRegistrationLegalAcceptance, recordMemberLegalAcceptances, type RegistrationLegalAcceptanceInput } from '@/lib/legalConsent'
 import { getMemberLegalCompliance } from '@/lib/legalConsentEnforcement'
 import { guardianAuthorityDecision } from '@/lib/guardianAuthorityDecision'
+import { recordVerifiedGuardianLegalAcceptance } from '@/lib/verifiedGuardianLegalAcceptance'
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 const email = (x: unknown) => typeof x === 'string' ? x.trim().toLowerCase() : ''
@@ -119,11 +120,23 @@ export async function POST(req: Request) {
         return reply({ ok: false, code: 'GUARDIAN_AUTHORITY_REVIEW_REQUIRED' }, 409)
     } else if (validation.normalized.acceptor_capacity !== 'participant')
       return reply({ ok: false, code: 'PARTICIPANT_ACCEPTANCE_REQUIRED' }, 400)
-    const { error, data } = await recordMemberLegalAcceptances({
-      admin: c.admin, memberUserId: c.member.user_id, actorUserId: c.user.id,
-      source: 'profile_reaccept', input: validation.normalized,
-      userAgent: req.headers.get('user-agent'), ipAddress: null,
-    })
+    // F07.2C: the minor write and final authority decision share one database transaction.
+    // Adults retain their original recorder without changed behavior.
+    const { error, data } = c.minor
+      ? await recordVerifiedGuardianLegalAcceptance({
+          admin: c.admin,
+          registrationRequestId: c.request.id,
+          familyId: c.request.family_id!,
+          guardianAuthUserId: c.user.id,
+          memberUserId: c.member.user_id,
+          input: validation.normalized,
+          userAgent: req.headers.get('user-agent'),
+        })
+      : await recordMemberLegalAcceptances({
+          admin: c.admin, memberUserId: c.member.user_id, actorUserId: c.user.id,
+          source: 'profile_reaccept', input: validation.normalized,
+          userAgent: req.headers.get('user-agent'), ipAddress: null,
+        })
     if (error) return reply({ ok: false, code: 'LEGAL_RECORD_FAILED' }, 503)
     const compliance = await getMemberLegalCompliance(c.admin, c.member.user_id)
     return reply({ ok: compliance.complete, inserted: Number(data ?? 0), complete: compliance.complete,
