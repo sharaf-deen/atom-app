@@ -9,7 +9,7 @@ const registrationSchema = z.object({
   request_key: z.string().uuid(),
   first_name: z.string().trim().min(2).max(100),
   last_name: z.string().trim().min(2).max(100),
-  email: z.string().trim().email().max(254),
+  email: z.string().trim().max(254),
   phone: z.string().trim().max(30).optional(),
   date_of_birth: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   program_key: z.string().trim().min(1).max(100),
@@ -75,6 +75,11 @@ export async function validatePendingRegistrationRequest(
   const age = ageOnCairoDate(input.date_of_birth)
   if (age === null) throw new RegistrationInputError('INVALID_DATE_OF_BIRTH')
   const isMinor = age < 18
+  // Adult participants require their own email. For minors the verified parent/guardian
+  // email is the account identity; a child email is not required or persisted.
+  if (!isMinor && !z.string().email().safeParse(input.email).success) {
+    throw new RegistrationInputError('ADULT_EMAIL_REQUIRED')
+  }
 
   const [programs, legalResult] = await Promise.all([
     loadActiveMemberProgramOptions(admin),
