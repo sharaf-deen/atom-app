@@ -15,7 +15,11 @@ type LaunchEnvironment = {
  */
 export function registrationLaunchAccess(
   accountEmail: string,
-  env: LaunchEnvironment = process.env,
+  env: LaunchEnvironment = {
+    VERCEL_ENV: process.env.VERCEL_ENV,
+    ATOM_REGISTRATION_ACCESS_MODE: process.env.ATOM_REGISTRATION_ACCESS_MODE,
+    ATOM_REGISTRATION_PILOT_EMAIL_ALLOWLIST: process.env.ATOM_REGISTRATION_PILOT_EMAIL_ALLOWLIST,
+  },
 ): 'allowed' | 'closed' | 'not_in_pilot' {
   if (env.VERCEL_ENV !== 'production') return 'allowed'
 
