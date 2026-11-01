@@ -31,12 +31,17 @@ export default async function RegistrationDeskPage() {
     .select('id,participant_first_name,participant_last_name,is_minor,status,submitted_at,expires_at,identity_verified_at,provisioning_claim_id,auth_provisioning_started_at,provisioned_auth_user_id,auth_provisioning_recorded_at,member_user_id,family_id,invitation_dispatch_started_at,invitation_dispatched_at,account_activated_at,last_error_code')
     .order('submitted_at', { ascending: false }).limit(30)
   const rows = (result.data || []) as RegistrationRow[]
+  const isSuperAdmin = normalizeRole(me.role) === 'super_admin'
   const displayRows = rows.map(row => {
     const display = registrationDeskDisplay(row)
     return {
       id: row.id,
       name: `${row.participant_first_name} ${row.participant_last_name}`.trim(),
       kind: row.is_minor ? 'family' as const : 'adult' as const,
+      guardianReview: isSuperAdmin && row.is_minor && row.status === 'completed' && row.account_activated_at &&
+        row.family_id && row.provisioned_auth_user_id && row.member_user_id
+        ? { familyId: row.family_id, guardianAuthUserId: row.provisioned_auth_user_id, memberUserId: row.member_user_id }
+        : null,
       status: display.label,
       tone: display.tone,
       needsReview: display.needsReview,
@@ -52,7 +57,7 @@ export default async function RegistrationDeskPage() {
         <div className="rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-950" role="status">
           <strong>Safe preview.</strong> Online submission and account provisioning are not enabled here. No invitation, registration or payment is triggered by this page.
         </div>
-        <RegistrationDeskClient rows={displayRows} loadError={Boolean(result.error)} isSuperAdmin={normalizeRole(me.role) === 'super_admin'} />
+        <RegistrationDeskClient rows={displayRows} loadError={Boolean(result.error)} isSuperAdmin={isSuperAdmin} />
       </Section>
     </main>
   )
