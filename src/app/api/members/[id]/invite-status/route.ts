@@ -6,7 +6,7 @@ export const revalidate = 0
 import { NextResponse } from 'next/server'
 import { canManageMemberAccountAccess, normalizeRole } from '@/lib/rbac'
 import { createSupabaseServerActionClient } from '@/lib/supabaseServer'
-import { createClient } from '@supabase/supabase-js'
+import { createSupabaseAdminClient } from '@/lib/supabaseAdmin'
 
 function noStore(res: NextResponse) {
   res.headers.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate')
@@ -54,16 +54,13 @@ export async function GET(req: Request, ctx: { params: { id: string } }) {
       return noStore(NextResponse.json({ ok: false, status: 'forbidden' as InviteStatus }, { status: 403 }))
     }
 
-    // 2) Service role
-    const url = process.env.NEXT_PUBLIC_SUPABASE_URL
-    const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY
-    if (!url || !serviceKey) {
+    // 2) Centralized server-only Admin client
+    let admin: ReturnType<typeof createSupabaseAdminClient>
+    try {
+      admin = createSupabaseAdminClient()
+    } catch {
       return noStore(NextResponse.json({ ok: false, error: 'SERVER_MISCONFIGURED' }, { status: 500 }))
     }
-
-    const admin = createClient(url, serviceKey, {
-      auth: { autoRefreshToken: false, persistSession: false },
-    })
 
     // 3) Profile exists?
     const { data: prof, error: profErr } = await admin
