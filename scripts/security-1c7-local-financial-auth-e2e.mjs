@@ -186,6 +186,9 @@ try {
   for(const id of subscriptions){
     const {data:payments}=await admin.from('subscription_payments').select('id').eq('subscription_id',id)
     if(payments?.length)await admin.from('subscription_payments').delete().eq('subscription_id',id)
+    // Local test fixture only: deletion trigger forbids paid or due history.
+    // Reset synthetic balances AFTER clearing ledger, then delete fixture.
+    await admin.from('subscriptions').update({amount:0,amount_due:0}).eq('id',id)
     await admin.from('subscriptions').delete().eq('id',id)
   }
   for(const id of ids){
