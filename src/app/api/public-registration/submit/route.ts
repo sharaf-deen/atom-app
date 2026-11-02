@@ -2,6 +2,7 @@ import { createHmac } from 'node:crypto'
 import { NextRequest, NextResponse } from 'next/server'
 import { createSupabaseAdminClient } from '@/lib/supabaseAdmin'
 import { RegistrationInputError, validatePendingRegistrationRequest } from '@/lib/publicRegistrationRequest'
+import { registrationLaunchAccess } from '@/lib/publicRegistrationLaunchAccess'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -34,6 +35,15 @@ export async function POST(request: NextRequest) {
     const ipHash = createHmac('sha256', secret).update(ip).digest('hex')
     const admin = createSupabaseAdminClient()
     const input = await validatePendingRegistrationRequest(admin, raw)
+    // A production deployment must explicitly select pilot/public mode. In
+    // pilot mode, non-allowlisted addresses receive the same generic response
+    // without creating a request or exposing pilot membership.
+    const launchAccess = registrationLaunchAccess(input.account_email)
+    if (launchAccess === 'closed') {
+      return NextResponse.json({ error: 'Registration is not available yet.' }, { status: 503, headers: noStore })
+    }
+    if (launchAccess === 'not_in_pilot') return generic()
+
     const { error } = await admin.rpc('atom_submit_public_registration_v1', {
       p_request_key: input.request_key,
       p_account_email: input.account_email,
