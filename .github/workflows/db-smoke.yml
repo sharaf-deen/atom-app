@@ -44,3 +44,8 @@ jobs:
 
       - name: Reset DB + Smoke
         run: npm run reset:smoke
+
+      - name: Authenticated financial API E2E (isolated local Supabase only)
+        env:
+          ATOM_LOCAL_FINANCIAL_E2E: "1"
+        run: node scripts/security-1c7-local-financial-auth-e2e.mjs
