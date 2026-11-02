@@ -5,7 +5,7 @@ export const revalidate = 0
 import { NextResponse } from 'next/server'
 import { canManageMemberAccountAccess, normalizeRole } from '@/lib/rbac'
 import { createSupabaseServerActionClient } from '@/lib/supabaseServer'
-import { createClient } from '@supabase/supabase-js'
+import { createSupabaseAdminClient } from '@/lib/supabaseAdmin'
 
 const ACTION_RESET = 'member_reset_password_send'
 
@@ -99,15 +99,12 @@ export async function POST(req: Request, ctx: { params: { id: string } }) {
     return noStore(NextResponse.json({ ok: false, error: 'INVALID_MEMBER_ID' }, { status: 400 }))
   }
 
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL
-  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY
-  if (!url || !serviceKey) {
+  let admin: ReturnType<typeof createSupabaseAdminClient>
+  try {
+    admin = createSupabaseAdminClient()
+  } catch {
     return noStore(NextResponse.json({ ok: false, error: 'SERVER_MISCONFIGURED' }, { status: 500 }))
   }
-
-  const admin = createClient(url, serviceKey, {
-    auth: { autoRefreshToken: false, persistSession: false },
-  })
 
   let actorIdForAudit: string | null = null
   let actorEmailForAudit: string | null = null

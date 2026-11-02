@@ -5,7 +5,7 @@ export const revalidate = 0
 import { NextResponse } from 'next/server'
 import { canManageMemberAccountAccess, normalizeRole } from '@/lib/rbac'
 import { createSupabaseServerActionClient } from '@/lib/supabaseServer'
-import { createClient } from '@supabase/supabase-js'
+import { createSupabaseAdminClient } from '@/lib/supabaseAdmin'
 import { extractActionLink, sendMemberInviteEmailWithQr } from '@/lib/memberInviteEmail'
 
 // Audit action name (stable)
@@ -130,10 +130,11 @@ export async function POST(req: Request, ctx: { params: { id: string } }) {
     )
   }
 
-  // Service role (create once, reused even for error audit)
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL
-  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY
-  if (!url || !serviceKey) {
+  // Centralized server-only Admin client, reused for error audit
+  let admin: ReturnType<typeof createSupabaseAdminClient>
+  try {
+    admin = createSupabaseAdminClient()
+  } catch {
     return noStore(
       NextResponse.json(
         {
@@ -146,10 +147,6 @@ export async function POST(req: Request, ctx: { params: { id: string } }) {
       ),
     )
   }
-
-  const admin = createClient(url, serviceKey, {
-    auth: { autoRefreshToken: false, persistSession: false },
-  })
 
   let actorIdForAudit: string | null = null
   let actorEmailForAudit: string | null = null

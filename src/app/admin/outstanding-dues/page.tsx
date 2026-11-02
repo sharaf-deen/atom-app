@@ -4,7 +4,7 @@ export const revalidate = 0
 
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
-import { createClient } from '@supabase/supabase-js'
+import { createSupabaseAdminClient } from '@/lib/supabaseAdmin'
 import AccessDeniedCard from '@/components/AccessDeniedCard'
 import FinanceReadOnlyNotice from '@/components/finance/FinanceReadOnlyNotice'
 import { getSessionUser } from '@/lib/session'
@@ -60,23 +60,7 @@ export default async function AdminOutstandingDuesPage() {
     )
   }
 
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL
-  const service = process.env.SUPABASE_SERVICE_ROLE_KEY
-
-  if (!url || !service) {
-    return (
-      <main className="p-6">
-        <h1 className="text-2xl font-bold">Admin · Outstanding Dues</h1>
-        <p className="mt-3 text-sm text-rose-700">
-          Server env missing: NEXT_PUBLIC_SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY
-        </p>
-      </main>
-    )
-  }
-
-  const admin = createClient(url, service, {
-    auth: { persistSession: false, autoRefreshToken: false },
-  })
+  const admin = createSupabaseAdminClient()
 
   const { data: subsRaw, error: subsErr } = await admin
     .from('subscriptions')

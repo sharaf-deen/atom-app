@@ -4,7 +4,7 @@ export const revalidate = 0
 
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
-import { createClient } from '@supabase/supabase-js'
+import { createSupabaseAdminClient } from '@/lib/supabaseAdmin'
 import PageHeader from '@/components/layout/PageHeader'
 import Section from '@/components/layout/Section'
 import { Card, CardContent } from '@/components/ui/Card'
@@ -189,27 +189,7 @@ export default async function MembershipActivityLogPage({
     )
   }
 
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL
-  const service = process.env.SUPABASE_SERVICE_ROLE_KEY
-  if (!url || !service) {
-    return (
-      <main>
-        <PageHeader title="Membership Activity Log" subtitle="Server env missing" />
-        <Section className="py-6">
-          <Card>
-            <CardContent className="p-6 space-y-2">
-              <p className="text-sm text-red-600">Missing NEXT_PUBLIC_SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY.</p>
-              <p className="text-sm text-[hsl(var(--muted-foreground))]">
-                This page needs the Service Role key to read the audit log.
-              </p>
-            </CardContent>
-          </Card>
-        </Section>
-      </main>
-    )
-  }
-
-  const admin = createClient(url, service, { auth: { persistSession: false, autoRefreshToken: false } })
+  const admin = createSupabaseAdminClient()
 
   const q = toStr(searchParams?.q)
   const action = toStr(searchParams?.action)
