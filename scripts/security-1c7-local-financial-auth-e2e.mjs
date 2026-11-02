@@ -34,6 +34,7 @@ const port = 31880
 const origin = `http://127.0.0.1:${port}`
 const ids = []
 const subscriptions = []
+const refundIds = []
 let server
 let tested = 0
 const prefix = 'atom1c7-' + randomUUID().slice(0,8)
@@ -172,6 +173,93 @@ try {
   check('deletion of zero-history subscription allowed',r.status,200)
   check('deletion success',r.body.ok,true)
 
+  // 1C.8 — genuine authenticated POST checks of creation/renewal guards.
+  // These requests are intentionally rejected before touching financial data.
+  r=await post(member,'/api/subscriptions/create',{
+    memberId:member.id,plan:'1m',amount:100,payment_method:'cash',
+    idempotency_key:randomUUID(),start_date:new Date().toISOString().slice(0,10),
+  })
+  check('member subscription create forbidden',r.status,403)
+  r=await post(member,'/api/subscriptions/renew',{
+    memberId:member.id,plan:'1m',amount:100,payment_method:'cash',
+    idempotency_key:randomUUID(),
+  })
+  check('member subscription renewal forbidden',r.status,403)
+  r=await post(actors.reception,'/api/subscriptions/create',{memberId:member.id,plan:'1m'})
+  check('staff create requires idempotency key',r.status,400)
+  check('staff create idempotency error',r.body.error,'IDEMPOTENCY_KEY_REQUIRED')
+  r=await post(actors.admin,'/api/subscriptions/renew',{memberId:member.id,plan:'1m'})
+  check('staff renew requires idempotency key',r.status,400)
+  check('staff renew idempotency error',r.body.error,'IDEMPOTENCY_KEY_REQUIRED')
+
+  // 1C.8 — successful HTTP subscription update, followed by freeze lifecycle.
+  const freezeSub=await makeSubscription(member,0,0)
+  r=await post(actors.admin,'/api/subscriptions/update',{
+    id:freezeSub,patch:{end_date:'2027-02-15'},invoice:{generate:false,email:false}
+  })
+  check('admin subscription date update',r.status,200)
+  const {data:edited,error:editError}=await admin.from('subscriptions')
+    .select('end_date').eq('id',freezeSub).single()
+  if(editError)throw editError
+  check('updated subscription date',edited.end_date,'2027-02-15')
+
+  const tomorrow=new Date(Date.now()+86400000).toISOString().slice(0,10)
+  const inFive=new Date(Date.now()+5*86400000).toISOString().slice(0,10)
+  r=await post(actors.admin,'/api/subscriptions/freeze',{
+    id:freezeSub,action:'create',from:tomorrow,to:inFive
+  })
+  check('admin freeze forbidden',r.status,403)
+  r=await post(actors.super_admin,'/api/subscriptions/freeze',{
+    id:freezeSub,action:'create',from:tomorrow,to:inFive
+  })
+  check('super admin freeze creation',r.status,200)
+  check('super admin freeze result',r.body.ok,true)
+  const {data:freezes,error:freezeError}=await admin.from('subscription_freezes')
+    .select('id,days').eq('subscription_id',freezeSub).is('cleared_at',null)
+  if(freezeError)throw freezeError
+  check('active freeze count',freezes.length,1)
+  check('inclusive freeze days',Number(freezes[0].days),5)
+  r=await post(actors.super_admin,'/api/subscriptions/freeze',{
+    id:freezeSub,action:'delete',freeze_id:freezes[0].id
+  })
+  check('super admin freeze cleared',r.status,200)
+  const {count:clearedCount,error:clearedError}=await admin.from('subscription_freezes')
+    .select('id',{count:'exact',head:true}).eq('subscription_id',freezeSub).is('cleared_at',null)
+  if(clearedError)throw clearedError
+  check('remaining active freezes',clearedCount,0)
+
+  // 1C.8 — real HTTP refund-impact route using a synthetic already-paid refund.
+  const refundSub=await makeSubscription(member,0,0)
+  const {data:refund,error:refundError}=await admin.from('membership_refunds')
+    .insert({member_id:member.id,subscription_id:refundSub,amount:1,
+      refund_method:'cash',reason:'Local isolated regression',status:'paid'})
+    .select('id').single()
+  if(refundError)throw refundError
+  // Route requires a UUID; local schema/fixture must follow the same contract.
+  assert.equal(typeof refund.id,'string','Refund fixture ID must be a UUID string')
+  assert.match(refund.id,/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
+    'Refund fixture ID must match the HTTP route UUID contract')
+  refundIds.push(refund.id)
+  r=await post(actors.admin,'/api/membership-refunds/subscription-impact',{
+    refund_id:refund.id,action:'keep_active',reason:'Isolated role regression'
+  })
+  check('admin cannot apply real refund impact',r.status,403)
+  r=await post(actors.super_admin,'/api/membership-refunds/subscription-impact',{
+    refund_id:refund.id,action:'keep_active',reason:'Isolated keep-active regression'
+  })
+  if(r.status!==200) console.error('REFUND_IMPACT_DIAGNOSTIC:',JSON.stringify({status:r.status,error:r.body?.error,details:r.body?.details}).slice(0,900))
+  check('super admin applies refund impact',r.status,200)
+  check('refund impact response',r.body.ok,true)
+  const {data:applied,error:appliedError}=await admin.from('membership_refunds')
+    .select('subscription_impact_status,subscription_impact_action').eq('id',refund.id).single()
+  if(appliedError)throw appliedError
+  check('refund impact status persisted',applied.subscription_impact_status,'applied')
+  check('refund impact action persisted',applied.subscription_impact_action,'keep_active')
+  r=await post(actors.super_admin,'/api/membership-refunds/subscription-impact',{
+    refund_id:refund.id,action:'keep_active',reason:'Duplicate impact rejection test'
+  })
+  check('refund duplicate application rejected',r.status,409)
+
   console.log(`PASS: ${tested} assertions with real local auth sessions and HTTP financial routes.`)
 } catch(e){
   console.error('FAIL 1C.7:',e.message)
@@ -183,7 +271,12 @@ try {
     if(server.exitCode===null)server.kill('SIGKILL')
   }
   // Local-only disposable environment, cleanup even when checks fail.
+  for(const id of refundIds){
+    await admin.from('membership_refunds').delete().eq('id',id)
+  }
   for(const id of subscriptions){
+    // The protected-history trigger checks historical freezes as well as paid rows.
+    await admin.from('subscription_freezes').delete().eq('subscription_id',id)
     const {data:payments}=await admin.from('subscription_payments').select('id').eq('subscription_id',id)
     if(payments?.length)await admin.from('subscription_payments').delete().eq('subscription_id',id)
     // Local test fixture only: deletion trigger forbids paid or due history.
