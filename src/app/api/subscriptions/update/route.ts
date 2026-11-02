@@ -4,8 +4,8 @@ export const revalidate = 0
 
 import { NextResponse } from 'next/server'
 import { revalidateTag, revalidatePath } from 'next/cache'
-import { createClient } from '@supabase/supabase-js'
 import { createSupabaseServerActionClient } from '@/lib/supabaseServer'
+import { createSupabaseAdminClient } from '@/lib/supabaseAdmin'
 import { canManagePayments, canManageSubscriptions, normalizeRole } from '@/lib/rbac'
 import { generateInvoicePdfBytes, makeInvoiceNumber, type InvoiceSnapshot } from '@/lib/invoices'
 
@@ -47,10 +47,11 @@ function computeTimePlanEnd(startDate: string, plan: string) {
 }
 
 function makeAdminClient() {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY
-  if (!url || !key) return null
-  return createClient<any>(url, key, { auth: { persistSession: false } })
+  try {
+    return createSupabaseAdminClient()
+  } catch {
+    return null
+  }
 }
 
 const ACTION_SUB_UPDATE = 'subscription_update'
