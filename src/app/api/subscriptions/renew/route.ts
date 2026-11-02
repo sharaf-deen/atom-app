@@ -6,8 +6,9 @@ export const revalidate = 0
 
 import { NextResponse } from 'next/server'
 import { revalidateTag, revalidatePath } from 'next/cache'
-import { createClient, type SupabaseClient } from '@supabase/supabase-js'
+import { type SupabaseClient } from '@supabase/supabase-js'
 import { createSupabaseServerActionClient } from '@/lib/supabaseServer'
+import { createSupabaseAdminClient } from '@/lib/supabaseAdmin'
 import { canCreateSubscription, canManagePayments, normalizeRole } from '@/lib/rbac'
 import { generateInvoicePdfBytes, makeInvoiceNumber, type InvoiceSnapshot } from '@/lib/invoices'
 import { getMemberLegalCompliance } from '@/lib/legalConsentEnforcement'
@@ -167,12 +168,11 @@ function humanPlan(p: Plan, sessionsTotal?: number | null) {
 }
 
 function makeAdminClient(): SupabaseClient<any, any, any, any, any> | null {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY
-  if (!url || !key) return null
-  return createClient<any>(url, key, {
-    auth: { autoRefreshToken: false, persistSession: false },
-  })
+  try {
+    return createSupabaseAdminClient()
+  } catch {
+    return null
+  }
 }
 
 const ACTION_SUB_RENEW = 'subscription_renew'
@@ -300,7 +300,7 @@ export async function POST(req: Request) {
         ok: false,
         error: 'SERVICE_ROLE_MISSING',
         details:
-          'SUPABASE_SERVICE_ROLE_KEY (and NEXT_PUBLIC_SUPABASE_URL) must be set on the server to create subscription notifications safely.',
+          'A server-side Supabase admin API key and URL must be configured to create subscription notifications safely.',
       })
     }
 
