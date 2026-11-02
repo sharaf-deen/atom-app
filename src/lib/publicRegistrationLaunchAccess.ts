@@ -21,7 +21,9 @@ export function registrationLaunchAccess(
     ATOM_REGISTRATION_PILOT_EMAIL_ALLOWLIST: process.env.ATOM_REGISTRATION_PILOT_EMAIL_ALLOWLIST,
   },
 ): 'allowed' | 'closed' | 'not_in_pilot' {
-  if (env.VERCEL_ENV !== 'production') return 'allowed'
+  // Only explicit Vercel Preview/Development environments bypass the production gate.
+  // Missing or unknown environment metadata must fail closed.
+  if (env.VERCEL_ENV === 'preview' || env.VERCEL_ENV === 'development') return 'allowed'
 
   if (env.ATOM_REGISTRATION_ACCESS_MODE === 'public') return 'allowed'
   if (env.ATOM_REGISTRATION_ACCESS_MODE !== 'pilot') return 'closed'
