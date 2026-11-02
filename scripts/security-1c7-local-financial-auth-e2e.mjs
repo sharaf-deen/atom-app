@@ -235,6 +235,10 @@ try {
       refund_method:'cash',reason:'Local isolated regression',status:'paid'})
     .select('id').single()
   if(refundError)throw refundError
+  // Route requires a UUID; local schema/fixture must follow the same contract.
+  assert.equal(typeof refund.id,'string','Refund fixture ID must be a UUID string')
+  assert.match(refund.id,/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
+    'Refund fixture ID must match the HTTP route UUID contract')
   refundIds.push(refund.id)
   r=await post(actors.admin,'/api/membership-refunds/subscription-impact',{
     refund_id:refund.id,action:'keep_active',reason:'Isolated role regression'
