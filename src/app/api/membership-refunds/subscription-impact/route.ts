@@ -34,7 +34,7 @@ function cleanString(v: unknown, max = 2000) {
 
 function normalizeUuid(v: unknown) {
   const s = cleanString(v, 80)
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s) ? s : ''
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s) ? s : ''
 }
 
 function isISODateOnly(value: string | null | undefined) {
