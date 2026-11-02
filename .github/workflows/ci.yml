@@ -40,3 +40,6 @@ jobs:
 
       - name: Build
         run: npm run build
+
+      - name: Financial HTTP auth denial smoke (loopback only)
+        run: node scripts/security-1c5-financial-http-smoke.mjs
