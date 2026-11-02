@@ -6,7 +6,7 @@ export const revalidate = 0
 import { NextResponse } from 'next/server'
 import { createSupabaseServerActionClient } from '@/lib/supabaseServer'
 
-import { createClient } from '@supabase/supabase-js'
+import { createSupabaseAdminClient } from '@/lib/supabaseAdmin'
 
 function noStore(res: NextResponse) {
   res.headers.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate')
@@ -39,13 +39,13 @@ export async function GET(req: Request) {
       return noStore(NextResponse.json({ ok: false, error: 'FORBIDDEN' }, { status: 403 }))
     }
 
-    // 2) Utilise le service role pour lister le staff (pas de friction RLS)
-    const url = process.env.NEXT_PUBLIC_SUPABASE_URL!
-    const service = process.env.SUPABASE_SERVICE_ROLE_KEY!
-    if (!url || !service) {
+    // 2) Centralized server-only Admin client; preserve configuration error response.
+    let admin: ReturnType<typeof createSupabaseAdminClient>
+    try {
+      admin = createSupabaseAdminClient()
+    } catch {
       return noStore(NextResponse.json({ ok: false, error: 'SERVER_ENV_MISSING' }, { status: 500 }))
     }
-    const admin = createClient(url, service)
 
     const { searchParams } = new URL(req.url)
     const q = (searchParams.get('q') || '').trim()
