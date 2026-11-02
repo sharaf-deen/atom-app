@@ -4,8 +4,8 @@ export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
 import { NextResponse } from 'next/server'
-import { createClient } from '@supabase/supabase-js'
 import { createSupabaseServerActionClient } from '@/lib/supabaseServer'
+import { createSupabaseAdminClient } from '@/lib/supabaseAdmin'
 import { canManagePayments, normalizeRole } from '@/lib/rbac'
 
 function json(status: number, body: any) {
@@ -15,12 +15,11 @@ function json(status: number, body: any) {
 }
 
 function makeAdminClient() {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY
-  if (!url || !key) return null
-  return createClient(url, key, {
-    auth: { autoRefreshToken: false, persistSession: false },
-  })
+  try {
+    return createSupabaseAdminClient()
+  } catch {
+    return null
+  }
 }
 
 export async function POST(req: Request) {
@@ -48,7 +47,7 @@ export async function POST(req: Request) {
       return json(500, {
         ok: false,
         error: 'SERVICE_ROLE_MISSING',
-        details: 'SUPABASE_SERVICE_ROLE_KEY (and NEXT_PUBLIC_SUPABASE_URL) must be set on the server.',
+        details: 'A server-side Supabase admin API key and URL must be configured.',
       })
     }
 
