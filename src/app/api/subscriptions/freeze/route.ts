@@ -3,8 +3,8 @@ export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
 import { NextResponse } from 'next/server'
-import { createClient } from '@supabase/supabase-js'
 import { createSupabaseServerActionClient } from '@/lib/supabaseServer'
+import { createSupabaseAdminClient } from '@/lib/supabaseAdmin'
 import { isISODateOnly } from '@/lib/cairoTime'
 
 type FreezeAction = 'create' | 'update' | 'delete'
@@ -42,10 +42,12 @@ export async function POST(req: Request) {
     return response(400, { ok: false, error: 'Invalid freeze date range' })
   }
 
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY
-  if (!url || !key) return response(500, { ok: false, error: 'Service client unavailable' })
-  const admin = createClient(url, key, { auth: { persistSession: false } })
+  let admin: ReturnType<typeof createSupabaseAdminClient>
+  try {
+    admin = createSupabaseAdminClient()
+  } catch {
+    return response(500, { ok: false, error: 'Service client unavailable' })
+  }
   const { data, error } = await admin.rpc('manage_subscription_freeze_atomic', {
     p_subscription_id: id,
     p_action: action,
