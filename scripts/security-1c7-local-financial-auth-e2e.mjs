@@ -243,6 +243,7 @@ try {
   r=await post(actors.super_admin,'/api/membership-refunds/subscription-impact',{
     refund_id:refund.id,action:'keep_active',reason:'Isolated keep-active regression'
   })
+  if(r.status!==200) console.error('REFUND_IMPACT_DIAGNOSTIC:',JSON.stringify({status:r.status,error:r.body?.error,details:r.body?.details}).slice(0,900))
   check('super admin applies refund impact',r.status,200)
   check('refund impact response',r.body.ok,true)
   const {data:applied,error:appliedError}=await admin.from('membership_refunds')
