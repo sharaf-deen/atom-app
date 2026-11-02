@@ -7,7 +7,7 @@ import { NextResponse } from 'next/server'
 import { revalidateTag, revalidatePath } from 'next/cache'
 import { canAccessKiosk, normalizeRole, type Role } from '@/lib/rbac'
 import { createSupabaseServerActionClient } from '@/lib/supabaseServer'
-import { createClient } from '@supabase/supabase-js'
+import { createSupabaseAdminClient } from '@/lib/supabaseAdmin'
 import { extractActionLink, sendMemberInviteEmailWithQr } from '@/lib/memberInviteEmail'
 import { loadActiveMemberProgramOptions } from '@/lib/memberPrograms'
 import { recordMemberLegalAcceptances, validateRegistrationLegalAcceptance, type RegistrationLegalAcceptanceInput } from '@/lib/legalConsent'
@@ -165,11 +165,11 @@ export async function POST(req: Request) {
       )
     }
 
-    // 3) Client admin (Service Role)
-    const url = process.env.NEXT_PUBLIC_SUPABASE_URL
-    const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY
-
-    if (!url || !serviceKey) {
+    // 3) Centralized server-only Admin client
+    let admin: ReturnType<typeof createSupabaseAdminClient>
+    try {
+      admin = createSupabaseAdminClient()
+    } catch {
       return noStore(
         NextResponse.json(
           { ok: false, error: 'SERVER_MISCONFIGURED' },
@@ -177,10 +177,6 @@ export async function POST(req: Request) {
         ),
       )
     }
-
-    const admin = createClient(url, serviceKey, {
-      auth: { autoRefreshToken: false, persistSession: false },
-    })
 
     let selectedProgram: { key: string; name: string } | null = null
     if (program_key) {
