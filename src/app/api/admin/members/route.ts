@@ -3,7 +3,7 @@ export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
 import { NextRequest } from 'next/server'
-import { createClient } from '@supabase/supabase-js'
+import { createSupabaseAdminClient } from '@/lib/supabaseAdmin'
 import { requireUser } from '@/lib/apiAuth'
 import { jsonWithApiRuntime, logApiError, startApiRuntime } from '@/lib/apiRuntime'
 import { canAccessMembersList, isRole } from '@/lib/rbac'
@@ -31,16 +31,13 @@ export async function POST(req: NextRequest) {
   const limitRaw = Number(body.limit ?? 50)
   const limit = Number.isFinite(limitRaw) ? Math.min(200, Math.max(1, Math.floor(limitRaw))) : 50
 
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL
-  const service = process.env.SUPABASE_SERVICE_ROLE_KEY
-  if (!url || !service) {
-    logApiError(meta, 'env', 'SUPABASE env missing')
+  let admin: ReturnType<typeof createSupabaseAdminClient>
+  try {
+    admin = createSupabaseAdminClient()
+  } catch {
+    logApiError(meta, 'env', 'Supabase admin client unavailable')
     return jsonWithApiRuntime(meta, 500, { ok: false, error: 'Server env missing' })
   }
-
-  const admin = createClient(url, service, {
-    auth: { persistSession: false, autoRefreshToken: false },
-  })
 
   let query = admin
     .from('profiles')
