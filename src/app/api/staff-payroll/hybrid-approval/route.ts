@@ -3,6 +3,7 @@ export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
+import { getSupabaseAdminKey } from '@/lib/supabaseAdmin'
 import { NextResponse } from 'next/server'
 import { revalidatePath } from 'next/cache'
 import { createClient } from '@supabase/supabase-js'
@@ -32,7 +33,7 @@ function nextMonthStart(monthStart:string){
 }
 function makeAdminClient(){
   const url=process.env.NEXT_PUBLIC_SUPABASE_URL
-  const key=process.env.SUPABASE_SERVICE_ROLE_KEY
+  const key=getSupabaseAdminKey()
   if(!url||!key) return null
   return createClient<any>(url,key,{auth:{autoRefreshToken:false,persistSession:false}})
 }

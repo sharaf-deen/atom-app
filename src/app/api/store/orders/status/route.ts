@@ -3,6 +3,7 @@ export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
+import { getSupabaseAdminKey } from '@/lib/supabaseAdmin'
 import { NextResponse } from 'next/server'
 import { createSupabaseServerActionClient } from '@/lib/supabaseServer'
 
@@ -137,7 +138,7 @@ export async function PATCH(req: Request) {
           : `Your order #${order_id} has been canceled.`
 
       const url = process.env.NEXT_PUBLIC_SUPABASE_URL
-      const service = process.env.SUPABASE_SERVICE_ROLE_KEY
+      const service = getSupabaseAdminKey()
       const adminClient = url && service
         ? createClient(url, service, { auth: { autoRefreshToken: false, persistSession: false } })
         : supa // fallback (peut échouer en RLS)
