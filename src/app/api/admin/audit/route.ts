@@ -4,7 +4,7 @@ export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
 import { NextResponse } from 'next/server'
-import { createClient } from '@supabase/supabase-js'
+import { createSupabaseAdminClient } from '@/lib/supabaseAdmin'
 import { requireAdmin } from '@/lib/apiAuth'
 
 function noStore(res: NextResponse) {
@@ -22,15 +22,12 @@ export async function GET() {
   if (!gate.ok) return noStore(gate.res)
 
   try {
-    const url = process.env.NEXT_PUBLIC_SUPABASE_URL
-    const service = process.env.SUPABASE_SERVICE_ROLE_KEY
-    if (!url || !service) {
+    let admin: ReturnType<typeof createSupabaseAdminClient>
+    try {
+      admin = createSupabaseAdminClient()
+    } catch {
       return noStore(NextResponse.json({ ok: false, error: 'Server env missing' }, { status: 500 }))
     }
-
-    const admin = createClient(url, service, {
-      auth: { autoRefreshToken: false, persistSession: false },
-    })
 
     const { data, error } = await admin
       .from('audit_logs')
