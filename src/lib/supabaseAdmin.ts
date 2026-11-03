@@ -15,14 +15,22 @@ import { createClient } from '@supabase/supabase-js'
  *
  * The legacy key fallback preserves existing deployments during rollout.
  */
-export function createSupabaseAdminClient() {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL
+/**
+ * Centralized credential lookup for existing server-only Supabase clients.
+ * Undefined indicates a missing key so legacy endpoint-specific 500 responses
+ * remain unchanged. A malformed configured modern key always fails closed.
+ */
+export function getSupabaseAdminKey(): string | undefined {
   const modernKey = process.env.SUPABASE_SECRET_KEY?.trim()
   if (modernKey && !modernKey.startsWith('sb_secret_')) {
-    // A configured but malformed secret must not silently fall back.
     throw new Error('Invalid server-side Supabase secret key configuration')
   }
-  const key = modernKey || process.env.SUPABASE_SERVICE_ROLE_KEY
+  return modernKey || process.env.SUPABASE_SERVICE_ROLE_KEY
+}
+
+export function createSupabaseAdminClient() {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL
+  const key = getSupabaseAdminKey()
   if (!url || !key) {
     throw new Error('Missing Supabase URL or server-side Supabase API key')
   }
