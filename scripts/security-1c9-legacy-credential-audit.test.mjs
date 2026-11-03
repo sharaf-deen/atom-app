@@ -91,6 +91,6 @@ test('legacy Supabase key references remain centralized and audited', () => {
   const previouslyKnown = unsafe.filter(x => x.reason === 'direct legacy key in application source' && baseline.has(x.path))
   const newViolations = unsafe.filter(x => x.reason !== 'direct legacy key in application source' || !baseline.has(x.path))
   console.log('KNOWN_UNMIGRATED_LEGACY_PATHS:', previouslyKnown.length, 'of', baseline.size, 'baselined dependencies.')
-  console.log('Existing dependencies are NOT waived for key rotation; they remain a migration blocker.')
+  console.log('Source-level migration does NOT authorize key rotation; verify runtime environments and external consumers first.')
   assert.deepEqual(newViolations, [], 'New, unapproved legacy credential dependency: ' + JSON.stringify(newViolations))
 })
