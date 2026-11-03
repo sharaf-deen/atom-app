@@ -4,7 +4,7 @@ export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
 import { NextRequest } from 'next/server'
-import { createClient } from '@supabase/supabase-js'
+import { createSupabaseAdminClient } from '@/lib/supabaseAdmin'
 import { requireAdmin } from '@/lib/apiAuth'
 import { jsonWithApiRuntime, logApiError, startApiRuntime } from '@/lib/apiRuntime'
 
@@ -31,16 +31,13 @@ export async function POST(req: NextRequest) {
       return jsonWithApiRuntime(meta, 400, { ok: false, error: 'Missing email' })
     }
 
-    const url = process.env.NEXT_PUBLIC_SUPABASE_URL
-    const service = process.env.SUPABASE_SERVICE_ROLE_KEY
-    if (!url || !service) {
+    let admin: ReturnType<typeof createSupabaseAdminClient>
+    try {
+      admin = createSupabaseAdminClient()
+    } catch {
       logApiError(meta, 'env', 'SUPABASE env missing')
       return jsonWithApiRuntime(meta, 500, { ok: false, error: 'Server env missing' })
     }
-
-    const admin = createClient(url, service, {
-      auth: { autoRefreshToken: false, persistSession: false },
-    })
 
     const { data: profile, error: pErr } = await admin
       .from('profiles')
