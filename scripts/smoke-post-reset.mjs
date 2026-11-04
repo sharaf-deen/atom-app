@@ -133,6 +133,23 @@ async function main() {
   loadEnvFromFiles()
   const { url, anon, service } = resolveSupabaseCreds()
 
+  // This script creates users, subscriptions, invoices and Storage objects.
+  // Never allow it to touch remote Staging/Production, even if a local .env
+  // accidentally points at a real Supabase project.
+  let parsedApi
+  try {
+    parsedApi = new URL(url)
+  } catch {
+    logFail('Refusing smoke test: invalid Supabase API URL')
+    process.exit(1)
+  }
+  if (parsedApi.protocol !== 'http:' ||
+      !['127.0.0.1', 'localhost'].includes(parsedApi.hostname) ||
+      parsedApi.port !== '54321') {
+    logFail('Refusing smoke test: isolated local Supabase API required')
+    process.exit(1)
+  }
+
   if (!anon || !service) {
     logFail(
       `Missing Supabase keys.\n` +
