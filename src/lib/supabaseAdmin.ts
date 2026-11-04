@@ -25,6 +25,11 @@ export function getSupabaseAdminKey(): string | undefined {
   if (modernKey && !modernKey.startsWith('sb_secret_')) {
     throw new Error('Invalid server-side Supabase secret key configuration')
   }
+  // Opt-in staging gate: prove the modern secret works without legacy fallback.
+  // This flag must remain unset in Production until a separate release approval.
+  if (process.env.ATOM_REQUIRE_MODERN_SUPABASE_KEY === '1' && !modernKey) {
+    throw new Error('Modern server-side Supabase secret key required')
+  }
   return modernKey || process.env.SUPABASE_SERVICE_ROLE_KEY
 }
 
