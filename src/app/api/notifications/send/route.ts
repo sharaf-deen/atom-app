@@ -3,6 +3,7 @@ export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
+import { getSupabaseAdminKey } from '@/lib/supabaseAdmin'
 import { NextResponse } from 'next/server'
 import { createSupabaseServerActionClient } from '@/lib/supabaseServer'
 import { type Role, isRole, NOTIFICATION_MANAGER_ROLES, NOTIFICATION_RECIPIENT_ROLES } from '@/lib/rbac'
@@ -194,7 +195,7 @@ export async function POST(req: Request) {
     }))
 
     const url = process.env.NEXT_PUBLIC_SUPABASE_URL
-    const service = process.env.SUPABASE_SERVICE_ROLE_KEY
+    const service = getSupabaseAdminKey()
     const client = url && service
       ? createClient(url, service, { auth: { autoRefreshToken: false, persistSession: false } })
       : supa
