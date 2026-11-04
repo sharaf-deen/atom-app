@@ -40,6 +40,8 @@ test('central privileged client prefers modern secret and fails closed on malfor
   assert.match(s, /process\.env\.SUPABASE_SECRET_KEY\?\.trim\(\)/)
   assert.match(s, /!modernKey\.startsWith\('sb_secret_'\)/)
   assert.match(s, /throw new Error\('Invalid server-side Supabase secret key configuration'\)/)
+  assert.match(s, /process\.env\.ATOM_REQUIRE_MODERN_SUPABASE_KEY === '1' && !modernKey/)
+  assert.match(s, /throw new Error\('Modern server-side Supabase secret key required'\)/)
   assert.match(s, /modernKey\s*\|\|\s*process\.env\.SUPABASE_SERVICE_ROLE_KEY/)
   assert.doesNotMatch(s, /NEXT_PUBLIC_SUPABASE_SECRET_KEY/)
 })
