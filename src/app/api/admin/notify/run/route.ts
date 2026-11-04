@@ -3,6 +3,7 @@ export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
+import { getSupabaseAdminKey } from '@/lib/supabaseAdmin'
 import { createClient } from '@supabase/supabase-js'
 import { createSupabaseServerActionClient } from '@/lib/supabaseServer'
 import { addDays, cairoToday } from '@/lib/cairoDate'
@@ -56,7 +57,7 @@ export async function POST(req: Request) {
     }
 
     const url = process.env.NEXT_PUBLIC_SUPABASE_URL!
-    const service = process.env.SUPABASE_SERVICE_ROLE_KEY!
+    const service = getSupabaseAdminKey()!
     if (!url || !service) {
       logApiError(meta, 'env', 'SUPABASE env missing')
       return jsonWithApiRuntime(meta, 500, { ok: false, error: 'SERVER_ENV_MISSING' })
