@@ -3,6 +3,7 @@ export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
+import { getSupabaseAdminKey } from '@/lib/supabaseAdmin'
 import { NextResponse } from 'next/server'
 import { revalidatePath } from 'next/cache'
 import { createClient } from '@supabase/supabase-js'
@@ -11,7 +12,7 @@ import { createSupabaseServerActionClient } from '@/lib/supabaseServer'
 function json(status: number, body: any) { const response = NextResponse.json(body, { status }); response.headers.set('Cache-Control', 'no-store'); return response }
 function clean(value: unknown, max = 2000) { return typeof value === 'string' ? value.trim().slice(0, max) : '' }
 function month(value: unknown) { const raw = clean(value, 20); return /^\d{4}-(0[1-9]|1[0-2])(?:-01)?$/.test(raw) ? `${raw.slice(0, 7)}-01` : '' }
-function adminClient() { const url = process.env.NEXT_PUBLIC_SUPABASE_URL; const key = process.env.SUPABASE_SERVICE_ROLE_KEY; return url && key ? createClient<any>(url, key, { auth: { autoRefreshToken: false, persistSession: false } }) : null }
+function adminClient() { const url = process.env.NEXT_PUBLIC_SUPABASE_URL; const key = getSupabaseAdminKey(); return url && key ? createClient<any>(url, key, { auth: { autoRefreshToken: false, persistSession: false } }) : null }
 
 async function actor() {
   const supabase = createSupabaseServerActionClient()
