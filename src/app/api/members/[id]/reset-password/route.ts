@@ -2,6 +2,7 @@ export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
+import { getSupabaseAdminKey } from '@/lib/supabaseAdmin'
 import { NextResponse } from 'next/server'
 import { canManageMemberAccountAccess, normalizeRole } from '@/lib/rbac'
 import { createSupabaseServerActionClient } from '@/lib/supabaseServer'
@@ -100,7 +101,7 @@ export async function POST(req: Request, ctx: { params: { id: string } }) {
   }
 
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL
-  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY
+  const serviceKey = getSupabaseAdminKey()
   if (!url || !serviceKey) {
     return noStore(NextResponse.json({ ok: false, error: 'SERVER_MISCONFIGURED' }, { status: 500 }))
   }
