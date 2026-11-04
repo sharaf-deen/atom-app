@@ -2,6 +2,7 @@
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
+import { getSupabaseAdminKey } from '@/lib/supabaseAdmin'
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { createClient } from '@supabase/supabase-js'
@@ -61,7 +62,7 @@ export default async function AdminOutstandingDuesPage() {
   }
 
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL
-  const service = process.env.SUPABASE_SERVICE_ROLE_KEY
+  const service = getSupabaseAdminKey()
 
   if (!url || !service) {
     return (
