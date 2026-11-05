@@ -121,6 +121,12 @@ export async function POST(req: Request) {
   const canHandleDeskPayment = canCreateSubscription(role)
   const canDirectlyAdjustDue = canManagePayments(role)
 
+  // Deny unauthorized callers before using a privileged client to read subscriptions.
+  // Front desk roles can settle member dues, matching the Reception/member-detail workflow.
+  if (!canHandleDeskPayment) {
+    return json(403, { ok: false, error: 'Forbidden' })
+  }
+
   const admin = makeAdminClient()
   if (!admin) return json(500, { ok: false, error: 'Missing service role key' })
 
@@ -147,11 +153,6 @@ export async function POST(req: Request) {
 
   if (curErr) return json(500, { ok: false, error: curErr.message })
   if (!current) return json(404, { ok: false, error: 'Subscription not found' })
-
-  // Front desk roles can settle member dues, matching the Reception/member-detail workflow.
-  if (!canHandleDeskPayment) {
-    return json(403, { ok: false, error: 'Forbidden' })
-  }
 
   // In this app: amount = paid so far, amount_due = remaining due
   const amountPaidSoFar = Number(current.amount ?? 0)
