@@ -18,5 +18,7 @@ test('isolated financial E2E retains its explicit local-only guard', () => {
   const source = readFileSync('scripts/security-1c7-local-financial-auth-e2e.mjs', 'utf8')
   assert.match(source, /ATOM_LOCAL_FINANCIAL_E2E/)
   assert.match(source, /Refusing nonlocal Supabase API/)
-  assert.match(source, /delete startEnv\.SUPABASE_SECRET_KEY/)
+  assert.match(source, /SUPABASE_SECRET_KEY:service/)
+  assert.match(source, /delete startEnv\.SUPABASE_SERVICE_ROLE_KEY/)
+  assert.match(source, /Missing modern local Supabase secret key/)
 })

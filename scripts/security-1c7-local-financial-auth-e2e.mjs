@@ -26,7 +26,8 @@ const parsed = Object.fromEntries(
 const api = parsed.API_URL || parsed.SUPABASE_URL || 'http://127.0.0.1:54321'
 assert.match(api, /^http:\/\/(127\.0\.0\.1|localhost):54321\/?$/, 'Refusing nonlocal Supabase API')
 const anon = parsed.ANON_KEY || parsed.PUBLISHABLE_KEY
-const service = parsed.SERVICE_ROLE_KEY || parsed.SECRET_KEY
+const service = parsed.SECRET_KEY
+assert.ok(service?.startsWith('sb_secret_'), 'Missing modern local Supabase secret key')
 assert.ok(anon && service, 'Missing local Supabase API keys')
 const admin = createClient(api, service, { auth:{persistSession:false,autoRefreshToken:false} })
 
@@ -114,10 +115,11 @@ try {
   const startEnv={
     ...process.env, NODE_ENV:'development', PORT:String(port),
     NEXT_PUBLIC_SUPABASE_URL:api,NEXT_PUBLIC_SUPABASE_ANON_KEY:anon,
-    SUPABASE_SERVICE_ROLE_KEY:service,ATOM_LOCAL_FINANCIAL_E2E:'1',
+    SUPABASE_SECRET_KEY:service,ATOM_LOCAL_FINANCIAL_E2E:'1',
   }
-  // The CI reset DB gives a local legacy service key. It is never printed.
-  delete startEnv.SUPABASE_SECRET_KEY
+  // The isolated CI Supabase instance provides a modern sb_secret_ key.
+  // Ensure a legacy env inherited from the runner cannot mask migration issues.
+  delete startEnv.SUPABASE_SERVICE_ROLE_KEY
   delete startEnv.RESEND_API_KEY
   server=spawn(process.execPath,['node_modules/next/dist/bin/next','dev','-H','127.0.0.1','-p',String(port)],{
     env:startEnv,stdio:['ignore','pipe','pipe'],

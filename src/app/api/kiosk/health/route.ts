@@ -1,3 +1,7 @@
+export const runtime = 'nodejs'
+export const dynamic = 'force-dynamic'
+export const revalidate = 0
+
 import { NextRequest } from 'next/server'
 import { createSupabaseRouteClient } from '@/lib/supabaseRoute'
 import { jsonWithApiRuntime, logApiError, startApiRuntime } from '@/lib/apiRuntime'
