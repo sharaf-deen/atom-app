@@ -24,9 +24,11 @@ test('production app source contains no direct legacy service key lookups', () =
   assert.deepEqual(violations, [], 'Direct legacy service key remains in app source')
 })
 
-test('central key resolver prefers modern key; Production does not force new gate', () => {
+test('central key resolver requires modern key and never falls back to legacy', () => {
   const source = readFileSync('src/lib/supabaseAdmin.ts', 'utf8')
   assert.match(source, /process\.env\.SUPABASE_SECRET_KEY\?\.trim\(\)/)
-  assert.match(source, /modernKey \|\| process\.env\.SUPABASE_SERVICE_ROLE_KEY/)
-  assert.match(source, /process\.env\.ATOM_REQUIRE_MODERN_SUPABASE_KEY === '1'/)
+  assert.match(source, /if \(!modernKey\)/)
+  assert.match(source, /return modernKey/)
+  assert.doesNotMatch(source, /process\.env\.SUPABASE_SERVICE_ROLE_KEY/)
+  assert.doesNotMatch(source, /modernKey\s*\|\|/)
 })
