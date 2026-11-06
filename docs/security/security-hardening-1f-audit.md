@@ -18,6 +18,7 @@ Consolidate the planned 1E.4–1E.6 audits: financial write protections, API rol
 - Supabase security advisor identified 95 callable `SECURITY DEFINER` functions for `anon` and 98 for `authenticated`; evaluate each function's internal authorization and intended access.
 - Prioritize financial write, store sale, schedule modification and user-role operations. These advisor numbers are not exploit counts.
 - **Priority investigation:** `public.admin_apply_store_sale_update(...)` is reported executable by `anon` and `authenticated`; its inspected PL/pgSQL definition contains mutation of sale payments/inventory without an explicit `auth.uid()` or role check. Confirm all application consumers and revoke inappropriate EXECUTE grants or introduce verified server-side authorization before calling 1F complete.
+- **Mitigation staged:** `20261106121000_security_hardening_1f_store_privileged_rpc_revoke.sql` revokes `PUBLIC`, `anon`, and `authenticated` from two privileged Store sale mutations (`admin_apply_store_sale_update`, `admin_complete_store_preorder_as_sale`). Both have explicit `service_role` EXECUTE in Staging and the inspected Store update API uses an authenticated Super Admin guard plus a server admin client. Regression test added. Check other Store paths and role-specific behavior before Staging merge.
 - Prefer REVOKE EXECUTE from PUBLIC/anon/authenticated for server-only RPCs; maintain explicit grants for deliberately public, self-service RPCs.
 
 ### F3 — Elevated view (TRIAGE)
