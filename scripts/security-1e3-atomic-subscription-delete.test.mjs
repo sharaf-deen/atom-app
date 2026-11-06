@@ -8,6 +8,9 @@ const sql = readFileSync(
   'supabase/migrations/20261106070000_security_hardening_1e3_atomic_subscription_delete_audit.sql',
   'utf8',
 )
+const revoke = readFileSync('supabase/migrations/20261106070010_security_hardening_1e3_atomic_delete_revoke.sql', 'utf8')
+const grant = readFileSync('supabase/migrations/20261106070020_security_hardening_1e3_atomic_delete_grant.sql', 'utf8')
+const privilegeAssertion = readFileSync('supabase/migrations/20261106070030_security_hardening_1e3_atomic_delete_assert.sql', 'utf8')
 const route = readFileSync('src/app/api/subscriptions/delete/route.ts', 'utf8')
 
 test('atomic deletion RPC enforces role and caller before writing', () => {
@@ -16,8 +19,10 @@ test('atomic deletion RPC enforces role and caller before writing', () => {
   assert.match(sql, /SET search_path = ''/i)
   assert.match(sql, /current_user <> 'service_role'/)
   assert.match(sql, /v_role IS DISTINCT FROM 'super_admin'/)
-  assert.match(sql, /REVOKE ALL ON FUNCTION[\s\S]*FROM PUBLIC, anon, authenticated;/i)
-  assert.match(sql, /GRANT EXECUTE ON FUNCTION[\s\S]*TO service_role;/i)
+  assert.match(revoke, /REVOKE ALL ON FUNCTION[\s\S]*FROM PUBLIC, anon, authenticated;/i)
+  assert.match(grant, /GRANT EXECUTE ON FUNCTION[\s\S]*TO service_role;/i)
+  assert.match(privilegeAssertion, /SECURITY_1E3_PUBLIC_RPC_EXECUTE/)
+  assert.doesNotMatch(sql, /REVOKE ALL ON FUNCTION|GRANT EXECUTE ON FUNCTION|DO \$assert_1e3\$/i)
 })
 
 test('deletion and audit write are one function transaction with no swallowed errors', () => {
