@@ -75,7 +75,7 @@ export async function POST(req: Request) {
       error: error.code === 'PGRST202'
         ? 'PAYMENT_CORRECTION_NOT_DEPLOYED'
         : 'PAYMENT_CORRECTION_REJECTED',
-      details: error.message,
+      // Detailed SQL exceptions remain in server logs, not in the API response.
     })
   }
 
