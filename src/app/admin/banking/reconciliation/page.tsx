@@ -290,6 +290,7 @@ export default async function BankingReconciliationPage({
 
       {!loadError ? (
         <BankBulkReconciliationPreview
+          demoEnabled={process.env.VERCEL_ENV !== 'production' && process.env.NODE_ENV !== 'production' ? true : process.env.VERCEL_ENV === 'preview'}
           credits={credits.map((row) => ({
             id: row.id,
             transaction_date: row.transaction_date,
