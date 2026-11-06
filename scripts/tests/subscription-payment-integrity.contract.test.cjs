@@ -11,7 +11,7 @@ const root = path.resolve(__dirname, '../..')
 const read = (name) => fs.readFileSync(path.join(root, name), 'utf8')
 const route = read('src/app/api/subscriptions/update/route.ts')
 const correction = read('src/app/api/subscriptions/payments/correct-method/route.ts')
-const sql = read('scripts/sql/subscription-payment-method-correction-DRAFT.sql')
+const sql = read('supabase/migrations/20261106160000_subscription_payment_method_correction.sql')
 
 test('subscription header finance edits are rejected when ledger payments exist', () => {
   assert.match(route, /financialHeaderChange/)
@@ -53,8 +53,9 @@ test('database function denies direct public execution and logs method changes',
   assert.match(sql, /corrected_by/)
 })
 
-test('draft is not shipped as an executable migration', () => {
-  assert.match(sql, /DRAFT ONLY/)
-  assert.match(sql, /NOT A MIGRATION/)
+test('correction is shipped as a reviewed versioned migration with strict role grants', () => {
+  assert.match(sql, /grant execute on function public\.correct_subscription_payment_method_v1/)
+  assert.match(sql, /grant select on public\.subscription_payment_method_corrections to authenticated/)
+  assert.match(sql, /validation batch -> payment ledger -> subscription/)
   assert.doesNotMatch(correction, /create or replace function/i)
 })
