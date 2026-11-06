@@ -71,6 +71,22 @@ Independent Supabase verification:
 
 **Production decision remains NO-GO** pending Security Hardening migration reconciliation and remaining historical-batch regression.
 
+## Consolidated readiness update — historical validation test and branch divergence (2026-11-06)
+
+**Staging historical validated-batch lifecycle: transactional PASS.**
+Using authorized test payment `a6210c01-03e3-4455-b0f8-695606a35501`, which had a genuinely active validated InstaPay batch `d342d64e-eb8b-49f3-a3fd-9154bc4099c9`, tested the actual installed correction RPC inside a single `BEGIN ... ROLLBACK`:
+- InstaPay -> Cash in the transaction; amount EGP 1,000 and due EGP 0 remained unchanged.
+- Original validated batch soft-deleted and its item released within the transaction.
+- A new audit event created within transaction.
+- Original payment became available under Cash in the open-validation groups.
+- On independent read after rollback: payment and subscription remain InstaPay, original validation batch and item still active, audit count still 1. **No change persisted from this test.**
+
+**Git branches diverged materially** at inspection: GitHub `main...staging` comparison reported 175 commits ahead and 278 behind, with 125 changed files. Do **not** merge `staging` directly to `main`, nor cherry-pick all Security Hardening migrations without a reviewed integration plan.
+
+**Staging Supabase migrations missing from Production:** 14 versions at inspection (the Security Hardening 1F series including 1F9/1F10, plus `20261106160000_subscription_payment_method_correction`). Inspect latest state again immediately before preparing any release because parallel work is active.
+
+**Decision:** Functional method correction, audit, manual revalidation, and historical batch release all PASS on Staging (the historical release tested transactionally). Production stays NO-GO due to branch/migration integration risk, not the tested subscription correction behavior.
+
 ## Remaining **hard gates** before Production
 1. Confirm current **latest** Staging Vercel deployment is READY and matches the current `staging` head (parallel Security Hardening changes may still be building).
 2. Complete an **authorized actual correction** on a clearly identified **fictional Staging payment**, with verified pre-change ledger/batch/bank-link state; do not use real member funds.
