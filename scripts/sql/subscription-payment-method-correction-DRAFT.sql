@@ -51,7 +51,8 @@ begin
   if p_actor is null or not public.is_super_admin(p_actor) then
     raise exception 'Only Super Admin can correct payment methods.';
   end if;
-  if p_payment_id is null or v_old_method not in ('cash','instapay','card','bank_transfer')
+  if p_payment_id is null or v_old_method is null or v_new_method is null
+     or v_old_method not in ('cash','instapay','card','bank_transfer')
      or v_new_method not in ('cash','instapay','card','bank_transfer')
      or v_old_method = v_new_method then
     raise exception 'Specify a valid payment and two different methods.';
@@ -130,8 +131,7 @@ begin
       where batch_id = v_batch_id and released_at is null;
     update public.payment_validation_batches
       set deleted_at = v_now, deleted_by = p_actor,
-          updated_at = v_now, updated_by = p_actor,
-          note = concat_ws(' | ', note, 'Method corrected; requires new validation: ' || v_reason)
+          updated_at = v_now, updated_by = p_actor
       where id = v_batch_id;
   end if;
 
