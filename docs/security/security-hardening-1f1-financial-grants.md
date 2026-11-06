@@ -101,3 +101,19 @@ ALTER POLICY payments_update_ops ON public.payments USING (public.is_ops(auth.ui
 ALTER POLICY payments_delete_admin ON public.payments USING (public.is_admin_or_super_admin(auth.uid()));
 COMMIT;
 ```
+
+## 1F.4 — SQL role-predicate verification (Staging 2026-11-06)
+
+Migration `20261106133214_security_hardening_1f_financial_table_permissions` successfully recorded in the Supabase Staging migration history and its exact versioned SQL committed in this branch.
+
+Read-only simulated JWT checks used `BEGIN; set_config('request.jwt.claim.sub', ..., true); SET LOCAL ROLE authenticated;` and `ROLLBACK;` for each of the three existing role categories. No member financial data was changed.
+
+| Profile role | is_ops(auth.uid()) (legacy) | is_super_admin(auth.uid()) (current write policies) | Result |
+| --- | --- | --- | --- |
+| reception | true | false | PASS |
+| admin | true | false | PASS |
+| super_admin | true | true | PASS |
+
+All six INSERT/UPDATE/DELETE policy predicates for `payments` and `expenses` were separately verified as `is_super_admin(auth.uid())` (6/6 PASS).
+
+These are **predicate/configuration checks**, not actual API write-denial tests or application E2E tests. CI workflow runs were not reported for the migration commit at the time of this check. Keep this PR Draft until manual front-desk settlement and expense/payment UI smoke tests pass.
