@@ -32,6 +32,14 @@ BEGIN
     RAISE EXCEPTION 'SERVICE_ROLE_EXECUTE_PERMISSION_MISSING';
   END IF;
 
+  IF NOT has_table_privilege('authenticated','public.subscription_payment_method_corrections','SELECT') THEN
+    RAISE EXCEPTION 'SUPER_ADMIN_AUDIT_READ_GRANT_MISSING';
+  END IF;
+
+  IF has_table_privilege('authenticated','public.subscription_payment_method_corrections','INSERT') THEN
+    RAISE EXCEPTION 'UNPRIVILEGED_AUDIT_INSERT_GRANT_LEAK';
+  END IF;
+
   IF NOT EXISTS (
     SELECT 1 FROM pg_policies
     WHERE schemaname = 'public'
