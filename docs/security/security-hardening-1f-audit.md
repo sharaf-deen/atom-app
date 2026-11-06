@@ -21,7 +21,8 @@ Consolidate the planned 1E.4–1E.6 audits: financial write protections, API rol
 
 ### F3 — Elevated view (TRIAGE)
 - Supabase security advisor flagged `public.admin_income_events_open_v1` as SECURITY DEFINER.
-- Check existing REVOKEs and invoker-compatibility before a view change; absence of direct privileges may already mitigate exposure.
+- **Confirmed exposed:** Staging `has_table_privilege` was true for both `anon` and `authenticated` on this view, which includes member and payment metadata. The 1A REVOKE on `admin_income_events_v1` did not cover this separate view.
+- **Fix prepared on this branch:** `20261106120000_security_hardening_1f_financial_view_revoke.sql` revokes client SELECT while preserving `service_role` access. Validate role-based client access and internal financial reporting on Staging after merge.
 
 ### F4 — Additional advisor notices (REVIEW)
 - 30 mutable function search paths; one extension in public; leaked password protection setting; 30 RLS-enabled tables with no policies.
