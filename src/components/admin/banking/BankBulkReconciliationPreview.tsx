@@ -31,7 +31,7 @@ export default function BankBulkReconciliationPreview({ credits, batches, active
     for (const m of activeMatches) matched.set(m.bank_transaction_id, (matched.get(m.bank_transaction_id) ?? 0) + Number(m.matched_amount))
     const availableCredits = credits.filter(c => cents(c.amount - (matched.get(c.id) ?? 0)) > 0)
     const availableBatches = batches.filter(b =>
-      (b.payment_method === 'instapay' || b.payment_method === 'bank_transfer') &&
+      b.payment_method === 'instapay' &&
       !b.legacy_matched && b.business_date &&
       cents(b.counted_amount - b.active_matched_amount) > 0
     )
