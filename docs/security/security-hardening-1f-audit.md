@@ -77,3 +77,9 @@ Consolidate the planned 1E.4–1E.6 audits: financial write protections, API rol
 - Confirmed `staff_payroll_save_task_minimum_rates(date,jsonb,jsonb,uuid)` was executable by `anon` and `authenticated`, is `SECURITY DEFINER`, and does not verify the session principal or role. `p_actor_id` is a caller-controlled audit value.
 - Added `20261106131000_security_hardening_1f_task_minimum_rates_rpc_revoke.sql` and a static regression test to block direct client EXECUTE while preserving explicit `service_role` privilege.
 - **Release blocker:** verify the application's task-minimum-rate editing path; the corresponding caller was not definitively identified during this audit. If direct browser RPC is used, adapt it to an authenticated server-side Super Admin route before applying this restriction. Do not mark this flow PASS without actual Staging checks.
+
+### F12 — Staging isolated migration rehearsal (PASS; no migrations applied)
+- On 2026-11-06, executed all **14** prepared 1F SQL migration bodies in version order within one nested PostgreSQL exception block in Staging. Each was dispatched as a separate dynamic statement, retaining the one-top-level-statement migration rule.
+- Verified while the changes were active: anonymous SELECT on the protected finance view denied; authenticated EXECUTE on the task minimum rate writer denied; `service_role` EXECUTE preserved; the final SQL assertion migration ran without error.
+- Deliberately raised and trapped a sentinel exception to roll back **all** privilege/policy changes. Independently checked existing anonymous SELECT and authenticated RPC privileges remained present after the rollback and that no 1F migrations were registered as applied.
+- **Still required:** full GitHub CI, DB Reset+Smoke, code-level role tests, end-to-end finance and Store operations, and task minimum rate editing-path verification. Rehearsal does not substitute for those checks. No Production changes.
