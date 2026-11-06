@@ -1,7 +1,8 @@
 -- Security Hardening 1E.3 — atomic deletion and audit for subscriptions.
 -- Deploy to Staging first. Does not delete data during migration.
 -- The existing BEFORE DELETE history-protection trigger is retained.
-BEGIN;
+-- Supabase runs migration statements through its migration executor; no explicit
+-- BEGIN/COMMIT here. The RPC itself is atomic as one PostgreSQL statement.
 
 CREATE OR REPLACE FUNCTION public.delete_subscription_with_audit_atomic(
   p_subscription_id uuid,
@@ -86,4 +87,3 @@ BEGIN
   END IF;
 END;
 $assert_1e3$;
-COMMIT;
