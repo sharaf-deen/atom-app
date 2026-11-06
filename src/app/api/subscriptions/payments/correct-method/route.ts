@@ -14,6 +14,54 @@ function json(status: number, body: Record<string, unknown>) {
   return response
 }
 
+/** Read-only payment ledger discovery for a single subscription. Super Admin only. */
+export async function GET(req: Request) {
+  const supabase = createSupabaseServerActionClient()
+  const { data: auth, error: authError } = await supabase.auth.getUser()
+  if (authError || !auth.user) return json(401, { ok: false, error: 'NOT_AUTHENTICATED' })
+
+  const { data: profile, error: profileError } = await supabase
+    .from('profiles').select('role').eq('user_id', auth.user.id).maybeSingle()
+  if (profileError) return json(500, { ok: false, error: 'PROFILE_LOOKUP_FAILED' })
+  if (normalizeRole(profile?.role) !== 'super_admin') {
+    return json(403, { ok: false, error: 'SUPER_ADMIN_REQUIRED' })
+  }
+
+  const subscriptionId = new URL(req.url).searchParams.get('subscription_id')?.trim() ?? ''
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(subscriptionId)) {
+    return json(400, { ok: false, error: 'INVALID_SUBSCRIPTION_ID' })
+  }
+
+  let admin: ReturnType<typeof createSupabaseAdminClient>
+  try {
+    admin = createSupabaseAdminClient()
+  } catch {
+    return json(500, { ok: false, error: 'ADMIN_CLIENT_UNAVAILABLE' })
+  }
+
+  const { data: subscription, error: subscriptionError } = await admin
+    .from('subscriptions')
+    .select('id, amount, amount_due, payment_method')
+    .eq('id', subscriptionId)
+    .maybeSingle()
+  if (subscriptionError) return json(500, { ok: false, error: 'SUBSCRIPTION_READ_FAILED' })
+  if (!subscription) return json(404, { ok: false, error: 'SUBSCRIPTION_NOT_FOUND' })
+
+  const { data: payments, error: paymentsError } = await admin
+    .from('subscription_payments')
+    .select('id, subscription_id, amount, payment_method, paid_at, created_at')
+    .eq('subscription_id', subscriptionId)
+    .order('created_at', { ascending: false })
+    .limit(100)
+  if (paymentsError) return json(500, { ok: false, error: 'PAYMENTS_READ_FAILED' })
+
+  return json(200, {
+    ok: true,
+    subscription,
+    payments: payments ?? [],
+  })
+}
+
 /**
  * Correct ONE payment's method without inventing a new financial receipt.
  * The backing RPC is responsible for atomic ledger, validation and audit writes.
