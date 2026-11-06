@@ -63,8 +63,28 @@ begin
     raise exception 'A correction reason of 5 to 500 characters is required.';
   end if;
 
-  -- Lock order note: subscription payment first, then subscription, then batch.
-  -- Any companion amount-correction workflow must be checked for lock compatibility.
+  -- Match the lock order used by correct_and_revalidate_payment_v1:
+  -- validation batch -> payment ledger -> subscription.
+  -- Discover the batch ID before locking, then recheck the active item after
+  -- the batch lock; if a concurrent workflow changed it, fail closed.
+  select i.batch_id into v_batch_id
+  from public.payment_validation_batch_items i
+  join public.payment_validation_batches b on b.id = i.batch_id
+  where i.source_kind = 'subscription_payment'
+    and i.source_id = p_payment_id
+    and i.released_at is null
+    and b.deleted_at is null
+  order by b.validated_at desc
+  limit 1;
+
+  if v_batch_id is not null then
+    select * into v_batch from public.payment_validation_batches
+      where id = v_batch_id for update;
+    if not found or v_batch.deleted_at is not null then
+      raise exception 'Validation batch changed; refresh and retry.';
+    end if;
+  end if;
+
   select * into v_entry from public.subscription_payments
     where id = p_payment_id for update;
   if not found or public.normalize_payment_method(v_entry.payment_method) is distinct from v_old_method then
@@ -85,14 +105,16 @@ begin
 
   -- Lock an active validation batch first. Corrections of multi-entry batches
   -- need a separate batch-rebuild workflow, not partial mutation of evidence.
-  select i.batch_id into v_batch_id from public.payment_validation_batch_items i
-    join public.payment_validation_batches b on b.id = i.batch_id
-    where i.source_kind = 'subscription_payment' and i.source_id = p_payment_id
-      and i.released_at is null and b.deleted_at is null
-    limit 1;
   if v_batch_id is not null then
-    select * into v_batch from public.payment_validation_batches
-      where id = v_batch_id for update;
+    if not exists (
+      select 1 from public.payment_validation_batch_items i
+      where i.batch_id = v_batch_id
+        and i.source_kind = 'subscription_payment'
+        and i.source_id = p_payment_id
+        and i.released_at is null
+    ) then
+      raise exception 'Payment validation link changed; refresh and retry.';
+    end if;
     if v_batch.deleted_at is not null or v_batch.superseded_by_batch_id is not null
        or v_batch.validation_mode <> 'daily'
        or v_batch.business_date < date '2026-08-01'
