@@ -47,3 +47,27 @@ Rollback restores pre-change SQL table privileges and should only run after expl
 4. Verify unauthorized access denial and authorized reception flows in Staging; only then assess Production.
 
 Current status: **triage verified; role-policy remediation not yet applied**.
+
+## 1F.2 — Expenses write RLS (Staging applied 2026-11-06)
+
+```sql
+BEGIN;
+ALTER POLICY expenses_insert_ops ON public.expenses WITH CHECK (public.is_super_admin(auth.uid()));
+ALTER POLICY expenses_update_ops ON public.expenses USING (public.is_super_admin(auth.uid())) WITH CHECK (public.is_super_admin(auth.uid()));
+ALTER POLICY expenses_delete_admin ON public.expenses USING (public.is_super_admin(auth.uid()));
+COMMIT;
+```
+
+Read-only verification PASS: all three expenses write policies now require `is_super_admin(auth.uid())`. The expenses SELECT policy and all payments policies were retained. The subscription settlement route uses `subscription_payments`, not a direct write to the `payments` table in its inspected path.
+
+**Pending:** real role-matrix and UI tests. This was applied directly to Staging, not via migration history. Reconcile as a versioned migration using the Supabase CLI before deploy. Production unchanged.
+
+Rollback if regression requires it, after review:
+
+```sql
+BEGIN;
+ALTER POLICY expenses_insert_ops ON public.expenses WITH CHECK (public.is_ops(auth.uid()));
+ALTER POLICY expenses_update_ops ON public.expenses USING (public.is_ops(auth.uid())) WITH CHECK (public.is_ops(auth.uid()));
+ALTER POLICY expenses_delete_admin ON public.expenses USING (public.is_admin_or_super_admin(auth.uid()));
+COMMIT;
+```
