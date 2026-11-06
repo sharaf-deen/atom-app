@@ -59,3 +59,4 @@ jobs:
           fi
           docker exec -i "$DB_CONTAINER" psql -U postgres -d postgres -v ON_ERROR_STOP=1 < scripts/sql/subscription-payment-method-correction-DRAFT.sql
           docker exec -i "$DB_CONTAINER" psql -U postgres -d postgres -v ON_ERROR_STOP=1 < scripts/tests/subscription-payment-method-local-smoke.sql
+          docker exec -i "$DB_CONTAINER" psql -U postgres -d postgres -v ON_ERROR_STOP=1 < scripts/tests/subscription-payment-method-business-local.sql
