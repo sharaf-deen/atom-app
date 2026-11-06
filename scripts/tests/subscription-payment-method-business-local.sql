@@ -13,8 +13,6 @@ DECLARE
   batch_id uuid := gen_random_uuid();
   returned_batch uuid;
   returned_method text;
-  count_payments integer;
-  value_total numeric;
   remaining_due numeric;
   batch_deleted_at timestamptz;
   correction_count integer;
@@ -88,8 +86,6 @@ BEGIN
     RAISE EXCEPTION 'CORRECT_METHOD_RESULT_MISMATCH';
   END IF;
 
-  SELECT count(*),coalesce(sum(amount),0) INTO count_payments,value_total
-    FROM public.subscription_payments WHERE subscription_id = subscription_id;
   -- Test exact identity via payment ID (do not assume single payment globally).
   IF (SELECT payment_method FROM public.subscription_payments WHERE id=first_payment_id) <> 'instapay' THEN
     RAISE EXCEPTION 'PAYMENT_METHOD_NOT_CORRECTED';
