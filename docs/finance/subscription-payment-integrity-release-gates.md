@@ -14,6 +14,23 @@ Issue #1341. Main functional PR #1344. Staging integration PR #1349 (merged).
 - Staging read-only audit review showed **0 correction records** as of 2026-11-06.
 - Production release not performed.
 
+## Final consolidated verification — 2026-11-06
+**Decision: STAGING TECHNICAL PASS / PRODUCTION NO-GO.**
+
+Verified directly:
+- The current `staging` SHA `57c0b74cd3e521a56c7c67e812d106bbb2e066c1` has a Vercel deployment in state `READY`.
+- PR #1344 commit `ab772d57f2f369e076187be66807c9f20b6a7649`: CI PASS; DB Reset + Smoke PASS.
+- Staging's method correction SQL migration is installed precisely once; function and audit table exist, RLS enabled, only service_role can execute the privileged correction RPC, and authenticated cannot insert audit events.
+- Audit table count remains **0**: no real Staging correction has been accepted/executed. Picking a payment in the UI only proves the selection flow, NOT end-to-end mutation, audit or manual revalidation.
+- Supabase Staging migration ledger has **11 versions not in Production**, specifically 10 Security Hardening 1F migrations plus the payment method correction migration. Do not merge the finance-only PR straight to main and assume this ordering is resolved.
+
+Remaining explicit release blockers:
+1. An authorized fictional Staging record with genuine ledger entry and controlled end-to-end correction, audit, validation/reconciliation verification. Run without touching real member funds.
+2. Coordinate with Security Hardening to promote the complete set of reviewed migrations in order to main/Production; do not skip or repair migration history.
+3. Explicit Production GO decision and its regression suite.
+
+No Production migration, data mutation, or deployment was performed as part of this verification.
+
 ## Remaining **hard gates** before Production
 1. Confirm current **latest** Staging Vercel deployment is READY and matches the current `staging` head (parallel Security Hardening changes may still be building).
 2. Complete an **authorized actual correction** on a clearly identified **fictional Staging payment**, with verified pre-change ledger/batch/bank-link state; do not use real member funds.
