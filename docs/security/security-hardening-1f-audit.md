@@ -13,6 +13,7 @@ Consolidate the planned 1E.4–1E.6 audits: financial write protections, API rol
 - Database RLS `expenses_insert_ops`, `expenses_update_ops`, `payments_insert_ops`, `payments_update_ops` permits `is_ops(auth.uid())`; this includes `reception`, `admin`, and `super_admin`.
 - Database RLS delete on these tables currently permits `is_admin_or_super_admin(auth.uid())`; this includes `admin`.
 - A direct client request may therefore enjoy broader permission than the app's RBAC. **Do not tighten blindly** until all direct-client and front-desk workflows are inventoried. Retain legitimate subscription settlement capabilities.
+- **Mitigation prepared, NOT yet applied:** six sequential `ALTER POLICY` migrations (`20261106122000` through `20261106122050`) align direct INSERT/UPDATE/DELETE on `expenses` and `payments` with `public.is_super_admin(auth.uid())`; SELECT policies are untouched. The server-side expenses form uses an explicit Super Admin check and privileged Supabase client; subscriptions settlement uses its own server-side flow. Validate all other payment-entry and front-desk paths on Staging before release. Read-only source test added.
 
 ### F2 — Exposed privileged functions (TRIAGE; risk not yet established per function)
 - Supabase security advisor identified 95 callable `SECURITY DEFINER` functions for `anon` and 98 for `authenticated`; evaluate each function's internal authorization and intended access.
