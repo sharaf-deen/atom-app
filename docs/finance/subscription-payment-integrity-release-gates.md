@@ -46,6 +46,18 @@ Executed the **installed** `correct_subscription_payment_method_v1` on Staging i
 **Acceptance status:** Transactional database correction/audit/queue tests PASS on shared Staging, without persisting test changes.
 **Not yet proven:** actual UI submission and permanent audited correction; manual payment validation/reconciliation of a post-correction entry; historical validated-batch release/revalidation on shared Staging. These remain release gates. The tests use an existing payment with no active batch and cannot stand in for the whole validated-batch lifecycle.
 
+## Persisted Super Admin UI acceptance — 2026-11-06
+
+**PASS — Staging only.** Super Admin completed an actual UI correction on authorized test account ATOM-000011. Application displayed `Method corrected`.
+
+Independent SQL reads verified:
+- Payment `a6210c01-03e3-4455-b0f8-695606a35501` changed Cash -> InstaPay, and single-payment subscription header also InstaPay.
+- Amount 1,000 EGP unchanged; remaining due 0 EGP unchanged; unrelated 5,000 EGP Cash payment unchanged.
+- Exactly one persistent audit row: old cash, new instapay, reason `Staging acceptance test — authorized fictional payment`, actor populated, corrected at 2026-11-06T20:19:04Z.
+- `admin_income_events_v1` includes the corrected source under InstaPay for the original 2026-08-29 business date; active validation batch count 0.
+
+**Still unproven:** manual new Payment Validation via UI and bank-match workflow, and specifically the historical validated-batch release scenario (tested only in isolated DB). No Production operation authorized.
+
 ## Remaining **hard gates** before Production
 1. Confirm current **latest** Staging Vercel deployment is READY and matches the current `staging` head (parallel Security Hardening changes may still be building).
 2. Complete an **authorized actual correction** on a clearly identified **fictional Staging payment**, with verified pre-change ledger/batch/bank-link state; do not use real member funds.
