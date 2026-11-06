@@ -17,6 +17,7 @@ Consolidate the planned 1E.4–1E.6 audits: financial write protections, API rol
 ### F2 — Exposed privileged functions (TRIAGE; risk not yet established per function)
 - Supabase security advisor identified 95 callable `SECURITY DEFINER` functions for `anon` and 98 for `authenticated`; evaluate each function's internal authorization and intended access.
 - Prioritize financial write, store sale, schedule modification and user-role operations. These advisor numbers are not exploit counts.
+- **Priority investigation:** `public.admin_apply_store_sale_update(...)` is reported executable by `anon` and `authenticated`; its inspected PL/pgSQL definition contains mutation of sale payments/inventory without an explicit `auth.uid()` or role check. Confirm all application consumers and revoke inappropriate EXECUTE grants or introduce verified server-side authorization before calling 1F complete.
 - Prefer REVOKE EXECUTE from PUBLIC/anon/authenticated for server-only RPCs; maintain explicit grants for deliberately public, self-service RPCs.
 
 ### F3 — Elevated view (TRIAGE)
