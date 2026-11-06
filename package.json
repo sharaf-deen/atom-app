@@ -11,7 +11,7 @@
     "gen:types": "supabase gen types typescript --linked --schema public > src/lib/database.types.ts",
     "smoke:postreset": "node scripts/smoke-post-reset.mjs",
     "reset:smoke": "node scripts/reset-smoke.mjs",
-    "test": "node --test scripts/*.test.mjs"
+    "test": "node --test scripts/*.test.mjs scripts/tests/*.test.cjs"
   },
   "dependencies": {
     "@capacitor/android": "^7.4.4",
