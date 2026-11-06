@@ -10,7 +10,7 @@ DECLARE
   member_id uuid := '965d5c39-6e78-4dcc-afc3-f5eeb6d4b77c';
   subscription_id uuid := gen_random_uuid();
   first_payment_id uuid := gen_random_uuid();
-  batch_id uuid := gen_random_uuid();
+  v_batch_id uuid := gen_random_uuid();
   returned_batch uuid;
   returned_method text;
   remaining_due numeric;
@@ -56,7 +56,7 @@ BEGIN
     (id, payment_method, validation_mode, business_date, period_from, period_to,
      expected_amount, counted_amount, difference_amount, validated_by, created_by)
   VALUES
-    (batch_id,'card','daily','2026-10-29',
+    (v_batch_id,'card','daily','2026-10-29',
      '2026-10-29T11:59:00Z','2026-10-29T12:01:00Z',
      2200,2200,0,actor_id,actor_id);
 
@@ -64,7 +64,7 @@ BEGIN
     (batch_id, source_kind, source_id, amount_snapshot, business_date_snapshot,
      event_at_snapshot, created_by)
   VALUES
-    (batch_id,'subscription_payment',first_payment_id,
+    (v_batch_id,'subscription_payment',first_payment_id,
      2200,'2026-10-29','2026-10-29T12:00:00Z',actor_id);
 
   -- Authorization: only actual super admins can invoke this operation.
@@ -82,7 +82,7 @@ BEGIN
     FROM public.correct_subscription_payment_method_v1(
       first_payment_id,'card','instapay','Confirmed third-party InstaPay payment',actor_id);
 
-  IF returned_batch IS DISTINCT FROM batch_id OR returned_method <> 'instapay' THEN
+  IF returned_batch IS DISTINCT FROM v_batch_id OR returned_method <> 'instapay' THEN
     RAISE EXCEPTION 'CORRECT_METHOD_RESULT_MISMATCH';
   END IF;
 
@@ -96,11 +96,11 @@ BEGIN
   SELECT amount_due INTO remaining_due FROM public.subscriptions WHERE id=subscription_id;
   IF remaining_due <> 0 THEN RAISE EXCEPTION 'CORRECTION_ALTERED_DUE'; END IF;
 
-  SELECT deleted_at INTO batch_deleted_at FROM public.payment_validation_batches WHERE id=batch_id;
+  SELECT deleted_at INTO batch_deleted_at FROM public.payment_validation_batches WHERE id=v_batch_id;
   IF batch_deleted_at IS NULL THEN RAISE EXCEPTION 'OLD_BATCH_STILL_ACTIVE'; END IF;
   IF EXISTS (
     SELECT 1 FROM public.payment_validation_batch_items i
-    WHERE i.batch_id=batch_id AND i.released_at IS NULL
+    WHERE i.batch_id=v_batch_id AND i.released_at IS NULL
   ) THEN RAISE EXCEPTION 'OLD_BATCH_ITEM_NOT_RELEASED'; END IF;
 
   SELECT count(*) INTO correction_count FROM public.subscription_payment_method_corrections
