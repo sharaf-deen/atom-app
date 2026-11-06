@@ -1,8 +1,8 @@
 -- Security Hardening 1E.3 — atomic deletion and audit for subscriptions.
 -- Deploy to Staging first. Does not delete data during migration.
 -- The existing BEFORE DELETE history-protection trigger is retained.
--- Supabase runs migration statements through its migration executor; no explicit
--- BEGIN/COMMIT here. The RPC itself is atomic as one PostgreSQL statement.
+-- One migration statement: the RPC body is atomic when invoked. Grants and
+-- privilege assertions are in separate versioned migrations.
 
 CREATE OR REPLACE FUNCTION public.delete_subscription_with_audit_atomic(
   p_subscription_id uuid,
@@ -68,22 +68,3 @@ BEGIN
   );
 END;
 $atomic$;
-
--- PostgreSQL gives new functions EXECUTE to PUBLIC unless explicitly revoked.
-REVOKE ALL ON FUNCTION public.delete_subscription_with_audit_atomic(uuid, uuid)
-  FROM PUBLIC, anon, authenticated;
-GRANT EXECUTE ON FUNCTION public.delete_subscription_with_audit_atomic(uuid, uuid)
-  TO service_role;
-
--- Fail migration if an exposed client role can invoke the function.
-DO $assert_1e3$
-BEGIN
-  IF has_function_privilege(
-       'anon', 'public.delete_subscription_with_audit_atomic(uuid, uuid)', 'EXECUTE'
-     ) OR has_function_privilege(
-       'authenticated', 'public.delete_subscription_with_audit_atomic(uuid, uuid)', 'EXECUTE'
-     ) THEN
-    RAISE EXCEPTION 'SECURITY_1E3_PUBLIC_RPC_EXECUTE';
-  END IF;
-END;
-$assert_1e3$;
