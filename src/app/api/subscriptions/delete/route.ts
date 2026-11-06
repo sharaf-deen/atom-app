@@ -55,14 +55,13 @@ export async function POST(req: Request) {
     const id = typeof body?.id === 'string' ? body.id.trim() : ''
     if (!id) return json(400, { ok: false, error: 'MISSING_ID' })
 
-    // Request the deleted row in the same DELETE statement. This avoids a
-    // separate privileged lookup and gives the audit its actual target.
-    const { data: deleted, error } = await admin
-      .from('subscriptions')
-      .delete()
-      .eq('id', id)
-      .select('id, member_id')
-      .maybeSingle<{ id: string; member_id: string }>()
+    // A single PostgreSQL RPC performs DELETE and audit INSERT in the same
+    // transaction; either both succeed or both roll back.
+    const { data: result, error } = await admin.rpc('delete_subscription_with_audit_atomic', {
+      p_subscription_id: id,
+      p_actor_user_id: auth.user.id,
+    })
+
     if (error) {
       if (error.code === '23514') {
         return json(409, {
@@ -71,28 +70,14 @@ export async function POST(req: Request) {
           details: error.message,
         })
       }
-      return json(500, { ok: false, error: 'DELETE_FAILED', details: error.message })
+      if (error.code === '42501') return json(403, { ok: false, error: 'FORBIDDEN' })
+      return json(500, { ok: false, error: 'ATOMIC_DELETE_FAILED' })
     }
-    if (!deleted) return json(404, { ok: false, error: 'SUBSCRIPTION_NOT_FOUND' })
-
-    // Audit the successfully deleted subscription, with a server-side actor.
-    // This write is not transactional with DELETE. Surface audit failures so
-    // they cannot be mistaken for a confirmed audit trail.
-    let audit_logged = false
-    try {
-      const { error: auditError } = await admin.from('audit_logs').insert({
-        actor_user_id: auth.user.id,
-        target_user_id: deleted.member_id,
-        action: 'subscription_deleted',
-        action_details: { subscription_id: deleted.id, source: 'api/subscriptions/delete' },
-      })
-      audit_logged = !auditError
-      if (auditError) console.error('SUBSCRIPTION_DELETE_AUDIT_FAILED', auditError.code ?? 'UNKNOWN')
-    } catch {
-      console.error('SUBSCRIPTION_DELETE_AUDIT_FAILED', 'UNEXPECTED')
+    if (!result || result.deleted !== true) {
+      return json(404, { ok: false, error: 'SUBSCRIPTION_NOT_FOUND' })
     }
 
-    return json(200, { ok: true, audit_logged })
+    return json(200, { ok: true, audit_logged: true })
   } catch (e: any) {
     return json(500, { ok: false, error: 'SERVER_ERROR', details: e?.message ?? String(e) })
   }
