@@ -16,21 +16,41 @@ type Props = {
   credits: Credit[]
   batches: BankPaymentBatch[]
   activeMatches: BankPaymentMatch[]
+  demoEnabled: boolean
 }
 
 const cents = (v: number) => Math.round(Number(v) * 100)
 const day = (v: string) => Math.floor(Date.parse(v + 'T12:00:00Z') / 86400000)
 const money = (v: number) => new Intl.NumberFormat('en-EG', { style: 'currency', currency: 'EGP' }).format(v)
 
-export default function BankBulkReconciliationPreview({ credits, batches, activeMatches }: Props) {
+const demoCredits: Credit[] = [
+  { id: 'demo-unique', transaction_date: '2026-10-04', amount: 1111, reference: 'DEMO-UNIQUE', category_code: 'membership_income', classification_status: 'suggested' },
+  { id: 'demo-ambiguous-a', transaction_date: '2026-10-05', amount: 2222, reference: 'DEMO-AMBIGUOUS-A', category_code: 'membership_income', classification_status: 'suggested' },
+  { id: 'demo-ambiguous-b', transaction_date: '2026-10-05', amount: 2222, reference: 'DEMO-AMBIGUOUS-B', category_code: 'membership_income', classification_status: 'suggested' },
+  { id: 'demo-transfer', transaction_date: '2026-10-06', amount: 3333, reference: 'DEMO-INTERNAL-TRANSFER', category_code: 'internal_transfer', classification_status: 'suggested' },
+  { id: 'demo-unclassified', transaction_date: '2026-10-07', amount: 4444, reference: 'DEMO-UNCLASSIFIED', category_code: null, classification_status: 'unclassified' },
+  { id: 'demo-unmatched', transaction_date: '2026-10-08', amount: 5555, reference: 'DEMO-NO-BATCH', category_code: 'membership_income', classification_status: 'suggested' },
+]
+const demoBatches: BankPaymentBatch[] = [
+  { id: 'demo-batch-unique', payment_method: 'instapay', business_date: '2026-10-04', expected_amount: 1111, counted_amount: 1111, difference_amount: 0, validated_at: '2026-10-04T12:00:00Z', legacy_matched: false, active_matched_amount: 0 },
+  { id: 'demo-batch-ambiguous', payment_method: 'instapay', business_date: '2026-10-05', expected_amount: 2222, counted_amount: 2222, difference_amount: 0, validated_at: '2026-10-05T12:00:00Z', legacy_matched: false, active_matched_amount: 0 },
+  { id: 'demo-batch-transfer', payment_method: 'instapay', business_date: '2026-10-06', expected_amount: 3333, counted_amount: 3333, difference_amount: 0, validated_at: '2026-10-06T12:00:00Z', legacy_matched: false, active_matched_amount: 0 },
+  { id: 'demo-batch-unclassified', payment_method: 'instapay', business_date: '2026-10-07', expected_amount: 4444, counted_amount: 4444, difference_amount: 0, validated_at: '2026-10-07T12:00:00Z', legacy_matched: false, active_matched_amount: 0 },
+]
+
+export default function BankBulkReconciliationPreview({ credits, batches, activeMatches, demoEnabled }: Props) {
+  const isDemo = demoEnabled && credits.length === 0
+  const previewCredits = isDemo ? demoCredits : credits
+  const previewBatches = isDemo ? demoBatches : batches
+  const previewMatches = isDemo ? [] : activeMatches
   const [selected, setSelected] = useState<string[]>([])
   const [showReview, setShowReview] = useState(false)
 
   const data = useMemo(() => {
     const matched = new Map<string, number>()
-    for (const m of activeMatches) matched.set(m.bank_transaction_id, (matched.get(m.bank_transaction_id) ?? 0) + Number(m.matched_amount))
-    const availableCredits = credits.filter(c => cents(c.amount - (matched.get(c.id) ?? 0)) > 0)
-    const availableBatches = batches.filter(b =>
+    for (const m of previewMatches) matched.set(m.bank_transaction_id, (matched.get(m.bank_transaction_id) ?? 0) + Number(m.matched_amount))
+    const availableCredits = previewCredits.filter(c => cents(c.amount - (matched.get(c.id) ?? 0)) > 0)
+    const availableBatches = previewBatches.filter(b =>
       b.payment_method === 'instapay' &&
       !b.legacy_matched && b.business_date &&
       cents(b.counted_amount - b.active_matched_amount) > 0
@@ -59,7 +79,7 @@ export default function BankBulkReconciliationPreview({ credits, batches, active
       internal: options.filter(o => o.credit.category_code === 'internal_transfer'),
       unmatched: availableCredits.length,
     }
-  }, [credits, batches, activeMatches])
+  }, [previewCredits, previewBatches, previewMatches])
 
   const approved = data.safe.filter(row => selected.includes(row.credit.id))
   const selectedTotal = approved.reduce((sum, row) => sum + row.credit.amount, 0)
@@ -74,7 +94,7 @@ export default function BankBulkReconciliationPreview({ credits, batches, active
             Suggested classifications require manual review before matching.
           </p>
         </div>
-        <span className="rounded-full border border-sky-300 px-3 py-1 text-xs font-bold text-sky-900">SIMULATION ONLY · NO WRITES</span>
+        <span className="rounded-full border border-sky-300 px-3 py-1 text-xs font-bold text-sky-900">{isDemo ? 'FICTIONAL DEMO · NO DATABASE RECORDS' : 'SIMULATION ONLY · NO WRITES'}</span>
       </div>
       <div className="grid grid-cols-2 gap-2 text-sm md:grid-cols-4">
         <div className="rounded-xl bg-white p-3"><div className="text-xs text-slate-500">Credits to review</div><strong>{data.unmatched}</strong></div>
@@ -101,7 +121,7 @@ export default function BankBulkReconciliationPreview({ credits, batches, active
                   <td className="p-2 font-semibold">{money(row.credit.amount)}</td>
                   <td className="p-2">{row.batch.business_date}</td>
                   <td className="p-2 font-mono text-xs">{row.batch.id.slice(0, 8)}</td>
-                  <td className="p-2"><a className="font-semibold text-blue-700 underline" href={`#credit-${row.credit.id}`}>Inspect</a></td>
+                  <td className="p-2">{isDemo ? <span className="text-xs text-slate-500">Demo only</span> : <a className="font-semibold text-blue-700 underline" href={`#credit-${row.credit.id}`}>Inspect</a>}</td>
                 </tr>)}
               </tbody>
             </table>
@@ -116,7 +136,7 @@ export default function BankBulkReconciliationPreview({ credits, batches, active
         <p><strong>{data.needsReview.length}</strong> non-internal credits require separate investigation, including ambiguous amounts, dates, methods or missing validation batches.</p>
         <p className="mt-1"><strong>{data.internal.length}</strong> internal-transfer suggestions are excluded from income proposals; their classifications are not automatically confirmed.</p>
       </div> : null}
-      <p className="text-xs text-amber-900">Bulk write is intentionally disabled until a transactional PostgreSQL RPC, concurrency tests, and explicit Super Admin confirmation are validated on Staging. Do not treat any candidate as a confirmed bank match.</p>
+      <p className="text-xs text-amber-900">Demo data is never stored or matched. Bulk write is intentionally disabled until a transactional PostgreSQL RPC, concurrency tests, and explicit Super Admin confirmation are validated on Staging. Do not treat any candidate as a confirmed bank match.</p>
     </section>
   )
 }
