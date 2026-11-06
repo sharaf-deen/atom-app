@@ -45,10 +45,10 @@ jobs:
       - name: Reset DB + Smoke
         run: npm run reset:smoke
 
-      # Compile and inspect the payment correction SQL only against the
-      # ephemeral local Supabase PostgreSQL container started above.
-      # Never use remote database URLs or run this SQL via cloud Supabase.
-      - name: Isolated payment method correction SQL smoke
+      # The versioned migration is applied by local 'supabase db reset' above.
+      # Run finance regression fixtures only against that isolated PostgreSQL.
+      # Never use remote database URLs or run these fixtures via cloud Supabase.
+      - name: Isolated payment method correction migration smoke
         shell: bash
         run: |
           set -euo pipefail
@@ -57,7 +57,6 @@ jobs:
             echo "Local Supabase database container not found"
             exit 1
           fi
-          docker exec -i "$DB_CONTAINER" psql -U postgres -d postgres -v ON_ERROR_STOP=1 < scripts/sql/subscription-payment-method-correction-DRAFT.sql
           docker exec -i "$DB_CONTAINER" psql -U postgres -d postgres -v ON_ERROR_STOP=1 < scripts/tests/subscription-payment-method-local-smoke.sql
           docker exec -i "$DB_CONTAINER" psql -U postgres -d postgres -v ON_ERROR_STOP=1 < scripts/tests/subscription-payment-method-business-local.sql
           docker exec -i "$DB_CONTAINER" psql -U postgres -d postgres -v ON_ERROR_STOP=1 < scripts/tests/subscription-payment-method-guards-local.sql
