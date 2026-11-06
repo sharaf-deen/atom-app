@@ -67,3 +67,8 @@ Consolidate the planned 1E.4–1E.6 audits: financial write protections, API rol
 - `staff_payroll_save_staff_profile` is a privileged SECURITY DEFINER function, executable by public client roles, taking a client-provided `p_actor_id`. Its internal Super Admin check on that supplied identifier does not establish the requester's identity.
 - Confirmed the application path `src/app/api/staff-payroll/staff-profiles/route.ts` validates the signed-in Super Admin and calls the function using its privileged server client.
 - Prepared `20261106130000_security_hardening_1f_staff_profile_rpc_revoke.sql` and a read-only route permission contract. Validate display and guarded write paths on Staging before Production.
+
+### F10 — Remaining payroll function triage (2026-11-06)
+- **Protected by session-bound check:** `staff_payroll_import_coaching_sessions(date,jsonb)` and `staff_payroll_reconcile_qr_attendance(uuid,uuid,text)` explicitly use `auth.uid()`, look up the caller's role, and reject anyone other than `super_admin`. Their direct client EXECUTE is not by itself an authorization bypass. Retain pending consumer review; do not blindly revoke.
+- **Unresolved risk:** `staff_payroll_save_task_minimum_rates(date,jsonb,jsonb,uuid)` is SECURITY DEFINER, client-role executable, and its inspected function body contains no `auth.uid()` / current-user / super-admin check; `p_actor_id` only populates audit fields. Treat as an authorization gap pending consumer inventory. Do not release 1F until it is guarded or its client EXECUTE is removed with verified server use.
+- Role table grants and no-policy RLS advisor warnings must be assessed in context of actual direct client operations. This document is an audit baseline, not evidence that all 1F issues are resolved.
