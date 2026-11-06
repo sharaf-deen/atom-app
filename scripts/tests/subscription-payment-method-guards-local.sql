@@ -15,6 +15,10 @@ DECLARE
   v_matched_batch uuid := gen_random_uuid();
   v_bank_import uuid := gen_random_uuid();
   v_bank_line uuid := gen_random_uuid();
+  v_multi_sub uuid := gen_random_uuid();
+  v_multi_first uuid := gen_random_uuid();
+  v_multi_second uuid := gen_random_uuid();
+  v_multi_batch uuid := gen_random_uuid();
   v_blocked boolean;
 BEGIN
   INSERT INTO auth.users
@@ -123,6 +127,46 @@ BEGIN
         WHERE batch_id=v_matched_batch AND released_at IS NULL) <> 1
   THEN RAISE EXCEPTION 'MATCHED_BATCH_GUARD_FAILED'; END IF;
   RAISE NOTICE 'BANK_MATCH_GUARD_ISOLATED_PASS';
+
+  -- A multi-entry validation batch must never be partly released by a
+  -- single-payment method correction.
+  INSERT INTO public.subscriptions
+    (id,member_id,subscription_type,plan,status,start_date,end_date,
+     amount,amount_due,payment_method,paid_at)
+  VALUES(v_multi_sub,v_member,'time','1m','active','2026-10-27','2026-11-27',
+         2200,0,'card','2026-10-27T12:00:00Z');
+  INSERT INTO public.subscription_payments
+    (id,subscription_id,member_id,amount,payment_method,paid_at,note)
+  VALUES
+    (v_multi_first,v_multi_sub,v_member,1000,'card','2026-10-27T12:00:00Z','Batch first'),
+    (v_multi_second,v_multi_sub,v_member,1200,'card','2026-10-27T13:00:00Z','Batch second');
+  INSERT INTO public.payment_validation_batches
+    (id,payment_method,validation_mode,business_date,period_from,period_to,
+     expected_amount,counted_amount,difference_amount,validated_by,created_by)
+  VALUES(v_multi_batch,'card','daily','2026-10-27',
+         '2026-10-27T11:00:00Z','2026-10-27T14:00:00Z',
+         2200,2200,0,v_actor,v_actor);
+  INSERT INTO public.payment_validation_batch_items
+    (batch_id,source_kind,source_id,amount_snapshot,business_date_snapshot,event_at_snapshot,created_by)
+  VALUES
+    (v_multi_batch,'subscription_payment',v_multi_first,1000,
+     '2026-10-27','2026-10-27T12:00:00Z',v_actor),
+    (v_multi_batch,'subscription_payment',v_multi_second,1200,
+     '2026-10-27','2026-10-27T13:00:00Z',v_actor);
+
+  v_blocked := false;
+  BEGIN
+    PERFORM public.correct_subscription_payment_method_v1(
+      v_multi_first,'card','instapay','Multi-entry batch must not split',v_actor);
+  EXCEPTION WHEN OTHERS THEN v_blocked := true;
+  END;
+  IF NOT v_blocked
+    OR (SELECT payment_method FROM public.subscription_payments WHERE id=v_multi_first) <> 'card'
+    OR (SELECT count(*) FROM public.payment_validation_batch_items
+        WHERE batch_id=v_multi_batch AND released_at IS NULL) <> 2
+    OR (SELECT deleted_at FROM public.payment_validation_batches WHERE id=v_multi_batch) IS NOT NULL
+  THEN RAISE EXCEPTION 'MULTI_ENTRY_BATCH_GUARD_FAILED'; END IF;
+  RAISE NOTICE 'MULTI_ENTRY_BATCH_GUARD_ISOLATED_PASS';
 
   IF (SELECT count(*) FROM public.subscription_payment_method_corrections WHERE payment_id IN
       (v_refund_payment,v_matched_payment)) <> 0
