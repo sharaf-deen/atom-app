@@ -71,3 +71,33 @@ ALTER POLICY expenses_update_ops ON public.expenses USING (public.is_ops(auth.ui
 ALTER POLICY expenses_delete_admin ON public.expenses USING (public.is_admin_or_super_admin(auth.uid()));
 COMMIT;
 ```
+
+## 1F.3 — Payments write RLS (Staging applied 2026-11-06)
+
+Applied transaction:
+
+```sql
+BEGIN;
+ALTER POLICY payments_insert_ops ON public.payments
+  WITH CHECK (public.is_super_admin(auth.uid()));
+ALTER POLICY payments_update_ops ON public.payments
+  USING (public.is_super_admin(auth.uid()))
+  WITH CHECK (public.is_super_admin(auth.uid()));
+ALTER POLICY payments_delete_admin ON public.payments
+  USING (public.is_super_admin(auth.uid()));
+COMMIT;
+```
+
+Read-only verification PASS: `pg_policies` reports Super Admin checks for the three write policies of `payments` as well as `expenses`. Existing SELECT policies remain unchanged. No schema or policy changes to `subscription_payments`. `pg_stat_user_tables` reported zero inserts for `payments` on Staging, but this does **not** prove absence of legacy application callers.
+
+**Not yet verified:** isolated role-based live attempts, service/API workflow smoke, CI, DB Reset+Smoke, and reproducible versioned migration. No Production change. Do not merge Draft PR until release gates pass.
+
+Rollback upon regression after review:
+
+```sql
+BEGIN;
+ALTER POLICY payments_insert_ops ON public.payments WITH CHECK (public.is_ops(auth.uid()));
+ALTER POLICY payments_update_ops ON public.payments USING (public.is_ops(auth.uid())) WITH CHECK (public.is_ops(auth.uid()));
+ALTER POLICY payments_delete_admin ON public.payments USING (public.is_admin_or_super_admin(auth.uid()));
+COMMIT;
+```
