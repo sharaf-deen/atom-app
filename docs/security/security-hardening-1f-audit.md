@@ -47,3 +47,8 @@ Consolidate the planned 1E.4–1E.6 audits: financial write protections, API rol
 - Supabase view advisory: https://supabase.com/docs/guides/database/database-linter?lint=0010_security_definer_view
 - Supabase anon SECURITY DEFINER advisory: https://supabase.com/docs/guides/database/database-linter?lint=0028_anon_security_definer_function_executable
 - Supabase authenticated SECURITY DEFINER advisory: https://supabase.com/docs/guides/database/database-linter?lint=0029_authenticated_security_definer_function_executable
+
+### F6 — Payroll payment SECURITY DEFINER RPCs (HIGH; mitigation staged)
+- `staff_payroll_record_salary_payment` and `staff_payroll_reverse_salary_payment` were EXECUTABLE by `anon` and `authenticated` even though both accept caller-supplied actor identifiers and perform financial mutations. Their SQL definitions lacked session-bound authorization.
+- Verified `src/app/api/staff-payroll/payments/route.ts` resolves the actual user with `auth.getUser()`, restricts operations to `super_admin`, and invokes the RPCs using the server admin client.
+- Migration `20261106123000_security_hardening_1f_payroll_payment_rpc_revoke.sql` removes `PUBLIC`, `anon`, and `authenticated` EXECUTE while preserving the service-side path; source-only regression added. Validate Staging salary payment **read-only display** and denial; use isolated synthetic DB tests if needed, never real staff payments.
