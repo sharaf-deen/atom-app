@@ -31,6 +31,21 @@ Remaining explicit release blockers:
 
 No Production migration, data mutation, or deployment was performed as part of this verification.
 
+## Staging transactional acceptance — ATOM-000011 (2026-11-06)
+
+Account owner explicitly confirmed ATOM-000011 is available as a test account on Staging. Inspected its 3 subscriptions and 2 ledger entries. Used the 1,000 EGP Cash payment without an active validation batch or pending refund.
+
+Executed the **installed** `correct_subscription_payment_method_v1` on Staging inside `BEGIN ... ROLLBACK` using a privileged actor; checked during the same transaction:
+- Cash -> InstaPay on the selected payment and single-payment subscription header.
+- Payment amount 1,000 EGP and remaining due 0 EGP unchanged.
+- Exactly one audit correction row with payment ID, before/after methods, reason and actor.
+- Repeating the request with the stale old method is refused.
+- `admin_income_events_v1` reflects the corrected InstaPay method; no active validation batch is incorrectly attached.
+- Independent post-rollback read: both payment and subscription still Cash, paid 1,000 EGP, due 0, correction audit count 0.
+
+**Acceptance status:** Transactional database correction/audit/queue tests PASS on shared Staging, without persisting test changes.
+**Not yet proven:** actual UI submission and permanent audited correction; manual payment validation/reconciliation of a post-correction entry; historical validated-batch release/revalidation on shared Staging. These remain release gates. The tests use an existing payment with no active batch and cannot stand in for the whole validated-batch lifecycle.
+
 ## Remaining **hard gates** before Production
 1. Confirm current **latest** Staging Vercel deployment is READY and matches the current `staging` head (parallel Security Hardening changes may still be building).
 2. Complete an **authorized actual correction** on a clearly identified **fictional Staging payment**, with verified pre-change ledger/batch/bank-link state; do not use real member funds.
