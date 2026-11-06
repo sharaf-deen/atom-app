@@ -99,8 +99,8 @@ BEGIN
   SELECT deleted_at INTO batch_deleted_at FROM public.payment_validation_batches WHERE id=batch_id;
   IF batch_deleted_at IS NULL THEN RAISE EXCEPTION 'OLD_BATCH_STILL_ACTIVE'; END IF;
   IF EXISTS (
-    SELECT 1 FROM public.payment_validation_batch_items
-    WHERE batch_id=batch_id AND released_at IS NULL
+    SELECT 1 FROM public.payment_validation_batch_items i
+    WHERE i.batch_id=batch_id AND i.released_at IS NULL
   ) THEN RAISE EXCEPTION 'OLD_BATCH_ITEM_NOT_RELEASED'; END IF;
 
   SELECT count(*) INTO correction_count FROM public.subscription_payment_method_corrections
