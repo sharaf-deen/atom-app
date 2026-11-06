@@ -31,3 +31,19 @@ TO anon, authenticated;
 ```
 
 Rollback restores pre-change SQL table privileges and should only run after explicit review because these privileges are unsafe for client roles.
+
+## 1F.2 authorization mismatch confirmed (read-only investigation)
+- `src/lib/rbac.ts`: `FINANCE_ROLES = ['super_admin']`, `FINANCE_READ_ROLES = ['admin','super_admin']`; thus `canManageExpenses` and `canManagePayments` are super-admin-only.
+- `src/app/expenses/page.tsx`: server action checks `canManageExpenses(me.role)` prior to financial write.
+- `src/app/api/subscriptions/settle/route.ts`: includes `canCreateSubscription` and `canManagePayments` distinctions; do not assume every payment-related action should be super-admin-only.
+- Staging policies on both financial tables use `is_ops(auth.uid())` for INSERT and UPDATE; DELETE uses `is_admin_or_super_admin(auth.uid())`.
+- Staging function `is_ops(uuid)` explicitly allows `reception`, `admin`, `super_admin`; `is_admin_or_super_admin(uuid)` allows `admin`, `super_admin`.
+- Confirmed SQL grant restrictions above do NOT close this RBAC/RLS mismatch.
+
+## 1F.2 next safe change gates
+1. Inventory application and RPC direct financial writes, especially reception subscription settlements and payment correction paths.
+2. Separate manually managed expenses/payments (super-admin-only) from transaction-ledger mutations needed by authorized subscription settlement.
+3. Add least-privilege migration and isolated actor-matrix tests in a further commit only after inventory; never blindly revoke all authenticated INSERT/UPDATE/DELETE.
+4. Verify unauthorized access denial and authorized reception flows in Staging; only then assess Production.
+
+Current status: **triage verified; role-policy remediation not yet applied**.
