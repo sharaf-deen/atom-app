@@ -58,6 +58,19 @@ Independent SQL reads verified:
 
 **Still unproven:** manual new Payment Validation via UI and bank-match workflow, and specifically the historical validated-batch release scenario (tested only in isolated DB). No Production operation authorized.
 
+## Actual Staging revalidation — 2026-11-06
+
+**PASS — UI correction followed by manual Payment Reconciliation.** Authorized test member ATOM-000011, payment `a6210c01-03e3-4455-b0f8-695606a35501`.
+
+Independent Supabase verification:
+- Payment method and subscription header: `instapay`; amount EGP 1,000; due EGP 0.
+- Correction audit rows: exactly 1.
+- Validation batch `d342d64e-eb8b-49f3-a3fd-9154bc4099c9`: daily InstaPay, Cairo business date 2026-08-29; expected EGP 1,000, counted EGP 1,000, difference EGP 0; validated at 2026-11-06T20:25:03Z; not deleted.
+- Exactly one active item in that batch, tied to the test payment; no released item; unrelated EGP 5,000 Cash payment unchanged.
+- This verifies **new** validation after correction, but does **not** exercise historical pre-correction validated batch release on shared Staging, nor real bank statement matching.
+
+**Production decision remains NO-GO** pending Security Hardening migration reconciliation and remaining historical-batch regression.
+
 ## Remaining **hard gates** before Production
 1. Confirm current **latest** Staging Vercel deployment is READY and matches the current `staging` head (parallel Security Hardening changes may still be building).
 2. Complete an **authorized actual correction** on a clearly identified **fictional Staging payment**, with verified pre-change ledger/batch/bank-link state; do not use real member funds.
