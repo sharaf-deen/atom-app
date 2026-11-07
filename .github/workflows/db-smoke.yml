@@ -44,3 +44,14 @@ jobs:
 
       - name: Reset DB + Smoke
         run: npm run reset:smoke
+
+      - name: Banking 2H.2 isolated atomicity and permissions regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          DB_CONTAINER="$(docker ps --filter 'name=supabase_db_' --format '{{.ID}}' | head -n 1)"
+          if [ -z "$DB_CONTAINER" ]; then
+            echo "Local Supabase DB container unavailable"
+            exit 1
+          fi
+          docker exec -i "$DB_CONTAINER" psql -U postgres -d postgres -v ON_ERROR_STOP=1 < scripts/tests/banking-2h2-bulk-local.sql
