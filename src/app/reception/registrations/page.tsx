@@ -43,6 +43,7 @@ export default async function RegistrationDeskPage() {
         ? { familyId: row.family_id, guardianAuthUserId: row.provisioned_auth_user_id, memberUserId: row.member_user_id }
         : null,
       status: display.label,
+      rawStatus: row.status,
       tone: display.tone,
       needsReview: display.needsReview,
       nextAction: display.nextAction,
