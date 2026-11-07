@@ -38,7 +38,7 @@ export default function RegistrationDeskClient({ rows, loadError, isSuperAdmin }
   ]
   return <div className="space-y-5">
     <section aria-labelledby="new-registration" className="rounded-2xl border border-[hsl(var(--border))] p-4 sm:p-5">
-      <h2 id="new-registration" className="text-lg font-semibold">Start a registration</h2>
+      <h2 id="new-registration" className="text-lg font-semibold">Start a registration</h2><a href="/registration" target="_blank" rel="noopener noreferrer" className="mt-2 inline-flex min-h-[44px] items-center font-semibold underline">Open public registration link to share</a>
       <p className="mt-1 text-sm text-[hsl(var(--muted))]">Choose a path. Existing authorized forms are reused; no new public account is created from this page.</p>
       <div role="group" aria-label="Registration type" className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
         {([['adult', 'Adult', 'One adult Member'], ['family', 'Parent & child', 'Guardian and dependents']] as const).map(([key, label, description]) => <button key={key} type="button" onClick={() => setJourney(key)} aria-pressed={journey === key} className={`min-h-[80px] rounded-xl border-2 p-4 text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-black ${journey === key ? 'border-black bg-slate-50' : 'border-[hsl(var(--border))]'}`}><span className="block font-semibold">{label}</span><span className="mt-1 block text-sm text-[hsl(var(--muted))]">{description}</span></button>)}
