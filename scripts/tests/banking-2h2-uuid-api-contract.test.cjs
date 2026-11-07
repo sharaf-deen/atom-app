@@ -26,9 +26,9 @@ test('Banking 2H.2: representative valid bank credits and validation batch UUIDs
 test('Banking 2H.2: rejects malformed UUIDs and demo placeholders', () => {
   for (const bad of [
     'demo-batch-unique',
-    'acf9d12e-ce3b-4a7d-ab19-1cd7efb1635',
+    '77777777-7777-4777-8777-77777777777',
     '55555555-5555-4555-8555-555555555555zzz',
     'acf9d12e-ce3b-4a7d-zb19-1cd7efb1635d',
-    'acf9d12ece3b4a7dab191cd7efb1635d',
+    '77777777777747778777777777777777',
   ]) assert.equal(validate.test(bad), false, bad)
 })
