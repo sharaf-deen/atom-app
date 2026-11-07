@@ -1,0 +1,210 @@
+'use client'
+
+import { useMemo, useState } from 'react'
+import { useRouter } from 'next/navigation'
+import type { BankPaymentBatch, BankPaymentMatch } from './BankPaymentMatcher'
+
+type Credit = {
+  id: string
+  transaction_date: string
+  amount: number
+  reference: string | null
+  category_code: string | null
+  classification_status: string
+}
+
+type Props = {
+  credits: Credit[]
+  batches: BankPaymentBatch[]
+  activeMatches: BankPaymentMatch[]
+  demoEnabled: boolean
+}
+
+const cents = (v: number) => Math.round(Number(v) * 100)
+const day = (v: string) => Math.floor(Date.parse(v + 'T12:00:00Z') / 86400000)
+const money = (v: number) => new Intl.NumberFormat('en-EG', { style: 'currency', currency: 'EGP' }).format(v)
+
+const demoCredits: Credit[] = [
+  { id: 'demo-unique', transaction_date: '2026-10-04', amount: 1111, reference: 'DEMO-UNIQUE', category_code: 'membership_income', classification_status: 'suggested' },
+  { id: 'demo-ambiguous-a', transaction_date: '2026-10-05', amount: 2222, reference: 'DEMO-AMBIGUOUS-A', category_code: 'membership_income', classification_status: 'suggested' },
+  { id: 'demo-ambiguous-b', transaction_date: '2026-10-05', amount: 2222, reference: 'DEMO-AMBIGUOUS-B', category_code: 'membership_income', classification_status: 'suggested' },
+  { id: 'demo-transfer', transaction_date: '2026-10-06', amount: 3333, reference: 'DEMO-INTERNAL-TRANSFER', category_code: 'internal_transfer', classification_status: 'suggested' },
+  { id: 'demo-unclassified', transaction_date: '2026-10-07', amount: 4444, reference: 'DEMO-UNCLASSIFIED', category_code: null, classification_status: 'unclassified' },
+  { id: 'demo-unmatched', transaction_date: '2026-10-08', amount: 5555, reference: 'DEMO-NO-BATCH', category_code: 'membership_income', classification_status: 'suggested' },
+]
+const demoBatches: BankPaymentBatch[] = [
+  { id: 'demo-batch-unique', payment_method: 'instapay', business_date: '2026-10-04', expected_amount: 1111, counted_amount: 1111, difference_amount: 0, validated_at: '2026-10-04T12:00:00Z', legacy_matched: false, active_matched_amount: 0 },
+  { id: 'demo-batch-ambiguous', payment_method: 'instapay', business_date: '2026-10-05', expected_amount: 2222, counted_amount: 2222, difference_amount: 0, validated_at: '2026-10-05T12:00:00Z', legacy_matched: false, active_matched_amount: 0 },
+  { id: 'demo-batch-transfer', payment_method: 'instapay', business_date: '2026-10-06', expected_amount: 3333, counted_amount: 3333, difference_amount: 0, validated_at: '2026-10-06T12:00:00Z', legacy_matched: false, active_matched_amount: 0 },
+  { id: 'demo-batch-unclassified', payment_method: 'instapay', business_date: '2026-10-07', expected_amount: 4444, counted_amount: 4444, difference_amount: 0, validated_at: '2026-10-07T12:00:00Z', legacy_matched: false, active_matched_amount: 0 },
+]
+
+export default function BankBulkReconciliationPreview({ credits, batches, activeMatches, demoEnabled }: Props) {
+  const isDemo = demoEnabled && credits.length === 0
+  const previewCredits = isDemo ? demoCredits : credits
+  const previewBatches = isDemo ? demoBatches : batches
+  const previewMatches = isDemo ? [] : activeMatches
+  const router = useRouter()
+  const [selected, setSelected] = useState<string[]>([])
+  const [reason, setReason] = useState('')
+  const [verified, setVerified] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [message, setMessage] = useState('')
+  const [confirmOpen, setConfirmOpen] = useState(false)
+  const [showReview, setShowReview] = useState(false)
+
+  const data = useMemo(() => {
+    const matched = new Map<string, number>()
+    for (const m of previewMatches) matched.set(m.bank_transaction_id, (matched.get(m.bank_transaction_id) ?? 0) + Number(m.matched_amount))
+    const availableCredits = previewCredits.filter(c => cents(c.amount) > 0 && cents(matched.get(c.id) ?? 0) === 0)
+    const availableBatches = previewBatches.filter(b =>
+      b.payment_method === 'instapay' &&
+      !b.legacy_matched && b.business_date &&
+      cents(b.counted_amount) > 0 && cents(b.active_matched_amount) === 0 && cents(b.difference_amount) === 0
+    )
+    const options = availableCredits.map(c => {
+      const remainder = cents(c.amount - (matched.get(c.id) ?? 0))
+      const candidates = availableBatches.filter(b =>
+        cents(b.counted_amount - b.active_matched_amount) === remainder &&
+        Math.abs(day(c.transaction_date) - day(String(b.business_date))) <= 1
+      )
+      return { credit: c, candidates, remainder }
+    })
+    const reverse = new Map<string, number>()
+    for (const item of options) for (const b of item.candidates) reverse.set(b.id, (reverse.get(b.id) ?? 0) + 1)
+    const safe = options.filter(o =>
+      o.credit.category_code === 'membership_income' &&
+      o.candidates.length === 1 && reverse.get(o.candidates[0].id) === 1
+    ).map(o => ({ ...o, batch: o.candidates[0] }))
+    const needsReview = options.filter(o =>
+      o.credit.category_code !== 'internal_transfer' &&
+      !safe.some(s => s.credit.id === o.credit.id)
+    )
+    return {
+      safe,
+      needsReview,
+      internal: options.filter(o => o.credit.category_code === 'internal_transfer'),
+      unmatched: availableCredits.length,
+    }
+  }, [previewCredits, previewBatches, previewMatches])
+
+  const approved = data.safe.filter(row => selected.includes(row.credit.id))
+  const selectedTotal = approved.reduce((sum, row) => sum + row.credit.amount, 0)
+  async function submitBulk() {
+    if (busy || isDemo || !approved.length || !verified || reason.trim().length < 10) return
+    setBusy(true)
+    setMessage('')
+    try {
+      const response = await fetch('/api/admin/banking/reconciliation/bulk', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          verified: true,
+          reason: reason.trim(),
+          pairs: approved.map(row => ({
+            bank_transaction_id: row.credit.id,
+            batch_id: row.batch.id,
+          })),
+        }),
+      })
+      const payload = await response.json()
+      if (!response.ok || !payload?.ok) throw new Error(String(payload?.error || 'BULK_MATCH_FAILED'))
+      setMessage('Successfully matched ' + payload.result.matched_count + ' bank credits.')
+      setSelected([])
+      setVerified(false)
+      setConfirmOpen(false)
+      router.refresh()
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'Bulk reconciliation failed')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <section className="space-y-3 rounded-2xl border border-sky-200 bg-sky-50/40 p-4 shadow-soft">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="text-lg font-bold">Banking 2H · Smart bulk preview</h2>
+          <p className="mt-1 text-sm text-slate-700">
+            Review exact unmatched amounts, dates within one day, and unique credit-to-batch pairing.
+            Suggested classifications require manual review before matching.
+          </p>
+        </div>
+        <span className="rounded-full border border-sky-300 px-3 py-1 text-xs font-bold text-sky-900">{isDemo ? 'FICTIONAL DEMO · NEVER WRITES' : 'HUMAN-REVIEWED BULK MATCHING'}</span>
+      </div>
+      <div className="grid grid-cols-2 gap-2 text-sm md:grid-cols-4">
+        <div className="rounded-xl bg-white p-3"><div className="text-xs text-slate-500">Credits to review</div><strong>{data.unmatched}</strong></div>
+        <div className="rounded-xl bg-white p-3"><div className="text-xs text-slate-500">Unique candidates</div><strong>{data.safe.length}</strong></div>
+        <div className="rounded-xl bg-white p-3"><div className="text-xs text-slate-500">Internal transfers suggested</div><strong>{data.internal.length}</strong></div>
+        <div className="rounded-xl bg-white p-3"><div className="text-xs text-slate-500">Other / ambiguous</div><strong>{data.needsReview.length}</strong></div>
+      </div>
+      {data.safe.length ? (
+        <div className="space-y-2">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <strong className="text-sm">Candidates for human review</strong>
+            <label className="flex items-center gap-2 text-xs">
+              <input type="checkbox" checked={selected.length === data.safe.length} onChange={e => setSelected(e.target.checked ? data.safe.map(s => s.credit.id) : [])} />
+              Select all unique candidates
+            </label>
+          </div>
+          <div className="overflow-x-auto rounded-xl border bg-white">
+            <table className="w-full min-w-[680px] text-left text-sm">
+              <thead className="bg-slate-50 text-xs"><tr><th className="p-2">Review</th><th className="p-2">Bank date / reference</th><th className="p-2">Credit</th><th className="p-2">Validation date</th><th className="p-2">Batch</th><th className="p-2">Open</th></tr></thead>
+              <tbody>
+                {data.safe.map(row => <tr className="border-t" key={row.credit.id}>
+                  <td className="p-2"><input type="checkbox" aria-label={`Select credit ${row.credit.reference ?? row.credit.id}`} checked={selected.includes(row.credit.id)} onChange={e => setSelected(prev => e.target.checked ? [...prev, row.credit.id] : prev.filter(id => id !== row.credit.id))}/></td>
+                  <td className="p-2">{row.credit.transaction_date}<div className="font-mono text-xs">{row.credit.reference ?? 'No reference'}</div></td>
+                  <td className="p-2 font-semibold">{money(row.credit.amount)}</td>
+                  <td className="p-2">{row.batch.business_date}</td>
+                  <td className="p-2 font-mono text-xs">{row.batch.id.slice(0, 8)}</td>
+                  <td className="p-2">{isDemo ? <span className="text-xs text-slate-500">Demo only</span> : <a className="font-semibold text-blue-700 underline" href={`#credit-${row.credit.id}`}>Inspect</a>}</td>
+                </tr>)}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      ) : <p className="rounded-xl bg-white p-3 text-sm">No strictly unique, classified membership candidates in this date range.</p>}
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border bg-white p-3 text-sm">
+        <div><strong>{approved.length} selected · {money(selectedTotal)}</strong><div className="text-xs text-slate-600">Selections are not saved until explicit confirmation.</div></div>
+        <div className="flex flex-wrap gap-2">
+          <button type="button" disabled={!approved.length || isDemo || busy}
+            onClick={() => { setConfirmOpen(true); setMessage('') }}
+            className="rounded-lg bg-black px-3 py-2 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40">
+            Review {approved.length} bulk matches
+          </button>
+          <button type="button" onClick={() => setShowReview(!showReview)} className="rounded-lg border px-3 py-2 font-semibold">{showReview ? 'Hide' : 'Show'} exceptions</button>
+        </div>
+      </div>
+      {showReview ? <div className="rounded-xl bg-white p-3 text-sm">
+        <p><strong>{data.needsReview.length}</strong> non-internal credits require separate investigation, including ambiguous amounts, dates, methods or missing validation batches.</p>
+        <p className="mt-1"><strong>{data.internal.length}</strong> internal-transfer suggestions are excluded from income proposals; their classifications are not automatically confirmed.</p>
+      </div> : null}
+      {confirmOpen && !isDemo ? (
+        <div className="space-y-3 rounded-xl border-2 border-amber-400 bg-white p-4 text-sm">
+          <h3 className="font-bold">Confirm bank reconciliation · {approved.length} credits · {money(selectedTotal)}</h3>
+          <p>These are suggestions, not verified matches. Compare each bank reference and payment validation evidence before confirming. All selected matches succeed together or none is written.</p>
+          <label className="block space-y-1">
+            <span className="font-semibold">Review reason / supporting evidence (10–500 characters)</span>
+            <textarea value={reason} onChange={e => setReason(e.target.value)} maxLength={500}
+              rows={2} className="w-full rounded-lg border px-3 py-2" placeholder="Explain which bank references and validation batch evidence were verified." />
+          </label>
+          <label className="flex items-start gap-2">
+            <input type="checkbox" checked={verified} onChange={e => setVerified(e.target.checked)} />
+            <span>I have independently checked each bank credit and validation batch, including payer/reference, and that these are genuine membership receipts.</span>
+          </label>
+          <div className="flex flex-wrap gap-2">
+            <button type="button" disabled={busy || !verified || reason.trim().length < 10}
+              onClick={() => void submitBulk()}
+              className="rounded-lg bg-black px-4 py-2 font-semibold text-white disabled:opacity-40">
+              {busy ? 'Confirming…' : 'Confirm atomic bulk reconciliation'}
+            </button>
+            <button type="button" disabled={busy} onClick={() => setConfirmOpen(false)} className="rounded-lg border px-4 py-2">Cancel</button>
+          </div>
+        </div>
+      ) : null}
+      {message ? <p role="status" className="rounded-lg bg-white p-3 text-sm">{message}</p> : null}
+      <p className="text-xs text-amber-900">Demo data is never stored or matched. Real bulk matches are atomic and rechecked server-side under a database lock. Suggested classifications are not proof of revenue: confirm independently before writing.</p>
+    </section>
+  )
+}
