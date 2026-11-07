@@ -66,3 +66,14 @@ jobs:
           docker exec -i "$DB_CONTAINER" psql -U postgres -d postgres -v ON_ERROR_STOP=1 < scripts/tests/subscription-payment-method-business-local.sql
           docker exec -i "$DB_CONTAINER" psql -U postgres -d postgres -v ON_ERROR_STOP=1 < scripts/tests/subscription-payment-method-guards-local.sql
           bash scripts/tests/payment-correction-concurrency-local.sh "$DB_CONTAINER"
+
+      - name: Banking 2H.2 atomic matching security and rollback tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          DB_CONTAINER="$(docker ps --filter 'name=supabase_db_' --format '{{.ID}}' | head -n 1)"
+          if [ -z "$DB_CONTAINER" ]; then
+            echo "Local Supabase database container not found"
+            exit 1
+          fi
+          docker exec -i "$DB_CONTAINER" psql -U postgres -d postgres -v ON_ERROR_STOP=1 < scripts/tests/banking-2h2-bulk-local.sql
