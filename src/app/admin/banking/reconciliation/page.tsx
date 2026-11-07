@@ -6,6 +6,7 @@ import { redirect } from 'next/navigation'
 import AccessDeniedCard from '@/components/AccessDeniedCard'
 import Button from '@/components/ui/Button'
 import FinanceReconciliationNav from '@/components/finance/FinanceReconciliationNav'
+import BankBulkReconciliationPreview from '@/components/admin/banking/BankBulkReconciliationPreview'
 import BankPaymentMatcher, {
   type BankPaymentBatch,
   type BankPaymentMatch,
@@ -287,12 +288,28 @@ export default async function BankingReconciliationPage({
         </form>
       </section>
 
+      {!loadError ? (
+        <BankBulkReconciliationPreview
+          demoEnabled={process.env.VERCEL_ENV !== 'production' && process.env.NODE_ENV !== 'production' ? true : process.env.VERCEL_ENV === 'preview'}
+          credits={credits.map((row) => ({
+            id: row.id,
+            transaction_date: row.transaction_date,
+            amount: Number(row.amount ?? 0),
+            reference: row.reference,
+            category_code: row.category_code,
+            classification_status: row.classification_status,
+          }))}
+          batches={batches}
+          activeMatches={matches}
+        />
+      ) : null}
+
       <section className="space-y-3">
         {visible.slice(0, 250).map((row) => {
           const p = progress(row)
           const active = matchesByTransaction.get(row.id) ?? []
           return (
-            <article key={row.id} className="rounded-2xl border bg-white p-4 shadow-soft">
+            <article key={row.id} id={`credit-${row.id}`} className="rounded-2xl border bg-white p-4 shadow-soft">
               <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
                 <div className="min-w-0">
                   <div className="flex flex-wrap items-center gap-2">
