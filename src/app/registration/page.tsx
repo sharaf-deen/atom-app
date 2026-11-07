@@ -1,9 +1,15 @@
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
+import type { Metadata } from 'next'
 import PublicRegistrationForm from '@/components/public-registration/PublicRegistrationForm'
 import { loadActiveMemberProgramOptions } from '@/lib/memberPrograms'
 import { createSupabaseAdminClient } from '@/lib/supabaseAdmin'
+
+/** The address is shared personally, never advertised or indexed. */
+export const metadata: Metadata = {
+  robots: { index: false, follow: false },
+}
 
 /** Public invitation link: form submission never creates or activates an Auth account. */
 export default async function RegistrationPage() {
