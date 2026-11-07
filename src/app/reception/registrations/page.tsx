@@ -55,7 +55,7 @@ export default async function RegistrationDeskPage() {
       <PageHeader title="Registration Desk" subtitle="Adult and family intake, with clear next steps" />
       <Section className="space-y-5">
         <div className="rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-950" role="status">
-          <strong>Safe preview.</strong> Online submission and account provisioning are not enabled here. No invitation, registration or payment is triggered by this page.
+          <strong>Registration desk.</strong> Reviewing a request does not activate an account. Super Admin must explicitly approve each provisioning step; no payment or subscription is created from this page.
         </div>
         <RegistrationDeskClient rows={displayRows} loadError={Boolean(result.error)} isSuperAdmin={isSuperAdmin} />
       </Section>
