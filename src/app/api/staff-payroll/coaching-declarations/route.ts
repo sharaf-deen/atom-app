@@ -30,7 +30,7 @@ function nextMonth(month: string) {
   return date.toISOString().slice(0, 7) + '-01'
 }
 
-const allowed = new Set(['coach', 'assistant_coach', 'head_coach', 'super_admin'])
+const allowed = new Set(['super_admin'])
 
 export async function GET(req: Request) {
   const me = await getSessionUser()
@@ -42,19 +42,10 @@ export async function GET(req: Request) {
   const isAdmin = me.role === 'super_admin'
   const admin = getSupabaseAdminClientCached()
 
-  let staffId = me.id
-  if (!isAdmin) {
-    const { data: link, error } = await admin
-      .from('staff_payroll_account_links').select('staff_user_id')
-      .eq('linked_user_id', me.id).maybeSingle()
-    if (error) return json({ ok: false, error: 'ACCOUNT_LINK_LOOKUP_FAILED' }, 500)
-    staffId = String(link?.staff_user_id ?? me.id)
-  }
   let declarationsQuery = admin.from('staff_payroll_coaching_monthly_declarations')
     .select('id,month_start,staff_user_id,submitted_by,payroll_task_id,declared_sessions,declared_hours,coach_note,status,review_note,reviewed_at,monthly_task_log_id,updated_at')
     .eq('month_start', monthStart)
     .order('updated_at', { ascending: false })
-  if (!isAdmin) declarationsQuery = declarationsQuery.eq('staff_user_id', staffId)
 
   const [declarationsResult, tasksResult, profilesResult, sessionsResult, mappingsResult, linksResult] =
     await Promise.all([
@@ -81,7 +72,7 @@ export async function GET(req: Request) {
   const profileIds = isAdmin
     ? Array.from(new Set([...(profilesResult.data ?? []).map((x: any)=>String(x.staff_user_id)),
       ...(declarationsResult.data ?? []).map((x: any)=>String(x.staff_user_id))]))
-    : [staffId]
+    : []
   const { data: names, error: nameError } = await admin.from('profiles')
     .select('user_id,first_name,last_name,role').in('user_id',profileIds)
   if (nameError) return json({ ok: false, error: 'PROFILE_LOOKUP_FAILED' },500)
@@ -109,7 +100,7 @@ export async function GET(req: Request) {
     scheduled_assignments: scheduled.get(String(row.staff_user_id)+':'+String(row.payroll_task_id)) ?? 0,
   }))
   return json({
-    ok: true, month, staffId: isAdmin ? null : staffId, isAdmin,
+    ok: true, month, staffId: null, isAdmin,
     tasks: tasksResult.data ?? [], declarations,
     staff: isAdmin
       ? (profilesResult.data ?? []).map((row: any) => ({
@@ -133,11 +124,13 @@ export async function POST(req: Request) {
     const hours = Number(body.hours)
     const taskId = String(body.taskId ?? '')
     const note = String(body.note ?? '').trim()
-    if (!month || !/^[a-f0-9-]{36}$/i.test(taskId)
+    const staffId = String(body.staffId ?? '')
+    if (me.role !== 'super_admin' || !month || !/^[a-f0-9-]{36}$/i.test(taskId) || !/^[a-f0-9-]{36}$/i.test(staffId)
       || !Number.isInteger(count) || count<1 || count>250
       || !Number.isFinite(hours) || hours<=0 || hours>500 || Math.abs(Math.round(hours*100)-hours*100)>0.00001
       || note.length>1500) return json({ ok:false,error:'INVALID_DECLARATION' },400)
-    const { data,error } = await (supabase as any).rpc('staff_payroll_submit_coaching_month_v1',{
+    const { data,error } = await (supabase as any).rpc('staff_payroll_admin_record_coaching_month_v1',{
+      p_staff_user_id:staffId,
       p_month_start:month+'-01',p_payroll_task_id:taskId,p_declared_sessions:count,
       p_declared_hours:hours,p_note:note,
     })
