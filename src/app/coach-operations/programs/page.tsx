@@ -165,6 +165,9 @@ export default async function CoachTrainingProgramsPage() {
         }
       />
       <Section className="max-w-6xl space-y-4">
+        <a href="/coach-operations/monthly-declarations" className="block rounded-2xl border border-black/10 bg-white px-4 py-3 text-sm font-semibold underline">
+          Submit my monthly coaching sessions for payroll review
+        </a>
         <div className="rounded-2xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-950">
           {canManage
             ? 'Head Coach and Super Admin select recurring Schedule classes once. Published programs then flow automatically to existing and future dated sessions, with the Responsible Coach and default assistants inherited.'
