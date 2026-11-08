@@ -72,7 +72,7 @@ export async function GET(req: Request) {
   const profileIds = isAdmin
     ? Array.from(new Set([...(profilesResult.data ?? []).map((x: any)=>String(x.staff_user_id)),
       ...(declarationsResult.data ?? []).map((x: any)=>String(x.staff_user_id))]))
-    : [staffId]
+    : []
   const { data: names, error: nameError } = await admin.from('profiles')
     .select('user_id,first_name,last_name,role').in('user_id',profileIds)
   if (nameError) return json({ ok: false, error: 'PROFILE_LOOKUP_FAILED' },500)
