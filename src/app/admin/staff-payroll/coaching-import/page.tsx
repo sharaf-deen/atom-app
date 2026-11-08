@@ -106,7 +106,7 @@ export default async function StaffPayrollCoachingImportPage({
       {canWrite ? (
         <div className="rounded-2xl border border-black/10 bg-white p-4 text-sm">
           <a className="font-semibold underline" href={'/admin/staff-payroll/coaching-declarations?month=' + selectedMonth}>
-            Review coaches' monthly declarations
+            Review coaches&apos; monthly declarations
           </a>
           <p className="mt-1 text-black/60">
             Actual classes may be declared by coaches even without QR scans. Approval by Super Admin is required before payroll tasks are created.
