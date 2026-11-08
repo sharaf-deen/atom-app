@@ -135,7 +135,7 @@ export async function POST(req: Request) {
     const note = String(body.note ?? '').trim()
     if (!month || !/^[a-f0-9-]{36}$/i.test(taskId)
       || !Number.isInteger(count) || count<1 || count>250
-      || !Number.isFinite(hours) || hours<=0 || hours>500 || Math.round(hours*100)!==hours*100
+      || !Number.isFinite(hours) || hours<=0 || hours>500 || Math.abs(Math.round(hours*100)-hours*100)>0.00001
       || note.length>1500) return json({ ok:false,error:'INVALID_DECLARATION' },400)
     const { data,error } = await (supabase as any).rpc('staff_payroll_submit_coaching_month_v1',{
       p_month_start:month+'-01',p_payroll_task_id:taskId,p_declared_sessions:count,
