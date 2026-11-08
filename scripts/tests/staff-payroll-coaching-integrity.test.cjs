@@ -17,7 +17,8 @@ test('Canonical account used for payroll, teaching account kept for evidence',()
  assert.ok(integrity.includes('v_payroll_staff_user_id'))
  assert.ok(integrity.includes('link.linked_user_id = v_staff_user_id'))
  assert.ok(integrity.includes('v_payroll_staff_user_id,\n        v_task.id'))
- assert.ok(integrity.includes('v_staff_user_id,\n      v_task.id')===false)
+ // Preserve actual coach identity in the import evidence even when payroll uses canonical staff.
+ assert.ok(integrity.includes('v_staff_user_id,\n      v_task.id'))
 })
 test('Monthly declarations are authenticated, RLS-protected and salary approval is outside the lot',()=>{
  for(const expected of ['ENABLE ROW LEVEL SECURITY',
