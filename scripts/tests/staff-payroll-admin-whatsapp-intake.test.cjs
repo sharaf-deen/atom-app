@@ -1,0 +1,31 @@
+const test=require('node:test')
+const assert=require('node:assert/strict')
+const fs=require('node:fs')
+const path=require('node:path')
+const read=p=>fs.readFileSync(path.join(__dirname,'../..',p),'utf8')
+const migration=read('supabase/migrations/20261108200000_staff_payroll_whatsapp_admin_only_coaching_intake.sql')
+const api=read('src/app/api/staff-payroll/coaching-declarations/route.ts')
+const ui=read('src/components/staff-payroll/CoachingMonthlyDeclarations.tsx')
+const legacy=read('src/app/coach-operations/monthly-declarations/page.tsx')
+test('Only Super Admin can record submitted WhatsApp totals',()=>{
+ assert.ok(migration.includes("v_role IS DISTINCT FROM 'super_admin'"))
+ assert.ok(migration.includes('p_staff_user_id uuid'))
+ assert.ok(migration.includes("payroll_coaching_whatsapp_admin_recorded"))
+ assert.ok(migration.includes("FROM PUBLIC,anon,authenticated"))
+ assert.ok(api.includes("new Set(['super_admin'])"))
+ assert.ok(api.includes("p_staff_user_id:staffId"))
+ assert.ok(api.includes("staff_payroll_admin_record_coaching_month_v1"))
+ assert.ok(!api.includes("rpc('staff_payroll_submit_coaching_month_v1'"))
+ assert.ok(legacy.includes("redirect('/coach-operations/programs')"))
+})
+test('Prevent cross-account double payments and protect approved declarations',()=>{
+ for(const text of ['INVALID_CANONICAL_STAFF','staff_payroll_account_links','APPROVED_DECLARATION_LOCKED',
+ 'STAFF_PAYROLL_MONTH_LOCKED','payroll_coaching_monthly_declarations'])assert.ok(migration.includes(text))
+ assert.ok(!migration.includes('INSERT INTO public.staff_monthly_task_logs'))
+ assert.ok(!migration.includes('staff_payroll_salary_payments'))
+})
+test('Super Admin can pick staff, coaching task, session count, actual hours and supporting note',()=>{
+ for(const field of ['model.staff.filter','staffId','taskId','sessions:Number(count)',
+ 'hours:Number(hours)','note','Approve verified work'])assert.ok(ui.includes(field))
+ assert.ok(!ui.includes('model&&!adminView&&<form'))
+})
