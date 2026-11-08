@@ -6,6 +6,7 @@ import { redirect } from 'next/navigation'
 import AccessDeniedCard from '@/components/AccessDeniedCard'
 import Button from '@/components/ui/Button'
 import FinanceReconciliationNav from '@/components/finance/FinanceReconciliationNav'
+import BankUnifiedReviewBoard from '@/components/admin/banking/BankUnifiedReviewBoard'
 import BankBulkReconciliationPreview from '@/components/admin/banking/BankBulkReconciliationPreview'
 import BankPaymentMatcher, {
   type BankPaymentBatch,
@@ -287,6 +288,21 @@ export default async function BankingReconciliationPage({
           </div>
         </form>
       </section>
+
+      {!loadError ? <BankUnifiedReviewBoard
+        direction="income"
+        movements={credits.map(row => ({
+          id: row.id, transaction_date: row.transaction_date, amount: Number(row.amount ?? 0),
+          currency: row.currency, description: row.description, reference: row.reference,
+          counterparty: row.counterparty, category_code: row.category_code,
+        }))}
+        sources={batches.filter(b => !b.legacy_matched).map(b => ({
+          id: b.id, date: String(b.business_date ?? ''), amount: b.counted_amount,
+          available: Math.max(0, b.counted_amount - b.active_matched_amount),
+          label: `Validated ${b.payment_method} batch ${b.id.slice(0, 8)}`, kind: 'payment batch',
+        }))}
+        activeMatchedByTransaction={Object.fromEntries(credits.map(row => [row.id, progress(row).matched]))}
+      /> : null}
 
       {!loadError ? (
         <BankBulkReconciliationPreview
