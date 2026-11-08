@@ -38,5 +38,8 @@ jobs:
       - name: Tests
         run: npm test --if-present
 
+      - name: Staff Payroll coaching integrity contract
+        run: node --test scripts/tests/staff-payroll-coaching-integrity.test.cjs
+
       - name: Build
         run: npm run build
