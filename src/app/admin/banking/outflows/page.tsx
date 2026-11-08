@@ -6,6 +6,7 @@ import { redirect } from 'next/navigation'
 import AccessDeniedCard from '@/components/AccessDeniedCard'
 import Button from '@/components/ui/Button'
 import FinanceReconciliationNav from '@/components/finance/FinanceReconciliationNav'
+import BankUnifiedReviewBoard from '@/components/admin/banking/BankUnifiedReviewBoard'
 import BankOutflowMatcher, {
   type OutflowMatch,
   type OutflowSource,
@@ -231,11 +232,26 @@ export default async function BankingOutflowsPage({
       </form>
     </section>
 
+    {!loadError ? <BankUnifiedReviewBoard
+      direction="outflow"
+      movements={debits.map(row => ({
+        id: row.id, transaction_date: row.transaction_date, amount: Number(row.amount ?? 0),
+        currency: row.currency, description: row.description, reference: row.reference,
+        counterparty: row.counterparty, category_code: row.category_code,
+      }))}
+      sources={sources.map(s => ({
+        id: s.id, date: s.date, amount: s.amount,
+        available: Math.max(0, s.amount - s.active_matched_amount),
+        label: s.label, kind: s.kind,
+      }))}
+      activeMatchedByTransaction={Object.fromEntries(debits.map(row => [row.id, progress(row).matched]))}
+    /> : null}
+
     <section className="space-y-3">
       {visible.slice(0,250).map(row=>{
         const p=progress(row)
         const active=matchesByTransaction.get(row.id)??[]
-        return <article key={row.id} className="rounded-2xl border bg-white p-4 shadow-soft">
+        return <article key={row.id} id={`debit-${row.id}`} className="rounded-2xl border bg-white p-4 shadow-soft">
           <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
