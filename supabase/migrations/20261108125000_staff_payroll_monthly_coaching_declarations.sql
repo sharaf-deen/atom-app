@@ -40,7 +40,7 @@ DECLARE
 BEGIN
  IF v_actor IS NULL THEN RAISE EXCEPTION 'NOT_AUTHENTICATED'; END IF;
  SELECT role::text INTO v_role FROM public.profiles WHERE user_id=v_actor;
- IF v_role NOT IN ('coach','assistant_coach','head_coach','super_admin') THEN
+ IF v_role IS NULL OR v_role NOT IN ('coach','assistant_coach','head_coach','super_admin') THEN
    RAISE EXCEPTION 'NOT_COACH'; END IF;
  IF p_month_start IS NULL OR p_month_start<>date_trunc('month',p_month_start)::date
  OR p_month_start > date_trunc('month',(now() at time zone 'Africa/Cairo'))::date
@@ -90,7 +90,7 @@ BEGIN
  IF v_actor IS NULL THEN RAISE EXCEPTION 'NOT_AUTHENTICATED'; END IF;
  SELECT role::text INTO v_role FROM public.profiles WHERE user_id=v_actor;
  IF v_role IS DISTINCT FROM 'super_admin' THEN RAISE EXCEPTION 'FORBIDDEN'; END IF;
- IF p_decision NOT IN ('approve','reject') OR char_length(btrim(coalesce(p_reason,'')))<10
+ IF p_decision IS NULL OR p_decision NOT IN ('approve','reject') OR char_length(btrim(coalesce(p_reason,'')))<10
  OR char_length(p_reason)>1500 THEN RAISE EXCEPTION 'REVIEW_REASON_REQUIRED'; END IF;
  SELECT * INTO v_row FROM public.staff_payroll_coaching_monthly_declarations
  WHERE id=p_declaration_id FOR UPDATE;
