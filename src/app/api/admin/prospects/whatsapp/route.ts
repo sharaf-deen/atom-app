@@ -76,7 +76,7 @@ export async function POST(req:NextRequest){
   return json({ok:false,error:'META_REJECTED',code:result?.error?.code??null},502)
  }
  const {error:updateError}=await admin.from('crm_whatsapp_messages').update({
-  provider_message_id:wamid,status:'sent',updated_at:new Date().toISOString()
+  provider_message_id:wamid,status:'queued',updated_at:new Date().toISOString()
  }).eq('id',reservation.id)
  if(updateError)return json({ok:false,error:'META_ACCEPTED_DB_UPDATE_FAILED',details:'Do not retry. Check Meta dashboard.'},503)
  await admin.from('crm_whatsapp_conversations').update({last_message_at:new Date().toISOString(),updated_at:new Date().toISOString()}).eq('id',id)
