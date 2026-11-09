@@ -22,6 +22,7 @@ type Calculation = {
   staff_name_snapshot: string
   staff_role_snapshot: string | null
   calculated_salary: number
+  manual_deduction: number
   coaching_sessions: number
   coaching_session_rate: number
   coaching_guarantee: number
@@ -178,10 +179,16 @@ export default function StaffPayrollHybridPaymentContext({
       <div className="mt-4 rounded-2xl border border-sky-200 bg-sky-50 p-3 text-sm text-sky-950">
         <div className="font-semibold">Salary advances</div>
         <div className="mt-1 text-xs">
-          If a salary advance was already paid before payroll approval, record it below as a normal salary payment using the actual historical payment date and payment method. It counts toward Paid and automatically reduces Remaining due. Do not enter the advance as a deduction.
+          Advance treatment depends on the approved payroll: when an advance is already deducted from the approved salary, it must NOT be recorded again as a salary payment. Only enter the remaining balance actually paid. If no advance was deducted, a genuine earlier salary advance may be recorded as an advance payment with its historical date.
         </div>
       </div>
 
+      {calculations.some(row => Number(row.manual_deduction ?? 0) > 0) ? (
+        <div className="mt-3 rounded-2xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950">
+          <strong>Already deducted from approved payroll: {money(calculations.reduce((sum,row)=>sum+Number(row.manual_deduction??0),0))}.</strong>
+          {' '}This amount is historical, not an unpaid balance. Do not record it again as Paid.
+        </div>
+      ) : null}
       <div className="mt-4 overflow-x-auto rounded-2xl border border-black/10 bg-white">
         <table className="min-w-full text-left text-sm">
           <thead className="border-b border-black/10 bg-black/[0.02] text-xs text-[hsl(var(--muted))]">
@@ -225,7 +232,7 @@ export default function StaffPayrollHybridPaymentContext({
       </div>
 
       <div className="mt-4 text-xs text-[hsl(var(--muted))]">
-        Closeout remains available only when every approved final salary is fully settled. Prior advances count as salary payments once recorded in the ledger. The closeout record preserves the approved hybrid coaching and residual-pool context.
+        Closeout is available when every approved NET salary has been settled. Only advances NOT previously deducted may count toward Paid when entered as an advance payment. Historical deducted advances never reduce Remaining a second time.
       </div>
     </section>
   )
