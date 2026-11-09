@@ -23,11 +23,11 @@ export async function GET(req:NextRequest){
   if(error)return json({ok:false,error:'LOAD_FAILED'},500)
   return json({ok:true,messages:data??[]})
  }
- const {data,error}=await admin.from('crm_whatsapp_conversations').select(
+ const [templatesResult, conversationsResult]=await Promise.all([admin.from('prospect_message_templates').select('template_key,language,label,body_template').eq('channel','whatsapp').eq('is_active',true).limit(100),admin.from('crm_whatsapp_conversations').select(
  'id,wa_id,display_name,prospect_id,last_inbound_at,last_message_at,prospects(full_name,status)'
- ).order('last_message_at',{ascending:false,nullsFirst:false}).limit(100)
- if(error)return json({ok:false,error:'LOAD_FAILED'},500)
- return json({ok:true,configured:configuredWhatsApp(),conversations:data??[]})
+ ).order('last_message_at',{ascending:false,nullsFirst:false}).limit(100)])
+ if(conversationsResult.error||templatesResult.error)return json({ok:false,error:'LOAD_FAILED'},500)
+ return json({ok:true,configured:configuredWhatsApp(),conversations:conversationsResult.data??[],templates:templatesResult.data??[]})
 }
 export async function POST(req:NextRequest){
  const me=await guard()

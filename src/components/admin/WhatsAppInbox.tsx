@@ -2,9 +2,12 @@
 import {useEffect,useState} from 'react'
 type Conversation={id:string;wa_id:string;display_name:string|null;prospect_id:string|null;last_inbound_at:string|null;last_message_at:string|null;prospects:{full_name:string;status:string}|null}
 type Message={id:string;body:string;direction:string;status:string;occurred_at:string;error_code:string|null}
+type Template={template_key:string;language:string;label:string;body_template:string}
 export default function WhatsAppInbox(){
  const [configured,setConfigured]=useState(false)
  const [rows,setRows]=useState<Conversation[]>([])
+ const [templates,setTemplates]=useState<Template[]>([])
+ const [templateId,setTemplateId]=useState('')
  const [selected,setSelected]=useState<Conversation|null>(null)
  const [messages,setMessages]=useState<Message[]>([])
  const [draft,setDraft]=useState('')
@@ -15,10 +18,10 @@ export default function WhatsAppInbox(){
   const r=await fetch('/api/admin/prospects/whatsapp',{cache:'no-store'})
   const data=await r.json()
   if(!r.ok)throw Error(data.error||'Inbox unavailable')
-  setRows(data.conversations||[]);setConfigured(data.configured)
+  setRows(data.conversations||[]);setConfigured(data.configured);setTemplates(data.templates||[])
  }
  async function open(row:Conversation){
-  setSelected(row);setDraft('');setNotice('');setError('')
+  setSelected(row);setDraft('');setTemplateId('');setNotice('');setError('')
   const r=await fetch('/api/admin/prospects/whatsapp?conversation_id='+encodeURIComponent(row.id),{cache:'no-store'})
   const data=await r.json()
   if(!r.ok)throw Error(data.error||'Conversation unavailable')
@@ -64,6 +67,20 @@ export default function WhatsAppInbox(){
  {messages.map(m=><div key={m.id} className={'max-w-[90%] rounded-lg p-2 text-sm '+(m.direction==='outbound'?'ml-auto bg-emerald-100':'bg-white')}>
  <div className="whitespace-pre-wrap">{m.body}</div><div className="mt-1 text-xs text-slate-500">{m.direction} · {m.status}</div></div>)}
  </div>
+ <label className="mt-4 block text-sm font-medium">Suggested message template (editable before sending)
+ <select className="mt-1 w-full rounded-lg border p-2" value={templateId} onChange={e=>{
+ const value=e.target.value;setTemplateId(value)
+ const template=templates.find(t=>t.template_key+':'+t.language===value)
+ if(template){
+  const first=(selected.prospects?.full_name||selected.display_name||'there').trim().split(/\\s+/)[0]
+  setDraft(template.body_template.replace(/{{\\s*first_name\\s*}}/g,first)
+    .replace(/{{\\s*requested_class\\s*}}/g,'Jiu-Jitsu')
+    .replace(/{{\\s*trial_date\\s*}}/g,'the agreed date'))
+ }
+ }}>
+ <option value="">Write a new message</option>
+ {templates.map(t=><option key={t.template_key+':'+t.language} value={t.template_key+':'+t.language}>{t.label} · {t.language.toUpperCase()}</option>)}
+ </select></label>
  <label className="mt-4 block text-sm font-medium">Your reviewed reply
  <textarea className="mt-1 w-full rounded-lg border p-2" rows={4} maxLength={4096} value={draft} onChange={e=>setDraft(e.target.value)}
  placeholder="Write or paste a response here. You approve each outbound message."/></label>

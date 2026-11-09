@@ -2,6 +2,7 @@ export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
 import { redirect } from 'next/navigation'
+import Link from 'next/link'
 import Forbidden from '@/components/Forbidden'
 import PageHeader from '@/components/layout/PageHeader'
 import Section from '@/components/layout/Section'
@@ -296,6 +297,7 @@ export default async function AdminProspectsPage() {
       />
 
       <Section className="max-w-7xl space-y-4">
+        <Link href="/admin/prospects/whatsapp" className="inline-flex rounded-xl border border-black/15 bg-white px-4 py-2 text-sm font-semibold hover:bg-black/[0.03]">WhatsApp Business Inbox</Link>
         {loadError ? (
           <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">
             Failed to load prospects: {loadError}

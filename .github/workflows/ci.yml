@@ -64,5 +64,8 @@ jobs:
       - name: Prospects WhatsApp assisted follow-up integrity
         run: node --test scripts/tests/prospects-whatsapp-assisted.contract.test.cjs
 
+      - name: Meta WhatsApp Cloud API contracts
+        run: node --test scripts/tests/crm-whatsapp-cloud-api.contract.test.cjs
+
       - name: Build
         run: npm run build
