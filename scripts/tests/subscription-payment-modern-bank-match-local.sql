@@ -101,9 +101,11 @@ BEGIN
          '2026-10-28','2026-10-28T12:00:00Z',v_actor);
 
   -- Only the modern Bank reconciliation system is matched; the legacy system is empty.
+  INSERT INTO public.bank_accounts(id,code,display_name,bank_name)
+  VALUES (v_bank_import,'fictional-'||left(v_bank_import::text,8),'Fictional modern bank account','TEST');
   INSERT INTO public.bank_transactions
     (account_id,transaction_date,description,reference,amount,direction,currency,fingerprint)
-  VALUES((select id from public.bank_accounts limit 1),'2026-10-28',
+  VALUES(v_bank_import,'2026-10-28',
          'Fictional modern Bank match','INTEGRITY-ROLLBACK-TEST',2200,'credit','EGP',
          'fixture-method-modern-bank-guard-20261109')
   RETURNING id INTO v_bank_line;
