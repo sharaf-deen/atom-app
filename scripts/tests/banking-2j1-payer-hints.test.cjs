@@ -1,0 +1,21 @@
+const test = require('node:test')
+const assert = require('node:assert/strict')
+const {readFileSync} = require('node:fs')
+const page = readFileSync('src/app/admin/banking/reconciliation/page.tsx','utf8')
+const ui = readFileSync('src/components/admin/banking/BankAssistedBulk2J.tsx','utf8')
+
+test('2J.1 loads member payment hints for super admin only',()=>{
+ assert.match(page,/me\.role !== 'super_admin'/)
+ assert.match(page,/from\('subscription_payments'\)/)
+ assert.match(page,/\.eq\('payment_method', 'instapay'\)/)
+ assert.match(page,/from\('profiles'\)/)
+ assert.match(page,/hintsUnavailable=\{Boolean\(paymentsResult\.error \|\| profileError\)\}/)
+})
+test('2J.1 does not automatically match a payer or batch from suggestive identity',()=>{
+ assert.match(ui,/Payer pre-identification — informational only/)
+ assert.match(ui,/not identity proof/)
+ assert.match(ui,/NOT prove allocation/)
+ assert.match(ui,/competingCredits/)
+ assert.match(ui,/choices\[r\.credit\.id\]\?\.verified/)
+ assert.doesNotMatch(ui,/useEffect\(/)
+})

@@ -13,7 +13,8 @@ type Batch = {
   legacy_matched: boolean; active_matched_amount: number
 }
 type Selection = { batchId: string; evidence: string; verified: boolean }
-type Props = { credits: Credit[]; batches: Batch[] }
+type PaymentHint = { id: string; date: string; amount: number; member_name: string; note: string }
+type Props = { credits: Credit[]; batches: Batch[]; paymentHints: PaymentHint[]; hintsUnavailable: boolean }
 
 const cents = (n: number) => Math.round(Number(n) * 100)
 const day = (s: string) => Math.floor(Date.parse(s.slice(0, 10) + 'T12:00:00Z') / 86400000)
@@ -21,7 +22,19 @@ const distance = (a: string, b: string) => Math.abs(day(a) - day(b))
 const money = (n: number) => new Intl.NumberFormat('en-EG', {style: 'currency', currency: 'EGP'}).format(n)
 const isSwitch = (description: string) => /ATM Switch\s*File\s*Upload/i.test(description)
 
-export default function BankAssistedBulk2J({ credits, batches }: Props) {
+const normalizeName = (value: string) => value.normalize('NFKD')
+  .replace(/[\u0300-\u036f\u064b-\u065f]/g, '')
+  .toLowerCase().replace(/[^a-z0-9\u0621-\u064a]+/g, ' ').replace(/\s+/g, ' ').trim()
+const nameTokens = (value: string) => normalizeName(value).split(' ').filter(t => t.length >= 3)
+const payerName = (description: string) =>
+  (description.match(/Payer Name:\s*(.*?)(?=\s+Living Exp|\s+Tuition Fees|\s+-\s+Total|$)/i)?.[1] ?? '').trim()
+function matchesMemberPayer(payer: string, member: string) {
+  const payerTokens = new Set(nameTokens(payer))
+  const tokens = nameTokens(member)
+  return payerTokens.size > 0 && tokens.length >= 2 && tokens.filter(t => payerTokens.has(t)).length >= 2
+}
+
+export default function BankAssistedBulk2J({ credits, batches, paymentHints, hintsUnavailable }: Props) {
   const router = useRouter()
   const [choices, setChoices] = useState<Record<string, Selection>>({})
   const [reason, setReason] = useState('')
@@ -40,6 +53,23 @@ export default function BankAssistedBulk2J({ credits, batches }: Props) {
         cents(b.counted_amount) === cents(c.amount) && distance(b.business_date!, c.transaction_date) <= 3)
       .sort((x, y) => distance(x.business_date!, c.transaction_date) - distance(y.business_date!, c.transaction_date))
   })), [active, available])
+  const memberHints = useMemo(() => new Map(instant.map(row => {
+    const payer = payerName(row.credit.description)
+    const possible = paymentHints.filter(p => p.member_name &&
+      distance(p.date, row.credit.transaction_date) <= 3 &&
+      cents(p.amount) === cents(row.credit.amount)
+    ).map(p => ({ ...p, payerMatch: matchesMemberPayer(payer, p.member_name) }))
+      .sort((a, b) => Number(b.payerMatch) - Number(a.payerMatch) ||
+        distance(a.date, row.credit.transaction_date) - distance(b.date, row.credit.transaction_date))
+    const nearby = paymentHints.filter(p => p.member_name && distance(p.date, row.credit.transaction_date) <= 3)
+    const grouped = new Map<string, PaymentHint[]>()
+    for (const p of nearby) grouped.set(p.date, [...(grouped.get(p.date) ?? []), p])
+    const dayTotals = [...grouped].filter(([, items]) =>
+      items.length > 1 && cents(items.reduce((sum, p) => sum + p.amount, 0)) === cents(row.credit.amount))
+      .map(([date, items]) => ({date, members: items.map(x => x.member_name)}))
+    return [row.credit.id, {payer, possible: possible.slice(0, 5), possibleCount: possible.length,
+      dayTotals: dayTotals.slice(0, 3)}] as const
+  })), [instant, paymentHints])
   const cib = useMemo(() => active.filter(c => c.matched === 0 && isSwitch(c.description)).map(c => ({
     credit: c,
     options: available.filter(b => b.payment_method === 'card' &&
@@ -108,6 +138,9 @@ export default function BankAssistedBulk2J({ credits, batches }: Props) {
         {instant.map(r => {
           const selectedBatch = choices[r.credit.id]?.batchId ?? ''
           const state = choices[r.credit.id]
+          const hints = memberHints.get(r.credit.id)
+          const competingCredits = instant.filter(other => other.credit.id !== r.credit.id &&
+            other.options.some(b => r.options.some(candidate => candidate.id === b.id))).length
           return <div key={r.credit.id} className="rounded-xl border p-3 text-sm">
             <div className="flex flex-wrap justify-between gap-2">
               <div><strong>{r.credit.transaction_date} · {money(r.credit.amount)}</strong>
@@ -115,6 +148,24 @@ export default function BankAssistedBulk2J({ credits, batches }: Props) {
               <a href={`#credit-${r.credit.id}`} className="text-blue-700 underline">Bank record</a>
             </div>
             <p className="mt-1 break-words text-xs text-slate-600">{r.credit.description}</p>
+            {!hintsUnavailable ? <div className="mt-2 space-y-1 rounded-lg border border-slate-200 bg-slate-50 p-2 text-xs">
+              <div className="font-semibold">Payer pre-identification — informational only</div>
+              <p>Bank sender: {hints?.payer || 'Name not available'}</p>
+              {hints?.possible.length ? <>
+                {hints.possible.map(p => <p key={p.id}>
+                  {p.payerMatch ? 'Name overlap (not identity proof)' : 'Same amount (identity unverified)'}:
+                  {' '}{p.member_name} · {p.date} · {money(p.amount)}
+                  {p.note ? ' · ATOM note: ' + p.note : ''}
+                </p>)}
+                {hints.possibleCount > 5 ? <p>{hints.possibleCount - 5} additional same-amount payment(s) omitted.</p> : null}
+              </> : <p>No individual InstaPay payment with identical amount within three days. May be a third-party or combined payment.</p>}
+              {hints?.dayTotals.map(group => <p key={group.date} className="text-amber-800">
+                Same-day aggregate: {group.date} · {group.members.join(', ')}. Sum equals this bank credit, but does NOT prove allocation.
+              </p>)}
+              {r.options.length > 1 || competingCredits > 0 ? <p className="font-semibold text-amber-800">
+                Conflict: {r.options.length} candidate batch(es); {competingCredits} other credit(s) share at least one batch. Verify the individual receipt.
+              </p> : null}
+            </div> : <p className="mt-2 text-xs text-amber-800">Member context unavailable. Review independently.</p>}
             {r.options.length ? <>
               <label className="mt-2 block text-xs font-medium">Validated InstaPay payment batch</label>
               <select className="mt-1 w-full rounded-lg border p-2" value={selectedBatch}
