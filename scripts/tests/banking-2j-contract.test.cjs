@@ -9,7 +9,7 @@ test('Banking 2J InstaPay bulk requires distinct documented pairs and Super Admi
  for (const token of ["me.role !== 'super_admin'", 'body.verified !== true','credits.has(credit)','batches.has(batch)','evidence.trim().length < 15']) {
    assert.ok(api.includes(token), 'API missing: ' + token)
  }
- for (const token of ["lock table public.bank_payment_matches","v_batch.payment_method <> 'instapay'","v_tx.description not ilike 'IPN Inward%'","PAIR_EVIDENCE_REQUIRED","ALREADY_MATCHED","LEGACY_BATCH_MATCHED","to service_role"]) {
+ for (const token of ["lock table public.bank_payment_matches","v_batch.payment_method <> 'instapay'","coalesce(v_tx.description,'') not ilike 'IPN Inward%'","PAIR_EVIDENCE_REQUIRED","ALREADY_MATCHED","LEGACY_BATCH_MATCHED","to service_role"]) {
    assert.ok(sql.includes(token), 'SQL missing: ' + token)
  }
  assert.ok(sql.includes('abs(v_tx.transaction_date-v_batch.business_date)>3'))
