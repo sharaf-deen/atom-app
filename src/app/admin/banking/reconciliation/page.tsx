@@ -7,6 +7,7 @@ import AccessDeniedCard from '@/components/AccessDeniedCard'
 import Button from '@/components/ui/Button'
 import FinanceReconciliationNav from '@/components/finance/FinanceReconciliationNav'
 import BankUnifiedReviewBoard from '@/components/admin/banking/BankUnifiedReviewBoard'
+import BankAssistedBulk2J from '@/components/admin/banking/BankAssistedBulk2J'
 import BankBulkReconciliationPreview from '@/components/admin/banking/BankBulkReconciliationPreview'
 import BankPaymentMatcher, {
   type BankPaymentBatch,
@@ -296,6 +297,18 @@ export default async function BankingReconciliationPage({
         </form>
       </section>
 
+      {!loadError ? <BankAssistedBulk2J
+        credits={credits.map(row => ({
+          id: row.id, transaction_date: row.transaction_date, amount: Number(row.amount ?? 0),
+          description: row.description, reference: row.reference, currency: row.currency,
+          category_code: row.category_code, matched: progress(row).matched,
+        }))}
+        batches={batches}
+      /> : null}
+
+      <details className="rounded-2xl border bg-white p-4 shadow-soft">
+        <summary className="cursor-pointer text-sm font-semibold">Legacy tools — Banking 2H / 2I (retained for compatibility)</summary>
+        <div className="mt-4 space-y-4">
       {!loadError ? <BankUnifiedReviewBoard
         direction="income"
         movements={credits.map(row => ({
@@ -333,6 +346,9 @@ export default async function BankingReconciliationPage({
           activeMatches={matches}
         />
       ) : null}
+
+        </div>
+      </details>
 
       <section className="space-y-3">
         {visible.slice(0, 250).map((row) => {
