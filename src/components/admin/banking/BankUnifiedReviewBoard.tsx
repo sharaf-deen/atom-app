@@ -58,34 +58,39 @@ export default function BankUnifiedReviewBoard({ direction, movements, sources, 
     for (const r of ranked) {
       for (const c of r.candidates) occurrences.set(c.id, (occurrences.get(c.id) ?? 0) + 1)
     }
-    const candidates = ranked.filter(r => !r.inferredTransfer && cents(activeMatchedByTransaction[r.movement.id] ?? 0) === 0 && r.candidates.length === 1 && occurrences.get(r.candidates[0].id) === 1 && r.candidates[0].gap <= 7)
+    const candidates = ranked.filter(r => !r.inferredTransfer && (direction === 'outflow' || r.movement.category_code === 'membership_income') && cents(activeMatchedByTransaction[r.movement.id] ?? 0) === 0 && r.candidates.length === 1 && occurrences.get(r.candidates[0].id) === 1 && r.candidates[0].gap <= 7)
     const transfers = ranked.filter(r => r.inferredTransfer)
     const exceptions = ranked.filter(r => !r.inferredTransfer && !candidates.includes(r))
     return { candidates, transfers, exceptions, all: ranked }
-  }, [movements, sources, activeMatchedByTransaction])
-  const reviewable = direction === 'outflow' ? report.candidates.filter(r => ['expense', 'staff_payroll_payment', 'membership_refund'].includes(r.candidates[0].kind)) : []
+  }, [movements, sources, activeMatchedByTransaction, direction])
+  const reviewable = report.candidates.filter(r => direction === 'outflow'
+    ? ['expense', 'staff_payroll_payment', 'membership_refund'].includes(r.candidates[0].kind)
+    : r.candidates[0].kind === 'payment batch')
   const chosen = reviewable.filter(r => selected.includes(r.movement.id))
   async function confirmBulk() {
-    if (direction !== 'outflow' || busy || !verified || reason.trim().length < 10 || chosen.length < 1 || chosen.length > 50) return
+    if (busy || !verified || reason.trim().length < 10 || chosen.length < 1 || chosen.length > 50) return
     setBusy(true)
     setNotice('')
     try {
-      const response = await fetch('/api/admin/banking/outflows/bulk', {
+      const response = await fetch(direction === 'income' ? '/api/admin/banking/reconciliation/bulk-v2' : '/api/admin/banking/outflows/bulk', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           verified: true,
           reason: reason.trim(),
-          pairs: chosen.map(r => ({
+          pairs: chosen.map(r => direction === 'income' ? {
+            bank_transaction_id: r.movement.id,
+            batch_id: r.candidates[0].id,
+          } : {
             bank_transaction_id: r.movement.id,
             source_id: r.candidates[0].id,
             source_kind: r.candidates[0].kind,
-          })),
+          }),
         }),
       })
       const data = await response.json()
       if (!response.ok || !data?.ok) throw new Error(String(data?.error ?? 'BULK_MATCH_FAILED'))
-      setNotice(`Matched ${data.result.matched_count} bank debits. Audit records preserved.`)
+      setNotice(`Matched ${data.result.matched_count} bank transactions. Audit records preserved.`)
       setSelected([])
       setReason('')
       setVerified(false)
@@ -117,7 +122,7 @@ export default function BankUnifiedReviewBoard({ direction, movements, sources, 
     <input aria-label="Filter review worklist" value={query} onChange={e => setQuery(e.target.value)} placeholder="Filter by reference, description or amount..." className="w-full rounded-xl border p-2 text-sm"/>
     <div className="space-y-2">
       {visible.map(r => <div key={r.movement.id} className="rounded-xl border p-3 text-sm">
-        {direction === 'outflow' && filter === 'candidates' && reviewable.some(item => item.movement.id === r.movement.id) ?
+        {filter === 'candidates' && reviewable.some(item => item.movement.id === r.movement.id) ?
           <label className="mb-2 flex items-center gap-2 text-xs">
             <input type="checkbox" disabled={busy || (selected.length >= 50 && !selected.includes(r.movement.id))}
               checked={selected.includes(r.movement.id)}
@@ -136,9 +141,9 @@ export default function BankUnifiedReviewBoard({ direction, movements, sources, 
       </div>)}
       {!visible.length ? <p className="rounded-xl bg-slate-50 p-3 text-sm">No transactions in this group.</p> : null}
     </div>
-    {direction === 'outflow' && filter === 'candidates' && reviewable.length > 0 ?
+    {filter === 'candidates' && reviewable.length > 0 ?
       <div className="space-y-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm">
-        <h3 className="font-semibold">Super Admin bulk confirmation — {chosen.length} debit(s) · {money(chosen.reduce((sum,r) => sum + r.remainder, 0))}</h3>
+        <h3 className="font-semibold">Super Admin bulk confirmation — {chosen.length} {direction === 'income' ? 'credit(s)' : 'debit(s)'} · {money(chosen.reduce((sum,r) => sum + r.remainder, 0))}</h3>
         <p>Only fully unmatched, exactly equal one-to-one pairs are eligible. Date tolerance: seven days. Similar amounts and dates are suggestions, not payment evidence. Inspect bank and ATOM records individually before confirming the selection.</p>
         <textarea value={reason} onChange={e => setReason(e.target.value)} maxLength={480}
           rows={2} placeholder="Evidence reviewed, bank references and supporting records (10–480 characters)"
@@ -150,7 +155,7 @@ export default function BankUnifiedReviewBoard({ direction, movements, sources, 
         <button type="button" disabled={busy || !verified || reason.trim().length < 10 || chosen.length < 1 || chosen.length > 50}
           onClick={() => void confirmBulk()}
           className="rounded-xl bg-black px-3 py-2 font-semibold text-white disabled:opacity-40">
-          {busy ? 'Confirming…' : `Confirm ${chosen.length} atomic outflow matches`}
+          {busy ? 'Confirming…' : `Confirm ${chosen.length} atomic ${direction} matches`}
         </button>
       </div> : null}
     {notice ? <p role="status" className="rounded-xl border p-3 text-sm">{notice}</p> : null}
