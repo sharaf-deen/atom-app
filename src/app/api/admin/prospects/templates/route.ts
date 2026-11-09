@@ -22,7 +22,7 @@ const TEMPLATE_KEYS = [
   'post_trial_follow_up',
   'final_follow_up',
 ] as const
-const LANGUAGES = ['en', 'ar'] as const
+const LANGUAGES = ['en', 'ar', 'fr'] as const
 
 function json(body: unknown, status = 200) {
   const response = NextResponse.json(body, { status })

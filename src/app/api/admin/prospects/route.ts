@@ -335,6 +335,23 @@ export async function POST(req: NextRequest) {
     return json({ ok: true, ...(data ?? {}) })
   }
 
+  if (action === 'confirm_whatsapp_sent') {
+    if (body?.confirmed !== true) return json({ok:false,error:'MANUAL_SEND_CONFIRMATION_REQUIRED'},400)
+    const message = String(body?.message ?? '').trim()
+    if (!message || message.length > 4000) return json({ok:false,error:'INVALID_MESSAGE'},400)
+    const rawFollowUp = body?.follow_up_at
+    const date = rawFollowUp === null ? null : (typeof rawFollowUp === 'string' ? new Date(rawFollowUp) : null)
+    if (rawFollowUp !== null && (!date || Number.isNaN(date.getTime()))) {
+      return json({ok:false,error:'INVALID_FOLLOW_UP_DATE'},400)
+    }
+    const {data,error} = await admin.rpc('crm_confirm_prospect_whatsapp_sent_v1',{
+      p_prospect_id:id,p_actor:access.me.id,p_message:message,
+      p_follow_up_at:date?.toISOString()??null,
+    })
+    if(error)return json({ok:false,error:'SEND_CONFIRMATION_REJECTED',details:error.message},409)
+    return json({ok:true,...(data??{})})
+  }
+
   if (action === 'note') {
     const note = sanitizeProspectText(body?.note, 2000)
     if (!note) return json({ ok: false, error: 'NOTE_REQUIRED' }, 400)

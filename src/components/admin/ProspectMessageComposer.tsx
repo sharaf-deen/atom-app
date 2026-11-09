@@ -20,7 +20,7 @@ export type MessageTemplateKey =
   | 'trial_reschedule'
   | 'post_trial_follow_up'
   | 'final_follow_up'
-export type MessageLanguage = 'en' | 'ar'
+export type MessageLanguage = 'en' | 'ar' | 'fr'
 
 export type MessageComposerRequest = {
   prospect: ProspectRow
@@ -34,6 +34,7 @@ type ComposerProps = {
   busy: boolean
   onClose: () => void
   onInitiate: (request: MessageComposerRequest, subject: string, message: string) => Promise<boolean>
+  onConfirmSent: (request: MessageComposerRequest, message: string, followUpAt: string | null) => Promise<boolean>
 }
 
 type AdminProps = {
@@ -104,11 +105,16 @@ export default function ProspectMessageComposer({
   busy,
   onClose,
   onInitiate,
+  onConfirmSent,
 }: ComposerProps) {
   const [templateKey, setTemplateKey] = useState<MessageTemplateKey>('first_contact')
   const [language, setLanguage] = useState<MessageLanguage>('en')
   const [subject, setSubject] = useState('')
   const [message, setMessage] = useState('')
+  const [opened, setOpened] = useState(false)
+  const [sentConfirmed, setSentConfirmed] = useState(false)
+  const [followUpDays, setFollowUpDays] = useState('2')
+  const [confirmError, setConfirmError] = useState<string | null>(null)
 
   const selected = useMemo(() => {
     if (!request) return null
@@ -124,6 +130,10 @@ export default function ProspectMessageComposer({
     if (!request) return
     setTemplateKey(defaultKey(request.prospect))
     setLanguage('en')
+    setOpened(false)
+    setSentConfirmed(false)
+    setFollowUpDays('2')
+    setConfirmError(null)
   }, [request])
 
   useEffect(() => {
@@ -159,6 +169,7 @@ export default function ProspectMessageComposer({
             <span className="font-medium">Message type</span>
             <select
               value={templateKey}
+              disabled={opened}
               onChange={(event) => setTemplateKey(event.target.value as MessageTemplateKey)}
               className="w-full rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2"
             >
@@ -171,11 +182,13 @@ export default function ProspectMessageComposer({
             <span className="font-medium">Language</span>
             <select
               value={language}
+              disabled={opened}
               onChange={(event) => setLanguage(event.target.value as MessageLanguage)}
               className="w-full rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2"
             >
               <option value="en">English</option>
               <option value="ar">العربية</option>
+              <option value="fr">Français</option>
             </select>
           </label>
         </div>
@@ -201,6 +214,7 @@ export default function ProspectMessageComposer({
               <span className="font-medium">Message preview</span>
               <textarea
                 value={message}
+                disabled={opened}
                 onChange={(event) => setMessage(event.target.value)}
                 rows={9}
                 maxLength={4000}
@@ -212,17 +226,52 @@ export default function ProspectMessageComposer({
 
         <div className="mt-5 flex flex-wrap items-center justify-between gap-3">
           <p className="text-xs text-[hsl(var(--muted))]">
-            Opening the app records “contact initiated”; it does not confirm delivery.
+            This opens your messaging app only. ATOM cannot see delivery. Confirm below only after you actually send.
           </p>
           <button
             type="button"
-            disabled={!selected || !message.trim() || (request.channel === 'email' && !subject.trim()) || busy}
-            onClick={() => void onInitiate(request, subject.trim(), message.trim())}
+            disabled={!selected || !message.trim() || (request.channel === 'email' && !subject.trim()) || busy || opened}
+            onClick={async () => {
+              const success = await onInitiate(request, subject.trim(), message.trim())
+              if (success) setOpened(true)
+            }}
             className="rounded-xl bg-black px-4 py-2 text-sm font-semibold text-white disabled:opacity-40"
           >
             {busy ? 'Opening…' : `Open ${request.channel === 'whatsapp' ? 'WhatsApp' : 'email app'}`}
           </button>
         </div>
+        {opened && request.channel === 'whatsapp' ? (
+          <section className="mt-4 space-y-3 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm">
+            <h3 className="font-semibold">After sending in WhatsApp</h3>
+            <p>Opening WhatsApp did not send the message. Only confirm after pressing Send in WhatsApp. ATOM cannot verify delivery.</p>
+            <label className="block space-y-1">
+              <span className="font-medium">Next follow-up (assisted reminder, no automatic sending)</span>
+              <select className="w-full rounded-lg border p-2" value={followUpDays} onChange={e=>setFollowUpDays(e.target.value)}>
+                <option value="2">In 2 days</option>
+                <option value="3">In 3 days</option>
+                <option value="7">In 7 days</option>
+                <option value="none">No reminder</option>
+              </select>
+            </label>
+            <label className="flex items-start gap-2">
+              <input type="checkbox" checked={sentConfirmed} onChange={e=>setSentConfirmed(e.target.checked)}/>
+              I confirm I actually sent this exact message to this prospect in WhatsApp.
+            </label>
+            {confirmError && <p role="alert" className="text-red-700">{confirmError}</p>}
+            <button type="button" disabled={busy || !sentConfirmed}
+              className="rounded-xl bg-emerald-800 px-4 py-2 text-white font-semibold disabled:opacity-40"
+              onClick={async ()=>{
+                setConfirmError(null)
+                const days=followUpDays==='none'?null:Number(followUpDays)
+                const at=days===null?null:new Date(Date.now()+days*86400000).toISOString()
+                const success=await onConfirmSent(request,message.trim(),at)
+                if(!success)setConfirmError('Could not record the confirmed send. The message has not been marked as sent.')
+              }}>
+              {busy?'Saving…':'Confirm sent & schedule follow-up'}
+            </button>
+            <p className="text-xs">No WhatsApp API, campaign, automated message, or delivery claim is enabled.</p>
+          </section>
+        ):null}
       </div>
     </div>
   )
