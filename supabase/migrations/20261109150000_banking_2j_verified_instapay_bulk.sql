@@ -1,7 +1,7 @@
 -- Banking 2J: explicit, independently evidenced InstaPay bulk pairing.
 -- Does not change payment ledger, categorization, CIB card settlements or payroll.
 begin;
-create function public.bulk_match_bank_instapay_verified_v1(
+create or replace function public.bulk_match_bank_instapay_verified_v1(
  p_pairs jsonb, p_actor uuid, p_note text, p_verified boolean
 ) returns jsonb
 language plpgsql security definer set search_path = ''
