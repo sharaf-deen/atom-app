@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 
 type Movement = {
   id: string
+  account_id?: string
   transaction_date: string
   amount: number
   currency: string
@@ -17,6 +18,7 @@ type Candidate = { id: string; date: string; amount: number; label: string; kind
 type Props = {
   direction: 'income' | 'outflow'
   movements: Movement[]
+  oppositeMovements?: Movement[]
   sources: Candidate[]
   activeMatchedByTransaction: Record<string, number>
 }
@@ -30,7 +32,7 @@ function dayDiff(a: string, b: string) {
 function money(n: number) { return new Intl.NumberFormat('en-EG', { style: 'currency', currency: 'EGP' }).format(n) }
 function normalize(s: string | null) { return String(s ?? '').normalize('NFKC').trim().toLowerCase().replace(/\s+/g, ' ') }
 
-export default function BankUnifiedReviewBoard({ direction, movements, sources, activeMatchedByTransaction }: Props) {
+export default function BankUnifiedReviewBoard({ direction, movements, oppositeMovements = [], sources, activeMatchedByTransaction }: Props) {
   const [filter, setFilter] = useState<'candidates' | 'transfer' | 'exceptions'>('candidates')
   const [query, setQuery] = useState('')
   const [expanded, setExpanded] = useState(false)
@@ -48,9 +50,11 @@ export default function BankUnifiedReviewBoard({ direction, movements, sources, 
       const options = eligible.filter(s => cents(s.available) === remainder && dayDiff(m.transaction_date, s.date) <= 7)
         .map(s => ({ ...s, gap: dayDiff(m.transaction_date, s.date) }))
         .sort((a, b) => a.gap - b.gap)
+      const possibleTransfers = oppositeMovements.filter(other => other.account_id && m.account_id && other.account_id !== m.account_id &&
+        other.currency === m.currency && cents(other.amount) === cents(m.amount) && dayDiff(m.transaction_date, other.transaction_date) <= 3)
       const inferredTransfer = m.category_code === 'internal_transfer'
       // Do not promote a plausible reference/date into uniqueness while alternatives exist.
-      return { movement: m, remainder: remainder / 100, options, inferredTransfer, candidates: options }
+      return { movement: m, remainder: remainder / 100, options, inferredTransfer, possibleTransfers, candidates: options }
     })
     const occurrences = new Map<string, number>()
     for (const r of ranked) {
@@ -60,7 +64,7 @@ export default function BankUnifiedReviewBoard({ direction, movements, sources, 
     const transfers = ranked.filter(r => r.inferredTransfer)
     const exceptions = ranked.filter(r => !r.inferredTransfer && !candidates.includes(r))
     return { candidates, transfers, exceptions, all: ranked }
-  }, [movements, sources, activeMatchedByTransaction, direction])
+  }, [movements, oppositeMovements, sources, activeMatchedByTransaction, direction])
   const reviewable = report.candidates.filter(r => direction === 'outflow'
     ? ['expense', 'staff_payroll_payment', 'membership_refund'].includes(r.candidates[0].kind)
     : r.candidates[0].kind === 'payment batch')
@@ -117,6 +121,14 @@ export default function BankUnifiedReviewBoard({ direction, movements, sources, 
         <span className="block text-xs text-slate-500">Exceptions</span><strong>{report.exceptions.length}</strong>
       </button>
     </div>
+    {filter === 'candidates' && reviewable.length > 0 ?
+      <button type="button" disabled={busy} onClick={() => setSelected(
+        reviewable.length <= 50 && reviewable.every(r => selected.includes(r.movement.id))
+          ? [] : reviewable.slice(0, 50).map(r => r.movement.id)
+      )} className="rounded-xl border px-3 py-2 text-sm">
+        {reviewable.length <= 50 && reviewable.every(r => selected.includes(r.movement.id))
+          ? 'Clear selected candidates' : `Select first ${Math.min(reviewable.length, 50)} candidates for review`}
+      </button> : null}
     <input aria-label="Filter review worklist" value={query} onChange={e => setQuery(e.target.value)} placeholder="Filter by reference, description or amount..." className="w-full rounded-xl border p-2 text-sm"/>
     <div className="space-y-2">
       {visible.map(r => <div key={r.movement.id} className="rounded-xl border p-3 text-sm">
@@ -134,7 +146,7 @@ export default function BankUnifiedReviewBoard({ direction, movements, sources, 
         <p className="mt-1 break-words">{r.movement.description}</p>
         <p className="text-xs text-slate-500">{r.movement.counterparty ?? 'No counterparty'} · {r.movement.reference ?? 'No bank reference'}</p>
         {filter === 'candidates' ? <p className="mt-1 text-xs text-blue-800">Potential {r.candidates[0].kind}: {r.candidates[0].label} · {r.candidates[0].date} · {r.candidates[0].gap} day(s) apart. Review evidence before confirming.</p> :
-          filter === 'transfer' ? <p className="mt-1 text-xs text-amber-800">Unconfirmed classification only. Verify the matching movement in another ATOM-owned bank account.</p> :
+          filter === 'transfer' ? <p className="mt-1 text-xs text-amber-800">Unconfirmed classification only. {r.possibleTransfers.length === 1 ? `Potential opposite movement: ${r.possibleTransfers[0].transaction_date} · ${r.possibleTransfers[0].reference ?? r.possibleTransfers[0].id.slice(0, 8)} in another account. Independently verify both accounts.` : r.possibleTransfers.length > 1 ? `${r.possibleTransfers.length} possible opposite-account movements; ambiguous.` : 'No opposite-account bank movement found in the three-day window. Do not assume this is an internal transfer.'}</p> :
           <p className="mt-1 text-xs text-amber-800">{r.options.length ? `${r.options.length} possible source record(s); no unique verified pairing.` : 'No equal remaining amount in the seven-day source window.'}</p>}
       </div>)}
       {!visible.length ? <p className="rounded-xl bg-slate-50 p-3 text-sm">No transactions in this group.</p> : null}
