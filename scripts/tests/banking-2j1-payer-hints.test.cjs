@@ -16,6 +16,6 @@ test('2J.1 does not automatically match a payer or batch from suggestive identit
  assert.match(ui,/not identity proof/)
  assert.match(ui,/NOT prove allocation/)
  assert.match(ui,/competingCredits/)
- assert.match(ui,/choices\[row\.credit\.id\]\.verified/)
+ assert.match(ui,/choices\[r\.credit\.id\]\?\.verified/)
  assert.doesNotMatch(ui,/useEffect\(/)
 })
