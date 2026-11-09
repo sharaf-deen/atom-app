@@ -24,6 +24,7 @@ export function buildPayrollSourceHashes(input: {
   staffProfiles: any[]
   adjustments?: any[]
   taskMinimumRates?: any[]
+  expenseBasisExclusions?: any[]
 }) {
   const payments = sortByKey(input.payments, (row) => String(row.id ?? '')).map((row) => ({
     id: String(row.id ?? ''),
@@ -40,6 +41,17 @@ export function buildPayrollSourceHashes(input: {
     date: String(row.date ?? ''),
     category_key: String(row.category_key ?? ''),
     amount: normalizeNumber(row.amount),
+  }))
+
+  // Expense-basis adjustments participate in the same financial source hash as payments,
+  // refunds and expenses. Updating an exclusion invalidates an old payroll draft.
+  const expenseBasisExclusions = sortByKey(input.expenseBasisExclusions ?? [],
+    (row) => String(row.expense_id ?? '')).map((row) => ({
+    month_start: String(row.month_start ?? ''),
+    expense_id: String(row.expense_id ?? ''),
+    excluded_amount: normalizeNumber(row.excluded_amount),
+    reason: String(row.reason ?? ''),
+    updated_at: row.updated_at == null ? null : String(row.updated_at),
   }))
 
   const logs = sortByKey(input.logs, (row) => String(row.id ?? '')).map((row) => ({
@@ -120,7 +132,7 @@ export function buildPayrollSourceHashes(input: {
   }))
 
   return {
-    financial_source_hash: stableHash({ payments, refunds, expenses }),
+    financial_source_hash: stableHash({ payments, refunds, expenses, expenseBasisExclusions }),
     task_source_hash: stableHash(logs),
     compensation_source_hash: stableHash({ compensation, adjustments, task_minimum_rates: taskMinimumRates }),
     staff_source_hash: stableHash(staff),
