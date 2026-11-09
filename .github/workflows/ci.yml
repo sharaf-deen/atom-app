@@ -53,5 +53,8 @@ jobs:
       - name: Banking 2J.1 payer identification integrity
         run: node --test scripts/tests/banking-2j1-payer-hints.test.cjs
 
+      - name: Banking 2J.2 triage worklist regression
+        run: node --test scripts/tests/banking-2j2-triage.test.cjs
+
       - name: Build
         run: npm run build
