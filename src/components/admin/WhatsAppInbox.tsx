@@ -72,10 +72,10 @@ export default function WhatsAppInbox(){
  const value=e.target.value;setTemplateId(value)
  const template=templates.find(t=>t.template_key+':'+t.language===value)
  if(template){
-  const first=(selected.prospects?.full_name||selected.display_name||'there').trim().split(/\\s+/)[0]
-  setDraft(template.body_template.replace(/{{\\s*first_name\\s*}}/g,first)
-    .replace(/{{\\s*requested_class\\s*}}/g,'Jiu-Jitsu')
-    .replace(/{{\\s*trial_date\\s*}}/g,'the agreed date'))
+  const first=(selected.prospects?.full_name||selected.display_name||'there').trim().split(/\s+/)[0]
+  setDraft(template.body_template.replace(/{{\s*first_name\s*}}/g,first)
+    .replace(/{{\s*requested_class\s*}}/g,'Jiu-Jitsu')
+    .replace(/{{\s*trial_date\s*}}/g,'the agreed date'))
  }
  }}>
  <option value="">Write a new message</option>
