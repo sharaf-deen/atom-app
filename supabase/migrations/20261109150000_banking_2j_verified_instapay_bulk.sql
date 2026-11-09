@@ -40,7 +40,7 @@ begin
   if not found then raise exception 'BATCH_NOT_FOUND'; end if;
   if v_tx.direction <> 'credit' or v_tx.currency <> 'EGP'
     or v_tx.transaction_date < date '2026-08-01'
-    or v_tx.description not ilike 'IPN Inward%'
+    or coalesce(v_tx.description,'') not ilike 'IPN Inward%'
     or coalesce(v_tx.category_code,'membership_income') <> 'membership_income'
     or v_tx.classification_status not in ('unclassified','suggested','confirmed')
   then raise exception 'CREDIT_NOT_ELIGIBLE'; end if;
