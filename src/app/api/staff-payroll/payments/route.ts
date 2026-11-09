@@ -166,6 +166,7 @@ export async function POST(req: Request) {
       const approvalCalculationId = normalizeUuid(
         body?.approvalCalculationId ?? body?.approval_calculation_id
       )
+      const paymentPurpose = cleanString(body?.paymentPurpose ?? body?.payment_purpose,40)
       const amount = normalizeAmount(body?.amount)
       const paymentMethod = cleanString(
         body?.paymentMethod ?? body?.payment_method,
@@ -188,6 +189,12 @@ export async function POST(req: Request) {
           details: 'Payment amount must be greater than zero.',
         })
       }
+      if (!['salary_balance','prior_advance'].includes(paymentPurpose)) {
+        return json(400, {
+          ok: false, error: 'PAYMENT_PURPOSE_REQUIRED',
+          details: 'Choose new approved salary balance or earlier undeducted advance. Deducted advances must never be recorded again.',
+        })
+      }
       if (!['cash', 'instapay', 'bank_transfer'].includes(paymentMethod)) {
         return json(400, {
           ok: false,
@@ -199,6 +206,34 @@ export async function POST(req: Request) {
         return json(400, {
           ok: false,
           error: 'INVALID_PAYMENT_DATE',
+        })
+      }
+
+      // Fail closed for already-deducted advances; the approved calculation is immutable.
+      const { data: approved, error: approvedError } = await admin
+        .from('staff_payroll_approval_calculations')
+        .select('id,manual_deduction,approval_version_id,month_start')
+        .eq('id',approvalCalculationId).maybeSingle()
+      if (approvedError || !approved) return json(409,{
+        ok:false,error:'APPROVED_CALCULATION_REQUIRED',
+      })
+      if (paymentPurpose === 'prior_advance' && Number(approved.manual_deduction ?? 0) > 0) {
+        return json(409,{ok:false,error:'ADVANCE_ALREADY_DEDUCTED',
+          details:'Advance already deducted from this staff member’s approved payroll. Do not record it again as a salary payment.'})
+      }
+      if (paymentPurpose === 'salary_balance' && Number(approved.manual_deduction ?? 0) > 0) {
+        const {data:version,error:versionError}=await admin
+          .from('staff_payroll_approval_versions')
+          .select('approved_at')
+          .eq('id',approved.approval_version_id).maybeSingle()
+        if(versionError || !version?.approved_at) return json(409,{ok:false,error:'APPROVAL_DATE_REQUIRED'})
+        const cairoApprovalDate=new Intl.DateTimeFormat('en-CA',{
+          timeZone:'Africa/Cairo',year:'numeric',month:'2-digit',day:'2-digit',
+        }).format(new Date(version.approved_at))
+        // Backdated payments for someone with deducted advances are ambiguous and unsafe.
+        if(paymentDate < cairoApprovalDate) return json(409,{
+          ok:false,error:'HISTORICAL_PAYMENT_CONFLICT',
+          details:'This salary already includes deducted historical advances. Do not record payments dated before approval in the balance ledger.',
         })
       }
 
@@ -238,6 +273,7 @@ export async function POST(req: Request) {
           approval_calculation_id: approvalCalculationId,
           payment_id: result?.payment_id ?? null,
           amount,
+          payment_purpose: paymentPurpose,
           payment_method: paymentMethod,
           payment_date: paymentDate,
           reference: reference || null,
