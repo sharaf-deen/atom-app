@@ -169,6 +169,7 @@ export default function ProspectMessageComposer({
             <span className="font-medium">Message type</span>
             <select
               value={templateKey}
+              disabled={opened}
               onChange={(event) => setTemplateKey(event.target.value as MessageTemplateKey)}
               className="w-full rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2"
             >
@@ -181,6 +182,7 @@ export default function ProspectMessageComposer({
             <span className="font-medium">Language</span>
             <select
               value={language}
+              disabled={opened}
               onChange={(event) => setLanguage(event.target.value as MessageLanguage)}
               className="w-full rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2"
             >
@@ -212,6 +214,7 @@ export default function ProspectMessageComposer({
               <span className="font-medium">Message preview</span>
               <textarea
                 value={message}
+                disabled={opened}
                 onChange={(event) => setMessage(event.target.value)}
                 rows={9}
                 maxLength={4000}
@@ -227,11 +230,11 @@ export default function ProspectMessageComposer({
           </p>
           <button
             type="button"
-            disabled={!selected || !message.trim() || (request.channel === 'email' && !subject.trim()) || busy}
+            disabled={!selected || !message.trim() || (request.channel === 'email' && !subject.trim()) || busy || opened}
             onClick={async () => {
               const success = await onInitiate(request, subject.trim(), message.trim())
               if (success) setOpened(true)
-            }
+            }}
             className="rounded-xl bg-black px-4 py-2 text-sm font-semibold text-white disabled:opacity-40"
           >
             {busy ? 'Opening…' : `Open ${request.channel === 'whatsapp' ? 'WhatsApp' : 'email app'}`}
