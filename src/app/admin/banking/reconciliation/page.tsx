@@ -122,7 +122,7 @@ export default async function BankingReconciliationPage({
       .order('matched_at', { ascending: false }),
     admin
       .from('payment_validation_batches')
-      .select('id,payment_method,business_date,expected_amount,counted_amount,difference_amount,validated_at,deleted_at,superseded_by_batch_id')
+      .select('id,payment_method,business_date,expected_amount,counted_amount,difference_amount,validation_mode,validated_at,deleted_at,superseded_by_batch_id')
       .is('deleted_at', null)
       .is('superseded_by_batch_id', null)
       .gte('business_date', '2026-08-01')
@@ -160,6 +160,7 @@ export default async function BankingReconciliationPage({
   const batches = (batchesResult.data ?? []).map((row: any) => ({
     id: String(row.id),
     payment_method: String(row.payment_method),
+    validation_mode: String(row.validation_mode ?? ''),
     business_date: row.business_date ?? null,
     expected_amount: Number(row.expected_amount ?? 0),
     counted_amount: Number(row.counted_amount ?? 0),
@@ -296,7 +297,7 @@ export default async function BankingReconciliationPage({
           currency: row.currency, description: row.description, reference: row.reference,
           counterparty: row.counterparty, category_code: row.category_code,
         }))}
-        sources={batches.filter(b => !b.legacy_matched && ['instapay', 'bank_transfer', 'card'].includes(b.payment_method) && b.business_date && Math.abs(b.difference_amount) < 0.01).map(b => ({
+        sources={batches.filter(b => !b.legacy_matched && ['instapay', 'bank_transfer', 'card'].includes(b.payment_method) && b.validation_mode === 'daily' && b.business_date && Math.abs(b.difference_amount) < 0.01).map(b => ({
           id: b.id, date: String(b.business_date ?? ''), amount: b.counted_amount,
           available: Math.max(0, b.counted_amount - b.active_matched_amount),
           label: `Validated ${b.payment_method} batch ${b.id.slice(0, 8)}`, kind: 'payment batch',
