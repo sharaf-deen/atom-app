@@ -16,6 +16,7 @@ import { getSessionUserCached, getSupabaseAdminClientCached } from '@/lib/reques
 
 type CreditRow = {
   id: string
+  account_id: string
   transaction_date: string
   description: string
   reference: string | null
@@ -106,10 +107,10 @@ export default async function BankingReconciliationPage({
   const q = String(first(searchParams?.q) ?? '').trim().toLowerCase()
   const admin = getSupabaseAdminClientCached() as any
 
-  const [creditsResult, matchesResult, batchesResult, legacyResult] = await Promise.all([
+  const [creditsResult, matchesResult, batchesResult, legacyResult, oppositeResult] = await Promise.all([
     admin
       .from('bank_transactions')
-      .select('id,transaction_date,description,reference,counterparty,amount,currency,category_code,classification_status')
+      .select('id,account_id,transaction_date,description,reference,counterparty,amount,currency,category_code,classification_status')
       .eq('direction', 'credit')
       .gte('transaction_date', from)
       .lte('transaction_date', to)
@@ -132,12 +133,17 @@ export default async function BankingReconciliationPage({
       .from('reconciliation_bank_matches')
       .select('batch_id')
       .is('released_at', null),
+    admin.from('bank_transactions')
+      .select('id,account_id,transaction_date,amount,currency,description,reference,counterparty,category_code')
+      .eq('direction','debit').gte('transaction_date',from).lte('transaction_date',to)
+      .limit(2000),
   ])
 
   const loadError =
     creditsResult.error?.message
     || matchesResult.error?.message
     || batchesResult.error?.message
+    || oppositeResult.error?.message
     || legacyResult.error?.message
     || null
 
@@ -296,6 +302,13 @@ export default async function BankingReconciliationPage({
           id: row.id, transaction_date: row.transaction_date, amount: Number(row.amount ?? 0),
           currency: row.currency, description: row.description, reference: row.reference,
           counterparty: row.counterparty, category_code: row.category_code,
+        }))}
+        oppositeMovements={(oppositeResult.data ?? []).map((row: any) => ({
+          id: String(row.id), account_id: String(row.account_id),
+          transaction_date: String(row.transaction_date), amount: Number(row.amount ?? 0),
+          currency: String(row.currency), description: String(row.description),
+          reference: row.reference ?? null, counterparty: row.counterparty ?? null,
+          category_code: row.category_code ?? null,
         }))}
         sources={batches.filter(b => !b.legacy_matched && ['instapay', 'bank_transfer', 'card'].includes(b.payment_method) && b.validation_mode === 'daily' && b.business_date && Math.abs(b.difference_amount) < 0.01).map(b => ({
           id: b.id, date: String(b.business_date ?? ''), amount: b.counted_amount,
