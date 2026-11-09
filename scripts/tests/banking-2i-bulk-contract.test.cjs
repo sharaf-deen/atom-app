@@ -38,3 +38,15 @@ test('Banking 2I board never performs automatic writes', () => {
   assert.match(text, /bank_transaction_id/)
   assert.doesNotMatch(text, /useEffect\(/)
 })
+
+test('Banking 2I.1 rejects card settlement bulk matches at both DB and UI boundary', () => {
+  const migration = source('supabase/migrations/20261109130000_banking_2i1_exclude_card_bulk_income.sql')
+  const incomePage = source('src/app/admin/banking/reconciliation/page.tsx')
+  assert.match(migration, /create or replace function public\.bulk_match_bank_income_v2/)
+  assert.match(migration, /payment_method not in \('instapay','bank_transfer'\)/)
+  assert.match(migration, /b\.payment_method in \('instapay','bank_transfer'\)/)
+  assert.doesNotMatch(migration, /'instapay','bank_transfer','card'/)
+  assert.match(incomePage, /\['instapay', 'bank_transfer'\]\.includes\(b\.payment_method\)/)
+  const board = source('src/components/admin/banking/BankUnifiedReviewBoard.tsx')
+  assert.match(board, /Card settlement batches are excluded/)
+})
