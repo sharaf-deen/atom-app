@@ -158,6 +158,42 @@ export default async function BankingReconciliationPage({
     matched_at: String(row.matched_at),
   })) as BankPaymentMatch[]
 
+  // Super Admin-only contextual hints. Do not infer batch allocation from individual payments.
+  const paddedFrom = new Date(from + 'T12:00:00Z')
+  paddedFrom.setUTCDate(paddedFrom.getUTCDate() - 4)
+  const paddedTo = new Date(to + 'T12:00:00Z')
+  paddedTo.setUTCDate(paddedTo.getUTCDate() + 5)
+  const paymentsResult = await admin.from('subscription_payments')
+    .select('id,member_id,amount,payment_method,paid_at,note')
+    .eq('payment_method', 'instapay')
+    .gte('paid_at', paddedFrom.toISOString().slice(0, 10))
+    .lt('paid_at', paddedTo.toISOString().slice(0, 10))
+    .order('paid_at', { ascending: false })
+    .limit(5000)
+  const paymentRows = paymentsResult.error ? [] : (paymentsResult.data ?? [])
+  const memberIds = [...new Set(paymentRows.map((row: any) => String(row.member_id)).filter(Boolean))]
+  const profileChunks: any[] = []
+  let profileError: string | null = null
+  for (let start = 0; start < memberIds.length; start += 300) {
+    const result = await admin.from('profiles')
+      .select('user_id,first_name,last_name')
+      .in('user_id', memberIds.slice(start, start + 300))
+    if (result.error) { profileError = result.error.message; break }
+    profileChunks.push(...(result.data ?? []))
+  }
+  const memberNames = new Map<string, string>(profileChunks.map((row: any) =>
+    [String(row.user_id), [row.first_name, row.last_name].filter(Boolean).join(' ').trim()]
+  ))
+  const instapayMembers = !paymentsResult.error && !profileError
+    ? paymentRows.map((row: any) => ({
+        id: String(row.id),
+        date: String(row.paid_at ?? '').slice(0, 10),
+        amount: Number(row.amount ?? 0),
+        member_name: memberNames.get(String(row.member_id)) ?? '',
+        note: String(row.note ?? '').slice(0, 160),
+      }))
+    : []
+
   const legacyBatchIds = new Set((legacyResult.data ?? []).map((row: any) => String(row.batch_id)))
   const activeMatchedByBatch = new Map<string, number>()
   for (const match of matches) {
@@ -304,6 +340,8 @@ export default async function BankingReconciliationPage({
           category_code: row.category_code, matched: progress(row).matched,
         }))}
         batches={batches}
+        paymentHints={instapayMembers}
+        hintsUnavailable={Boolean(paymentsResult.error || profileError)}
       /> : null}
 
       <details className="rounded-2xl border bg-white p-4 shadow-soft">
