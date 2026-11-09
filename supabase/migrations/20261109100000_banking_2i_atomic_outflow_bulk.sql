@@ -38,7 +38,7 @@ begin
      or jsonb_array_length(p_pairs) not between 1 and 50 then
     raise exception 'INVALID_BULK_SELECTION';
   end if;
-  if length(btrim(coalesce(p_note,''))) not between 10 and 500 then
+  if length(btrim(coalesce(p_note,''))) not between 10 and 480 then
     raise exception 'RECONCILIATION_REASON_REQUIRED';
   end if;
 
