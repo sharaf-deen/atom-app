@@ -49,10 +49,8 @@ export default function BankUnifiedReviewBoard({ direction, movements, sources, 
         .map(s => ({ ...s, gap: dayDiff(m.transaction_date, s.date) }))
         .sort((a, b) => a.gap - b.gap)
       const inferredTransfer = m.category_code === 'internal_transfer'
-      const refs = [m.reference, m.counterparty].filter(Boolean).map(normalize)
-      const matchingReference = options.filter(s => refs.some(ref => ref.length >= 5 && normalize(s.label).includes(ref)))
-      const strongest = matchingReference.length === 1 ? matchingReference : options.filter(s => s.gap <= 1)
-      return { movement: m, remainder: remainder / 100, options, inferredTransfer, candidates: strongest }
+      // Do not promote a plausible reference/date into uniqueness while alternatives exist.
+      return { movement: m, remainder: remainder / 100, options, inferredTransfer, candidates: options }
     })
     const occurrences = new Map<string, number>()
     for (const r of ranked) {
