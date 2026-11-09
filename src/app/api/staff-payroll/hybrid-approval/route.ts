@@ -91,7 +91,7 @@ export async function POST(req:Request){
       const startISO=cairoDayBoundsUTC(monthStart).startISO
       const endISO=cairoDayBoundsUTC(nextMonth).startISO
 
-      const [paymentsResult,refundsResult,expensesResult,logsResult,compensationResult,staffResult,adjustmentsResult,calculationsResult]=await Promise.all([
+      const [paymentsResult,refundsResult,expensesResult,logsResult,compensationResult,staffResult,adjustmentsResult,basisExclusionsResult,calculationsResult]=await Promise.all([
         admin.from('subscription_payments').select('id,amount').gte('paid_at',startISO).lt('paid_at',endISO).limit(100000),
         admin.from('membership_refunds').select('id,amount').eq('status','paid').gte('paid_at',startISO).lt('paid_at',endISO).limit(100000),
         admin.from('expenses').select('id,date,category_key,amount').gte('date',monthStart).lt('date',nextMonth).limit(100000),
@@ -99,10 +99,11 @@ export async function POST(req:Request){
         admin.from('staff_compensation_rate_periods').select('id,staff_user_id,effective_from,effective_until,fixed_monthly_base,weighted_hour_rate,bonus_eligible,updated_at,staff_compensation_task_rates(id,task_id,weighted_hour_rate,updated_at)').lte('effective_from',monthStart).or(`effective_until.is.null,effective_until.gt.${monthStart}`).limit(10000),
         admin.from('profiles').select('user_id,email,first_name,last_name,role').in('role',[...STAFF_ROLES]).limit(10000),
         admin.from('staff_payroll_monthly_adjustments').select('id,month_start,staff_user_id,adjustment_type,amount,reason,status,created_at,created_by_name_snapshot').eq('month_start',monthStart).eq('status','active').limit(10000),
+        admin.from('staff_payroll_expense_basis_exclusions').select('month_start,expense_id,excluded_amount,reason,updated_at').eq('month_start',monthStart).limit(10000),
         admin.from('staff_payroll_monthly_calculations').select('staff_user_id,staff_name_snapshot,staff_role_snapshot,compensation_configured,compensation_rate_period_id,compensation_effective_from,compensation_effective_until,fixed_monthly_base,weighted_hour_rate,bonus_eligible,active_task_count,missing_hours_task_count,actual_hours,weighted_hours,coaching_sessions,coaching_session_rate,coaching_guarantee,non_coaching_weighted_hours,non_coaching_variable_pay,task_compensation,minimum_task_compensation,dynamic_task_supplement,dynamic_weight_share_percent,guaranteed_compensation,bonus_weight_share_percent,performance_bonus,salary_before_adjustments,manual_bonus,manual_deduction,net_manual_adjustment,calculated_salary,adjustment_breakdown,task_rate_breakdown').eq('snapshot_id',snapshotId).limit(10000),
       ])
 
-      const sourceError=paymentsResult.error?.message||refundsResult.error?.message||expensesResult.error?.message||logsResult.error?.message||compensationResult.error?.message||staffResult.error?.message||adjustmentsResult.error?.message||calculationsResult.error?.message||''
+      const sourceError=paymentsResult.error?.message||refundsResult.error?.message||expensesResult.error?.message||logsResult.error?.message||compensationResult.error?.message||staffResult.error?.message||adjustmentsResult.error?.message||basisExclusionsResult.error?.message||calculationsResult.error?.message||''
       if(sourceError) return json(500,{ok:false,error:'APPROVAL_SOURCE_LOAD_FAILED',details:sourceError})
 
       const currentHashes=buildPayrollSourceHashes({
@@ -114,6 +115,7 @@ export async function POST(req:Request){
         staffProfiles:(staffResult.data??[]) as any[],
         adjustments:(adjustmentsResult.data??[]) as any[],
         taskMinimumRates:[],
+        expenseBasisExclusions:(basisExclusionsResult.data??[]) as any[],
       })
       const currentSnapshotHash=buildPayrollSnapshotHash(snapshot as any)
       const currentCalculationHash=buildPayrollCalculationsHash((calculationsResult.data??[]) as any[])
