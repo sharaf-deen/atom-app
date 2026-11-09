@@ -1,6 +1,7 @@
 'use client'
 
 import { useMemo, useState } from 'react'
+import { useRouter } from 'next/navigation'
 
 type Movement = {
   id: string
@@ -33,6 +34,12 @@ export default function BankUnifiedReviewBoard({ direction, movements, sources, 
   const [filter, setFilter] = useState<'candidates' | 'transfer' | 'exceptions'>('candidates')
   const [query, setQuery] = useState('')
   const [expanded, setExpanded] = useState(false)
+  const [selected, setSelected] = useState<string[]>([])
+  const [reason, setReason] = useState('')
+  const [verified, setVerified] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [notice, setNotice] = useState('')
+  const router = useRouter()
   const report = useMemo(() => {
     const available = movements.filter(m => m.currency === 'EGP' && cents(m.amount) > cents(activeMatchedByTransaction[m.id] ?? 0))
     const eligible = sources.filter(s => cents(s.available) > 0)
@@ -51,11 +58,44 @@ export default function BankUnifiedReviewBoard({ direction, movements, sources, 
     for (const r of ranked) {
       for (const c of r.candidates) occurrences.set(c.id, (occurrences.get(c.id) ?? 0) + 1)
     }
-    const candidates = ranked.filter(r => !r.inferredTransfer && r.candidates.length === 1 && occurrences.get(r.candidates[0].id) === 1)
+    const candidates = ranked.filter(r => !r.inferredTransfer && cents(activeMatchedByTransaction[r.movement.id] ?? 0) === 0 && r.candidates.length === 1 && occurrences.get(r.candidates[0].id) === 1 && r.candidates[0].gap <= 7)
     const transfers = ranked.filter(r => r.inferredTransfer)
     const exceptions = ranked.filter(r => !r.inferredTransfer && !candidates.includes(r))
     return { candidates, transfers, exceptions, all: ranked }
   }, [movements, sources, activeMatchedByTransaction])
+  const reviewable = direction === 'outflow' ? report.candidates.filter(r => ['expense', 'staff_payroll_payment', 'membership_refund'].includes(r.candidates[0].kind)) : []
+  const chosen = reviewable.filter(r => selected.includes(r.movement.id))
+  async function confirmBulk() {
+    if (direction !== 'outflow' || busy || !verified || reason.trim().length < 10 || chosen.length < 1 || chosen.length > 50) return
+    setBusy(true)
+    setNotice('')
+    try {
+      const response = await fetch('/api/admin/banking/outflows/bulk', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          verified: true,
+          reason: reason.trim(),
+          pairs: chosen.map(r => ({
+            bank_transaction_id: r.movement.id,
+            source_id: r.candidates[0].id,
+            source_kind: r.candidates[0].kind,
+          })),
+        }),
+      })
+      const data = await response.json()
+      if (!response.ok || !data?.ok) throw new Error(String(data?.error ?? 'BULK_MATCH_FAILED'))
+      setNotice(`Matched ${data.result.matched_count} bank debits. Audit records preserved.`)
+      setSelected([])
+      setReason('')
+      setVerified(false)
+      router.refresh()
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : 'Bulk confirmation failed')
+    } finally {
+      setBusy(false)
+    }
+  }
   const rows = filter === 'candidates' ? report.candidates : filter === 'transfer' ? report.transfers : report.exceptions
   const visible = rows.filter(r => [r.movement.description, r.movement.reference, r.movement.counterparty, String(r.movement.amount)]
     .some(v => normalize(v).includes(normalize(query)))).slice(0, expanded ? 200 : 20)
@@ -77,6 +117,15 @@ export default function BankUnifiedReviewBoard({ direction, movements, sources, 
     <input aria-label="Filter review worklist" value={query} onChange={e => setQuery(e.target.value)} placeholder="Filter by reference, description or amount..." className="w-full rounded-xl border p-2 text-sm"/>
     <div className="space-y-2">
       {visible.map(r => <div key={r.movement.id} className="rounded-xl border p-3 text-sm">
+        {direction === 'outflow' && filter === 'candidates' && reviewable.some(item => item.movement.id === r.movement.id) ?
+          <label className="mb-2 flex items-center gap-2 text-xs">
+            <input type="checkbox" disabled={busy || (selected.length >= 50 && !selected.includes(r.movement.id))}
+              checked={selected.includes(r.movement.id)}
+              onChange={event => setSelected(prev => event.target.checked
+                ? [...prev, r.movement.id]
+                : prev.filter(id => id !== r.movement.id))}/>
+            Include in verified bulk review
+          </label> : null}
         <div className="flex flex-wrap justify-between gap-2"><strong>{r.movement.transaction_date} · {money(r.remainder)}</strong>
           <a className="text-blue-700 underline" href={direction === 'income' ? `#credit-${r.movement.id}` : `#debit-${r.movement.id}`}>Inspect original transaction</a></div>
         <p className="mt-1 break-words">{r.movement.description}</p>
@@ -87,6 +136,24 @@ export default function BankUnifiedReviewBoard({ direction, movements, sources, 
       </div>)}
       {!visible.length ? <p className="rounded-xl bg-slate-50 p-3 text-sm">No transactions in this group.</p> : null}
     </div>
+    {direction === 'outflow' && filter === 'candidates' && reviewable.length > 0 ?
+      <div className="space-y-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm">
+        <h3 className="font-semibold">Super Admin bulk confirmation — {chosen.length} debit(s) · {money(chosen.reduce((sum,r) => sum + r.remainder, 0))}</h3>
+        <p>Only fully unmatched, exactly equal one-to-one pairs are eligible. Date tolerance: seven days. Similar amounts and dates are suggestions, not payment evidence. Inspect bank and ATOM records individually before confirming the selection.</p>
+        <textarea value={reason} onChange={e => setReason(e.target.value)} maxLength={480}
+          rows={2} placeholder="Evidence reviewed, bank references and supporting records (10–480 characters)"
+          className="w-full rounded-xl border bg-white p-2"/>
+        <label className="flex items-start gap-2">
+          <input type="checkbox" checked={verified} onChange={e => setVerified(e.target.checked)}/>
+          I independently verified the bank transaction, source record and references for every selected pair.
+        </label>
+        <button type="button" disabled={busy || !verified || reason.trim().length < 10 || chosen.length < 1 || chosen.length > 50}
+          onClick={() => void confirmBulk()}
+          className="rounded-xl bg-black px-3 py-2 font-semibold text-white disabled:opacity-40">
+          {busy ? 'Confirming…' : `Confirm ${chosen.length} atomic outflow matches`}
+        </button>
+      </div> : null}
+    {notice ? <p role="status" className="rounded-xl border p-3 text-sm">{notice}</p> : null}
     {rows.length > 20 ? <button type="button" onClick={() => setExpanded(v => !v)} className="rounded-xl border px-3 py-2 text-sm">{expanded ? 'Show first 20' : `Show more (${Math.min(rows.length, 200)} max)`}</button> : null}
     <p className="text-xs text-amber-900">Candidate counts are informational, not proof. Source records may be filtered by the selected month. Transfers are not income or expenses; there is no automatic approval, posting or salary calculation.</p>
   </section>
