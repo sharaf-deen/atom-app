@@ -64,7 +64,7 @@ export async function POST(req:Request){
       },{onConflict:'month_start,expense_id'})
   if(mutation.error) return json({ok:false,error:'EXPENSE_BASIS_SAVE_FAILED',details:mutation.error.message},409)
   const audit=await admin.from('audit_logs').insert({
-    actor_user_id:me.id,target_user_id:null,action:'payroll_expense_basis_adjusted',
+    actor_user_id:me.id,target_user_id:me.id,action:'payroll_expense_basis_adjusted',
     action_details:{month_start:month,expense_id:expenseId,expense_date:expense.data.date,
       original_expense_amount:Number(expense.data.amount),excluded_from_payroll:amount,
       justification:amount===0?'Adjustment removed':reason,underlying_expense_unchanged:true},
