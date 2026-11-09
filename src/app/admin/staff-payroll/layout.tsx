@@ -46,6 +46,7 @@ export default async function StaffPayrollLayout({
 
           <nav className="flex flex-wrap gap-2">
             <Link href="/admin/staff-payroll" className="rounded-xl bg-black px-3 py-2 text-sm font-semibold text-white">Month Closeout</Link>
+            <Link href="/admin/staff-payroll/coaching-declarations" className="rounded-xl border border-black/10 px-3 py-2 text-sm font-semibold hover:bg-black/[0.03]">Coaching Declarations</Link>
             <Link href="/admin/staff-payroll/calculation" className="rounded-xl border border-black/10 px-3 py-2 text-sm font-semibold hover:bg-black/[0.03]">Calculation</Link>
             <Link href="/admin/staff-payroll/payments" className="rounded-xl border border-black/10 px-3 py-2 text-sm font-semibold hover:bg-black/[0.03]">Payments</Link>
             <Link href="/admin/staff-payroll/dashboard" className="rounded-xl border border-black/10 px-3 py-2 text-sm font-semibold hover:bg-black/[0.03]">Closeout & History</Link>
