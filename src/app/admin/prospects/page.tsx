@@ -85,7 +85,7 @@ export type ProspectMessageTemplateRow = {
     | 'trial_reschedule'
     | 'post_trial_follow_up'
     | 'final_follow_up'
-  language: 'en' | 'ar'
+  language: 'en' | 'ar' | 'fr'
   label: string
   subject_template: string | null
   body_template: string

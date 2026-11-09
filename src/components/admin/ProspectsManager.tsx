@@ -651,8 +651,36 @@ export default function ProspectsManager({
       window.location.href = `mailto:${prospect.email}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(message)}`
     }
 
-    setComposer(null)
+    if (channel === 'email') setComposer(null)
     return true
+  }
+
+  async function confirmComposedWhatsAppSent(request: MessageComposerRequest, message: string, followUpAt: string | null) {
+    const prospect = request.prospect
+    if (!canManage || busyId === prospect.id) return false
+    setBusyId(prospect.id)
+    setError(null)
+    try {
+      const response = await fetch('/api/admin/prospects', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          prospect_id: prospect.id, action: 'confirm_whatsapp_sent',
+          message, follow_up_at: followUpAt, confirmed: true,
+        }),
+      })
+      const result = await response.json()
+      if (!response.ok || !result?.ok) throw new Error(result?.error || 'CONFIRMATION_FAILED')
+      if (result.prospect) mergeProspect(result.prospect as ProspectRow)
+      if (result.activity) setActivities(rows=>[result.activity as ProspectActivityRow,...rows])
+      setFlash(`WhatsApp send manually confirmed for ${prospect.full_name}. ${followUpAt?'Follow-up scheduled.':'No follow-up scheduled.'}`)
+      setComposer(null)
+      return true
+    } catch (caught: any) {
+      setError(String(caught?.message ?? 'Could not save WhatsApp confirmation.'))
+      return false
+    } finally {
+      setBusyId(null)
+    }
   }
 
   async function importBackfill(file: File | null) {
@@ -1191,6 +1219,7 @@ export default function ProspectsManager({
         busy={composer ? busyId === composer.prospect.id : false}
         onClose={() => setComposer(null)}
         onInitiate={initiateComposedMessage}
+        onConfirmSent={confirmComposedWhatsAppSent}
       />
     </div>
   )

@@ -8,7 +8,6 @@ import Button from '@/components/ui/Button'
 import Input from '@/components/ui/Input'
 import Select from '@/components/ui/Select'
 import SettleDueDialog from '@/components/SettleDueDialog'
-import SubscriptionPaymentMethodCorrection from '@/components/SubscriptionPaymentMethodCorrection'
 import SaveButton from '@/components/forms/SaveButton'
 import ConfirmActionModal, { type ConfirmActionSummaryItem } from '@/components/ui/ConfirmActionModal'
 import { freezePlanSummaryLabel, getFreezeTokenAllowance, toInclusiveFreezeEnd, type SubscriptionFreezeHistoryRow } from '@/lib/subscriptionFreeze'
@@ -701,10 +700,6 @@ export default function SubscriptionManageRowActions({
       <Button size="sm" variant="outline" onClick={() => setOpenEdit(true)} disabled={!canEdit}>
         Edit
       </Button>
-
-      {canManageFinancials ? (
-        <SubscriptionPaymentMethodCorrection subscriptionId={sub.id} />
-      ) : null}
 
       {Number(sub.amount_due ?? 0) > 0 ? (
         <SettleDueDialog
