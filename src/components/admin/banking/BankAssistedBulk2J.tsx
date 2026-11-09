@@ -9,7 +9,7 @@ type Credit = {
 }
 type Batch = {
   id: string; business_date: string | null; payment_method: string
-  validation_mode: string; counted_amount: number; difference_amount: number
+  validation_mode?: string; counted_amount: number; difference_amount: number
   legacy_matched: boolean; active_matched_amount: number
 }
 type Selection = { batchId: string; evidence: string; verified: boolean }
