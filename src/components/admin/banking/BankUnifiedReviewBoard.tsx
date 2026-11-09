@@ -110,12 +110,13 @@ export default function BankUnifiedReviewBoard({ direction, movements, oppositeM
   return <section className="space-y-3 rounded-2xl border border-sky-200 bg-white p-4 shadow-soft">
     <h2 className="text-lg font-bold">Banking 2I · Unified review worklist · {direction === 'income' ? 'Income' : 'Outflow'}</h2>
     <p className="text-sm text-slate-600">Read-only suggestions based on remaining amount, date and available ATOM records. The same review rules apply to both reconciliation pages. No money is posted or classified here.</p>
+    <p className="text-xs text-amber-800">Card settlement batches are excluded from automatic bulk income suggestions: settlements may combine payments. Transfer category labels require opposite-account bank evidence before they can be treated as verified transfers.</p>
     <div className="grid grid-cols-3 gap-2 text-sm">
       <button type="button" onClick={() => setFilter('candidates')} aria-pressed={filter === 'candidates'} className={`rounded-xl border p-3 text-left ${filter === 'candidates' ? 'border-blue-500 bg-blue-50' : ''}`}>
         <span className="block text-xs text-slate-500">One candidate</span><strong>{report.candidates.length}</strong>
       </button>
       <button type="button" onClick={() => setFilter('transfer')} aria-pressed={filter === 'transfer'} className={`rounded-xl border p-3 text-left ${filter === 'transfer' ? 'border-blue-500 bg-blue-50' : ''}`}>
-        <span className="block text-xs text-slate-500">Transfer labels to verify</span><strong>{report.transfers.length}</strong>
+        <span className="block text-xs text-slate-500">Unverified transfer labels</span><strong>{report.transfers.length}</strong>
       </button>
       <button type="button" onClick={() => setFilter('exceptions')} aria-pressed={filter === 'exceptions'} className={`rounded-xl border p-3 text-left ${filter === 'exceptions' ? 'border-blue-500 bg-blue-50' : ''}`}>
         <span className="block text-xs text-slate-500">Exceptions</span><strong>{report.exceptions.length}</strong>

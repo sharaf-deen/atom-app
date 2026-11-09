@@ -310,7 +310,7 @@ export default async function BankingReconciliationPage({
           reference: row.reference ?? null, counterparty: row.counterparty ?? null,
           category_code: row.category_code ?? null,
         }))}
-        sources={batches.filter(b => !b.legacy_matched && ['instapay', 'bank_transfer', 'card'].includes(b.payment_method) && b.validation_mode === 'daily' && b.business_date && Math.abs(b.difference_amount) < 0.01).map(b => ({
+        sources={batches.filter(b => !b.legacy_matched && ['instapay', 'bank_transfer'].includes(b.payment_method) && b.validation_mode === 'daily' && b.business_date && Math.abs(b.difference_amount) < 0.01).map(b => ({
           id: b.id, date: String(b.business_date ?? ''), amount: b.counted_amount,
           available: Math.max(0, b.counted_amount - b.active_matched_amount),
           label: `Validated ${b.payment_method} batch ${b.id.slice(0, 8)}`, kind: 'payment batch',
