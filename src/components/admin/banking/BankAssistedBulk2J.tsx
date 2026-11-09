@@ -13,6 +13,7 @@ type Batch = {
   legacy_matched: boolean; active_matched_amount: number
 }
 type Selection = { batchId: string; evidence: string; verified: boolean }
+type Triage = 'review' | 'conflict' | 'missing'
 type PaymentHint = { id: string; date: string; amount: number; member_name: string; note: string }
 type Props = { credits: Credit[]; batches: Batch[]; paymentHints: PaymentHint[]; hintsUnavailable: boolean }
 
@@ -42,6 +43,8 @@ export default function BankAssistedBulk2J({ credits, batches, paymentHints, hin
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState('')
   const [showAllCib, setShowAllCib] = useState(false)
+  const [triage, setTriage] = useState<Triage>('conflict')
+  const [filterText, setFilterText] = useState('')
   const active = useMemo(() => credits.filter(c => c.currency === 'EGP' && cents(c.amount - c.matched) > 0), [credits])
   const available = useMemo(() => batches.filter(b => b.validation_mode === 'daily' &&
     b.business_date && cents(b.counted_amount) > 0 && cents(b.difference_amount) === 0 &&
@@ -70,6 +73,31 @@ export default function BankAssistedBulk2J({ credits, batches, paymentHints, hin
     return [row.credit.id, {payer, possible: possible.slice(0, 5), possibleCount: possible.length,
       dayTotals: dayTotals.slice(0, 3)}] as const
   })), [instant, paymentHints])
+  const worklist = useMemo(() => {
+    const batchUsage = new Map<string, number>()
+    for (const row of instant) for (const b of row.options)
+      batchUsage.set(b.id, (batchUsage.get(b.id) ?? 0) + 1)
+    return instant.map(row => {
+      const competing = row.options.some(b => (batchUsage.get(b.id) ?? 0) > 1)
+      const group: Triage = !row.options.length ? 'missing'
+        : competing || row.options.length > 1 ? 'conflict' : 'review'
+      return {...row, group, competing}
+    })
+  }, [instant])
+  const counts = {
+    review: worklist.filter(row => row.group === 'review').length,
+    conflict: worklist.filter(row => row.group === 'conflict').length,
+    missing: worklist.filter(row => row.group === 'missing').length,
+  }
+  const visibleInstaPay = worklist.filter(row => {
+    if (row.group !== triage) return false
+    const search = filterText.trim().toLocaleLowerCase()
+    if (!search) return true
+    const hint = memberHints.get(row.credit.id)
+    return [row.credit.description, row.credit.reference, row.credit.transaction_date,
+      String(row.credit.amount), hint?.payer, ...(hint?.possible.map(p => p.member_name) ?? [])]
+      .some(value => String(value ?? '').toLocaleLowerCase().includes(search))
+  })
   const cib = useMemo(() => active.filter(c => c.matched === 0 && isSwitch(c.description)).map(c => ({
     credit: c,
     options: available.filter(b => b.payment_method === 'card' &&
@@ -132,10 +160,35 @@ export default function BankAssistedBulk2J({ credits, batches, paymentHints, hin
       <div className="rounded-xl bg-slate-50 p-3"><p className="text-xs text-slate-500">CIB net bank amount</p><strong>{money(cib.reduce((n,r)=>n+r.credit.amount,0))}</strong></div>
     </div>
     <div className="space-y-3">
-      <h3 className="font-semibold">InstaPay — explicit pair-by-pair evidence, one final approval</h3>
-      <p className="text-xs text-amber-800">A proposed amount/date is not proof. For each pair, identify the payer/member from bank or receipt evidence, select its batch and attest you checked it. A batch cannot be used twice. No preselected pairs.</p>
+      <h3 className="font-semibold">InstaPay — triage worklist and one final approval</h3>
+      <p className="text-xs text-amber-800">Suggestions are not payment evidence. Verify the bank payer, corresponding ATOM records and any third-party relationship. No automatic selections or approvals.</p>
+      <div className="grid gap-2 sm:grid-cols-3" role="group" aria-label="InstaPay review category">
+        {([
+          {key: 'review', label: 'Reviewable batches', count: counts.review,
+            help: 'One candidate batch, not contested by another open credit'},
+          {key: 'conflict', label: 'Competing batches', count: counts.conflict,
+            help: 'Several choices or multiple bank credits competing for a batch'},
+          {key: 'missing', label: 'No validated batch', count: counts.missing,
+            help: 'Requires research, not eligible for the current bulk matching'},
+        ] as const).map(group => <button key={group.key} type="button" onClick={() => setTriage(group.key)}
+          aria-pressed={triage === group.key}
+          className={`rounded-xl border p-3 text-left text-sm ${triage === group.key ? 'border-indigo-500 bg-indigo-50' : 'bg-white'}`}>
+          <span className="block text-xs text-slate-500">{group.label}</span>
+          <strong className="text-lg">{group.count}</strong>
+          <span className="mt-1 block text-xs text-slate-600">{group.help}</span>
+        </button>)}
+      </div>
+      <label className="block text-sm font-medium">
+        Search this worklist
+        <input type="search" className="mt-1 w-full rounded-xl border p-2.5 text-sm"
+          placeholder="Reference, payer, member, date or amount…"
+          value={filterText} onChange={event => setFilterText(event.target.value)}/>
+      </label>
+      <p className="text-xs text-slate-600">{visibleInstaPay.length} item(s) visible in this category.
+        Verified selections in other categories remain included in the final confirmation.
+      </p>
       <div className="max-h-[620px] space-y-2 overflow-y-auto">
-        {instant.map(r => {
+        {visibleInstaPay.map(r => {
           const selectedBatch = choices[r.credit.id]?.batchId ?? ''
           const state = choices[r.credit.id]
           const hints = memberHints.get(r.credit.id)
@@ -147,6 +200,11 @@ export default function BankAssistedBulk2J({ credits, batches, paymentHints, hin
                 <p className="font-mono text-xs text-slate-600">{r.credit.reference ?? 'No bank reference'}</p></div>
               <a href={`#credit-${r.credit.id}`} className="text-blue-700 underline">Bank record</a>
             </div>
+            <p className="mt-1 text-xs font-semibold text-indigo-700">
+              {r.group === 'review' ? 'One non-competing batch candidate — evidence still required'
+                : r.group === 'conflict' ? 'Competing matches — identify the correct payer and batch'
+                : 'No eligible validated batch — do not match from this screen'}
+            </p>
             <p className="mt-1 break-words text-xs text-slate-600">{r.credit.description}</p>
             {!hintsUnavailable ? <div className="mt-2 space-y-1 rounded-lg border border-slate-200 bg-slate-50 p-2 text-xs">
               <div className="font-semibold">Payer pre-identification — informational only</div>
@@ -185,7 +243,9 @@ export default function BankAssistedBulk2J({ credits, batches, paymentHints, hin
             </> : <p className="mt-2 text-xs text-amber-800">No exact validated InstaPay batch within three days. Requires separate investigation.</p>}
           </div>
         })}
-        {!instant.length ? <p className="text-sm text-slate-500">No open InstaPay credits.</p> : null}
+        {!visibleInstaPay.length ? <p className="rounded-xl bg-slate-50 p-4 text-sm text-slate-500">
+          No InstaPay credits in this category{filterText.trim() ? ' for the current search' : ''}.
+        </p> : null}
       </div>
       <div className="space-y-2 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm">
         <strong>{selected.length} independently verified pair(s) · {money(total)}</strong>
