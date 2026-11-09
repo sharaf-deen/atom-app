@@ -110,6 +110,8 @@ type Props = {
 
 type PaymentDraft = {
   amount: string
+  paymentPurpose: 'salary_balance' | 'prior_advance'
+  advanceAcknowledged: boolean
   paymentMethod: 'cash' | 'instapay' | 'bank_transfer'
   paymentDate: string
   reference: string
@@ -316,6 +318,8 @@ export default function StaffPayrollPaymentsManager({
       const remaining = Math.max(0, calculation.calculated_salary - paid)
       result[calculation.id] = {
         amount: remaining > 0 ? String(Math.round(remaining * 100) / 100) : '',
+        paymentPurpose: 'salary_balance',
+        advanceAcknowledged: false,
         paymentMethod: 'bank_transfer',
         paymentDate: today,
         reference: '',
@@ -341,6 +345,8 @@ export default function StaffPayrollPaymentsManager({
       const remaining = Math.max(0, calculation.calculated_salary - paid)
       result[calculation.id] = {
         amount: remaining > 0 ? String(Math.round(remaining * 100) / 100) : '',
+        paymentPurpose: 'salary_balance',
+        advanceAcknowledged: false,
         paymentMethod: 'bank_transfer',
         paymentDate: today,
         reference: '',
@@ -412,6 +418,14 @@ export default function StaffPayrollPaymentsManager({
       setError('Payment date is required.')
       return
     }
+    if (draft.paymentPurpose === 'prior_advance' && calculation.manual_deduction > 0) {
+      setError('This staff member already has a deducted advance in the approved salary. Do not record it again.')
+      return
+    }
+    if (calculation.manual_deduction > 0 && !draft.advanceAcknowledged) {
+      setError('Confirm that this payment is a new salary balance payment, not the advance already deducted.')
+      return
+    }
 
     setPendingKey(`record:${calculation.id}`)
     setMessage(null)
@@ -421,6 +435,7 @@ export default function StaffPayrollPaymentsManager({
       const payload = await post({
         action: 'record',
         approvalCalculationId: calculation.id,
+        paymentPurpose: draft.paymentPurpose,
         amount,
         paymentMethod: draft.paymentMethod,
         paymentDate: draft.paymentDate,
@@ -921,7 +936,22 @@ export default function StaffPayrollPaymentsManager({
                   {canWrite && !currentCloseout && remaining > 0.005 && draft ? (
                     <div className="mt-4 rounded-2xl border border-black/10 bg-black/[0.015] p-3">
                       <div className="text-xs font-semibold uppercase tracking-wide text-[hsl(var(--muted))]">Record salary payment</div>
+                      {calculation.manual_deduction > 0 ? (
+                        <div className="mt-2 rounded-xl border border-amber-300 bg-amber-50 p-3 text-xs text-amber-950">
+                          <strong>{money(calculation.manual_deduction)} of salary advances already deducted from this approved salary.</strong>
+                          {' '}The amount due is NET of this historical advance. Never enter the same advance as a payment again.
+                        </div>
+                      ) : null}
                       <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+                        <label className="text-xs font-medium">
+                          Payment purpose
+                          <select value={draft.paymentPurpose}
+                            onChange={(event)=>updateDraft(calculation.id,{paymentPurpose:event.target.value as PaymentDraft['paymentPurpose'],advanceAcknowledged:false})}
+                            className="mt-1 w-full rounded-xl border border-black/10 bg-white px-3 py-2 text-sm">
+                            <option value="salary_balance">New payment of approved salary balance</option>
+                            {calculation.manual_deduction <= 0 ? <option value="prior_advance">Earlier salary advance (not deducted)</option> : null}
+                          </select>
+                        </label>
                         <label className="text-xs font-medium">
                           Amount (EGP)
                           <input
@@ -975,11 +1005,18 @@ export default function StaffPayrollPaymentsManager({
                           />
                         </label>
                       </div>
+                      {calculation.manual_deduction > 0 ? (
+                        <label className="mt-3 flex items-start gap-2 text-xs text-amber-950">
+                          <input type="checkbox" checked={draft.advanceAcknowledged}
+                            onChange={event=>updateDraft(calculation.id,{advanceAcknowledged:event.target.checked})}/>
+                          I confirm this is a NEW payment, not any of the {money(calculation.manual_deduction)} advance already deducted.
+                        </label>
+                      ) : null}
                       <div className="mt-3 flex justify-end">
                         <button
                           type="button"
                           onClick={() => recordPayment(calculation)}
-                          disabled={pendingKey === `record:${calculation.id}`}
+                          disabled={pendingKey === `record:${calculation.id}` || (calculation.manual_deduction > 0 && !draft.advanceAcknowledged)}
                           className="rounded-xl border border-black bg-black px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
                         >
                           {pendingKey === `record:${calculation.id}` ? 'Recording…' : 'Record payment'}
