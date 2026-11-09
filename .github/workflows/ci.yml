@@ -47,5 +47,8 @@ jobs:
       - name: Banking 2I reconciliation contract
         run: node --test scripts/tests/banking-2i-bulk-contract.test.cjs
 
+      - name: Banking 2J supervised bulk and CIB contract
+        run: node --test scripts/tests/banking-2j-contract.test.cjs
+
       - name: Build
         run: npm run build
