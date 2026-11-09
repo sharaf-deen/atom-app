@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation'
 export type BankPaymentBatch = {
   id: string
   payment_method: string
+  validation_mode?: string
   business_date: string | null
   expected_amount: number
   counted_amount: number

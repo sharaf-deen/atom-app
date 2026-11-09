@@ -44,5 +44,8 @@ jobs:
       - name: Staff Payroll WhatsApp intake contract
         run: node --test scripts/tests/staff-payroll-admin-whatsapp-intake.test.cjs
 
+      - name: Banking 2I reconciliation contract
+        run: node --test scripts/tests/banking-2i-bulk-contract.test.cjs
+
       - name: Build
         run: npm run build

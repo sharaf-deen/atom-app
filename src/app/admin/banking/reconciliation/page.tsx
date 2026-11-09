@@ -6,6 +6,7 @@ import { redirect } from 'next/navigation'
 import AccessDeniedCard from '@/components/AccessDeniedCard'
 import Button from '@/components/ui/Button'
 import FinanceReconciliationNav from '@/components/finance/FinanceReconciliationNav'
+import BankUnifiedReviewBoard from '@/components/admin/banking/BankUnifiedReviewBoard'
 import BankBulkReconciliationPreview from '@/components/admin/banking/BankBulkReconciliationPreview'
 import BankPaymentMatcher, {
   type BankPaymentBatch,
@@ -15,6 +16,7 @@ import { getSessionUserCached, getSupabaseAdminClientCached } from '@/lib/reques
 
 type CreditRow = {
   id: string
+  account_id: string
   transaction_date: string
   description: string
   reference: string | null
@@ -105,10 +107,10 @@ export default async function BankingReconciliationPage({
   const q = String(first(searchParams?.q) ?? '').trim().toLowerCase()
   const admin = getSupabaseAdminClientCached() as any
 
-  const [creditsResult, matchesResult, batchesResult, legacyResult] = await Promise.all([
+  const [creditsResult, matchesResult, batchesResult, legacyResult, oppositeResult] = await Promise.all([
     admin
       .from('bank_transactions')
-      .select('id,transaction_date,description,reference,counterparty,amount,currency,category_code,classification_status')
+      .select('id,account_id,transaction_date,description,reference,counterparty,amount,currency,category_code,classification_status')
       .eq('direction', 'credit')
       .gte('transaction_date', from)
       .lte('transaction_date', to)
@@ -121,7 +123,7 @@ export default async function BankingReconciliationPage({
       .order('matched_at', { ascending: false }),
     admin
       .from('payment_validation_batches')
-      .select('id,payment_method,business_date,expected_amount,counted_amount,difference_amount,validated_at,deleted_at,superseded_by_batch_id')
+      .select('id,payment_method,business_date,expected_amount,counted_amount,difference_amount,validation_mode,validated_at,deleted_at,superseded_by_batch_id')
       .is('deleted_at', null)
       .is('superseded_by_batch_id', null)
       .gte('business_date', '2026-08-01')
@@ -131,12 +133,17 @@ export default async function BankingReconciliationPage({
       .from('reconciliation_bank_matches')
       .select('batch_id')
       .is('released_at', null),
+    admin.from('bank_transactions')
+      .select('id,account_id,transaction_date,amount,currency,description,reference,counterparty,category_code')
+      .eq('direction','debit').gte('transaction_date',from).lte('transaction_date',to)
+      .limit(2000),
   ])
 
   const loadError =
     creditsResult.error?.message
     || matchesResult.error?.message
     || batchesResult.error?.message
+    || oppositeResult.error?.message
     || legacyResult.error?.message
     || null
 
@@ -159,6 +166,7 @@ export default async function BankingReconciliationPage({
   const batches = (batchesResult.data ?? []).map((row: any) => ({
     id: String(row.id),
     payment_method: String(row.payment_method),
+    validation_mode: String(row.validation_mode ?? ''),
     business_date: row.business_date ?? null,
     expected_amount: Number(row.expected_amount ?? 0),
     counted_amount: Number(row.counted_amount ?? 0),
@@ -287,6 +295,28 @@ export default async function BankingReconciliationPage({
           </div>
         </form>
       </section>
+
+      {!loadError ? <BankUnifiedReviewBoard
+        direction="income"
+        movements={credits.map(row => ({
+          id: row.id, transaction_date: row.transaction_date, amount: Number(row.amount ?? 0),
+          currency: row.currency, description: row.description, reference: row.reference,
+          counterparty: row.counterparty, category_code: row.category_code,
+        }))}
+        oppositeMovements={(oppositeResult.data ?? []).map((row: any) => ({
+          id: String(row.id), account_id: String(row.account_id),
+          transaction_date: String(row.transaction_date), amount: Number(row.amount ?? 0),
+          currency: String(row.currency), description: String(row.description),
+          reference: row.reference ?? null, counterparty: row.counterparty ?? null,
+          category_code: row.category_code ?? null,
+        }))}
+        sources={batches.filter(b => !b.legacy_matched && ['instapay', 'bank_transfer', 'card'].includes(b.payment_method) && b.validation_mode === 'daily' && b.business_date && Math.abs(b.difference_amount) < 0.01).map(b => ({
+          id: b.id, date: String(b.business_date ?? ''), amount: b.counted_amount,
+          available: Math.max(0, b.counted_amount - b.active_matched_amount),
+          label: `Validated ${b.payment_method} batch ${b.id.slice(0, 8)}`, kind: 'payment batch',
+        }))}
+        activeMatchedByTransaction={Object.fromEntries(credits.map(row => [row.id, progress(row).matched]))}
+      /> : null}
 
       {!loadError ? (
         <BankBulkReconciliationPreview
