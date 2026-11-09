@@ -239,7 +239,7 @@ export default async function BankingOutflowsPage({
         currency: row.currency, description: row.description, reference: row.reference,
         counterparty: row.counterparty, category_code: row.category_code,
       }))}
-      sources={sources.map(s => ({
+      sources={sources.filter(s => String(s.payment_method ?? '').toLowerCase() !== 'cash').map(s => ({
         id: s.id, date: s.date, amount: s.amount,
         available: Math.max(0, s.amount - s.active_matched_amount),
         label: s.label, kind: s.kind,
