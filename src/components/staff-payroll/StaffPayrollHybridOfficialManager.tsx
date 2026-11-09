@@ -2,6 +2,7 @@
 
 import * as React from 'react'
 import { useRouter } from 'next/navigation'
+import StaffPayrollExpenseBasisAdjuster from './StaffPayrollExpenseBasisAdjuster'
 
 type Snapshot = {
   id: string
@@ -304,6 +305,8 @@ export default function StaffPayrollHybridOfficialManager({
           </>
         ) : null}
       </section>
+
+      <StaffPayrollExpenseBasisAdjuster monthStart={monthStart} canWrite={canWrite && !isApproved} />
 
       {!isHybrid ? (
         <section className="rounded-3xl border border-dashed border-black/15 bg-white p-8 text-center">
