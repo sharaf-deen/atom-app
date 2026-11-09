@@ -161,7 +161,7 @@ export default function BankAssistedBulk2J({ credits, batches, paymentHints, hin
     </div>
     <div className="space-y-3">
       <h3 className="font-semibold">InstaPay — triage worklist and one final approval</h3>
-      <p className="text-xs text-amber-800">Suggestions are not payment evidence. Verify the bank payer, corresponding ATOM records and any third-party relationship. No automatic selections or approvals.</p>
+      <p className="text-xs text-amber-800">Suggestions are not payment evidence. Verify the bank payer, corresponding ATOM records and any third-party relationship. No preselected pairs and no automatic approvals.</p>
       <div className="grid gap-2 sm:grid-cols-3" role="group" aria-label="InstaPay review category">
         {([
           {key: 'review', label: 'Reviewable batches', count: counts.review,
