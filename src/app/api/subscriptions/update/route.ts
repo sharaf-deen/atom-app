@@ -287,6 +287,26 @@ export async function POST(req: Request) {
     delete update.plan
   }
 
+  // Guard: financial corrections must target ledger payments, not only the subscription header.
+  const financialHeaderChange =
+    (update.amount !== undefined && Number(update.amount) !== Number(current.amount)) ||
+    (update.amount_due !== undefined && Number(update.amount_due) !== Number(current.amount_due)) ||
+    (update.payment_method !== undefined && update.payment_method !== current.payment_method)
+
+  if (financialHeaderChange) {
+    const { data: entries, error: checkError } = await admin
+      .from('subscription_payments')
+      .select('id')
+      .eq('subscription_id', id)
+      .limit(1)
+    if (checkError) return json(500, { ok: false, error: 'PAYMENT_LEDGER_CHECK_FAILED' })
+    if (entries?.length) return json(409, {
+      ok: false,
+      error: 'PAYMENT_LEDGER_CORRECTION_REQUIRED',
+      details: 'Use a specific payment correction workflow to preserve payment validation and bank reconciliation.',
+    })
+  }
+
   if (Object.keys(update).length === 0) {
     return json(400, { ok: false, error: 'Nothing to update' })
   }
