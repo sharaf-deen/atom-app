@@ -312,6 +312,7 @@ export async function POST(req: Request) {
       compensationResult,
       staffResult,
       adjustmentsResult,
+      basisExclusionsResult,
     ] = await Promise.all([
       admin.from('subscription_payments').select('id,amount').gte('paid_at', startISO).lt('paid_at', endISO).limit(100000),
       admin.from('membership_refunds').select('id,amount').eq('status', 'paid').gte('paid_at', startISO).lt('paid_at', endISO).limit(100000),
@@ -328,6 +329,9 @@ export async function POST(req: Request) {
       admin.from('staff_payroll_monthly_adjustments')
         .select('id,month_start,staff_user_id,adjustment_type,amount,reason,status,created_at,created_by_name_snapshot')
         .eq('month_start', monthStart).eq('status', 'active').limit(10000),
+      admin.from('staff_payroll_expense_basis_exclusions')
+        .select('month_start,expense_id,excluded_amount,reason,updated_at')
+        .eq('month_start',monthStart).limit(10000),
     ])
 
     const sourceError =
@@ -338,6 +342,7 @@ export async function POST(req: Request) {
       compensationResult.error?.message ||
       staffResult.error?.message ||
       adjustmentsResult.error?.message ||
+      basisExclusionsResult.error?.message ||
       ''
 
     if (sourceError) {
@@ -355,6 +360,7 @@ export async function POST(req: Request) {
     const compensationProfiles = compensationResult.data ?? []
     const staffProfiles = staffResult.data ?? []
     const adjustments = adjustmentsResult.data ?? []
+    const expenseBasisExclusions = basisExclusionsResult.data ?? []
 
     const sourceHashes = buildPayrollSourceHashes({
       payments,
@@ -365,6 +371,7 @@ export async function POST(req: Request) {
       staffProfiles,
       adjustments,
       taskMinimumRates: [],
+      expenseBasisExclusions,
     })
 
     const membershipRevenue = round2(payments.reduce((sum, row) => sum + Number(row.amount ?? 0), 0))
@@ -389,7 +396,23 @@ export async function POST(req: Request) {
       }
     }
 
-    eligibleOperatingExpenses = round2(eligibleOperatingExpenses)
+    // Exclusions alter only the payroll basis; the actual cash expenses remain untouched.
+    const expenseById = new Map(expenses.map((row) => [String(row.id), row]))
+    let payrollBasisExcludedAmount = 0
+    for (const exclusion of expenseBasisExclusions) {
+      const expense = expenseById.get(String(exclusion.expense_id))
+      const amount = Number(exclusion.excluded_amount)
+      if (!expense || String(expense.date).slice(0,7) !== monthStart.slice(0,7)
+        || PAYROLL_EXPENSE_CATEGORY_KEYS.has(String(expense.category_key ?? ''))
+        || !Number.isFinite(amount) || amount <= 0 || amount > Number(expense.amount)) {
+        return json(409,{ok:false,error:'INVALID_EXPENSE_BASIS_EXCLUSION'})
+      }
+      payrollBasisExcludedAmount += amount
+    }
+    if (payrollBasisExcludedAmount > eligibleOperatingExpenses) {
+      return json(409,{ok:false,error:'EXPENSE_BASIS_OVERALLOCATION'})
+    }
+    eligibleOperatingExpenses = round2(eligibleOperatingExpenses - payrollBasisExcludedAmount)
     excludedPayrollExpenses = round2(excludedPayrollExpenses)
     const operatingResultBeforePayroll = round2(netMembershipRevenue - eligibleOperatingExpenses)
 
@@ -812,7 +835,9 @@ export async function POST(req: Request) {
           draft_snapshot_hash: draftSnapshotHash,
           draft_calculation_hash: draftCalculationHash,
         },
-        note_scope: 'Hybrid Official Engine 1A draft only. Approval is intentionally blocked.',
+        payroll_expense_basis_excluded_amount: payrollBasisExcludedAmount,
+        payroll_expense_basis_exclusions: expenseBasisExclusions,
+        note_scope: 'Auditable payroll basis adjustments; underlying expenses unchanged.',
       },
     })
 
@@ -832,6 +857,7 @@ export async function POST(req: Request) {
         headCoachSessionCount,
         guaranteedCoachingPayroll,
         variablePayrollPool: allocation.allocated,
+        payrollExpenseBasisExcludedAmount: round2(payrollBasisExcludedAmount),
         calculatedPayrollTotal,
       },
     })
