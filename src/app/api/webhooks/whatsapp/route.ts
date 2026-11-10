@@ -3,6 +3,7 @@ export const dynamic = 'force-dynamic'
 import { NextRequest,NextResponse } from 'next/server'
 import { createSupabaseAdminClient } from '@/lib/supabaseAdmin'
 import { verifyWhatsAppSignature,waDigits,incomingText } from '@/lib/whatsappCloud'
+import { allowedWhatsAppPriorStatuses } from '@/lib/whatsappWebhookStatus'
 const plain=(message:string,status=200)=>new NextResponse(message,{status,headers:{'Cache-Control':'no-store','Content-Type':'text/plain; charset=utf-8'}})
 export async function GET(req:NextRequest){
  const url=new URL(req.url)
@@ -15,14 +16,14 @@ export async function POST(req:NextRequest){
  const secret=process.env.WA_APP_SECRET
  if(!secret)return plain('Not configured',503)
  const raw=await req.text()
- if(raw.length>1024*1024)return plain('Too large',413)
+ if(Buffer.byteLength(raw,'utf8')>1024*1024)return plain('Too large',413)
  if(!verifyWhatsAppSignature(raw,req.headers.get('x-hub-signature-256'),secret))
    return plain('Invalid signature',401)
  let payload:any
  try{payload=JSON.parse(raw)}catch{return plain('Invalid JSON',400)}
  if(payload?.object!=='whatsapp_business_account')return plain('Ignored')
- const admin=createSupabaseAdminClient()
  try {
+  const admin=createSupabaseAdminClient()
   for(const entry of payload.entry??[]){
    for(const change of entry.changes??[]){
     if(change.field!=='messages')continue
@@ -77,13 +78,15 @@ export async function POST(req:NextRequest){
        .select('id,status').eq('provider_message_id',id).eq('direction','outbound').maybeSingle()
       if(findError)throw findError
       if(!row)continue
-      const ranks:Record<string,number>={queued:0,sending:0,sent:1,failed:1,delivered:2,read:3}
-      if((ranks[eventStatus]??0) < (ranks[row.status]??0))continue
+      const allowedPreviousStatuses=allowedWhatsAppPriorStatuses(eventStatus)
+      if(!allowedPreviousStatuses.includes(row.status))continue
+      // Guard the UPDATE as well as the read: concurrent/out-of-order webhooks
+      // must not overwrite a newer delivery status with an older one.
       const {error:updateError}=await admin.from('crm_whatsapp_messages').update({
         status:eventStatus,error_code:eventStatus==='failed'
           ?String(status.errors?.[0]?.code??'PROVIDER_FAILED').slice(0,80):null,
         updated_at:new Date().toISOString()
-      }).eq('id',row.id)
+      }).eq('id',row.id).in('status',allowedPreviousStatuses)
       if(updateError)throw updateError
     }
    }
