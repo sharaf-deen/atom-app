@@ -5,6 +5,8 @@ const read = (path) => fs.readFileSync(path, 'utf8')
 
 const migration = read('supabase/migrations/20261113090000_family_duplicate_safe_recovery.sql')
 const financialMigration = read('supabase/migrations/20261113093000_family_duplicate_financial_transfer.sql')
+const notificationMigration = read('supabase/migrations/20261113094500_family_duplicate_notification_reconciliation.sql')
+const idempotencyMigration = read('supabase/migrations/20261113100000_family_duplicate_idempotency_preservation.sql')
 const api = read('src/app/api/admin/families/duplicate-recovery/route.ts')
 const ui = read('src/app/admin/members/families/recover/DuplicateRecoveryPanel.tsx')
 const memberSearch = read('src/app/api/members/search/route.ts')
@@ -48,4 +50,11 @@ test('existing annual subscription and original financial evidence are preserved
   assert.match(financialMigration, /FINANCIAL_OWNERSHIP_MISMATCH/)
   assert.match(financialMigration, /MORE_THAN_ONE_SUBSCRIPTION/)
   assert.doesNotMatch(financialMigration, /delete from public\.(subscriptions|subscription_payments|invoices)/i)
+})
+
+test('subscription notification and original idempotency request stay historically attributable', () => {
+  assert.match(notificationMigration, /update public\.notifications set member_id=p_guardian_auth_user_id/)
+  assert.match(idempotencyMigration, /atom_subscription_idempotency/)
+  assert.match(idempotencyMigration, /original_idempotency/)
+  assert.doesNotMatch(idempotencyMigration, /update public\.atom_subscription_idempotency/)
 })
