@@ -4,6 +4,7 @@ const fs = require('node:fs')
 const read = (path) => fs.readFileSync(path, 'utf8')
 
 const migration = read('supabase/migrations/20261113090000_family_duplicate_safe_recovery.sql')
+const financialMigration = read('supabase/migrations/20261113093000_family_duplicate_financial_transfer.sql')
 const api = read('src/app/api/admin/families/duplicate-recovery/route.ts')
 const ui = read('src/app/admin/members/families/recover/DuplicateRecoveryPanel.tsx')
 const memberSearch = read('src/app/api/members/search/route.ts')
@@ -36,4 +37,15 @@ test('preview required by UI, active search and scan exclude archives', () => {
   assert.match(familySearch, /is\('archived_at', null\)/)
   assert.match(listing, /is\('archived_at', null\)/)
   assert.match(kiosk, /if \(memberProfile\.archived_at\)/)
+})
+
+test('existing annual subscription and original financial evidence are preserved through transfer', () => {
+  assert.match(financialMigration, /financial_before/)
+  assert.match(financialMigration, /financial_after/)
+  assert.match(financialMigration, /update public\.subscriptions set member_id=p_guardian_auth_user_id/)
+  assert.match(financialMigration, /update public\.subscription_payments set member_id=p_guardian_auth_user_id/)
+  assert.match(financialMigration, /update public\.invoices set member_id=p_guardian_auth_user_id/)
+  assert.match(financialMigration, /FINANCIAL_OWNERSHIP_MISMATCH/)
+  assert.match(financialMigration, /MORE_THAN_ONE_SUBSCRIPTION/)
+  assert.doesNotMatch(financialMigration, /delete from public\.(subscriptions|subscription_payments|invoices)/i)
 })
