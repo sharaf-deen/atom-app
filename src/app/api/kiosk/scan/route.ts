@@ -164,13 +164,14 @@ export async function POST(req: Request) {
   try {
     const { data: memberProfile, error: memberProfileErr } = await admin
       .from('profiles')
-      .select('role, first_name, last_name, member_id')
+      .select('role, first_name, last_name, member_id, archived_at')
       .eq('user_id', memberId)
       .maybeSingle<{
         role: string | null
         first_name: string | null
         last_name: string | null
         member_id: string | null
+        archived_at: string | null
       }>()
 
     if (memberProfileErr) {
@@ -180,6 +181,10 @@ export async function POST(req: Request) {
 
     if (!memberProfile) {
       return json(meta, 404, { ok: false, message: 'Member not found' })
+    }
+
+    if (memberProfile.archived_at) {
+      return json(meta, 403, { ok: false, message: 'This Member ID is archived and cannot be scanned' })
     }
 
     const memberRole = normalizeRole(memberProfile.role ?? 'member')
