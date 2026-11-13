@@ -359,6 +359,7 @@ export default async function FamilyOperationsPage({ searchParams }: { searchPar
         .from('profiles')
         .select('user_id,member_id,first_name,last_name,email,phone,role')
         .in('role', ['member', 'champion', 'vip'])
+        .is('archived_at', null)
         .or(memberFilters.join(','))
         .order('created_at', { ascending: false })
         .limit(12),
