@@ -94,10 +94,10 @@ export default async function FamilyAccountsPage() {
   if (profileIds.length > 0) {
     const { data, error } = await admin
       .from('profiles')
-      .select('user_id,member_id,first_name,last_name,email,phone,role')
+      .select('user_id,member_id,first_name,last_name,email,phone,role,archived_at')
       .in('user_id', profileIds)
 
-    profiles = (data ?? []) as MemberProfile[]
+    profiles = (data ?? []).filter((profile) => !profile.archived_at) as MemberProfile[]
     profileError = error?.message ?? null
   }
 
@@ -149,6 +149,7 @@ export default async function FamilyAccountsPage() {
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
+          {me.role === 'super_admin' ? <Button asChild variant="outline" href="/admin/members/families/recover">Recover duplicate</Button> : null}
           <Button asChild variant="outline" href="/admin/members/family-operations">
             Family Operations
           </Button>

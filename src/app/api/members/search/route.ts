@@ -115,6 +115,7 @@ export async function GET(req: Request) {
       `,
           ))
       .in('role', [...MEMBER_LIKE_ROLES])
+       .is('archived_at', null)
       .order('created_at', { ascending: false })
       .range(from, to)
 

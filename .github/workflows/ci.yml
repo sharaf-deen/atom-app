@@ -67,5 +67,8 @@ jobs:
       - name: Meta WhatsApp Cloud API contracts
         run: node --test scripts/tests/crm-whatsapp-cloud-api.contract.test.cjs
 
+      - name: Family duplicate recovery consolidated contract
+        run: node --test scripts/tests/family-duplicate-recovery.contract.test.cjs
+
       - name: Build
         run: npm run build
