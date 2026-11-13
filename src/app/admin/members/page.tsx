@@ -147,6 +147,7 @@ export default async function AdminMembersPage({
   let query = admin
     .from('profiles')
     .select('user_id,member_id,email,first_name,last_name,phone,role,created_at', { count: 'exact' })
+    .is('archived_at', null)
     .order('created_at', { ascending: false })
     .range(from, to)
 
