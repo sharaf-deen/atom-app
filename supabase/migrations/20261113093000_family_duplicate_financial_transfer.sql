@@ -97,8 +97,10 @@ begin
       end if;
     end loop;
   end loop;
-  select count(*),min(member_id) into v_subscription_count,v_financial_source
+  select count(*) into v_subscription_count
   from public.subscriptions where member_id=any(v_member_user_ids);
+  select member_id into v_financial_source
+  from public.subscriptions where member_id=any(v_member_user_ids) limit 1;
   select count(*) into v_payment_count from public.subscription_payments
   where member_id=any(v_member_user_ids);
   select count(*) into v_invoice_count from public.invoices
