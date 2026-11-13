@@ -51,6 +51,7 @@ export async function GET(req: Request) {
     .from('profiles')
     .select('user_id,member_id,first_name,last_name,email,phone,role')
     .in('role', [...MEMBER_LIKE_ROLES])
+    .is('archived_at', null)
     .or(filters.join(','))
     .order('created_at', { ascending: false })
     .limit(20)
