@@ -73,5 +73,8 @@ jobs:
       - name: Reception six-action homepage contract
         run: node --test scripts/tests/reception-home-four-actions.contract.test.cjs
 
+      - name: Reception early renewal preview contract
+        run: node --test scripts/tests/reception-early-renewal-preview.contract.test.cjs
+
       - name: Build
         run: npm run build
