@@ -149,7 +149,7 @@ export default function FamilyIntakeManager({ actorRole, initialChildMode = 'vis
     setGuardianSearchQuery('')
     setGuardianResults([])
     setFamilyName('')
-    setChildren([newChild(0)])
+    setChildren([newChild(0, initialChildMode)])
     setLastResult(null)
     setMessage(null)
     setError(null)
