@@ -1307,8 +1307,8 @@ export default async function HomePage() {
   if (user.role === 'reception') {
     const receptionHomeActions = [
       { href: '/scan', label: 'SCAN ACCESS', icon: ScanLine },
-      { href: '/kiosk', label: 'Créer un membre adulte', icon: UserCog },
-      { href: '/admin/members/family-intake?mode=member', label: 'Créer un membre enfant', icon: UserRoundSearch },
+      { href: '/kiosk', label: 'Create Adult Member', icon: UserCog },
+      { href: '/admin/members/family-intake?mode=member', label: 'Create Child Member', icon: UserRoundSearch },
       { href: '/members', label: 'Members', icon: Users },
       { href: '/schedule', label: 'Schedule', icon: CalendarDays },
       { href: '/packages-and-promos', label: 'Packages & Promos', icon: Gift },
