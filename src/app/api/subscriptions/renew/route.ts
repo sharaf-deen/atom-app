@@ -535,6 +535,22 @@ payload.sessions_used = null
 
     }
 
+    // Optional optimistic check for the locked renewal preview shown to front desk.
+    // Existing API clients without expected_start_date retain the established behavior.
+    const expectedStartDate = body?.expected_start_date
+    if (expectedStartDate !== undefined) {
+      if (typeof expectedStartDate !== 'string' || !isISODateOnly(expectedStartDate)) {
+        return json(400, { ok: false, error: 'INVALID_EXPECTED_START_DATE' })
+      }
+      if (expectedStartDate !== payload.start_date) {
+        return json(409, {
+          ok: false,
+          error: 'RENEWAL_DATES_CHANGED',
+          details: 'The current membership period changed. Refresh the member page and review the renewal dates.',
+        })
+      }
+    }
+
     // Functional 1C.5A.1: one PostgreSQL transaction for subscription + initial payment.
     // Existing API authentication, permissions, legal consent and payload validation remain upstream.
     const { data: atomicResult, error: insErr } = await admin.rpc(
