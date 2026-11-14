@@ -7,7 +7,7 @@ import FamilyIntakeManager from '@/components/members/FamilyIntakeManager'
 import { canAccessFamilyIntake } from '@/lib/rbac'
 import { getSessionUserCached } from '@/lib/requestCache'
 
-export default async function FamilyIntakePage() {
+export default async function FamilyIntakePage({ searchParams }: { searchParams?: { mode?: string | string[] } }) {
   const me = await getSessionUserCached()
   if (!me) redirect('/login?next=/admin/members/family-intake')
 
@@ -26,5 +26,6 @@ export default async function FamilyIntakePage() {
     )
   }
 
-  return <FamilyIntakeManager actorRole={me.role} />
+  const memberMode = searchParams?.mode === 'member'
+  return <FamilyIntakeManager actorRole={me.role} initialChildMode={memberMode ? 'member' : 'visitor'} />
 }

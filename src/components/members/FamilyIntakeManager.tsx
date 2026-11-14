@@ -77,10 +77,10 @@ function todayDateOnly() {
   return new Date().toISOString().slice(0, 10)
 }
 
-function newChild(index = 0): ChildDraft {
+function newChild(index = 0, mode: 'member' | 'visitor' = 'visitor'): ChildDraft {
   return {
     key: `${Date.now()}-${index}-${Math.random().toString(36).slice(2)}`,
-    mode: 'visitor',
+    mode,
     firstName: '',
     lastName: '',
     dateOfBirth: '',
@@ -109,7 +109,7 @@ function modeNeedsFamily(mode: ChildMode) {
   return mode === 'member' || mode === 'existing_member'
 }
 
-export default function FamilyIntakeManager({ actorRole }: { actorRole: string }) {
+export default function FamilyIntakeManager({ actorRole, initialChildMode = 'visitor' }: { actorRole: string; initialChildMode?: 'member' | 'visitor' }) {
   const router = useRouter()
   const [guardianMode, setGuardianMode] = React.useState<'new' | 'existing'>('new')
   const [guardianFirstName, setGuardianFirstName] = React.useState('')
@@ -125,7 +125,7 @@ export default function FamilyIntakeManager({ actorRole }: { actorRole: string }
   const [guardianResults, setGuardianResults] = React.useState<GuardianResult[]>([])
 
   const [familyName, setFamilyName] = React.useState('')
-  const [children, setChildren] = React.useState<ChildDraft[]>([newChild(0)])
+  const [children, setChildren] = React.useState<ChildDraft[]>([newChild(0, initialChildMode)])
   const [submitting, setSubmitting] = React.useState(false)
   const [message, setMessage] = React.useState<string | null>(null)
   const [error, setError] = React.useState<string | null>(null)
@@ -149,7 +149,7 @@ export default function FamilyIntakeManager({ actorRole }: { actorRole: string }
     setGuardianSearchQuery('')
     setGuardianResults([])
     setFamilyName('')
-    setChildren([newChild(0)])
+    setChildren([newChild(0, initialChildMode)])
     setLastResult(null)
     setMessage(null)
     setError(null)
@@ -475,7 +475,7 @@ export default function FamilyIntakeManager({ actorRole }: { actorRole: string }
             <CardHeader>
               <div className="flex items-center justify-between gap-3">
                 <CardTitle>2. Children</CardTitle>
-                <Button type="button" variant="outline" onClick={() => setChildren((current) => current.length >= 8 ? current : [...current, newChild(current.length)])} disabled={children.length >= 8}>+ Add child</Button>
+                <Button type="button" variant="outline" onClick={() => setChildren((current) => current.length >= 8 ? current : [...current, newChild(current.length, initialChildMode)])} disabled={children.length >= 8}>+ Add child</Button>
               </div>
             </CardHeader>
             <CardContent>
