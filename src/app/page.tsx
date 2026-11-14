@@ -1302,6 +1302,38 @@ export default async function HomePage() {
     )
   }
 
+  // Reception-only home: four direct actions, no KPIs, redundant scan shortcut,
+  // member lookup widget or other dashboard blocks. Admin/coach/member homes unchanged.
+  if (user.role === 'reception') {
+    const receptionHomeActions = [
+      { href: '/scan', label: 'SCAN ACCESS', icon: ScanLine },
+      { href: '/kiosk', label: 'Créer un membre adulte', icon: UserCog },
+      { href: '/admin/members/family-intake?mode=member', label: 'Créer un membre enfant', icon: UserRoundSearch },
+      { href: '/members', label: 'Members', icon: Users },
+    ]
+    return (
+      <main className="min-h-[calc(100vh-3rem)] bg-[hsl(var(--bg))] text-black">
+        <section className="mx-auto max-w-5xl px-4 py-8 sm:py-12">
+          <h1 className="mb-6 text-2xl font-semibold tracking-tight sm:text-3xl">Reception</h1>
+          <nav aria-label="Reception quick actions" className="grid gap-4 sm:grid-cols-2">
+            {receptionHomeActions.map(({ href, label, icon: Icon }) => (
+              <Link
+                key={href}
+                href={href}
+                className="group flex min-h-32 items-center justify-between gap-4 rounded-3xl border border-[hsl(var(--border))] bg-white p-6 shadow-soft transition hover:-translate-y-0.5 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 sm:min-h-40"
+              >
+                <span className="text-lg font-semibold tracking-tight sm:text-xl">{label}</span>
+                <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] transition group-hover:translate-x-0.5">
+                  <Icon size={24} strokeWidth={1.9} aria-hidden="true" />
+                </span>
+              </Link>
+            ))}
+          </nav>
+        </section>
+      </main>
+    )
+  }
+
   const displayName = await getDisplayName(user)
   const memberLike = isMemberLikeRole(user.role)
   const showCoachTodaySchedule = user.role === 'coach' || user.role === 'assistant_coach' || user.role === 'head_coach'
