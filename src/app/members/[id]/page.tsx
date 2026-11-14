@@ -1386,6 +1386,7 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
                         buttonLabel="Renew / Extend"
                         defaultPlan={defaultRenewPlan}
                         defaultStartDate={renewStartDate}
+                        currentEndDate={maxActiveTimeEnd}
                         defaultSessions={10}
                         mode="renew"
                         lockStartDate
