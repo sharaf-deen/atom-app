@@ -77,10 +77,10 @@ function todayDateOnly() {
   return new Date().toISOString().slice(0, 10)
 }
 
-function newChild(index = 0): ChildDraft {
+function newChild(index = 0, mode: 'member' | 'visitor' = 'visitor'): ChildDraft {
   return {
     key: `${Date.now()}-${index}-${Math.random().toString(36).slice(2)}`,
-    mode: 'visitor',
+    mode,
     firstName: '',
     lastName: '',
     dateOfBirth: '',
@@ -109,7 +109,7 @@ function modeNeedsFamily(mode: ChildMode) {
   return mode === 'member' || mode === 'existing_member'
 }
 
-export default function FamilyIntakeManager({ actorRole }: { actorRole: string }) {
+export default function FamilyIntakeManager({ actorRole, initialChildMode = 'visitor' }: { actorRole: string; initialChildMode?: 'member' | 'visitor' }) {
   const router = useRouter()
   const [guardianMode, setGuardianMode] = React.useState<'new' | 'existing'>('new')
   const [guardianFirstName, setGuardianFirstName] = React.useState('')
@@ -125,7 +125,7 @@ export default function FamilyIntakeManager({ actorRole }: { actorRole: string }
   const [guardianResults, setGuardianResults] = React.useState<GuardianResult[]>([])
 
   const [familyName, setFamilyName] = React.useState('')
-  const [children, setChildren] = React.useState<ChildDraft[]>([newChild(0)])
+  const [children, setChildren] = React.useState<ChildDraft[]>([newChild(0, initialChildMode)])
   const [submitting, setSubmitting] = React.useState(false)
   const [message, setMessage] = React.useState<string | null>(null)
   const [error, setError] = React.useState<string | null>(null)
