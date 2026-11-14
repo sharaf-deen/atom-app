@@ -1310,6 +1310,8 @@ export default async function HomePage() {
       { href: '/kiosk', label: 'Créer un membre adulte', icon: UserCog },
       { href: '/admin/members/family-intake?mode=member', label: 'Créer un membre enfant', icon: UserRoundSearch },
       { href: '/members', label: 'Members', icon: Users },
+      { href: '/schedule', label: 'Schedule', icon: CalendarDays },
+      { href: '/packages-and-promos', label: 'Packages & Promos', icon: Gift },
     ]
     return (
       <main className="min-h-[calc(100vh-3rem)] bg-[hsl(var(--bg))] text-black">
