@@ -10,8 +10,8 @@ test('Reception home has exactly six links and no metrics or old widgets', () =>
   const actions = [...receptionBranch.matchAll(/\{ href: '([^']+)', label: '([^']+)'/g)].map(x => [x[1],x[2]])
   assert.deepEqual(actions, [
     ['/scan','SCAN ACCESS'],
-    ['/kiosk','Créer un membre adulte'],
-    ['/admin/members/family-intake?mode=member','Créer un membre enfant'],
+    ['/kiosk','Create Adult Member'],
+    ['/admin/members/family-intake?mode=member','Create Child Member'],
     ['/members','Members'],
     ['/schedule','Schedule'],
     ['/packages-and-promos','Packages & Promos'],
