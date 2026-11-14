@@ -1443,35 +1443,6 @@ export default async function HomePage() {
           </>
         ) : null}
 
-        {user.role === 'reception' ? (
-          <>
-            <PriorityGrid
-              title="Today’s priorities"
-              subtitle="Overview first, then your next desk action."
-              items={buildReceptionPriorities(opsKpis!)}
-            />
-
-            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-              <SummaryCard label="1 Week active" value={opsKpis?.weeklyActiveCount ?? 0} hint="Current weekly memberships." href="/members" />
-              <SummaryCard label="Scans today" value={opsKpis?.scansToday ?? 0} hint={`Attendance · ${cairoToday()}`} href="/scan" />
-              <SummaryCard label="Expiring soon" value={opsKpis?.expiring7Count ?? 0} hint="Members to renew soon." href="/reception?focus=renewals" />
-              <SummaryCard label="Outstanding dues" value={opsKpis?.outstandingCount ?? 0} hint={fmtMoneyEGP(opsKpis?.outstandingTotal ?? 0)} href="/reception?focus=dues" />
-            </div>
-
-            <QuickActions
-              title="Quick actions"
-              subtitle="The desk tools used most often."
-              items={receptionActions().slice(0, 5)}
-            />
-
-            <HomeMemberLookup
-              title="Member lookup"
-              subtitle="Open a member fast when the desk needs action."
-              canOpenProfile
-            />
-          </>
-        ) : null}
-
         {(user.role === 'admin' || user.role === 'super_admin') ? (
           <>
             <PriorityGrid
