@@ -5,7 +5,7 @@ const home = fs.readFileSync('src/app/page.tsx', 'utf8')
 const intakePage = fs.readFileSync('src/app/admin/members/family-intake/page.tsx', 'utf8')
 const intakeManager = fs.readFileSync('src/components/members/FamilyIntakeManager.tsx', 'utf8')
 const receptionBranch = home.slice(home.indexOf("  if (user.role === 'reception') {"),home.indexOf("  const displayName = await getDisplayName(user)"))
-test('Reception home has exactly four links and no metrics or old widgets', () => {
+test('Reception home has exactly six links and no metrics or old widgets', () => {
   assert.ok(receptionBranch.startsWith("  if (user.role === 'reception')"))
   const actions = [...receptionBranch.matchAll(/\{ href: '([^']+)', label: '([^']+)'/g)].map(x => [x[1],x[2]])
   assert.deepEqual(actions, [
@@ -13,6 +13,8 @@ test('Reception home has exactly four links and no metrics or old widgets', () =
     ['/kiosk','Créer un membre adulte'],
     ['/admin/members/family-intake?mode=member','Créer un membre enfant'],
     ['/members','Members'],
+    ['/schedule','Schedule'],
+    ['/packages-and-promos','Packages & Promos'],
   ])
   assert.match(receptionBranch,/return \(/)
   assert.doesNotMatch(receptionBranch,/getOpsKpis|PriorityGrid|SummaryCard|HomeMemberLookup|HomeScanShortcut|QuickActions/)

@@ -70,7 +70,7 @@ jobs:
       - name: Family duplicate recovery consolidated contract
         run: node --test scripts/tests/family-duplicate-recovery.contract.test.cjs
 
-      - name: Reception four-action homepage contract
+      - name: Reception six-action homepage contract
         run: node --test scripts/tests/reception-home-four-actions.contract.test.cjs
 
       - name: Build
