@@ -475,7 +475,7 @@ export default function FamilyIntakeManager({ actorRole, initialChildMode = 'vis
             <CardHeader>
               <div className="flex items-center justify-between gap-3">
                 <CardTitle>2. Children</CardTitle>
-                <Button type="button" variant="outline" onClick={() => setChildren((current) => current.length >= 8 ? current : [...current, newChild(current.length)])} disabled={children.length >= 8}>+ Add child</Button>
+                <Button type="button" variant="outline" onClick={() => setChildren((current) => current.length >= 8 ? current : [...current, newChild(current.length, initialChildMode)])} disabled={children.length >= 8}>+ Add child</Button>
               </div>
             </CardHeader>
             <CardContent>
