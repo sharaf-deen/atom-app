@@ -211,6 +211,10 @@ export default function SubscribeDialog({
       return 'This database still uses an outdated subscription due rule. Deploy the latest database changes, then try again.'
     }
 
+    if (j?.error === 'RENEWAL_DATES_CHANGED') {
+      return 'The subscription dates changed since you opened this form. Close it, refresh the member profile, and try Renew / Extend again.'
+    }
+
     if (j?.error === 'LEGAL_CONSENT_REQUIRED') {
       return 'Legal consent is incomplete. Complete the current required documents in Legal & consents before creating or renewing a subscription.'
     }
@@ -258,6 +262,10 @@ export default function SubscribeDialog({
         payment_date: paymentDate,
         amount_due: amountDueNum,
       }
+      if (mode === 'renew' && lockStartDate) {
+        // Verify the date shown in the preview still matches the server at submission.
+        body.expected_start_date = startDate
+      }
       if (isTimePlan) {
         body.start_date = startDate
       } else {
@@ -288,11 +296,12 @@ export default function SubscribeDialog({
         return
       }
 
+      const actualStart = j?.start_date || startDate
       const end = j?.end_date || previewEnd
       const msg =
         plan === 'sessions'
           ? `Subscription created: ${humanPlan(plan)} (${sessions} sessions) · Ends ${end || '—'}.`
-          : `Subscription created: ${humanPlan(plan)} · ${startDate} → ${end || '—'}.`
+          : `${mode === 'renew' ? 'Renewal created' : 'Subscription created'}: ${humanPlan(plan)} · ${actualStart} → ${end || '—'}.`
 
       setStatus({ kind: 'success', msg })
       toast.success(mode === 'renew' ? 'Subscription renewed' : 'Subscription created', {
