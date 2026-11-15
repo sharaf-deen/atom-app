@@ -76,5 +76,8 @@ jobs:
       - name: Reception early renewal preview contract
         run: node --test scripts/tests/reception-early-renewal-preview.contract.test.cjs
 
+      - name: Member ID 000595 controlled reissue contract
+        run: node --test scripts/tests/member-000595-reissue.contract.test.cjs
+
       - name: Build
         run: npm run build
