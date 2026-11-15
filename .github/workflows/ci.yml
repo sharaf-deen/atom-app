@@ -82,5 +82,8 @@ jobs:
       - name: Member 000593 controlled-release contract
         run: node --test scripts/tests/member-000593-controlled-release.contract.test.cjs
 
+      - name: Member ID recovery consolidated audit and automation contracts
+        run: node --test scripts/tests/member-id-recovery-audit.contract.test.cjs
+
       - name: Build
         run: npm run build
