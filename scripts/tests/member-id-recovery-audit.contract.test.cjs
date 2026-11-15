@@ -45,7 +45,7 @@ test('future mistaken registrations require restricted reviewed deletion with no
   assert.match(schema,/TEXTUAL_OR_HISTORICAL_EVIDENCE_BLOCKED/)
   assert.match(schema,/delete from public.profiles/)
   assert.match(schema,/insert into public.member_id_reissue_queue/)
-  assert.match(schema,/member_id_reissue_queue.*drop not null/)
+  assert.match(schema,/alter column original_profile_user_id drop not null/)
 })
 
 test('legacy 593/595 FIFO preserved, no sequence reset and direct client writes restricted',()=>{
