@@ -221,7 +221,7 @@ export default async function AdminMembersPage({
           </p>
         </div>
 
-        <div className={`grid w-full gap-2 sm:w-auto ${canManageFamilies ? 'sm:grid-cols-5' : 'sm:grid-cols-3'}`}>
+        <div className={`grid w-full gap-2 sm:w-auto ${canManageFamilies ? (canEdit ? 'sm:grid-cols-6' : 'sm:grid-cols-5') : 'sm:grid-cols-3'}`}>
           <Button asChild variant="outline" className="w-full" href="/admin">
             ← Admin
           </Button>
@@ -241,6 +241,11 @@ export default async function AdminMembersPage({
           <Button asChild variant="outline" className="w-full" href="/members">
             Members (public)
           </Button>
+          {canEdit ? (
+            <Button asChild variant="outline" className="w-full" href="/admin/members/member-id-recovery">
+              Member ID Recovery
+            </Button>
+          ) : null}
         </div>
       </div>
 
