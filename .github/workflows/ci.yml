@@ -85,5 +85,8 @@ jobs:
       - name: Member ID recovery consolidated audit and automation contracts
         run: node --test scripts/tests/member-id-recovery-audit.contract.test.cjs
 
+      - name: Super Admin grouped admin workspace contract
+        run: node --test scripts/tests/super-admin-home-admin-workspace.contract.test.cjs
+
       - name: Build
         run: npm run build

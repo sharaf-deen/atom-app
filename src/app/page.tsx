@@ -13,6 +13,7 @@ import { addDays, cairoToday, diffDays } from '@/lib/cairoDate'
 import HomeNotificationsTile from '@/components/HomeNotificationsTile'
 import QrImage from '@/components/QrImage'
 import HomeMemberLookup from '@/components/home/HomeMemberLookup'
+import SuperAdminPages from '@/components/home/SuperAdminPages'
 import {
   AlertTriangle,
   ArrowRight,
@@ -1383,6 +1384,50 @@ export default async function HomePage() {
     healthSnapshot = await getLatestHealthSnapshot()
   }
 
+  // Super Admin: one dedicated, complete /admin navigation block.
+  // The other quick actions intentionally contain only non-/admin routes.
+  if (user.role === 'super_admin') {
+    return (
+      <main className="min-h-[calc(100vh-3rem)] bg-[hsl(var(--bg))] text-black">
+        <section className="mx-auto max-w-6xl space-y-5 px-4 py-6 sm:py-8">
+          <HeroCard
+            displayName={displayName}
+            role={user.role}
+            avatarUrl={avatarUrl || undefined}
+            memberId={memberId}
+            joinedAt={profile?.created_at ?? null}
+          />
+          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+            <Surface className="p-4"><p className="text-xs text-[hsl(var(--muted))]">1 Week active</p><p className="mt-2 text-2xl font-semibold">{opsKpis?.weeklyActiveCount ?? 0}</p></Surface>
+            <Surface className="p-4"><p className="text-xs text-[hsl(var(--muted))]">Expiring soon</p><p className="mt-2 text-2xl font-semibold">{opsKpis?.expiring7Count ?? 0}</p></Surface>
+            <Surface className="p-4"><p className="text-xs text-[hsl(var(--muted))]">Outstanding dues</p><p className="mt-2 text-2xl font-semibold">{fmtMoneyEGP(opsKpis?.outstandingTotal ?? 0)}</p></Surface>
+            <Surface className="p-4"><p className="text-xs text-[hsl(var(--muted))]">Scans today</p><p className="mt-2 text-2xl font-semibold">{opsKpis?.scansToday ?? 0}</p></Surface>
+          </div>
+          <QuickActions
+            title="Quick actions"
+            subtitle="Everyday tools outside the admin workspace."
+            items={[
+              { href: '/scan', label: 'Scan Access', desc: 'Scan member QR codes.', icon: ScanLine },
+              { href: '/members', label: 'Members', desc: 'Find and open member profiles.', icon: Users },
+              { href: '/schedule', label: 'Schedule', desc: 'Open the academy class schedule.', icon: CalendarDays },
+              { href: '/packages-and-promos', label: 'Packages & Promos', desc: 'Review membership offers.', icon: Gift },
+              { href: '/notifications', label: 'Notifications', desc: 'Read staff and system updates.', icon: Bell },
+            ]}
+          />
+          <SuperAdminPages />
+          <HomeMemberLookup
+            title="Member lookup"
+            subtitle="Find a member without leaving your home."
+            canOpenProfile
+          />
+        </section>
+        <footer className="mx-auto max-w-6xl px-4 pb-10 pt-1 text-xs text-[hsl(var(--muted))]">
+          © {new Date().getFullYear()} ATOM Jiu-Jitsu
+        </footer>
+      </main>
+    )
+  }
+
   return (
     <main className="min-h-[calc(100vh-3rem)] bg-[hsl(var(--bg))] text-black">
       <section className="mx-auto max-w-6xl space-y-5 px-4 py-6 sm:py-8">
@@ -1445,7 +1490,7 @@ export default async function HomePage() {
           </>
         ) : null}
 
-        {(user.role === 'admin' || user.role === 'super_admin') ? (
+        {user.role === 'admin' ? (
           <>
             <PriorityGrid
               title="Operations today"
@@ -1456,18 +1501,14 @@ export default async function HomePage() {
             <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
               <SummaryCard label="1 Week active" value={opsKpis?.weeklyActiveCount ?? 0} hint="Current weekly memberships." href="/members" />
               <SummaryCard label="Expiring soon" value={opsKpis?.expiring7Count ?? 0} hint="Renewals needing attention." href="/admin/expiring-soon" />
-              {user.role === 'super_admin' ? (
-                <SummaryCard label="Outstanding total" value={fmtMoneyEGP(opsKpis?.outstandingTotal ?? 0)} hint={`${opsKpis?.outstandingCount ?? 0} member(s) with dues`} href="/admin/outstanding-dues" />
-              ) : (
-                <SummaryCard label="Health" value={healthSnapshot?.status ? String(healthSnapshot.status) : 'Open'} hint="Operational system status" href="/admin/health-monitor" />
-              )}
+              <SummaryCard label="Health" value={healthSnapshot?.status ? String(healthSnapshot.status) : 'Open'} hint="Operational system status" href="/admin/health-monitor" />
               <SummaryCard label="Scans today" value={opsKpis?.scansToday ?? 0} hint={`Kiosk attendance · ${cairoToday()}`} href="/admin/scan-audit" />
             </div>
 
             <QuickActions
               title="Admin shortcuts"
               subtitle="Keep the main operations close."
-              items={adminActions(user.role).slice(0, user.role === 'super_admin' ? 7 : 6)}
+              items={adminActions(user.role).slice(0, 6)}
             />
 
             <div className="grid gap-4 lg:grid-cols-[1.15fr_0.85fr]">
