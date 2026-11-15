@@ -106,6 +106,7 @@ export default function SubscribeDialog({
   member,
   defaultPlan,
   defaultStartDate,
+  currentEndDate,
   defaultSessions,
   buttonLabel = 'Subscribe',
   onCreated,
@@ -117,6 +118,7 @@ export default function SubscribeDialog({
   member: { user_id: string; email: string | null; first_name: string | null; last_name: string | null }
   defaultPlan?: Plan
   defaultStartDate?: string
+  currentEndDate?: string | null
   defaultSessions?: number
   buttonLabel?: string
   onCreated?: (payload: any) => void
@@ -209,6 +211,10 @@ export default function SubscribeDialog({
       return 'This database still uses an outdated subscription due rule. Deploy the latest database changes, then try again.'
     }
 
+    if (j?.error === 'RENEWAL_DATES_CHANGED') {
+      return 'The subscription dates changed since you opened this form. Close it, refresh the member profile, and try Renew / Extend again.'
+    }
+
     if (j?.error === 'LEGAL_CONSENT_REQUIRED') {
       return 'Legal consent is incomplete. Complete the current required documents in Legal & consents before creating or renewing a subscription.'
     }
@@ -256,6 +262,10 @@ export default function SubscribeDialog({
         payment_date: paymentDate,
         amount_due: amountDueNum,
       }
+      if (mode === 'renew' && lockStartDate) {
+        // Verify the date shown in the preview still matches the server at submission.
+        body.expected_start_date = startDate
+      }
       if (isTimePlan) {
         body.start_date = startDate
       } else {
@@ -286,11 +296,12 @@ export default function SubscribeDialog({
         return
       }
 
+      const actualStart = j?.start_date || startDate
       const end = j?.end_date || previewEnd
       const msg =
         plan === 'sessions'
           ? `Subscription created: ${humanPlan(plan)} (${sessions} sessions) · Ends ${end || '—'}.`
-          : `Subscription created: ${humanPlan(plan)} · ${startDate} → ${end || '—'}.`
+          : `${mode === 'renew' ? 'Renewal created' : 'Subscription created'}: ${humanPlan(plan)} · ${actualStart} → ${end || '—'}.`
 
       setStatus({ kind: 'success', msg })
       toast.success(mode === 'renew' ? 'Subscription renewed' : 'Subscription created', {
@@ -333,7 +344,7 @@ export default function SubscribeDialog({
           <div className="fixed inset-0 z-[100] bg-black/60" onClick={() => !busy && !confirmOpen && setOpen(false)} aria-hidden="true" />
 
           <div className="fixed inset-0 z-[101] flex items-center justify-center p-4">
-            <Card className="w-[92vw] max-w-md">
+            <Card className="max-h-[90vh] w-[92vw] max-w-md overflow-y-auto">
               <CardContent>
                 <div className="flex items-center gap-2">
                   <h3 className="text-lg font-semibold">{mode === 'renew' ? 'Renew / Extend' : 'New subscription'}</h3>
@@ -357,6 +368,32 @@ export default function SubscribeDialog({
                     >
                       {status.msg}
                     </InlineAlert>
+                  </div>
+                ) : null}
+
+                {mode === 'renew' ? (
+                  <div className="mt-4 space-y-3 rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] p-4" aria-label="Renewal date preview">
+                    <p className="text-sm font-semibold">Renew early — keep all remaining days</p>
+                    <p className="text-xs text-[hsl(var(--muted))]">
+                      Your current subscription stays unchanged. The new subscription starts after it ends.
+                    </p>
+                    <dl className="grid gap-3 sm:grid-cols-3">
+                      <div>
+                        <dt className="text-xs text-[hsl(var(--muted))]">Current plan ends</dt>
+                        <dd className="mt-1 text-sm font-semibold">{currentEndDate ?? '—'}</dd>
+                      </div>
+                      <div>
+                        <dt className="text-xs text-[hsl(var(--muted))]">New plan starts</dt>
+                        <dd className="mt-1 text-sm font-semibold">{dateOk ? startDate : '—'}</dd>
+                      </div>
+                      <div>
+                        <dt className="text-xs text-[hsl(var(--muted))]">New plan ends</dt>
+                        <dd className="mt-1 text-sm font-semibold">{previewEnd ?? '—'}</dd>
+                      </div>
+                    </dl>
+                    <p className="text-xs text-[hsl(var(--muted))]">
+                      Dates are a preview. The server checks the latest subscription dates when you confirm.
+                    </p>
                   </div>
                 ) : null}
 
@@ -386,7 +423,7 @@ export default function SubscribeDialog({
                       />
                       {lockStartDate ? (
                         <p className="-mt-2 text-xs text-[hsl(var(--muted))]">
-                          This renewal will start automatically on this date (after the current plan ends).
+                          The start date is automatically set to the day after the current subscription ends.
                         </p>
                       ) : null}
                       <p className="-mt-2 text-xs text-[hsl(var(--muted))]">
@@ -493,6 +530,7 @@ export default function SubscribeDialog({
             summaryItems={[
               { label: 'Member', value: fullName },
               { label: 'Package', value: humanPlan(plan) },
+              ...(mode === 'renew' ? [{ label: 'Current plan ends', value: currentEndDate ?? '—' }] : []),
               { label: 'Start date', value: dateOk ? startDate : '—' },
               { label: 'End date preview', value: previewEnd ?? '—' },
               { label: 'Sessions', value: plan === 'sessions' ? `${sessions} session(s)` : '—' },
@@ -500,9 +538,9 @@ export default function SubscribeDialog({
               { label: 'Remaining due', value: formatEGP(amountDueNum) },
               { label: 'Payment method', value: humanPaymentMethod(paymentMethod) },
               { label: 'Payment date', value: paymentDate || '—' },
-              { label: 'Access impact', value: plan === 'sessions' ? 'Creates a sessions pass.' : 'Creates or extends member access dates.' },
+              { label: 'Access impact', value: mode === 'renew' ? 'Creates a separate subscription after current coverage; remaining days are kept.' : plan === 'sessions' ? 'Creates a sessions pass.' : 'Creates member access dates.' },
             ]}
-            warning="This will update the member subscription/access once confirmed."
+            warning={mode === 'renew' ? 'This renewal creates a new subscription; the current plan is not shortened. Confirm the dates and payment before continuing.' : 'This will create the member subscription/access once confirmed.'}
           />
 
           <div role="dialog" aria-modal="true" aria-label="Create subscription" className="sr-only" />
