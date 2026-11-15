@@ -1490,7 +1490,7 @@ export default async function HomePage() {
           </>
         ) : null}
 
-        {(user.role === 'admin' || user.role === 'super_admin') ? (
+        {user.role === 'admin' ? (
           <>
             <PriorityGrid
               title="Operations today"
@@ -1501,18 +1501,14 @@ export default async function HomePage() {
             <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
               <SummaryCard label="1 Week active" value={opsKpis?.weeklyActiveCount ?? 0} hint="Current weekly memberships." href="/members" />
               <SummaryCard label="Expiring soon" value={opsKpis?.expiring7Count ?? 0} hint="Renewals needing attention." href="/admin/expiring-soon" />
-              {user.role === 'super_admin' ? (
-                <SummaryCard label="Outstanding total" value={fmtMoneyEGP(opsKpis?.outstandingTotal ?? 0)} hint={`${opsKpis?.outstandingCount ?? 0} member(s) with dues`} href="/admin/outstanding-dues" />
-              ) : (
-                <SummaryCard label="Health" value={healthSnapshot?.status ? String(healthSnapshot.status) : 'Open'} hint="Operational system status" href="/admin/health-monitor" />
-              )}
+              <SummaryCard label="Health" value={healthSnapshot?.status ? String(healthSnapshot.status) : 'Open'} hint="Operational system status" href="/admin/health-monitor" />
               <SummaryCard label="Scans today" value={opsKpis?.scansToday ?? 0} hint={`Kiosk attendance · ${cairoToday()}`} href="/admin/scan-audit" />
             </div>
 
             <QuickActions
               title="Admin shortcuts"
               subtitle="Keep the main operations close."
-              items={adminActions(user.role).slice(0, user.role === 'super_admin' ? 7 : 6)}
+              items={adminActions(user.role).slice(0, 6)}
             />
 
             <div className="grid gap-4 lg:grid-cols-[1.15fr_0.85fr]">
