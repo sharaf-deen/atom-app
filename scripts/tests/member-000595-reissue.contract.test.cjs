@@ -2,6 +2,7 @@ const test=require('node:test')
 const assert=require('node:assert/strict')
 const fs=require('node:fs')
 const sql=fs.readFileSync('supabase/migrations/20261115070000_member_000595_controlled_reissue.sql','utf8')
+const textualGuard=fs.readFileSync('supabase/migrations/20261115071000_member_000595_text_reference_guard.sql','utf8')
 
 test('only ATOM-000595 is eligible for reissue',()=>{
  assert.match(sql,/member_id_reissue_single_target check \(member_id='ATOM-000595'\)/)
@@ -29,4 +30,12 @@ test('next genuine member consumes released number exactly once and leaves the n
  assert.match(sql,/NEW\.member_id:=coalesce\(v_reissued,public\.generate_member_id\(\)\)/)
  assert.doesNotMatch(sql,/setval\(/i)
  assert.doesNotMatch(sql,/delete from public\.family_duplicate_recovery_audit/)
+})
+
+test('textual historical references block release; derived roster view is not a blocker',()=>{
+ assert.match(textualGuard,/TEXTUAL_HISTORY_DEPENDENCY_BLOCKED/)
+ assert.match(textualGuard,/public\.scan_audit/)
+ assert.match(textualGuard,/public\.store_sales/)
+ assert.match(textualGuard,/public\.coach_staff_attendance/)
+ assert.match(textualGuard,/head_coach_athlete_roster is a derived view/)
 })
