@@ -1,8 +1,8 @@
 const test=require('node:test')
 const assert=require('node:assert/strict')
 const fs=require('node:fs')
-const sql=fs.readFileSync('supabase/migrations/20261115070000_member_000595_controlled_reissue.sql','utf8')
-const textualGuard=fs.readFileSync('supabase/migrations/20261115071000_member_000595_text_reference_guard.sql','utf8')
+const sql=fs.readFileSync('supabase/migrations/20261115022809_member_000595_controlled_reissue.sql','utf8')
+const textualGuard=fs.readFileSync('supabase/migrations/20261115022818_member_000595_text_reference_guard.sql','utf8')
 
 test('only ATOM-000595 is eligible for reissue',()=>{
  assert.match(sql,/member_id_reissue_single_target check \(member_id='ATOM-000595'\)/)
