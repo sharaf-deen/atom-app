@@ -1,7 +1,7 @@
 const test=require('node:test')
 const assert=require('node:assert/strict')
 const fs=require('node:fs')
-const sql=fs.readFileSync('supabase/migrations/20261115080000_member_000593_guarded_reissue.sql','utf8')
+const sql=fs.readFileSync('supabase/migrations/20261115025005_member_000593_guarded_reissue.sql','utf8')
 
 test('only 593 and the previously authorized 595 are eligible for automatic one-time reissue',()=>{
  assert.match(sql,/check \(member_id in \('ATOM-000593','ATOM-000595'\)\)/)
