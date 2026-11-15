@@ -1,0 +1,28 @@
+const test=require('node:test')
+const assert=require('node:assert/strict')
+const fs=require('node:fs')
+const sql=fs.readFileSync('supabase/migrations/20261115080000_member_000593_guarded_reissue.sql','utf8')
+
+test('only 593 and the previously authorized 595 are eligible for automatic one-time reissue',()=>{
+ assert.match(sql,/check \(member_id in \('ATOM-000593','ATOM-000595'\)\)/)
+ assert.match(sql,/where member_id='ATOM-000593'/)
+ assert.match(sql,/v_old constant uuid := 'fcbcd098-492b-4cea-84da-4afda7449c81'/)
+ assert.doesNotMatch(sql,/setval\(/i)
+})
+test('super admin, immutable duplicate identity, family audit, login and all FK/history guards required',()=>{
+ for(const token of ["SUPER_ADMIN_REQUIRED","IDENTITY_OR_ARCHIVE_MISMATCH","AUTH_OR_FAMILY_DEPENDENCY","ORIGINAL_RECOVERY_AUDIT_MISSING","DEPENDENCY_BLOCKED","TEXTUAL_HISTORY_DEPENDENCY_BLOCKED"])assert.ok(sql.includes(token),token)
+ assert.match(sql,/revoke all on function public\.release_erroneous_atom_000593/)
+ assert.match(sql,/to service_role/)
+})
+test('the one original idempotency record is preserved and attributed to original UUID',()=>{
+ assert.match(sql,/add column if not exists original_member_user_id uuid/)
+ assert.match(sql,/v_request_count<>1/)
+ assert.match(sql,/ORIGINAL_SUBSCRIPTION_PROVENANCE_MISMATCH/)
+ assert.match(sql,/set original_member_user_id=v_old, member_id=v_parent/)
+ assert.match(sql,/where request_key=v_request\.request_key and member_id=v_old/)
+ assert.match(sql,/IDEMPOTENCY_TRANSFER_COUNT_MISMATCH/)
+ assert.match(sql,/release_evidence/)
+ assert.doesNotMatch(sql,/delete from public\.atom_subscription_idempotency/i)
+ assert.doesNotMatch(sql,/update public\.subscriptions/i)
+ assert.doesNotMatch(sql,/delete from public\.(subscriptions|invoices|subscription_payments)/i)
+})
