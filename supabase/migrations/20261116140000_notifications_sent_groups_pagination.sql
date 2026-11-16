@@ -65,7 +65,7 @@ grant execute on function public.atom_notifications_sent_groups(uuid,integer,int
 create or replace function public.atom_notifications_clear_read(p_actor uuid)
 returns jsonb
 language plpgsql security definer set search_path=public,pg_catalog
-as $
+as $clear_read$
 declare v_count integer;
 begin
   if p_actor is null or not exists(
@@ -77,7 +77,7 @@ begin
   get diagnostics v_count=row_count;
   return jsonb_build_object('ok',true,'removed',v_count);
 end;
-$;
+$clear_read$;
 revoke all on function public.atom_notifications_clear_read(uuid)
   from public,anon,authenticated;
 grant execute on function public.atom_notifications_clear_read(uuid) to service_role;
