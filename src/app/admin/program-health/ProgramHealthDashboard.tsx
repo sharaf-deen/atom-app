@@ -10,7 +10,7 @@ export type ProgramMember = {
 export type ProgramHealth = {
   key:string;name:string;audience:string;level:string;is_active:boolean
   target_capacity:number|null;warning_percent:number;management_note:string
-  enrolled:number;active:number;inactive:number;visited_30:number
+  enrolled:number;active:number;inactive:number;visited_30:number;joined_30:number;left_30:number
   gross_30:number;gross_90:number;net_30:number;net_90:number
   members:ProgramMember[]
 }
@@ -153,6 +153,10 @@ export default function ProgramHealthDashboard({snapshot}:{snapshot:Snapshot}){
             <div><div className="text-xs text-slate-500">Active</div><div className="text-xl font-semibold">{p.active}</div></div>
             <div><div className="text-xs text-slate-500">Inactive</div><div className="text-xl font-semibold">{p.inactive}</div></div>
             <div><div className="text-xs text-slate-500">Visited · 30d</div><div className="text-xl font-semibold">{p.visited_30}</div></div>
+          </div>
+          <div className="mt-3 flex flex-wrap gap-4 text-sm text-slate-600">
+            <span><strong className="text-emerald-700">+{p.joined_30}</strong> new enrollments · 30d</span>
+            <span><strong className="text-slate-800">−{p.left_30}</strong> assignments ended · 30d</span>
           </div>
           <div className="mt-4">
             <div className="flex items-center justify-between text-sm">
