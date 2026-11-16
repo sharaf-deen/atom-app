@@ -27,7 +27,7 @@ type Item = {
 
 const KINDS = ['all', 'info', 'order_update', 'billing', 'promo'] as const
 type KindFilter = (typeof KINDS)[number]
-const PER_PAGE = 5
+const PER_PAGE = 8
 
 type Props = {
   isAdmin?: boolean
@@ -179,12 +179,6 @@ export default function NotificationsList({ isAdmin = false, sentOnly = false, i
   const [openId, setOpenId] = useState<string | null>(null)
   const [openAdminContact, setOpenAdminContact] = useState(false)
   const [actionMsg, setActionMsg] = useState('')
-  const [audCounts, setAudCounts] = useState<{
-    members: number
-    coaches: number
-    assistant_coaches: number
-    head_coaches: number
-  } | null>(null)
 
   const isSentView = sentOnly || box === 'sent'
   const compactUserView = !isAdmin && !sentOnly
@@ -226,98 +220,6 @@ export default function NotificationsList({ isAdmin = false, sentOnly = false, i
     }
   }, [visibleItems, openId])
 
-  async function ensureAudienceCounts() {
-    if (audCounts) return audCounts
-    try {
-      const r = await fetch('/api/notifications/audience-counts', { cache: 'no-store' })
-      const j: any = await safeJson(r)
-      if (r.ok && j?.ok) {
-        const next = {
-          members: Number(j.members || 0),
-          coaches: Number(j.coaches || 0),
-          assistant_coaches: Number(j.assistant_coaches || 0),
-          head_coaches: Number(j.head_coaches || 0),
-        }
-        setAudCounts(next)
-        return next
-      }
-    } catch {}
-    return { members: 0, coaches: 0, assistant_coaches: 0, head_coaches: 0 }
-  }
-
-  function groupSent(rows: any[], counts: { members: number; coaches: number; assistant_coaches: number; head_coaches: number }): Item[] {
-    const norm = (s: any) => String(s ?? '').trim().replace(/\s+/g, ' ')
-    const timeKey = (iso: any) => {
-      const s = String(iso ?? '')
-      return s.length >= 19 ? s.slice(0, 19) : s
-    }
-
-    const out: Item[] = []
-    const map = new Map<string, { item: Item; recipients: { name?: string; email?: string | null }[] }>()
-
-    for (const r of rows) {
-      const k = `${timeKey(r.created_at)}|${norm(r.kind)}|${norm(r.title)}|${norm(r.body)}`
-      let g = map.get(k)
-      if (!g) {
-        const base: Item = {
-          id: k,
-          title: r.title ?? null,
-          body: String(r.body ?? ''),
-          kind: r.kind ?? null,
-          created_at: String(r.created_at ?? ''),
-          source_ids: [],
-        }
-        g = { item: base, recipients: [] }
-        map.set(k, g)
-        out.push(g.item)
-      }
-
-      if (typeof r.id === 'string' && isUuid(r.id)) {
-        g.item.source_ids = g.item.source_ids || []
-        g.item.source_ids.push(r.id)
-      }
-
-      g.recipients.push({
-        name: (r.recipient_name ?? r.recipient ?? '') as any,
-        email: (r.recipient_email ?? r.recipientEmail ?? null) as any,
-      })
-
-      if (typeof r.recipient_count === 'number' && r.recipient_count > 0) {
-        g.item.recipient_count = r.recipient_count
-        g.item.recipient_name = r.recipient_name
-        g.item.recipient_email = r.recipient_email ?? null
-      }
-    }
-
-    for (const item of out) {
-      if (typeof item.recipient_count === 'number' && item.recipient_count > 0) continue
-
-      const g = map.get(item.id)
-      const n = g?.recipients.length || 0
-      item.recipient_count = n
-
-      if (n === 1) {
-        item.recipient_name = (g?.recipients[0]?.name || '—').toString().trim() || '—'
-        item.recipient_email = g?.recipients[0]?.email ?? null
-      } else if (n > 1) {
-        if (counts.members > 0 && n === counts.members) item.recipient_name = 'All members'
-        else if (counts.coaches > 0 && n === counts.coaches) item.recipient_name = 'All coaches'
-        else if (counts.assistant_coaches > 0 && n === counts.assistant_coaches) item.recipient_name = 'All assistant coaches'
-        else if (
-          counts.coaches + counts.assistant_coaches + counts.head_coaches > 0 &&
-          n === counts.coaches + counts.assistant_coaches + counts.head_coaches
-        ) item.recipient_name = 'All coaches + assistants + head coaches'
-        else item.recipient_name = `Custom (${n})`
-        item.recipient_email = null
-      } else {
-        item.recipient_name = '—'
-        item.recipient_email = null
-      }
-    }
-
-    return out
-  }
-
   async function load(p = page) {
     setLoading(true)
     setErr('')
@@ -325,36 +227,26 @@ export default function NotificationsList({ isAdmin = false, sentOnly = false, i
       const params = new URLSearchParams()
 
       if (isSentView) {
-        params.set('page', '1')
-        params.set('limit', '1000')
+        // Server-side grouping/pagination avoids fetching 1,000 raw recipient messages into the browser.
+        params.set('page', String(p))
+        params.set('limit', String(PER_PAGE))
         if (kind !== 'all') params.set('kind', kind)
         if (debQ) params.set('q', debQ)
 
-        const [counts, r] = await Promise.all([
-          ensureAudienceCounts(),
-          fetch(`/api/notifications/sent/list?${params.toString()}`, { cache: 'no-store' }),
-        ])
+        const r = await fetch(`/api/notifications/sent/list?${params.toString()}`, { cache: 'no-store' })
         const j: any = await safeJson(r)
-
         if (!r.ok || !j?.ok) {
-          setErr(j?.details || j?.error || 'Failed to load')
+          setErr(j?.error || 'Failed to load sent notifications')
           setItems([])
           setTotal(0)
           return
         }
-
-        const raw = Array.isArray(j.items) ? j.items : []
-        const alreadyGrouped = raw.length > 0 && typeof raw[0]?.recipient_count === 'number' && !raw[0]?.user_id
-        const grouped: Item[] = alreadyGrouped ? (raw as Item[]) : groupSent(raw, counts)
-
-        const totalGroups = grouped.length
-        const offset = (p - 1) * PER_PAGE
-        const nextItems = grouped.slice(offset, offset + PER_PAGE)
+        const nextItems = Array.isArray(j.items) ? j.items as Item[] : []
         setItems(nextItems)
-        setTotal(totalGroups)
-        setPage(p)
+        setTotal(Number(j.total ?? 0))
+        setPage(Number(j.page ?? p))
         setSelected(new Set())
-        if (!openId && nextItems.length > 0) setOpenId(nextItems[0].id)
+        setOpenId(null)
         return
       }
 
@@ -379,7 +271,7 @@ export default function NotificationsList({ isAdmin = false, sentOnly = false, i
       setTotal(Number(j.total || 0))
       setPage(Number(j.page || p))
       setSelected(new Set())
-      if (!openId && nextItems.length > 0) setOpenId(nextItems[0].id)
+      // Keep details collapsed until the user explicitly opens a message.
     } catch (e: any) {
       setErr(String(e?.message || e))
     } finally {
@@ -466,29 +358,38 @@ export default function NotificationsList({ isAdmin = false, sentOnly = false, i
   }
 
   async function markAllUnreadInFilterRead() {
-    if (isSentView) return
-    const params = new URLSearchParams()
-    params.set('page', '1')
-    params.set('limit', '1000')
-    params.set('unread', '1')
-    if (kind !== 'all') params.set('kind', kind)
-    if (debQ) params.set('q', debQ)
-
-    const r = await fetch(`/api/notifications/list?${params.toString()}`, { cache: 'no-store' })
-    const j: any = await safeJson(r)
-    if (!r.ok || !j?.ok) {
-      setActionMsg(j?.details || j?.error || 'Failed to load unread')
-      return
+    if (isSentView || loading) return
+    if (!confirm('Mark all unread messages in the current filter as read?')) return
+    setLoading(true)
+    let processed=0
+    try {
+      // Backend pages are capped at 50; repeatedly fetch page one until the unread set is empty.
+      // Unlike requesting 1,000 rows, this stays bounded per request.
+      for (let batch=0;batch<200;batch++) {
+        const params=new URLSearchParams()
+        params.set('page','1')
+        params.set('limit','50')
+        params.set('unread','1')
+        if(kind!=='all')params.set('kind',kind)
+        if(debQ)params.set('q',debQ)
+        const r=await fetch(`/api/notifications/list?${params.toString()}`,{cache:'no-store'})
+        const j:any=await safeJson(r)
+        if(!r.ok||!j?.ok){
+          setActionMsg(j?.error||'Failed to load unread messages')
+          return
+        }
+        const ids:string[]=(j.items??[]).map((x:Item)=>x.id).filter(Boolean)
+        if(ids.length===0)break
+        const ok=await markIds(ids,'read')
+        if(!ok)return
+        processed+=ids.length
+        if(ids.length<50)break
+      }
+      setActionMsg(`Marked ${processed} notification(s) as read.`)
+      await load(1)
+    }finally{
+      setLoading(false)
     }
-
-    const ids: string[] = (j.items || []).map((x: any) => x.id).filter(Boolean)
-    if (ids.length === 0) {
-      setActionMsg('No unread notifications in the current filter.')
-      return
-    }
-
-    const ok = await markIds(ids, 'read')
-    if (ok) await load(page)
   }
 
   async function deleteIds(ids: string[], scope: 'inbox' | 'sent' = 'inbox') {
@@ -502,15 +403,38 @@ export default function NotificationsList({ isAdmin = false, sentOnly = false, i
       setActionMsg(j?.details || j?.error || 'Failed to delete')
       return false
     }
-    setActionMsg(`Deleted ${ids.length} notification${ids.length === 1 ? '' : 's'} from ${scope}.`)
+    setActionMsg(`Removed ${Number(j.deleted ?? 0)} notification${Number(j.deleted ?? 0) === 1 ? '' : 's'} from your ${scope} view. The underlying records are retained.`)
     window.dispatchEvent(new Event('notifications:updated'))
     return true
+  }
+
+  async function clearReadInbox() {
+    if (isSentView || loading) return
+    if (!confirm('Remove all read notifications from your inbox? Unread messages will stay visible and delivery records are preserved.')) return
+    setLoading(true)
+    try {
+      const r = await fetch('/api/notifications/clear-read', { method: 'POST' })
+      const j: any = await safeJson(r)
+      if (!r.ok || !j?.ok) {
+        setActionMsg(j?.error || 'Failed to clear read messages')
+        return
+      }
+      setActionMsg(`Removed ${Number(j.removed ?? 0)} read notification(s) from your inbox.`)
+      setSelected(new Set())
+      setOpenId(null)
+      window.dispatchEvent(new Event('notifications:updated'))
+      await load(1)
+    } catch {
+      setActionMsg('Failed to clear read messages')
+    } finally {
+      setLoading(false)
+    }
   }
 
   async function deleteSelected() {
     if (isSentView || selected.size === 0) return
     const ids = Array.from(selected)
-    if (!confirm(`Delete ${ids.length} notification(s)? This cannot be undone.`)) return
+    if (!confirm(`Remove ${ids.length} notification(s) from your inbox? The records will be retained.`)) return
     const ok = await deleteIds(ids, 'inbox')
     if (!ok) return
     const willEmpty = ids.length >= visibleItems.length && page > 1
@@ -519,7 +443,7 @@ export default function NotificationsList({ isAdmin = false, sentOnly = false, i
 
   async function deleteOne(id: string) {
     if (isSentView) return
-    if (!confirm('Delete this notification? This cannot be undone.')) return
+    if (!confirm('Remove this notification from your inbox? The record will be retained.')) return
     const ok = await deleteIds([id], 'inbox')
     if (!ok) return
     if (openId === id) setOpenId(null)
@@ -534,9 +458,12 @@ export default function NotificationsList({ isAdmin = false, sentOnly = false, i
       setActionMsg('Cannot delete this sent row because its source ids are missing.')
       return
     }
-    if (!confirm(`Delete this sent notification for you? (${ids.length} recipient${ids.length === 1 ? '' : 's'})`)) return
-    const ok = await deleteIds(ids, 'sent')
-    if (!ok) return
+    if (!confirm(`Remove this sent message from your view? (${ids.length} recipient record${ids.length === 1 ? '' : 's'}). Members keep their copies.`)) return
+    // The delete API accepts at most 200 source IDs; broadcast groups can exceed that.
+    for (let offset=0;offset<ids.length;offset+=200) {
+      const ok=await deleteIds(ids.slice(offset,offset+200),'sent')
+      if(!ok)return
+    }
     if (openId === item.id) setOpenId(null)
     const willEmpty = visibleItems.length === 1 && page > 1
     await load(willEmpty ? page - 1 : page)
@@ -956,6 +883,13 @@ export default function NotificationsList({ isAdmin = false, sentOnly = false, i
             </div>
           </div>
         )}
+
+        {!isSentView ? (
+          <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] px-3 py-2">
+            <span className="text-xs text-[hsl(var(--muted))]">Clean up read messages without affecting unread items or the underlying history.</span>
+            <Button variant="outline" size="sm" disabled={loading} onClick={clearReadInbox}>Clear read messages</Button>
+          </div>
+        ) : null}
 
         {!isSentView && !compactUserView ? (
           <div className="mt-3 flex flex-wrap items-center gap-2 rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] p-3">
