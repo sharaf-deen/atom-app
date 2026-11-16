@@ -8,6 +8,7 @@ const list=read('src/components/NotificationsList.tsx')
 const inbox=read('src/components/NotificationsMemberInbox.tsx')
 const sent=read('src/app/api/notifications/sent/list/route.ts')
 const deletion=read('src/app/api/notifications/delete/route.ts')
+const clearRead=read('src/app/api/notifications/clear-read/route.ts')
 const query=read('supabase/migrations/20261116140000_notifications_sent_groups_pagination.sql')
 
 test('Simplified notification page mounts only the chosen admin tab',()=>{
@@ -48,4 +49,18 @@ test('SQL read protection and no underlying message modification',()=>{
  assert.match(query,/revoke all on function public\.atom_notifications_sent_groups/)
  assert.match(query,/grant execute on function public\.atom_notifications_sent_groups/)
  assert.doesNotMatch(query,/update public\.notifications|delete from public\.notifications/)
+})
+
+test('Read cleanup is explicitly confirmed, respects own user, and leaves unread/history intact',()=>{
+ assert.match(list,/async function clearReadInbox\(\)/)
+ assert.match(list,/Clear read messages/)
+ assert.match(list,/confirm\('Remove all read notifications from your inbox/)
+ assert.match(clearRead,/getSessionUser\(\)/)
+ assert.match(clearRead,/p_actor:me\.id/)
+ assert.match(clearRead,/atom_notifications_clear_read/)
+ assert.match(query,/update public\.notifications\s+set deleted_for_user_at=now\(\)/)
+ assert.match(query,/where user_id=p_actor and read_at is not null and deleted_for_user_at is null/)
+ assert.match(query,/NOTIFICATION_ACTOR_FORBIDDEN/)
+ assert.match(query,/revoke all on function public\.atom_notifications_clear_read/)
+ assert.doesNotMatch(query,/delete from public\.notifications/)
 })
