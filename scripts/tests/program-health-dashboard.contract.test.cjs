@@ -15,7 +15,7 @@ test('Program Health available in Super Admin workspace with strict page and POS
  assert.match(api,/atom_program_health_update/)
 })
 test('Dashboard shows counts, attendance and transparent cash estimates',()=>{
- for(const token of ['Current enrollments','Active subscriptions','Enrollment target','Visited · 30d','Attributed net payments','Management notes / actions','Manage members','Review schedule','View members']){
+ for(const token of ['Program enrollments','Active program members','Active member target','Visited · 30d','Attributed net payments','Management notes / actions','Manage members','Review schedule','View members']){
   assert.ok(ui.includes(token),token)
  }
  assert.match(sql,/member_program_enrollments/)
@@ -38,4 +38,19 @@ test('Capacity configuration is audited, limited, and inaccessible to public rol
  assert.match(sql,/enable row level security/)
  assert.match(sql,/program_health_snapshot/)
  assert.doesNotMatch(sql,/update public\.subscriptions|delete from public\.subscriptions|update public\.member_program_enrollments/)
+})
+
+test('Program Health 1B: compact expandable program rows, active-only target and PT exclusion',()=>{
+ assert.match(ui,/\['kids-pt','adults-pt'\]\.includes\(p\.key\)/)
+ assert.match(ui,/p\.active>=p\.target_capacity/)
+ assert.match(ui,/p\.active\/p\.target_capacity/)
+ assert.doesNotMatch(ui,/p\.enrolled>=p\.target_capacity|p\.enrolled\/p\.target_capacity/)
+ assert.match(ui,/aria-expanded=\{isExpanded\}/)
+ assert.match(ui,/aria-controls=\{'program-health-details-'\+p\.key\}/)
+ assert.match(ui,/\{isExpanded&&<div id=/)
+ assert.match(ui,/Enrolled/)
+ assert.match(ui,/Active/)
+ assert.match(ui,/Active target/)
+ assert.match(ui,/\{membersOpen&&<div/)
+ assert.match(ui,/filter\(p=>!\['kids-pt','adults-pt'\]\.includes\(p\.key\)\)/)
 })
