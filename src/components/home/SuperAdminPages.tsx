@@ -10,6 +10,7 @@ export const SUPER_ADMIN_PAGE_GROUPS = [
   { title: 'Overview', pages: [
     { href: '/admin', label: 'Admin Dashboard' },
     { href: '/admin/health-monitor', label: 'Health Monitor' },
+    { href: '/admin/program-health', label: 'Program Health' },
     { href: '/admin/permissions-audit', label: 'Permissions Audit' },
     { href: '/admin/account-activation', label: 'Account Activation' },
     { href: '/admin/legal-consent-remediation', label: 'Legal Consent Remediation' },

@@ -88,5 +88,8 @@ jobs:
       - name: Super Admin grouped admin workspace contract
         run: node --test scripts/tests/super-admin-home-admin-workspace.contract.test.cjs
 
+      - name: Super Admin Program Health consolidated contract
+        run: node --test scripts/tests/program-health-dashboard.contract.test.cjs
+
       - name: Build
         run: npm run build
