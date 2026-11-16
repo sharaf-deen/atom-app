@@ -92,7 +92,7 @@ export default function ProgramHealthDashboard({snapshot}:{snapshot:Snapshot}){
   const [filter,setFilter]=useState('all')
   const [expanded,setExpanded]=useState<string[]>([])
   const [editing,setEditing]=useState<string[]>([])
-  const all=snapshot.programs??[]
+  const all=useMemo(()=>snapshot.programs??[],[snapshot.programs])
   const displayed=useMemo(()=>all.filter(p=>{
     const matches=(p.name+' '+p.key+' '+p.level).toLowerCase().includes(search.toLowerCase())
     return matches&&(filter==='all'||(filter==='alerts'&&['watch','full','not_set'].includes(statusOf(p)))
@@ -119,7 +119,7 @@ export default function ProgramHealthDashboard({snapshot}:{snapshot:Snapshot}){
       <p className="text-sm font-semibold">How to read this dashboard</p>
       <p className="mt-1 text-sm text-slate-600">Enrolled = distinct current assigned members, excluding archived profiles. Active = current assigned members with an active subscription valid today. Visited 30d = members with at least one valid attendance scan in the last 30 calendar days.</p>
       <p className="mt-2 text-sm text-slate-600">{snapshot.methodology} Each member assigned to multiple programs has their cash split equally between those programs; this is an estimate, not actual program-level bookkeeping.</p>
-      <p className="mt-2 text-xs text-slate-500">Snapshot as of {snapshot.as_of} (Cairo). Current assignments are used for revenue attribution, including historical payments; changing a member's program will change this estimate. Revenue is not profit and does not include expenses.</p>
+      <p className="mt-2 text-xs text-slate-500">Snapshot as of {snapshot.as_of} (Cairo). Current assignments are used for revenue attribution, including historical payments; changing a member&apos;s program will change this estimate. Revenue is not profit and does not include expenses.</p>
     </div>
     <div className="flex flex-wrap items-center gap-3">
       <label className="grow text-sm">Search programs
