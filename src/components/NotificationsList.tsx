@@ -358,29 +358,38 @@ export default function NotificationsList({ isAdmin = false, sentOnly = false, i
   }
 
   async function markAllUnreadInFilterRead() {
-    if (isSentView) return
-    const params = new URLSearchParams()
-    params.set('page', '1')
-    params.set('limit', '1000')
-    params.set('unread', '1')
-    if (kind !== 'all') params.set('kind', kind)
-    if (debQ) params.set('q', debQ)
-
-    const r = await fetch(`/api/notifications/list?${params.toString()}`, { cache: 'no-store' })
-    const j: any = await safeJson(r)
-    if (!r.ok || !j?.ok) {
-      setActionMsg(j?.details || j?.error || 'Failed to load unread')
-      return
+    if (isSentView || loading) return
+    if (!confirm('Mark all unread messages in the current filter as read?')) return
+    setLoading(true)
+    let processed=0
+    try {
+      // Backend pages are capped at 50; repeatedly fetch page one until the unread set is empty.
+      // Unlike requesting 1,000 rows, this stays bounded per request.
+      for (let batch=0;batch<200;batch++) {
+        const params=new URLSearchParams()
+        params.set('page','1')
+        params.set('limit','50')
+        params.set('unread','1')
+        if(kind!=='all')params.set('kind',kind)
+        if(debQ)params.set('q',debQ)
+        const r=await fetch(`/api/notifications/list?${params.toString()}`,{cache:'no-store'})
+        const j:any=await safeJson(r)
+        if(!r.ok||!j?.ok){
+          setActionMsg(j?.error||'Failed to load unread messages')
+          return
+        }
+        const ids:string[]=(j.items??[]).map((x:Item)=>x.id).filter(Boolean)
+        if(ids.length===0)break
+        const ok=await markIds(ids,'read')
+        if(!ok)return
+        processed+=ids.length
+        if(ids.length<50)break
+      }
+      setActionMsg(`Marked ${processed} notification(s) as read.`)
+      await load(1)
+    }finally{
+      setLoading(false)
     }
-
-    const ids: string[] = (j.items || []).map((x: any) => x.id).filter(Boolean)
-    if (ids.length === 0) {
-      setActionMsg('No unread notifications in the current filter.')
-      return
-    }
-
-    const ok = await markIds(ids, 'read')
-    if (ok) await load(page)
   }
 
   async function deleteIds(ids: string[], scope: 'inbox' | 'sent' = 'inbox') {
