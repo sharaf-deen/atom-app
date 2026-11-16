@@ -59,7 +59,8 @@ function statusLabel(sub:Subscription,today:string){
       &&(!sub.frozen_from||sub.frozen_from<=today))return 'Frozen'
     return 'Active'
   }
-  if(sub.start_date&&sub.start_date>today&&sub.status==='active')return 'Upcoming'
+  if(sub.status!=='active')return sub.status||'Unknown'
+  if(sub.start_date&&sub.start_date>today)return 'Upcoming'
   if(sub.end_date&&sub.end_date<today)return 'Expired'
   return sub.status||'Unknown'
 }
