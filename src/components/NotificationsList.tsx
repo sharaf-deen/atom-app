@@ -271,7 +271,7 @@ export default function NotificationsList({ isAdmin = false, sentOnly = false, i
       setTotal(Number(j.total || 0))
       setPage(Number(j.page || p))
       setSelected(new Set())
-      if (!openId && nextItems.length > 0) setOpenId(nextItems[0].id)
+      // Keep details collapsed until the user explicitly opens a message.
     } catch (e: any) {
       setErr(String(e?.message || e))
     } finally {
