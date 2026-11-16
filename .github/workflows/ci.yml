@@ -94,5 +94,8 @@ jobs:
       - name: Super Admin Program Health score and retention contracts
         run: node --test scripts/tests/program-health-score.contract.test.cjs
 
+      - name: Member subscription current and history contracts
+        run: node --test scripts/tests/member-subscription-history.contract.test.cjs
+
       - name: Build
         run: npm run build
