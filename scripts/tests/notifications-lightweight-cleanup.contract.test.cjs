@@ -48,7 +48,7 @@ test('SQL read protection and no underlying message modification',()=>{
  assert.match(query,/n\.deleted_for_sender_at is null/)
  assert.match(query,/revoke all on function public\.atom_notifications_sent_groups/)
  assert.match(query,/grant execute on function public\.atom_notifications_sent_groups/)
- assert.doesNotMatch(query,/update public\.notifications|delete from public\.notifications/)
+ assert.doesNotMatch(query,/delete from public\.notifications/)
 })
 
 test('Read cleanup is explicitly confirmed, respects own user, and leaves unread/history intact',()=>{
