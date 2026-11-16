@@ -1576,7 +1576,15 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
             <div>
               <h2 className="text-base font-semibold tracking-tight">Subscriptions</h2>
             </div>
-            <TinyBadge>{subs.length} record(s)</TinyBadge>
+            <div className="flex flex-wrap items-center gap-2">
+              {!coachSafeView ? (
+                <Link href={`/members/${encodeURIComponent(profile.user_id)}/subscriptions`}
+                  className="rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm font-semibold hover:bg-[hsl(var(--bg))]">
+                  Current &amp; full history →
+                </Link>
+              ) : null}
+              <TinyBadge>{subs.length} record(s)</TinyBadge>
+            </div>
           </div>
 
           {subs.length === 0 ? (
