@@ -15,7 +15,7 @@ test('Program Health available in Super Admin workspace with strict page and POS
  assert.match(api,/atom_program_health_update/)
 })
 test('Dashboard shows counts, attendance and transparent cash estimates',()=>{
- for(const token of ['Current enrollments','Active subscriptions','Active member target','Visited · 30d','Attributed net payments','Management notes / actions','Manage members','Review schedule','View members']){
+ for(const token of ['Program enrollments','Active program members','Active member target','Visited · 30d','Attributed net payments','Management notes / actions','Manage members','Review schedule','View members']){
   assert.ok(ui.includes(token),token)
  }
  assert.match(sql,/member_program_enrollments/)
