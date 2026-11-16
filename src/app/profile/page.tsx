@@ -286,6 +286,14 @@ export default async function ProfilePage() {
       <PageHeader title="Profile" subtitle="Your identity, access, QR and membership details." />
 
       <Section className="space-y-5">
+        <Link href={`/members/${encodeURIComponent(me.id)}/subscriptions`}
+          className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4 shadow-soft transition hover:bg-[hsl(var(--bg))]">
+          <div>
+            <div className="font-semibold">My membership &amp; subscription history</div>
+            <div className="mt-1 text-sm text-[hsl(var(--muted))]">View your current plan and full membership history on a dedicated page.</div>
+          </div>
+          <span className="rounded-full border bg-white px-3 py-1 text-sm font-semibold">View →</span>
+        </Link>
         {hasFamilyAccount ? (
           <Link
             href="/family"
