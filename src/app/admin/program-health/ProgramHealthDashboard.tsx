@@ -172,6 +172,16 @@ export default function ProgramHealthDashboard({snapshot}:{snapshot:Snapshot}){
             <div><span className="text-xs text-slate-500">Attributed net payments · 30d</span><p className="text-lg font-semibold">{money(p.net_30)}</p><span className="text-xs text-slate-500">Gross: {money(p.gross_30)}</span></div>
             <div><span className="text-xs text-slate-500">Attributed net payments · 90d</span><p className="text-lg font-semibold">{money(p.net_90)}</p><span className="text-xs text-slate-500">Gross: {money(p.gross_90)}</span></div>
           </div>
+          <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
+            <strong>Suggested action: </strong>
+            {status==='full'?'Review class demand and consider opening another group or adjusting the enrollment target.':
+              status==='watch'?'Monitor class density and prepare an additional group if demand continues.':
+              status==='not_set'?'Set an enrollment target to activate capacity alerts.':
+              status==='empty'?'Review scheduling and promote this program to prospects.':
+              p.inactive>0?'Follow up with members whose subscriptions are inactive.':
+              p.visited_30<p.active?'Review attendance and check in with members who have not scanned recently.':
+              'Continue monitoring retention, registrations and attendance.'}
+          </div>
           {p.management_note&&<p className="mt-3 rounded-xl border-l-4 border-slate-300 bg-slate-50 p-3 text-sm"><strong>Management note:</strong> {p.management_note}</p>}
           <div className="mt-4 flex flex-wrap gap-2">
             <button onClick={()=>toggle(p.key,setExpanded)} className="rounded-xl border px-3 py-2 text-sm font-semibold">
