@@ -4,6 +4,7 @@ import { useMemo, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { ChevronDown } from 'lucide-react'
+import { scoreProgram, priorityActions, type HealthSignals } from '@/lib/programHealthScore'
 
 export type ProgramMember = {
   user_id:string;member_id:string|null;name:string;active:boolean;visited_30:boolean
@@ -16,6 +17,7 @@ export type ProgramHealth = {
   members:ProgramMember[]
 }
 type Snapshot={as_of:string;methodology:string;programs:ProgramHealth[]}
+export type SignalSnapshot={as_of:string;methodology:string;programs:HealthSignals[]}
 const money = (n:number)=>new Intl.NumberFormat('en-EG',{maximumFractionDigits:0}).format(Number(n)||0)+' EGP'
 type Status='not_set'|'empty'|'room'|'watch'|'full'
 function statusOf(p:ProgramHealth):Status {
@@ -87,7 +89,7 @@ function Settings({program,done}:{program:ProgramHealth;done:()=>void}){
   </div>
 }
 
-export default function ProgramHealthDashboard({snapshot}:{snapshot:Snapshot}){
+export default function ProgramHealthDashboard({snapshot,signals}:{snapshot:Snapshot;signals:SignalSnapshot|null}){
   const router=useRouter()
   const [search,setSearch]=useState('')
   const [filter,setFilter]=useState('all')
@@ -96,11 +98,12 @@ export default function ProgramHealthDashboard({snapshot}:{snapshot:Snapshot}){
   const [editing,setEditing]=useState<string[]>([])
   // PT remains in the catalog and source data; exclude it only from this group-health dashboard.
   const all=useMemo(()=>(snapshot.programs??[]).filter(p=>!['kids-pt','adults-pt'].includes(p.key)),[snapshot.programs])
+  const signalByProgram=useMemo(()=>new Map((signals?.programs??[]).map(s=>[s.key,s])),[signals?.programs])
   const displayed=useMemo(()=>all.filter(p=>{
     const matches=(p.name+' '+p.key+' '+p.level).toLowerCase().includes(search.toLowerCase())
-    return matches&&(filter==='all'||(filter==='alerts'&&['watch','full','not_set'].includes(statusOf(p)))
+    return matches&&(filter==='all'||(filter==='alerts'&&(['watch','full','not_set'].includes(statusOf(p)) || (signalByProgram.get(p.key)?.expiring_7??0)>0 || (signals!==null && (scoreProgram(p,signalByProgram.get(p.key)).score??100)<60)))
       ||(filter==='empty'&&p.active===0)||(filter==='active'&&p.active>0))
-  }),[all,search,filter])
+  }),[all,search,filter,signalByProgram,signals])
   const totals=all.reduce((a,p)=>({enrolled:a.enrolled+p.enrolled,active:a.active+p.active,
     net30:a.net30+Number(p.net_30||0),needsAttention:a.needsAttention+(statusOf(p)==='watch'||statusOf(p)==='full'?1:0)}),
     {enrolled:0,active:0,net30:0,needsAttention:0})
@@ -125,6 +128,7 @@ export default function ProgramHealthDashboard({snapshot}:{snapshot:Snapshot}){
       <p className="mt-2 text-sm text-slate-600">{snapshot.methodology} Each member assigned to multiple programs has their cash split equally between those programs; this is an estimate, not actual program-level bookkeeping.</p>
       <p className="mt-2 text-xs text-slate-500">Snapshot as of {snapshot.as_of} (Cairo). Current assignments are used for revenue attribution, including historical payments; changing a member&apos;s program will change this estimate. Revenue is not profit and does not include expenses.</p>
     </div>
+    {signals===null&&<p role="status" className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">Renewal and trend signals are temporarily unavailable. Scores are not displayed until verified data is available.</p>}
     <div className="flex flex-wrap items-center gap-3">
       <label className="grow text-sm">Search programs
         <input className="mt-1 block w-full rounded-xl border bg-white p-3"
@@ -145,6 +149,10 @@ export default function ProgramHealthDashboard({snapshot}:{snapshot:Snapshot}){
         const isExpanded=expanded.includes(p.key)
         const isEditing=editing.includes(p.key)
         const membersOpen=membersExpanded.includes(p.key)
+        const signal=signalByProgram.get(p.key)
+        const health=signals!==null?scoreProgram(p,signal):null
+        const unvisitedActive=p.members.filter(m=>m.active&&!m.visited_30).length
+        const recommendations=priorityActions(p,signal,status,unvisitedActive)
         return <section key={p.key} className="overflow-hidden rounded-2xl border bg-white shadow-sm">
           <button type="button" onClick={()=>toggle(p.key,setExpanded)}
             aria-expanded={isExpanded} aria-controls={'program-health-details-'+p.key}
@@ -152,7 +160,7 @@ export default function ProgramHealthDashboard({snapshot}:{snapshot:Snapshot}){
             <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 lg:grid-cols-[minmax(0,2fr)_repeat(3,minmax(0,1fr))_auto]">
               <div className="min-w-0">
                 <h2 className="truncate text-base font-bold sm:text-lg">{p.name}</h2>
-                <p className="mt-1 text-xs text-slate-500">{p.level}</p>
+                <p className="mt-1 text-xs text-slate-500">{p.level}{health?' · Health '+(health.score===null?'N/A':health.score+'/100')+' · '+health.level:''}</p>
               </div>
               <div className="flex items-center gap-2 lg:order-last">
                 <span className={'hidden rounded-full px-3 py-1 text-xs font-semibold sm:inline-block '+statusClasses[status]}>{statuses[status]}</span>
@@ -167,6 +175,58 @@ export default function ProgramHealthDashboard({snapshot}:{snapshot:Snapshot}){
           </button>
           {isExpanded&&<div id={'program-health-details-'+p.key} className="border-t px-4 pb-5 pt-3 sm:px-5">
           <div className="mt-2 text-xs text-slate-500">{p.audience} · {p.level} · {p.is_active?'Catalog active':'Catalog inactive'}</div>
+          {health&&<div className="mt-4 rounded-xl border bg-slate-50 p-4">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h3 className="font-semibold">Program Health Score</h3>
+              <div className="text-right">
+                <strong className="text-xl">{health.score===null?'N/A':health.score+'/100'}</strong>
+                <p className="text-xs text-slate-500">{health.level} · {health.coverage}% measurable coverage</p>
+              </div>
+            </div>
+            {health.score!==null&&<div className="mt-3 h-2 overflow-hidden rounded-full bg-slate-200">
+              <div className={'h-full rounded-full '+(health.score>=80?'bg-emerald-600':health.score>=60?'bg-amber-500':'bg-rose-600')}
+                style={{width:health.score+'%'}}/>
+            </div>}
+            <div className="mt-4 grid gap-3 sm:grid-cols-3">
+              {health.factors.map(f=><div key={f.name} className="rounded-lg border bg-white p-3">
+                <div className="flex justify-between gap-2 text-sm font-medium">
+                  <span>{f.name}</span><span>{f.score===null?'N/A':f.score+'/100'}</span>
+                </div>
+                <p className="mt-1 text-xs text-slate-500">{f.note}</p>
+                <p className="mt-1 text-xs text-slate-500">{f.weight?f.weight+'% weight':'Excluded'}</p>
+              </div>)}
+            </div>
+            <p className="mt-3 text-xs text-slate-600">Advisory score only. Missing factors are excluded and remaining weights are normalized; low coverage or a small enrollment sample limits confidence. No financial profit or per-class attendance data is scored; gym-wide scan data cannot identify which class was attended.</p>
+            {health.lowSample&&<p className="mt-1 text-xs font-medium text-amber-800">Low-volume enrollment trends: interpret this score cautiously.</p>}
+          </div>}
+          {signal&&<div className="mt-3 grid gap-3 rounded-xl border p-3 sm:grid-cols-2">
+            <div>
+              <h3 className="text-sm font-semibold">Enrollment momentum · 30d</h3>
+              <p className="mt-1 text-sm">New assignments: <strong>{signal.joined_30}</strong> vs previous 30d <strong>{signal.joined_previous_30}</strong></p>
+              <p className="text-sm">Ended assignments: <strong>{signal.ended_30}</strong> vs previous 30d <strong>{signal.ended_previous_30}</strong></p>
+              <p className="text-sm">Net event change: <strong>{health?.trend===null?'N/A':(health?.trend??0)>0?'+':''}{health?.trend}</strong></p>
+            </div>
+            <div>
+              <h3 className="text-sm font-semibold">Renewal risk</h3>
+              <p className="mt-1 text-sm"><strong>{signal.expiring_7}</strong> active subscription(s) due in 7 days</p>
+              <p className="text-sm"><strong>{signal.expiring_30}</strong> due within 30 days (including the 7-day group)</p>
+              {signal.renewal_members.length>0&&<div className="mt-2 max-h-36 overflow-y-auto text-xs">
+                {signal.renewal_members.map(m=>{
+                  const linked=p.members.find(x=>x.user_id===m.user_id)
+                  return <div key={m.user_id} className="flex flex-wrap justify-between gap-2 border-t py-1.5">
+                    <Link className="underline" href={'/members/'+encodeURIComponent(m.user_id)}>{linked?.name||linked?.member_id||'Open member'}</Link>
+                    <span>{m.days_left} day(s) left · {m.end_date}</span>
+                  </div>
+                })}
+              </div>}
+            </div>
+          </div>}
+          <div className="mt-3 rounded-xl border border-slate-200 bg-white p-3">
+            <h3 className="text-sm font-semibold">Priority actions</h3>
+            <ol className="mt-2 list-inside list-decimal space-y-1 text-sm text-slate-700">
+              {recommendations.map(action=><li key={action}>{action}</li>)}
+            </ol>
+          </div>
           <div className="mt-4 grid grid-cols-2 gap-3 md:grid-cols-4">
             <div><div className="text-xs text-slate-500">Enrolled</div><div className="text-xl font-semibold">{p.enrolled}</div></div>
             <div><div className="text-xs text-slate-500">Active</div><div className="text-xl font-semibold">{p.active}</div></div>
@@ -191,16 +251,7 @@ export default function ProgramHealthDashboard({snapshot}:{snapshot:Snapshot}){
             <div><span className="text-xs text-slate-500">Attributed net payments · 30d</span><p className="text-lg font-semibold">{money(p.net_30)}</p><span className="text-xs text-slate-500">Gross: {money(p.gross_30)}</span></div>
             <div><span className="text-xs text-slate-500">Attributed net payments · 90d</span><p className="text-lg font-semibold">{money(p.net_90)}</p><span className="text-xs text-slate-500">Gross: {money(p.gross_90)}</span></div>
           </div>
-          <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
-            <strong>Suggested action: </strong>
-            {status==='full'?'Review class demand and consider opening another group or adjusting the enrollment target.':
-              status==='watch'?'Monitor class density and prepare an additional group if demand continues.':
-              status==='not_set'?'Set an enrollment target to activate capacity alerts.':
-              status==='empty'?'Review scheduling and promote this program to prospects.':
-              p.inactive>0?'Follow up with members whose subscriptions are inactive.':
-              p.visited_30<p.active?'Review attendance and check in with members who have not scanned recently.':
-              'Continue monitoring retention, registrations and attendance.'}
-          </div>
+
           {p.management_note&&<p className="mt-3 rounded-xl border-l-4 border-slate-300 bg-slate-50 p-3 text-sm"><strong>Management note:</strong> {p.management_note}</p>}
           <div className="mt-4 flex flex-wrap gap-2">
             <button onClick={()=>toggle(p.key,setMembersExpanded)} className="rounded-xl border px-3 py-2 text-sm font-semibold">

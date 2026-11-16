@@ -91,5 +91,8 @@ jobs:
       - name: Super Admin Program Health consolidated contract
         run: node --test scripts/tests/program-health-dashboard.contract.test.cjs
 
+      - name: Super Admin Program Health score and retention contracts
+        run: node --test scripts/tests/program-health-score.contract.test.cjs
+
       - name: Build
         run: npm run build
