@@ -3,6 +3,7 @@
 import { useMemo, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
+import { ChevronDown } from 'lucide-react'
 
 export type ProgramMember = {
   user_id:string;member_id:string|null;name:string;active:boolean;visited_30:boolean
@@ -19,13 +20,13 @@ const money = (n:number)=>new Intl.NumberFormat('en-EG',{maximumFractionDigits:0
 type Status='not_set'|'empty'|'room'|'watch'|'full'
 function statusOf(p:ProgramHealth):Status {
   if(p.target_capacity==null)return 'not_set'
-  if(p.enrolled===0)return 'empty'
-  if(p.enrolled>=p.target_capacity)return 'full'
-  if((p.enrolled/p.target_capacity)*100>=p.warning_percent)return 'watch'
+  if(p.active===0)return 'empty'
+  if(p.active>=p.target_capacity)return 'full'
+  if((p.active/p.target_capacity)*100>=p.warning_percent)return 'watch'
   return 'room'
 }
 const statuses:Record<Status,string>={
- not_set:'Set capacity',empty:'No enrollments',room:'Healthy capacity',
+ not_set:'Set capacity',empty:'No active members',room:'Healthy capacity',
  watch:'Near target',full:'At / over target'
 }
 const statusClasses:Record<Status,string>={
@@ -61,7 +62,7 @@ function Settings({program,done}:{program:ProgramHealth;done:()=>void}){
   return <div className="mt-4 space-y-3 rounded-xl border bg-slate-50 p-4">
     <p className="font-semibold">Program management</p>
     <div className="grid gap-3 sm:grid-cols-2">
-      <label className="text-sm font-medium">Enrollment target (people)
+      <label className="text-sm font-medium">Active member target (people)
         <input type="number" min="1" max="500" placeholder="Not set"
           className="mt-1 block w-full rounded-lg border bg-white p-2"
           value={capacity} onChange={e=>setCapacity(e.target.value)}/>
@@ -77,7 +78,7 @@ function Settings({program,done}:{program:ProgramHealth;done:()=>void}){
         placeholder="Example: Open a second group after 18 registrations; call inactive families."
         value={note} onChange={e=>setNote(e.target.value)}/>
     </label>
-    <p className="text-xs text-slate-500">The target is a total program enrollment target, not the number physically attending one class. Changes are audited.</p>
+    <p className="text-xs text-slate-500">The target is based on active subscriptions in this program, not total enrollments or physical attendance in a single class. Changes are audited.</p>
     {error&&<p role="alert" className="text-sm text-rose-700">{error}</p>}
     <button disabled={busy} onClick={()=>void save()}
       className="rounded-lg bg-black px-4 py-2 text-sm font-semibold text-white disabled:opacity-40">
@@ -91,12 +92,14 @@ export default function ProgramHealthDashboard({snapshot}:{snapshot:Snapshot}){
   const [search,setSearch]=useState('')
   const [filter,setFilter]=useState('all')
   const [expanded,setExpanded]=useState<string[]>([])
+  const [membersExpanded,setMembersExpanded]=useState<string[]>([])
   const [editing,setEditing]=useState<string[]>([])
-  const all=useMemo(()=>snapshot.programs??[],[snapshot.programs])
+  // PT remains in the catalog and source data; exclude it only from this group-health dashboard.
+  const all=useMemo(()=>(snapshot.programs??[]).filter(p=>!['kids-pt','adults-pt'].includes(p.key)),[snapshot.programs])
   const displayed=useMemo(()=>all.filter(p=>{
     const matches=(p.name+' '+p.key+' '+p.level).toLowerCase().includes(search.toLowerCase())
     return matches&&(filter==='all'||(filter==='alerts'&&['watch','full','not_set'].includes(statusOf(p)))
-      ||(filter==='empty'&&p.enrolled===0)||(filter==='active'&&p.enrolled>0))
+      ||(filter==='empty'&&p.active===0)||(filter==='active'&&p.active>0))
   }),[all,search,filter])
   const totals=all.reduce((a,p)=>({enrolled:a.enrolled+p.enrolled,active:a.active+p.active,
     net30:a.net30+Number(p.net_30||0),needsAttention:a.needsAttention+(statusOf(p)==='watch'||statusOf(p)==='full'?1:0)}),
@@ -106,8 +109,8 @@ export default function ProgramHealthDashboard({snapshot}:{snapshot:Snapshot}){
   return <div className="space-y-6">
     <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
       {[
-        ['Current enrollments',totals.enrolled.toLocaleString()],
-        ['Active subscriptions',totals.active.toLocaleString()],
+        ['Program enrollments',totals.enrolled.toLocaleString()],
+        ['Active program members',totals.active.toLocaleString()],
         ['Near / over target',totals.needsAttention.toLocaleString()],
         ['Attributed net cash · 30d',money(totals.net30)]
       ].map(([label,value])=><div key={label} className="rounded-2xl border bg-white p-4 shadow-sm">
@@ -118,6 +121,7 @@ export default function ProgramHealthDashboard({snapshot}:{snapshot:Snapshot}){
     <div className="rounded-2xl border bg-white p-4">
       <p className="text-sm font-semibold">How to read this dashboard</p>
       <p className="mt-1 text-sm text-slate-600">Enrolled = distinct current assigned members, excluding archived profiles. Active = current assigned members with an active subscription valid today. Visited 30d = members with at least one valid attendance scan in the last 30 calendar days.</p>
+      <p className="mt-2 text-sm text-slate-600">PT Kids and PT Adults are excluded from this group dashboard; they remain unchanged in the program catalog. Capacity thresholds count active program members only.</p>
       <p className="mt-2 text-sm text-slate-600">{snapshot.methodology} Each member assigned to multiple programs has their cash split equally between those programs; this is an estimate, not actual program-level bookkeeping.</p>
       <p className="mt-2 text-xs text-slate-500">Snapshot as of {snapshot.as_of} (Cairo). Current assignments are used for revenue attribution, including historical payments; changing a member&apos;s program will change this estimate. Revenue is not profit and does not include expenses.</p>
     </div>
@@ -137,17 +141,32 @@ export default function ProgramHealthDashboard({snapshot}:{snapshot:Snapshot}){
     <div className="space-y-4">
       {displayed.map(p=>{
         const status=statusOf(p)
-        const pct=p.target_capacity?Math.round((p.enrolled/p.target_capacity)*100):null
+        const pct=p.target_capacity?Math.round((p.active/p.target_capacity)*100):null
         const isExpanded=expanded.includes(p.key)
         const isEditing=editing.includes(p.key)
-        return <section key={p.key} className="rounded-2xl border bg-white p-4 shadow-sm sm:p-5">
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div>
-              <h2 className="text-lg font-bold">{p.name}</h2>
-              <div className="mt-1 text-xs text-slate-500">{p.audience} · {p.level} · {p.is_active?'Catalog active':'Catalog inactive'}</div>
+        const membersOpen=membersExpanded.includes(p.key)
+        return <section key={p.key} className="overflow-hidden rounded-2xl border bg-white shadow-sm">
+          <button type="button" onClick={()=>toggle(p.key,setExpanded)}
+            aria-expanded={isExpanded} aria-controls={'program-health-details-'+p.key}
+            className="w-full p-4 text-left transition hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-black sm:px-5">
+            <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 lg:grid-cols-[minmax(0,2fr)_repeat(3,minmax(0,1fr))_auto]">
+              <div className="min-w-0">
+                <h2 className="truncate text-base font-bold sm:text-lg">{p.name}</h2>
+                <p className="mt-1 text-xs text-slate-500">{p.level}</p>
+              </div>
+              <div className="flex items-center gap-2 lg:order-last">
+                <span className={'hidden rounded-full px-3 py-1 text-xs font-semibold sm:inline-block '+statusClasses[status]}>{statuses[status]}</span>
+                <ChevronDown aria-hidden="true" size={20} className={'shrink-0 transition-transform '+(isExpanded?'rotate-180':'')}/>
+              </div>
+              <div className="col-span-2 grid grid-cols-3 gap-2 border-t pt-3 lg:col-span-1 lg:contents lg:border-0 lg:pt-0">
+                <div className="lg:text-center"><span className="block text-xs text-slate-500">Enrolled</span><strong className="text-lg">{p.enrolled}</strong></div>
+                <div className="lg:text-center"><span className="block text-xs text-slate-500">Active</span><strong className="text-lg">{p.active}</strong></div>
+                <div className="lg:text-center"><span className="block text-xs text-slate-500">Active target</span><strong className="text-lg">{p.target_capacity===null?'—':p.active+' / '+p.target_capacity}</strong></div>
+              </div>
             </div>
-            <span className={'rounded-full px-3 py-1 text-xs font-semibold '+statusClasses[status]}>{statuses[status]}</span>
-          </div>
+          </button>
+          {isExpanded&&<div id={'program-health-details-'+p.key} className="border-t px-4 pb-5 pt-3 sm:px-5">
+          <div className="mt-2 text-xs text-slate-500">{p.audience} · {p.level} · {p.is_active?'Catalog active':'Catalog inactive'}</div>
           <div className="mt-4 grid grid-cols-2 gap-3 md:grid-cols-4">
             <div><div className="text-xs text-slate-500">Enrolled</div><div className="text-xl font-semibold">{p.enrolled}</div></div>
             <div><div className="text-xs text-slate-500">Active</div><div className="text-xl font-semibold">{p.active}</div></div>
@@ -160,8 +179,8 @@ export default function ProgramHealthDashboard({snapshot}:{snapshot:Snapshot}){
           </div>
           <div className="mt-4">
             <div className="flex items-center justify-between text-sm">
-              <span className="font-medium">Enrollment target</span>
-              <span>{p.target_capacity==null?'Not configured':p.enrolled+' / '+p.target_capacity+' ('+pct+'%)'}</span>
+              <span className="font-medium">Active member target</span>
+              <span>{p.target_capacity==null?'Not configured':p.active+' / '+p.target_capacity+' ('+pct+'%)'}</span>
             </div>
             <div className="mt-2 h-2 overflow-hidden rounded-full bg-slate-100">
               {p.target_capacity!=null&&<div className={'h-full rounded-full '+(status==='full'?'bg-rose-600':status==='watch'?'bg-amber-500':'bg-emerald-600')}
@@ -184,8 +203,8 @@ export default function ProgramHealthDashboard({snapshot}:{snapshot:Snapshot}){
           </div>
           {p.management_note&&<p className="mt-3 rounded-xl border-l-4 border-slate-300 bg-slate-50 p-3 text-sm"><strong>Management note:</strong> {p.management_note}</p>}
           <div className="mt-4 flex flex-wrap gap-2">
-            <button onClick={()=>toggle(p.key,setExpanded)} className="rounded-xl border px-3 py-2 text-sm font-semibold">
-              {isExpanded?'Hide members':'View members ('+p.enrolled+')'}
+            <button onClick={()=>toggle(p.key,setMembersExpanded)} className="rounded-xl border px-3 py-2 text-sm font-semibold">
+              {membersOpen?'Hide members':'View members ('+p.enrolled+')'}
             </button>
             <button onClick={()=>toggle(p.key,setEditing)} className="rounded-xl border px-3 py-2 text-sm font-semibold">
               {isEditing?'Close settings':'Set target & actions'}
@@ -193,7 +212,7 @@ export default function ProgramHealthDashboard({snapshot}:{snapshot:Snapshot}){
             <Link href="/admin/members" className="rounded-xl border px-3 py-2 text-sm font-semibold">Manage members</Link>
             <Link href="/schedule" className="rounded-xl border px-3 py-2 text-sm font-semibold">Review schedule</Link>
           </div>
-          {isExpanded&&<div className="mt-4 max-h-80 overflow-y-auto rounded-xl border">
+          {membersOpen&&<div className="mt-4 max-h-80 overflow-y-auto rounded-xl border">
             <table className="w-full text-left text-sm">
               <thead className="sticky top-0 bg-slate-50"><tr><th className="p-3">Member</th><th className="p-3">Subscription</th><th className="p-3">Visited</th></tr></thead>
               <tbody>{(p.members??[]).map(m=><tr key={m.user_id} className="border-t">
@@ -204,6 +223,7 @@ export default function ProgramHealthDashboard({snapshot}:{snapshot:Snapshot}){
             </table>
           </div>}
           {isEditing&&<Settings key={p.key+String(p.target_capacity)+p.management_note} program={p} done={()=>{setEditing(old=>old.filter(x=>x!==p.key));router.refresh()}}/>}
+          </div>}
         </section>
       })}
       {displayed.length===0&&<p className="rounded-xl border bg-white p-5 text-sm text-slate-500">No programs match the selected filter.</p>}
