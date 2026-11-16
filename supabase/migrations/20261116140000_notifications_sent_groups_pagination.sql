@@ -59,4 +59,26 @@ $$;
 revoke all on function public.atom_notifications_sent_groups(uuid,integer,integer,text,text)
   from public,anon,authenticated;
 grant execute on function public.atom_notifications_sent_groups(uuid,integer,integer,text,text) to service_role;
+
+-- Clear a user's own *read* inbox messages in one bounded-scope operation.
+-- This is a personal soft delete. Underlying delivery/accounting records remain intact.
+create or replace function public.atom_notifications_clear_read(p_actor uuid)
+returns jsonb
+language plpgsql security definer set search_path=public,pg_catalog
+as $
+declare v_count integer;
+begin
+  if p_actor is null or not exists(
+    select 1 from public.profiles where user_id=p_actor and archived_at is null
+  ) then raise exception 'NOTIFICATION_ACTOR_FORBIDDEN'; end if;
+  update public.notifications
+  set deleted_for_user_at=now()
+  where user_id=p_actor and read_at is not null and deleted_for_user_at is null;
+  get diagnostics v_count=row_count;
+  return jsonb_build_object('ok',true,'removed',v_count);
+end;
+$;
+revoke all on function public.atom_notifications_clear_read(uuid)
+  from public,anon,authenticated;
+grant execute on function public.atom_notifications_clear_read(uuid) to service_role;
 commit;
