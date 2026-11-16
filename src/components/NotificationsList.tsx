@@ -399,6 +399,29 @@ export default function NotificationsList({ isAdmin = false, sentOnly = false, i
     return true
   }
 
+  async function clearReadInbox() {
+    if (isSentView || loading) return
+    if (!confirm('Remove all read notifications from your inbox? Unread messages will stay visible and delivery records are preserved.')) return
+    setLoading(true)
+    try {
+      const r = await fetch('/api/notifications/clear-read', { method: 'POST' })
+      const j: any = await safeJson(r)
+      if (!r.ok || !j?.ok) {
+        setActionMsg(j?.error || 'Failed to clear read messages')
+        return
+      }
+      setActionMsg(`Removed ${Number(j.removed ?? 0)} read notification(s) from your inbox.`)
+      setSelected(new Set())
+      setOpenId(null)
+      window.dispatchEvent(new Event('notifications:updated'))
+      await load(1)
+    } catch {
+      setActionMsg('Failed to clear read messages')
+    } finally {
+      setLoading(false)
+    }
+  }
+
   async function deleteSelected() {
     if (isSentView || selected.size === 0) return
     const ids = Array.from(selected)
@@ -851,6 +874,13 @@ export default function NotificationsList({ isAdmin = false, sentOnly = false, i
             </div>
           </div>
         )}
+
+        {!isSentView ? (
+          <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] px-3 py-2">
+            <span className="text-xs text-[hsl(var(--muted))]">Clean up read messages without affecting unread items or the underlying history.</span>
+            <Button variant="outline" size="sm" disabled={loading} onClick={clearReadInbox}>Clear read messages</Button>
+          </div>
+        ) : null}
 
         {!isSentView && !compactUserView ? (
           <div className="mt-3 flex flex-wrap items-center gap-2 rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))] p-3">
