@@ -196,7 +196,7 @@ export default function ProgramHealthDashboard({snapshot,signals}:{snapshot:Snap
                 <p className="mt-1 text-xs text-slate-500">{f.weight?f.weight+'% weight':'Excluded'}</p>
               </div>)}
             </div>
-            <p className="mt-3 text-xs text-slate-600">Advisory score only. Missing factors are excluded and remaining weights are normalized; low coverage or a small enrollment sample limits confidence. No financial profit or per-class attendance data is scored.</p>
+            <p className="mt-3 text-xs text-slate-600">Advisory score only. Missing factors are excluded and remaining weights are normalized; low coverage or a small enrollment sample limits confidence. No financial profit or per-class attendance data is scored; gym-wide scan data cannot identify which class was attended.</p>
             {health.lowSample&&<p className="mt-1 text-xs font-medium text-amber-800">Low-volume enrollment trends: interpret this score cautiously.</p>}
           </div>}
           {signal&&<div className="mt-3 grid gap-3 rounded-xl border p-3 sm:grid-cols-2">
