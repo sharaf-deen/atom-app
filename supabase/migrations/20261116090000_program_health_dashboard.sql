@@ -82,6 +82,12 @@ begin
   where s.status='active' and s.start_date<=t.current_day and s.end_date>=t.current_day
     and (coalesce(s.subscription_type,'')<>'sessions' or coalesce(s.remaining_classes,s.sessions_total-coalesce(s.sessions_used,0),0)>0)
  ),
+ departures as (
+  select program_key,count(distinct member_user_id)::int as left_30
+  from public.member_program_enrollments
+  where is_current=false and ended_at>=now()-interval '30 days' and ended_at<=now()
+  group by program_key
+ ),
  activity as (
   select distinct a.member_id from public.attendance a
   where a.valid=true and a.date >= (select current_day-29 from today)
@@ -112,6 +118,7 @@ begin
   select e.program_key,
     count(*)::int enrolled,
     count(*) filter(where ac.member_id is not null)::int active,
+    count(*) filter(where e.started_at>=now()-interval '30 days')::int joined_30,
     count(*) filter(where act.member_id is not null)::int visited_30,
     count(*) filter(where ac.member_id is null)::int inactive,
     round(sum(coalesce(rec.gross_30,0)/nullif(cm.program_count,0)),2) as gross_30,
@@ -149,6 +156,7 @@ begin
      'management_note',coalesce(settings.management_note,''),
      'enrolled',coalesce(s.enrolled,0),'active',coalesce(s.active,0),
      'inactive',coalesce(s.inactive,0),'visited_30',coalesce(s.visited_30,0),
+     'joined_30',coalesce(s.joined_30,0),'left_30',coalesce(departures.left_30,0),
      'gross_30',coalesce(s.gross_30,0),'gross_90',coalesce(s.gross_90,0),
      'net_30',coalesce(s.net_30,0),'net_90',coalesce(s.net_90,0),
      'members',coalesce(m.member_rows,'[]'::jsonb)
@@ -156,6 +164,7 @@ begin
  ) into v_data
  from public.member_program_catalog c
  left join stats s on s.program_key=c.key
+ left join departures departures on departures.program_key=c.key
  left join members m on m.program_key=c.key
  left join public.atom_program_health_settings settings on settings.program_key=c.key;
  return v_data;
