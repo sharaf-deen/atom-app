@@ -3,7 +3,7 @@ export const revalidate = 0
 
 import Link from 'next/link'
 import { notFound, redirect } from 'next/navigation'
-import { ArrowLeft, CalendarDays, CreditCard, History, Wallet } from 'lucide-react'
+import { ArrowLeft, CreditCard, History, Wallet } from 'lucide-react'
 import { createSupabaseAdminClient } from '@/lib/supabaseAdmin'
 import { createSupabaseRSC } from '@/lib/supabaseServer'
 import { getSessionUser } from '@/lib/session'
