@@ -22,15 +22,15 @@ CREATE TABLE IF NOT EXISTS public.cib_card_approval_items (
   source_kind text NOT NULL CHECK (source_kind IN ('subscription','store','other_income')),
   source_id uuid NOT NULL,
   amount_cents bigint NOT NULL CHECK (amount_cents > 0),
+  released_at timestamptz,
   UNIQUE (approval_id,source_kind,source_id)
 );
 CREATE UNIQUE INDEX IF NOT EXISTS cib_card_approvals_active_transaction_key
   ON public.cib_card_approvals(transaction_key) WHERE released_at IS NULL;
 CREATE UNIQUE INDEX IF NOT EXISTS cib_card_approval_items_unique_source_active
   ON public.cib_card_approval_items(source_kind,source_id)
-  WHERE true;
--- The unique item index conservatively reserves a source even after release.
--- Release is an audit event; reusing a released item requires a dedicated reviewed remediation.
+  WHERE released_at IS NULL;
+-- Released source links remain auditable but become eligible for a reviewed replacement.
 CREATE INDEX IF NOT EXISTS cib_card_approvals_recent ON public.cib_card_approvals(approved_at DESC);
 
 ALTER TABLE public.cib_card_approvals ENABLE ROW LEVEL SECURITY;
@@ -70,8 +70,7 @@ BEGIN
     OR jsonb_array_length(p_items) NOT BETWEEN 1 AND 4 THEN
     RAISE EXCEPTION 'INVALID_APPROVAL_REQUEST';
   END IF;
-  v_key := encode(digest(
-    p_batch||'|'||p_transaction_date::text||'|'||upper(trim(p_approval_code))||'|'||p_gross_cents::text, 'sha256'), 'hex');
+  v_key := md5(p_batch||'|'||p_transaction_date::text||'|'||upper(trim(p_approval_code))||'|'||p_gross_cents::text);
   IF EXISTS(SELECT 1 FROM public.cib_card_approvals
       WHERE transaction_key=v_key AND released_at IS NULL) THEN
     RAISE EXCEPTION 'CIB_TRANSACTION_ALREADY_APPROVED';
@@ -97,7 +96,7 @@ BEGIN
       RAISE EXCEPTION 'SOURCE_NOT_ELIGIBLE';
     END IF;
     IF EXISTS(SELECT 1 FROM public.cib_card_approval_items
-      WHERE source_kind=v_kind AND source_id=v_id) THEN
+      WHERE source_kind=v_kind AND source_id=v_id AND released_at IS NULL) THEN
       RAISE EXCEPTION 'SOURCE_ALREADY_USED';
     END IF;
     v_sum := v_sum + v_amount;
@@ -131,7 +130,7 @@ REVOKE ALL ON FUNCTION public.cib_card_approve(text,date,date,text,bigint,jsonb,
  FROM PUBLIC,anon,authenticated;
 GRANT EXECUTE ON FUNCTION public.cib_card_approve(text,date,date,text,bigint,jsonb,text,uuid) TO service_role;
 
--- No deletion of evidence. Releasing only changes status; linked sources remain reserved.
+-- No deletion of evidence. Release retains the historical allocation snapshot.
 CREATE OR REPLACE FUNCTION public.cib_card_release(p_id uuid,p_reason text,p_actor uuid)
 RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
 BEGIN
@@ -142,6 +141,8 @@ BEGIN
   SET released_at=now(),released_by=p_actor,release_reason=trim(p_reason)
   WHERE id=p_id AND released_at IS NULL;
   IF NOT FOUND THEN RAISE EXCEPTION 'APPROVAL_NOT_ACTIVE'; END IF;
-END $$;
+  UPDATE public.cib_card_approval_items SET released_at=now()
+  WHERE approval_id=p_id AND released_at IS NULL;
+END $;
 REVOKE ALL ON FUNCTION public.cib_card_release(uuid,text,uuid) FROM PUBLIC,anon,authenticated;
 GRANT EXECUTE ON FUNCTION public.cib_card_release(uuid,text,uuid) TO service_role;
