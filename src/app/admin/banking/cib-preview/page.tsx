@@ -4,6 +4,7 @@ export const revalidate = 0
 import { redirect } from 'next/navigation'
 import AccessDeniedCard from '@/components/AccessDeniedCard'
 import CibPreviewUploader from '@/components/admin/banking/CibPreviewUploader'
+import CibPaymentPreviewUploader from '@/components/admin/banking/CibPaymentPreviewUploader'
 import { getSessionUserCached } from '@/lib/requestCache'
 
 export default async function CibMerchantPreviewPage() {
@@ -20,5 +21,6 @@ export default async function CibMerchantPreviewPage() {
       <p className="mt-2 text-sm text-slate-600">Compare CIB merchant settlement statements against individual terminal transactions. Super Admin only. No production data changes.</p>
     </div>
     <CibPreviewUploader />
+    <CibPaymentPreviewUploader />
   </main>
 }
