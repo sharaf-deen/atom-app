@@ -111,7 +111,12 @@ export async function POST(request: Request) {
     const salesByMonth = new Map<string, Totals>()
     const unique = new Set<string>()
     for (const row of tx) {
-      if (row.terminalid !== '28276801') throw new Error('Unexpected CIB terminal')
+      // CIB reports card-present batches with POS terminal 28276801, but
+      // merchant-coded M batches with merchant ID 282768 in TerminalId.
+      // Allow the latter only with the same POS terminal's M-batch prefix.
+      const directTerminal = row.terminalid === '28276801' && /^28276801[_M]/.test(row.batchno)
+      const merchantBatch = row.terminalid === '282768' && /^28276801M[0-9]+$/.test(row.batchno)
+      if (!directTerminal && !merchantBatch) throw new Error('Unexpected CIB terminal or batch number')
       const settlement = dateKey(row.settlementdate)
       const sale = dateKey(row.transactiondate)
       const g = cents(row.transactionamount), f = cents(row.transactioncommission), n = cents(row.transactionnetamount)
