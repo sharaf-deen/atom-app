@@ -175,6 +175,19 @@ export async function POST(request: Request) {
       })),
     ]
     const matches = transactions.map(t=>candidateList(t,candidates))
+    // One ATOM payment cannot establish two separate CIB payments:
+    // repeated use makes both candidate lists ambiguous until manually resolved.
+    const usage = new Map<string,number>()
+    for (const match of matches) {
+      for (const candidate of match.candidates) {
+        const key = candidate.source + ':' + candidate.id
+        usage.set(key, (usage.get(key) ?? 0) + 1)
+      }
+    }
+    for (const match of matches) {
+      if (match.candidates.some(candidate => (usage.get(candidate.source+':'+candidate.id) ?? 0)>1))
+        match.status = 'ambiguous'
+    }
     const aggregate = {
       reference_candidate:matches.filter(x=>x.status==='reference_candidate').length,
       single_candidate:matches.filter(x=>x.status==='single_candidate').length,
