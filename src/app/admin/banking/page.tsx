@@ -281,6 +281,7 @@ export default async function AdminBankingPage({
           </p>
         </div>
         <div className="page-header-actions flex flex-wrap gap-2">
+          <Button asChild variant="outline" href="/admin/banking/cib-preview">CIB merchant preview</Button>
           <Button asChild variant="outline" href="/admin/banking/classification-rules">Smart rules</Button>
           <Button asChild variant="outline" href="/admin">Super Admin Today</Button>
         </div>
