@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import CibReviewApprovalPanel from './CibReviewApprovalPanel'
 
 type Candidate = {source: string; id: string; date: string; amount: number; evidence: string}
 type Match = {
@@ -88,6 +89,7 @@ export default function CibPaymentPreviewUploader() {
             <option key={s} value={s}>{statuses[s]} ({result.aggregate[s]})</option>)}
         </select>
       </label>
+      <CibReviewApprovalPanel matches={result.matches} grouped={result.grouped}/>
       <div className="space-y-2">
         {filtered.map(m=><details key={m.transaction.row} className="rounded-xl border p-3">
           <summary className="cursor-pointer text-sm font-medium">
