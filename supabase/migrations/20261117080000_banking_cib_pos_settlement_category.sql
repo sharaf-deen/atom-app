@@ -14,7 +14,7 @@ set label = excluded.label,
 -- Do not change existing bank_transactions; only future suggestions use the revised rule.
 update public.bank_classification_rules
 set category_code = 'pos_settlement',
-    pattern = '(ATM\\s*Switch\\s*File\\s*Upload|Switch\\s*File\\s*Upload).*28276801',
+    pattern = '(ATM\s*Switch\s*File\s*Upload|Switch\s*File\s*Upload).*28276801',
     direction_scope = 'credit',
     match_field = 'description',
     updated_at = now()
@@ -27,12 +27,9 @@ insert into public.bank_classification_rules
 select
   'CIB · ATM Switch File Upload',
   'pos_settlement', 'credit', 'description',
-  '(ATM\\s*Switch\\s*File\\s*Upload|Switch\\s*File\\s*Upload).*28276801',
+  '(ATM\s*Switch\s*File\s*Upload|Switch\s*File\s*Upload).*28276801',
   8, 0.9800, 'cib_seed'
 where not exists (
   select 1 from public.bank_classification_rules
   where name = 'CIB · ATM Switch File Upload' and rule_origin = 'cib_seed'
 );
-
-comment on table public.bank_categories is
-  'Super Admin banking categories, including POS settlements as bank clearing transfers, not new customer revenue.';
