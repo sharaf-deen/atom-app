@@ -143,6 +143,6 @@ BEGIN
   IF NOT FOUND THEN RAISE EXCEPTION 'APPROVAL_NOT_ACTIVE'; END IF;
   UPDATE public.cib_card_approval_items SET released_at=now()
   WHERE approval_id=p_id AND released_at IS NULL;
-END $;
+END $$;
 REVOKE ALL ON FUNCTION public.cib_card_release(uuid,text,uuid) FROM PUBLIC,anon,authenticated;
 GRANT EXECUTE ON FUNCTION public.cib_card_release(uuid,text,uuid) TO service_role;
