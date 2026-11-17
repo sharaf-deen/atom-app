@@ -107,6 +107,52 @@ function candidateList(transaction: CardTransaction, payments: PaymentCandidate[
   return { transaction, status, candidates: possible.slice(0, 15) }
 }
 
+type GroupCandidate = {
+  payments: Array<{source: string; id: string; date: string; amount: number}>
+  total: number
+  evidence: string
+  conflicts_with_other_cib_rows: boolean
+}
+type GroupPreview = {row: number; groups: GroupCandidate[]; truncated: boolean}
+
+// Deliberately bounded search: group sizes 2–4, at most 40 nearby card records,
+// 12 displayed combinations. A cap is reported, never mistaken for no match.
+function groupedCandidates(transaction: CardTransaction, payments: PaymentCandidate[]): GroupPreview {
+  const nearby = payments.filter(p => p.amount_cents > 0 && p.amount_cents < transaction.amount_cents
+    && dayDistance(p.date, transaction.date) <= 1)
+    .sort((a,b) => dayDistance(a.date,transaction.date) - dayDistance(b.date,transaction.date)
+      || b.amount_cents-a.amount_cents || a.id.localeCompare(b.id))
+  const limited = nearby.slice(0,40)
+  const groups: GroupCandidate[] = []
+  let truncated = nearby.length > 40
+  let iterations = 0
+  const chosen: PaymentCandidate[] = []
+  function walk(start: number, remaining: number) {
+    if (groups.length >= 12 || iterations >= 80000) { truncated = true; return }
+    if (remaining === 0) {
+      if (chosen.length >= 2) groups.push({
+        payments: chosen.map(p=>({source:p.source,id:p.id,date:p.date,amount:p.amount_cents/100})),
+        total:transaction.amount_cents/100,
+        evidence:'Exact sum of '+chosen.length+' card payments within ±1 day; no receipt reference verified',
+        conflicts_with_other_cib_rows:false,
+      })
+      return
+    }
+    if (chosen.length >= 4) return
+    for (let index=start;index<limited.length;index++) {
+      iterations++
+      if (groups.length >= 12 || iterations >= 80000) {truncated=true;break}
+      const item=limited[index]
+      if (item.amount_cents > remaining) continue
+      chosen.push(item)
+      walk(index+1,remaining-item.amount_cents)
+      chosen.pop()
+    }
+  }
+  walk(0,transaction.amount_cents)
+  return {row:transaction.row,groups,truncated}
+}
+
 export async function POST(request: Request) {
   const me = await getSessionUser()
   if (!me) return json({ok:false,error:'NOT_AUTHENTICATED'},401)
@@ -188,6 +234,31 @@ export async function POST(request: Request) {
       if (match.candidates.some(candidate => (usage.get(candidate.source+':'+candidate.id) ?? 0)>1))
         match.status = 'ambiguous'
     }
+    // Grouped suggestions are independent of individual match status. Any record used
+    // by multiple plausible CIB rows is explicitly flagged, never auto-allocated.
+    const grouped = matches.map(m=>groupedCandidates(m.transaction,candidates))
+    const byPayment = new Map<string,Set<number>>()
+    for (const match of matches) {
+      for (const candidate of match.candidates) {
+        const key=candidate.source+':'+candidate.id
+        if (!byPayment.has(key)) byPayment.set(key,new Set())
+        byPayment.get(key)!.add(match.transaction.row)
+      }
+    }
+    for (const groupPreview of grouped) for (const group of groupPreview.groups)
+      for (const p of group.payments) {
+        const key=p.source+':'+p.id
+        if (!byPayment.has(key)) byPayment.set(key,new Set())
+        byPayment.get(key)!.add(groupPreview.row)
+      }
+    for (const groupPreview of grouped) for (const group of groupPreview.groups)
+      group.conflicts_with_other_cib_rows=group.payments.some(p=>
+        (byPayment.get(p.source+':'+p.id)?.size ?? 0)>1)
+    const groupedSummary = {
+      rows_with_group_candidates:grouped.filter(g=>g.groups.length>0).length,
+      rows_search_truncated:grouped.filter(g=>g.truncated).length,
+      group_combinations:grouped.reduce((s,g)=>s+g.groups.length,0),
+    }
     const aggregate = {
       reference_candidate:matches.filter(x=>x.status==='reference_candidate').length,
       single_candidate:matches.filter(x=>x.status==='single_candidate').length,
@@ -198,8 +269,8 @@ export async function POST(request: Request) {
       ok:true,read_only:true,
       totals:{ cib_transactions:transactions.length, cib_gross:transactions.reduce((s,t)=>s+t.amount_cents,0)/100,
         atom_card_records:candidates.length, atom_card_gross:candidates.reduce((s,p)=>s+p.amount_cents,0)/100 },
-      aggregate,matches,
-      warning:'These are candidate links only. Exact amount and date do not prove that an ATOM payment belongs to the CIB transaction. No payment, allocation, or reconciliation was confirmed.',
+      aggregate,matches,grouped,groupedSummary,
+      warning:'These are candidate links only, including grouped sums. Exact amount and date do not prove ownership. Group suggestions can overlap other CIB transactions. No payment, allocation, or reconciliation was confirmed.',
     })
   } catch(error) {
     return json({ok:false,error:'CIB_PAYMENT_PREVIEW_FAILED',details:error instanceof Error?error.message:'Unknown error'},400)
