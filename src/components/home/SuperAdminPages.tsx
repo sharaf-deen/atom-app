@@ -45,6 +45,7 @@ export const SUPER_ADMIN_PAGE_GROUPS = [
     { href: '/admin/cash-report', label: 'Cash Report' },
     { href: '/admin/banking', label: 'Banking' },
     { href: '/admin/banking/cash-position', label: 'Cash Position' },
+    { href: '/admin/banking/cib-preview', label: 'CIB Merchant Preview' },
     { href: '/admin/banking/classification-rules', label: 'Classification Rules' },
     { href: '/admin/banking/outflows', label: 'Outflows' },
     { href: '/admin/banking/reconciliation', label: 'Reconciliation' },
