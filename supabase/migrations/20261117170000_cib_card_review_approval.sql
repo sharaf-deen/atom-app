@@ -91,8 +91,8 @@ BEGIN
     ELSE
       RAISE EXCEPTION 'INVALID_SOURCE';
     END IF;
-    IF v_amount IS NULL OR v_amount <= 0 OR v_method <> 'card'
-      OR abs(v_date-p_transaction_date)>1 THEN
+    IF v_amount IS NULL OR v_amount <= 0 OR v_method IS DISTINCT FROM 'card'
+      OR v_date IS NULL OR abs(v_date-p_transaction_date)>1 THEN
       RAISE EXCEPTION 'SOURCE_NOT_ELIGIBLE';
     END IF;
     IF EXISTS(SELECT 1 FROM public.cib_card_approval_items
