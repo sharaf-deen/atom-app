@@ -39,6 +39,8 @@ export async function POST(req: Request) {
     return reply({ ok: false, code: 'NOT_AUTHENTICATED' }, 401)
 
   const user = identity.user
+  const userEmail = user.email
+  if (!userEmail) return reply({ ok: false, code: 'EMAIL_MISSING' }, 409)
   const requestId = user.app_metadata?.atom_registration_request_id
   const claimId = user.app_metadata?.atom_registration_claim_id
   if (typeof requestId !== 'string' || typeof claimId !== 'string')
@@ -66,7 +68,7 @@ export async function POST(req: Request) {
       { auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false } },
     )
     const { data: verified, error: verifyError } = await verifier.auth.signInWithPassword({
-      email: user.email,
+      email: userEmail,
       password: input.password,
     })
     if (verifyError || !verified.user || verified.user.id !== user.id)
