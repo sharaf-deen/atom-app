@@ -52,13 +52,13 @@ export async function POST(req: Request) {
     if (!row) return reply({ ok: false, code: 'NOT_FOUND' }, 404)
 
     if (row.status === 'completed' && row.account_activated_at)
-      return reply({ ok: true, state: 'ACTIVATED', resend_allowed: false })
+      return reply({ ok: input.action !== 'resend', state: 'ACTIVATED', resend_allowed: false }, input.action === 'resend' ? 409 : 200)
     if (row.status !== 'invitation_pending' || row.account_activated_at || row.last_error_code ||
         !row.provisioned_auth_user_id || !row.provisioning_claim_id || !row.member_user_id ||
         (row.is_minor && !row.family_id) || !row.identity_verified_at ||
         !row.invitation_dispatched_at || !row.invitation_email_id ||
         !row.account_email || row.account_email.trim().toLowerCase() !== row.verified_account_email?.trim().toLowerCase())
-      return reply({ ok: true, state: 'MANUAL_REVIEW', resend_allowed: false })
+      return reply({ ok: input.action !== 'resend', state: 'MANUAL_REVIEW', resend_allowed: false }, input.action === 'resend' ? 409 : 200)
 
     const { data: userResult, error: userError } = await admin.auth.admin.getUserById(row.provisioned_auth_user_id)
     if (userError) return reply({ ok: false, code: 'AUTH_LOOKUP_UNAVAILABLE' }, 503)
@@ -66,16 +66,16 @@ export async function POST(req: Request) {
     if (!auth || auth.email?.trim().toLowerCase() !== row.account_email.trim().toLowerCase() ||
         auth.app_metadata?.atom_registration_request_id !== row.id ||
         auth.app_metadata?.atom_registration_claim_id !== row.provisioning_claim_id)
-      return reply({ ok: true, state: 'IDENTITY_REVIEW_REQUIRED', resend_allowed: false })
+      return reply({ ok: input.action !== 'resend', state: 'IDENTITY_REVIEW_REQUIRED', resend_allowed: false }, input.action === 'resend' ? 409 : 200)
 
     if (row.password_setup_reported_at)
-      return reply({ ok: true, state: 'PASSWORD_REPORTED_ACTIVATION_INCOMPLETE', resend_allowed: false })
+      return reply({ ok: input.action !== 'resend', state: 'PASSWORD_REPORTED_ACTIVATION_INCOMPLETE', resend_allowed: false }, input.action === 'resend' ? 409 : 200)
 
     // A recorded sign-in is evidence of session use, NOT proof the password was set.
     // No admin resend in this state; let the account holder resume via their own
     // authenticated set-password page or the self-service password reset flow.
     if (auth.last_sign_in_at)
-      return reply({ ok: true, state: 'SESSION_USED_ACTIVATION_INCOMPLETE', resend_allowed: false })
+      return reply({ ok: input.action !== 'resend', state: 'SESSION_USED_ACTIVATION_INCOMPLETE', resend_allowed: false }, input.action === 'resend' ? 409 : 200)
 
     const { data: attempts, error: attemptError } = await admin
       .from('atom_registration_invitation_resend_attempts')
