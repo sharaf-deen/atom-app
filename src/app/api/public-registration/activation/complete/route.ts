@@ -37,7 +37,7 @@ export async function POST(req: Request) {
     const admin = createSupabaseAdminClient()
     // Fail closed before changing credentials. The RPC revalidates under a lock after the mutation.
     const { data: request, error: lookupError } = await admin.from('atom_public_registration_requests')
-      .select('id,status,provisioned_auth_user_id,provisioning_claim_id,invitation_dispatched_at,account_activated_at')
+      .select('id,status,is_minor,provisioned_auth_user_id,provisioning_claim_id,invitation_dispatched_at,account_activated_at')
       .eq('id', meta.atom_registration_request_id).maybeSingle()
     if (lookupError) return reply({ ok: false, code: 'LOOKUP_UNAVAILABLE' }, 503)
     if (!request || request.provisioned_auth_user_id !== identity.user.id ||
@@ -63,7 +63,7 @@ export async function POST(req: Request) {
     })
     if (finalError || completed !== true)
       return reply({ ok: false, code: 'PASSWORD_UPDATED_ACTIVATION_REVIEW_REQUIRED' }, 503)
-    return reply({ ok: true, code: 'ACTIVATED' })
+    return reply({ ok: true, code: 'ACTIVATED', next: request.is_minor ? '/family' : '/profile' })
   } catch {
     return reply({ ok: false, code: 'ACTIVATION_UNAVAILABLE' }, 503)
   }
