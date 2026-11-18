@@ -145,7 +145,7 @@ end;
 $$;
 revoke all on function public.bank_direct_income_match_v1(uuid,text,uuid,text,text,text,uuid)
   from public,anon,authenticated;
-grant execute on function public.bank_direct_income_match_v1(uuid,text,uuid,text,text,uuid)
+grant execute on function public.bank_direct_income_match_v1(uuid,text,uuid,text,text,text,uuid)
   to service_role;
 
 create or replace function public.bank_direct_income_release_v1(
