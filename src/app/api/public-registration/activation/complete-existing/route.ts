@@ -53,11 +53,8 @@ export async function POST(req: Request) {
         row.provisioning_claim_id !== claimId || !row.invitation_dispatched_at)
       return reply({ ok: false, code: 'ACCOUNT_BINDING_MISMATCH' }, 409)
 
-    // Idempotent and read-only once the original activation has completed.
-    if (row.status === 'completed' && row.account_activated_at)
-      return reply({ ok: true, code: 'ALREADY_ACTIVATED',
-        next: row.is_minor ? '/family' : '/profile' })
-    if (row.status !== 'invitation_pending' || row.account_activated_at)
+    if (!(row.status === 'invitation_pending' && !row.account_activated_at) &&
+        !(row.status === 'completed' && row.account_activated_at))
       return reply({ ok: false, code: 'REQUIRES_STAFF_REVIEW' }, 409)
 
     // Dedicated auth client: no cookie writes, persistence, refresh or sign-in
@@ -74,6 +71,12 @@ export async function POST(req: Request) {
     })
     if (verifyError || !verified.user || verified.user.id !== user.id)
       return reply({ ok: false, code: 'PASSWORD_VERIFICATION_FAILED' }, 401)
+
+    // Previously completed accounts are read-only and still require a valid
+    // password confirmation before continuing to outstanding legal setup.
+    if (row.status === 'completed')
+      return reply({ ok: true, code: 'ALREADY_ACTIVATED',
+        next: row.is_minor ? '/family' : '/profile' })
 
     // The existing SQL function locks the request and re-verifies identity,
     // claim, guardian/member bindings and invitation delivery atomically.
