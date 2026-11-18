@@ -37,12 +37,20 @@ export async function POST(req: Request) {
     const admin = createSupabaseAdminClient()
     // Fail closed before changing credentials. The RPC revalidates under a lock after the mutation.
     const { data: request, error: lookupError } = await admin.from('atom_public_registration_requests')
-      .select('id,status,provisioned_auth_user_id,provisioning_claim_id,invitation_dispatched_at,account_activated_at')
+      .select('id,status,is_minor,provisioned_auth_user_id,provisioning_claim_id,invitation_dispatched_at,account_activated_at')
       .eq('id', meta.atom_registration_request_id).maybeSingle()
     if (lookupError) return reply({ ok: false, code: 'LOOKUP_UNAVAILABLE' }, 503)
-    if (!request || request.status !== 'invitation_pending' || request.provisioned_auth_user_id !== identity.user.id
-        || request.provisioning_claim_id !== meta.atom_registration_claim_id || !request.invitation_dispatched_at
-        || request.account_activated_at)
+    if (!request || request.provisioned_auth_user_id !== identity.user.id ||
+        request.provisioning_claim_id !== meta.atom_registration_claim_id ||
+        !request.invitation_dispatched_at)
+      return reply({ ok: false, code: 'NOT_ELIGIBLE' }, 409)
+
+    // A completed registration may later use the ordinary password reset flow.
+    // This is not a new activation, and must never change the durable checkpoints.
+    if (request.status === 'completed' && request.account_activated_at)
+      return reply({ ok: false, code: 'ALREADY_ACTIVATED' }, 409)
+
+    if (request.status !== 'invitation_pending' || request.account_activated_at)
       return reply({ ok: false, code: 'NOT_ELIGIBLE' }, 409)
 
     // Auth mutation is performed by the currently authenticated Supabase user,
@@ -55,7 +63,7 @@ export async function POST(req: Request) {
     })
     if (finalError || completed !== true)
       return reply({ ok: false, code: 'PASSWORD_UPDATED_ACTIVATION_REVIEW_REQUIRED' }, 503)
-    return reply({ ok: true, code: 'ACTIVATED' })
+    return reply({ ok: true, code: 'ACTIVATED', next: request.is_minor ? '/family' : '/profile' })
   } catch {
     return reply({ ok: false, code: 'ACTIVATION_UNAVAILABLE' }, 503)
   }

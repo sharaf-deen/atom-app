@@ -12,6 +12,7 @@ export type RegistrationDeskCheckpoint = {
   family_id: string | null
   invitation_dispatch_started_at: string | null
   invitation_dispatched_at: string | null
+  password_setup_reported_at: string | null
   account_activated_at: string | null
   last_error_code: string | null
 }
@@ -60,8 +61,14 @@ export function registrationDeskDisplay(r: RegistrationDeskCheckpoint, now = Dat
     return review('Review state has no verified email. Refer to Super Admin.')
   if (r.expires_at && Date.parse(r.expires_at) <= now && ['pending_verification', 'under_review'].includes(r.status))
     return review('Request is expired. Ask Super Admin how to proceed; do not reuse its verification link.')
-  if (r.invitation_dispatched_at)
+  if (r.invitation_dispatched_at) {
+    if (r.password_setup_reported_at)
+      return review('Password setup was reported, but account activation is incomplete. Super Admin must diagnose the existing account.')
+    const sentAt = Date.parse(r.invitation_dispatched_at)
+    if (Number.isFinite(sentAt) && now - sentAt >= 12 * 60 * 60 * 1000)
+      return review('Account setup not completed after 12 hours. Super Admin should inspect the existing account and decide whether safe recovery is possible.')
     return waiting('Waiting for account setup', 'Ask the adult or parent to use the invitation link. Never request their password.')
+  }
   if (r.status === 'invitation_pending')
     return waiting('Preparing invitation', 'Provisioning is complete. Super Admin controls invitation dispatch.')
   if (r.status === 'provisioning')
