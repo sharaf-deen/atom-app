@@ -240,7 +240,7 @@ export default function ResetPasswordPage() {
       if (identityError || !identity.user) throw new Error('Your session expired. Request a new reset link.')
 
       const isRegistration = Boolean(identity.user.app_metadata?.atom_registration_request_id)
-      let pendingRegistrationActivated = false
+      let registrationDestination: '/family' | '/profile' | null = null
 
       if (isRegistration) {
         // A password reset must not bypass the registration activation gate.
@@ -252,9 +252,9 @@ export default function ResetPasswordPage() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ password }),
         })
-        const result = await response.json().catch(() => ({})) as { ok?: boolean; code?: string }
+        const result = await response.json().catch(() => ({})) as { ok?: boolean; code?: string; next?: string }
         if (response.ok && result.ok && result.code === 'ACTIVATED') {
-          pendingRegistrationActivated = true
+          registrationDestination = result.next === '/family' ? '/family' : '/profile'
         } else if (result.code === 'ALREADY_ACTIVATED') {
           // Existing completed registration: ordinary self-service password change.
           const { error } = await supabase.auth.updateUser({ password })
@@ -271,8 +271,8 @@ export default function ResetPasswordPage() {
 
       setStage('done')
       setInfo('✅ Password updated. Redirecting…')
-      const destination = pendingRegistrationActivated
-        ? '/auth/registration-consent?next=/family'
+      const destination = registrationDestination
+        ? `/auth/registration-consent?next=${encodeURIComponent(registrationDestination)}`
         : '/profile'
       setTimeout(() => router.replace(destination), 900)
     } catch (e: any) {
