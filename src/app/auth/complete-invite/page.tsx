@@ -72,6 +72,18 @@ function setPasswordUrl(nextAfterPassword: string) {
     : '/auth/set-password'
 }
 
+
+// Avoid an indefinite spinner when browser auth storage or a network request stalls.
+function withTimeout<T>(promise: PromiseLike<T>, ms: number, step: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`${step} timed out. Please try again.`)), ms)
+    Promise.resolve(promise).then(
+      value => { clearTimeout(timer); resolve(value) },
+      error => { clearTimeout(timer); reject(error) },
+    )
+  })
+}
+
 function CompleteInviteInner() {
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -89,84 +101,105 @@ function CompleteInviteInner() {
   })
 
   useEffect(() => {
-    async function run() {
-      // If user already has a session (rare), go straight to set-password
-      const { data: s0 } = await supabase.auth.getSession()
-      if (s0.session) {
-        setState({ kind: 'success', message: 'Session detected. Redirecting…' })
-        router.replace(setPasswordUrl(nextAfterPassword))
-        return
-      }
-
-      const { access_token, refresh_token, error, error_description } = parseHash(window.location.hash)
-
-      if (error || error_description) {
-        setState({
-          kind: 'error',
-          title: 'Link error',
-          message: error_description || error || 'Invalid or expired invite link.',
-        })
-        return
-      }
-
-      if (!access_token || !refresh_token) {
-        setState({
-          kind: 'error',
-          title: 'Invite link missing',
-          message:
-            'This invite link is invalid or has expired. Please request a new invite or sign in if you already have a password.',
-        })
-        return
-      }
-
-      setState({ kind: 'loading', message: 'Signing you in…' })
-
-      // 1) Set session in browser
-      const { data, error: setErr } = await supabase.auth.setSession({
-        access_token,
-        refresh_token,
-      })
-      if (setErr) {
-        setState({
-          kind: 'error',
-          title: 'Could not sign in',
-          message: setErr.message,
-        })
-        return
-      }
-
-      // 2) Sync cookies for SSR/middleware
-      const r = await fetch('/auth', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ event: 'SIGNED_IN', session: data.session }),
-      })
-
-      if (!r.ok) {
-        const j = await r.json().catch(() => ({}))
-        setState({
-          kind: 'error',
-          title: 'Server sync failed',
-          message: j?.error ?? 'Could not sync authentication cookies.',
-        })
-        return
-      }
-
-      // 3) Clean hash tokens from URL history
+    let cancelled = false
+    const fail = (title: string, message: string) => {
+      if (!cancelled) setState({ kind: 'error', title, message })
+    }
+    const redirectToPassword = () => {
+      if (cancelled) return
+      // Remove credentials from browser history only after establishing a session.
       try {
-        const clean = window.location.pathname + window.location.search
-        window.history.replaceState({}, document.title, clean)
+        window.history.replaceState({}, document.title, window.location.pathname + window.location.search)
       } catch {}
-
       setState({ kind: 'success', message: 'Account activated. Redirecting…' })
-
-      // 4) Redirect to set password (preserve next)
       router.replace(setPasswordUrl(nextAfterPassword))
     }
 
-    run()
+    async function run() {
+      try {
+        // Read credentials before the auth client can consume the URL fragment.
+        const { access_token, refresh_token, error, error_description } = parseHash(window.location.hash)
+        if (error || error_description) {
+          fail('Link error', error_description || error || 'Invalid or expired invite link.')
+          return
+        }
+
+        // A freshly opened invite contains tokens. Handle them before checking any
+        // previously stored session (which can belong to a different account).
+        if (access_token && refresh_token) {
+          if (!cancelled) setState({ kind: 'loading', message: 'Signing you in…' })
+          const { data, error: setErr } = await withTimeout(
+            supabase.auth.setSession({ access_token, refresh_token }),
+            12000,
+            'Invitation sign-in',
+          )
+          if (setErr || !data.session) {
+            fail('Could not sign in', setErr?.message || 'No session was returned for this invitation.')
+            return
+          }
+        } else {
+          // Supabase may already have consumed the invite fragment automatically;
+          // on a reopened link, an established session can still be used.
+          const { data, error: sessionErr } = await withTimeout(
+            supabase.auth.getSession(),
+            12000,
+            'Session check',
+          )
+          if (sessionErr || !data.session) {
+            fail(
+              'Invitation not available',
+              'We could not find an active invitation session. Please reopen the latest invitation email or ask ATOM reception for a new link.',
+            )
+            return
+          }
+        }
+
+        if (cancelled) return
+        setState({ kind: 'loading', message: 'Finishing activation…' })
+
+        const { data: current, error: sessionErr } = await withTimeout(
+          supabase.auth.getSession(),
+          12000,
+          'Session confirmation',
+        )
+        if (sessionErr || !current.session) {
+          fail('Session unavailable', 'Your invitation session could not be confirmed. Please retry.')
+          return
+        }
+
+        const controller = new AbortController()
+        const timer = setTimeout(() => controller.abort(), 12000)
+        try {
+          const response = await fetch('/auth', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'same-origin',
+            body: JSON.stringify({ event: 'SIGNED_IN', session: current.session }),
+            signal: controller.signal,
+          })
+          if (!response.ok) {
+            const payload = await response.json().catch(() => ({}))
+            fail('Server sync failed', payload?.error ?? 'Could not sync authentication cookies.')
+            return
+          }
+        } finally {
+          clearTimeout(timer)
+        }
+
+        redirectToPassword()
+      } catch (e) {
+        fail(
+          'Activation could not finish',
+          e instanceof Error ? e.message : 'An unexpected error occurred. Please retry.',
+        )
+      }
+    }
+
+    void run()
+    return () => { cancelled = true }
   }, [router, supabase, nextAfterPassword])
 
+  const retry = () => window.location.reload()
   const goLogin = () => router.replace(loginUrl(nextAfterPassword))
   const goSetPassword = () => router.replace(setPasswordUrl(nextAfterPassword))
 
@@ -187,7 +220,7 @@ function CompleteInviteInner() {
                 <div className="mt-1">{state.message}</div>
               </div>
 
-              <div className="pt-2 flex gap-2 flex-wrap">
+              <div className="pt-2 flex gap-2 flex-wrap">\n                <button onClick={retry} className="border rounded-lg px-4 py-2 text-sm hover:bg-gray-50">\n                  Try again\n                </button>
                 <button onClick={goLogin} className="border rounded-lg px-4 py-2 text-sm hover:bg-gray-50">
                   Go to login
                 </button>
