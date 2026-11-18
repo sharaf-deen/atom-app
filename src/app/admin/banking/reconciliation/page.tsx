@@ -9,6 +9,7 @@ import FinanceReconciliationNav from '@/components/finance/FinanceReconciliation
 import BankUnifiedReviewBoard from '@/components/admin/banking/BankUnifiedReviewBoard'
 import BankAssistedBulk2J from '@/components/admin/banking/BankAssistedBulk2J'
 import BankBulkReconciliationPreview from '@/components/admin/banking/BankBulkReconciliationPreview'
+import BankDirectIncomeMatcher, { type DirectIncomeMatch, type DirectIncomeSource } from '@/components/admin/banking/BankDirectIncomeMatcher'
 import BankPaymentMatcher, {
   type BankPaymentBatch,
   type BankPaymentMatch,
@@ -140,7 +141,57 @@ export default async function BankingReconciliationPage({
       .limit(2000),
   ])
 
+  const extendedFrom = new Date(from + 'T12:00:00Z')
+  extendedFrom.setUTCDate(extendedFrom.getUTCDate() - 14)
+  const extendedTo = new Date(to + 'T12:00:00Z')
+  extendedTo.setUTCDate(extendedTo.getUTCDate() + 14)
+  const candidateFrom = extendedFrom.toISOString().slice(0,10)
+  const candidateTo = extendedTo.toISOString().slice(0,10)
+  const [directResult, salesResult, externalResult] = await Promise.all([
+    admin.from('bank_direct_income_matches')
+      .select('id,bank_transaction_id,source_kind,source_id,matched_amount,note,matched_at')
+      .is('released_at',null).order('matched_at',{ascending:false}).limit(5000),
+    admin.from('store_sales')
+      .select('id,purchase_date,buyer_full_name,paid_cents,payment_method,status')
+      .gte('purchase_date',candidateFrom).lte('purchase_date',candidateTo)
+      .in('status',['paid','delivered']).in('payment_method',['instapay','bank_transfer'])
+      .order('purchase_date',{ascending:false}).limit(3000),
+    admin.from('external_income_entries')
+      .select('id,entry_date,title,amount,payment_method')
+      .gte('entry_date',candidateFrom).lte('entry_date',candidateTo)
+      .in('payment_method',['instapay','bank_transfer'])
+      .order('entry_date',{ascending:false}).limit(2000),
+  ])
+  const directMatches = (directResult.data ?? []).map((r:any) => ({
+    id:String(r.id),bank_transaction_id:String(r.bank_transaction_id),
+    source_kind:String(r.source_kind),source_id:String(r.source_id),
+    matched_amount:Number(r.matched_amount ?? 0),note:String(r.note ?? ''),
+    matched_at:String(r.matched_at),
+  })) as DirectIncomeMatch[]
+  const directByTransaction = new Map<string,DirectIncomeMatch[]>()
+  const directMatchedSources = new Set<string>()
+  for(const match of directMatches) {
+    directByTransaction.set(match.bank_transaction_id,[
+      ...(directByTransaction.get(match.bank_transaction_id) ?? []),match
+    ])
+    directMatchedSources.add(match.source_kind+':'+match.source_id)
+  }
+  const directSources:DirectIncomeSource[] = [
+    ...(salesResult.data ?? []).map((s:any) => ({
+      id:String(s.id),kind:'store_sale' as const,date:String(s.purchase_date),
+      label:'Store · '+String(s.buyer_full_name ?? 'Unknown buyer'),
+      amount:Number(s.paid_cents ?? 0)/100,method:String(s.payment_method),
+      matched:directMatchedSources.has('store_sale:'+s.id),
+    })),
+    ...(externalResult.data ?? []).map((e:any) => ({
+      id:String(e.id),kind:'external_income' as const,date:String(e.entry_date),
+      label:String(e.title),amount:Number(e.amount ?? 0),
+      method:String(e.payment_method),
+      matched:directMatchedSources.has('external_income:'+e.id),
+    }))
+  ]
   const loadError =
+    directResult.error?.message || salesResult.error?.message || externalResult.error?.message ||
     creditsResult.error?.message
     || matchesResult.error?.message
     || batchesResult.error?.message
@@ -226,7 +277,7 @@ export default async function BankingReconciliationPage({
     status: 'unmatched' | 'partial' | 'matched'
   } {
     const active = matchesByTransaction.get(row.id) ?? []
-    const matched = active.reduce((sum, match) => sum + match.matched_amount, 0)
+    const matched = active.reduce((sum, match) => sum + match.matched_amount, 0) + (directByTransaction.get(row.id) ?? []).reduce((sum,m)=>sum+m.matched_amount,0)
     const amount = Number(row.amount ?? 0)
     const remaining = Math.max(0, amount - matched)
     const status: 'unmatched' | 'partial' | 'matched' =
@@ -428,12 +479,22 @@ export default async function BankingReconciliationPage({
                 </div>
               </div>
 
-              <BankPaymentMatcher
+              {!(directByTransaction.get(row.id) ?? []).length ? <BankPaymentMatcher
                 transactionId={row.id}
                 transactionDate={row.transaction_date}
                 transactionAmount={Number(row.amount ?? 0)}
                 activeMatches={active}
                 batches={batches}
+              /> : null}
+              <BankDirectIncomeMatcher
+                bankTransactionId={row.id}
+                transactionDate={row.transaction_date}
+                amount={Number(row.amount ?? 0)}
+                category={row.category_code}
+                classificationStatus={row.classification_status}
+                batchMatched={active.reduce((sum,m)=>sum+m.matched_amount,0)}
+                matches={directByTransaction.get(row.id) ?? []}
+                sources={directSources}
               />
             </article>
           )
