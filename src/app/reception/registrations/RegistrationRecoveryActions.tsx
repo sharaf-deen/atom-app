@@ -20,7 +20,7 @@ const guidance: Record<RecoveryState, string> = {
   MANUAL_REVIEW: 'Account checkpoints conflict or are incomplete. Do not create another account or resend an invitation.',
   IDENTITY_REVIEW_REQUIRED: 'The Auth user does not match verified registration provenance. Manual security review required.',
   PASSWORD_REPORTED_ACTIVATION_INCOMPLETE: 'Password setup was reported but activation did not finalize. Review the account; never mark it activated manually.',
-  SESSION_USED_ACTIVATION_INCOMPLETE: 'The parent opened an authenticated session, but ATOM activation is incomplete. Ask them to use Set Password if still signed in, or request a fresh password reset at /reset. Do not send another invitation without an identity review.',
+  SESSION_USED_ACTIVATION_INCOMPLETE: 'The parent opened an authenticated session, but ATOM activation is incomplete. If the parent already knows their password, ask them to sign in and open /auth/complete-existing-registration. They confirm their current password; it is not changed. Do not resend an invitation without identity review.',
   RESEND_AVAILABLE: 'No login recorded. A controlled invitation resend can be requested with Super Admin confirmation.',
   INVITATION_PENDING: 'No login recorded. Resend is unavailable due to feature settings, cooldown, attempt limits, or an unresolved delivery attempt.',
 }
@@ -83,6 +83,9 @@ export default function RegistrationRecoveryActions({ requestId }: { requestId: 
       {diagnosis?.state && <div aria-live="polite" className="space-y-2">
         <p className="font-semibold">{diagnosis.state.replaceAll('_', ' ')}</p>
         <p className="text-xs text-slate-700">{guidance[diagnosis.state]}</p>
+        {diagnosis.state === 'SESSION_USED_ACTIVATION_INCOMPLETE' && <p className="text-xs text-slate-700">
+          Share this link with the account holder: <a className="underline" href="/auth/complete-existing-registration" target="_blank" rel="noopener noreferrer">Complete existing registration</a>. They must authenticate on their own device.
+        </p>}
         {diagnosis.resend_allowed && <>
           <label className="block font-medium">Reason for sending another invitation (12–1000 characters)
             <textarea rows={3} maxLength={1000} value={reason} onChange={e => { setReason(e.target.value); setConfirmed(false) }}
