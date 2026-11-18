@@ -32,7 +32,7 @@ export async function POST(req: Request) {
         !['store_sale', 'external_income', 'new_small_income'].includes(mode) ||
         (mode !== 'new_small_income' && !uuid(sourceId)) ||
         note.length < 15 || note.length > 500 ||
-        (mode === 'new_small_income' && (title.length < 5 || title.length > 140)) ||
+        (mode === 'new_small_income' && (title.length < 5 || title.length > 140 || !['bar','store','other'].includes(String(body.source_key ?? '')))) ||
         body.verified !== true)
       return reply({ ok: false, error: 'INVALID_OR_UNVERIFIED_MATCH' }, 400)
 
@@ -41,6 +41,7 @@ export async function POST(req: Request) {
       p_mode: mode,
       p_source_id: mode === 'new_small_income' ? null : sourceId,
       p_title: mode === 'new_small_income' ? title : null,
+      p_source_key: mode === 'new_small_income' ? body.source_key : null,
       p_note: note,
       p_actor: me.id,
     })
