@@ -97,6 +97,9 @@ jobs:
       - name: Member subscription current and history contracts
         run: node --test scripts/tests/member-subscription-history.contract.test.cjs
 
+      - name: Refund cancellation preserves contractual plan dates
+        run: node --test scripts/tests/refund-cancel-preserve-contract-end.contract.test.cjs
+
       - name: Notifications lightweight cleanup and deletion integrity
         run: node --test scripts/tests/notifications-lightweight-cleanup.contract.test.cjs
 
