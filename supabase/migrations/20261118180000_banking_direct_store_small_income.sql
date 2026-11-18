@@ -32,7 +32,7 @@ grant select,insert,update on public.bank_direct_income_matches to service_role;
 
 create or replace function public.bank_direct_income_match_v1(
   p_bank_transaction_id uuid, p_mode text, p_source_id uuid,
-  p_title text, p_note text, p_actor uuid
+  p_title text, p_source_key text, p_note text, p_actor uuid
 ) returns uuid
 language plpgsql security definer set search_path = ''
 as $$
@@ -76,7 +76,7 @@ begin
     select * into v_sale from public.store_sales where id=p_source_id for update;
     if not found or v_sale.status not in ('paid','delivered')
        or v_sale.payment_method not in ('instapay','bank_transfer')
-       or v_sale.paid_cents <= 0 or v_sale.paid_cents % 100 <> 0 then
+       or v_sale.paid_cents <= 0 then
       raise exception 'STORE_SALE_NOT_ELIGIBLE';
     end if;
     v_kind := 'store_sale';
@@ -97,7 +97,10 @@ begin
   else
     if v_tx.amount > 500 or v_tx.category_code not in ('other_income','store_income')
        or v_tx.classification_status <> 'confirmed'
-       or char_length(btrim(coalesce(p_title,''))) not between 5 and 140 then
+       or char_length(btrim(coalesce(p_title,''))) not between 5 and 140
+       or p_source_key not in ('bar','store','other')
+       or (v_tx.category_code='store_income' and p_source_key <> 'store')
+       or (v_tx.category_code='other_income' and p_source_key = 'store') then
       raise exception 'SMALL_INCOME_REQUIRES_CONFIRMED_CATEGORY_AND_TITLE';
     end if;
     v_kind := 'external_income';
@@ -109,7 +112,7 @@ begin
     insert into public.external_income_entries
       (entry_date,source_key,title,amount,payment_method,note,created_by,updated_by)
     values
-      (v_date,case when v_tx.category_code='store_income' then 'store' else 'bar' end,
+      (v_date,p_source_key,
        btrim(p_title),v_amount,v_method,
        'Bank-origin small income '||coalesce(v_tx.reference,v_tx.id::text)||' · '||btrim(p_note),
        p_actor,p_actor)
@@ -133,11 +136,6 @@ begin
   ) then
     raise exception 'INCOME_ALREADY_VALIDATED_IN_BATCH';
   end if;
-  if v_kind='store_sale' and exists (
-    select 1 from public.store_sale_reconciliations r where r.sale_id=v_id
-  ) then
-    raise exception 'STORE_SALE_ALREADY_RECONCILED';
-  end if;
   insert into public.bank_direct_income_matches
     (bank_transaction_id,source_kind,source_id,matched_amount,note,matched_by)
   values (v_tx.id,v_kind,v_id,v_amount,btrim(p_note),p_actor)
@@ -145,7 +143,7 @@ begin
   return v_match_id;
 end;
 $$;
-revoke all on function public.bank_direct_income_match_v1(uuid,text,uuid,text,text,uuid)
+revoke all on function public.bank_direct_income_match_v1(uuid,text,uuid,text,text,text,uuid)
   from public,anon,authenticated;
 grant execute on function public.bank_direct_income_match_v1(uuid,text,uuid,text,text,uuid)
   to service_role;
