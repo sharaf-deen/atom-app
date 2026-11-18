@@ -88,9 +88,7 @@ function effectiveSubscriptionStatus(subscription: Props['subscription']) {
 }
 
 function cancellationEndDate(subscription: Props['subscription']) {
-  const today = todayDateOnly()
-  const currentEndDate = normalizeDateOnly(subscription?.end_date)
-  return currentEndDate && currentEndDate < today ? currentEndDate : today
+  return normalizeDateOnly(subscription?.end_date)
 }
 
 function shortenMaxEndDate(subscription: Props['subscription']) {
@@ -315,7 +313,7 @@ export default function MembershipRefundSubscriptionImpactActions({ refund, subs
     { label: 'Current end date', value: formatDate(subscription?.end_date) },
     { label: 'Decision', value: impactLabel(selectedAction) },
     { label: 'New status', value: expectedStatus(selectedAction, subscription, shortenEndDate) },
-    { label: 'New end date', value: expectedEndDate(selectedAction, subscription, shortenEndDate) },
+    { label: selectedAction === 'cancel_subscription' ? 'Contract end date (unchanged)' : 'New end date', value: expectedEndDate(selectedAction, subscription, shortenEndDate) },
     { label: 'Decision reason', value: cleanReason || '—' },
     { label: 'Original payment/refund records', value: 'Preserved' },
   ] : []
@@ -381,7 +379,7 @@ export default function MembershipRefundSubscriptionImpactActions({ refund, subs
 
           {selectedAction === 'cancel_subscription' ? (
             <div className="rounded-2xl border border-rose-200 bg-rose-50 p-3 text-xs text-rose-900">
-              This will set the linked subscription status to cancelled. Its end date becomes today only when today is earlier than the existing end date; a past end date is never moved forward.
+              This will set the linked subscription status to cancelled immediately. The contractual start/end dates stay unchanged, so access ends through the cancelled status without rewriting the original membership duration.
             </div>
           ) : null}
 
