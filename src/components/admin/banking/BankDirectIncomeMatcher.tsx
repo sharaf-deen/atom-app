@@ -40,6 +40,7 @@ export default function BankDirectIncomeMatcher(props: Props) {
   const [mode, setMode] = useState<'store_sale' | 'external_income' | 'new_small_income'>('store_sale')
   const [sourceId, setSourceId] = useState('')
   const [title, setTitle] = useState('')
+  const [sourceKey, setSourceKey] = useState<'bar' | 'store' | 'other'>('bar')
   const [note, setNote] = useState('')
   const [verified, setVerified] = useState(false)
   const [releaseReasons, setReleaseReasons] = useState<Record<string, string>>({})
@@ -57,7 +58,8 @@ export default function BankDirectIncomeMatcher(props: Props) {
     ['other_income', 'store_income'].includes(props.category ?? '')
   const canMatch = !busy && !active && props.batchMatched < 0.009 &&
     verified && note.trim().length >= 15 &&
-    (mode === 'new_small_income' ? smallEligible && title.trim().length >= 5 : !!sourceId)
+    (mode === 'new_small_income' ? smallEligible && title.trim().length >= 5 &&
+      (props.category === 'store_income' ? sourceKey === 'store' : sourceKey !== 'store') : !!sourceId)
 
   async function perform(body: Record<string, unknown>) {
     setBusy(true)
@@ -125,6 +127,16 @@ export default function BankDirectIncomeMatcher(props: Props) {
             Small-income booking requires a confirmed Other Income / Store category and a bank credit of at most EGP 500.
           </p> : null}
           <label className="block space-y-1">
+            <span className="font-medium">Small income ledger</span>
+            <select className="w-full rounded-xl border bg-white px-3 py-2" value={sourceKey}
+              onChange={e => { setSourceKey(e.target.value as typeof sourceKey); setVerified(false) }}>
+              <option value="bar">Bar / drinks</option>
+              <option value="store">Store (small items)</option>
+              <option value="other">Other income</option>
+            </select>
+            <span className="text-xs text-slate-600">Store Income requires Store; Other Income requires Bar or Other.</span>
+          </label>
+          <label className="block space-y-1">
             <span className="font-medium">Actual item or service sold</span>
             <input className="w-full rounded-xl border px-3 py-2" maxLength={140}
               placeholder="Example: Juice sold to Imran Semenov"
@@ -150,7 +162,7 @@ export default function BankDirectIncomeMatcher(props: Props) {
             action: 'match', bank_transaction_id: props.bankTransactionId,
             mode, source_id: mode === 'new_small_income' ? null : sourceId,
             title: mode === 'new_small_income' ? title.trim() : null,
-            note: note.trim(), verified: true,
+            note: note.trim(), source_key: mode === 'new_small_income' ? sourceKey : null, verified: true,
           })}>
           {busy ? 'Saving…' : mode === 'new_small_income' ? 'Record & match small income' : 'Confirm direct match'}
         </button>
