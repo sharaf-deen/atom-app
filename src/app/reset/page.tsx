@@ -236,12 +236,45 @@ export default function ResetPasswordPage() {
 
     setBusy(true)
     try {
-      const { error } = await supabase.auth.updateUser({ password })
-      if (error) throw error
+      const { data: identity, error: identityError } = await supabase.auth.getUser()
+      if (identityError || !identity.user) throw new Error('Your session expired. Request a new reset link.')
+
+      const isRegistration = Boolean(identity.user.app_metadata?.atom_registration_request_id)
+      let registrationDestination: '/family' | '/profile' | null = null
+
+      if (isRegistration) {
+        // A password reset must not bypass the registration activation gate.
+        // This endpoint verifies the user's existing registration identity and
+        // atomically finalizes the account only after saving their new password.
+        const response = await fetch('/api/public-registration/activation/complete', {
+          method: 'POST',
+          credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ password }),
+        })
+        const result = await response.json().catch(() => ({})) as { ok?: boolean; code?: string; next?: string }
+        if (response.ok && result.ok && result.code === 'ACTIVATED') {
+          registrationDestination = result.next === '/family' ? '/family' : '/profile'
+        } else if (result.code === 'ALREADY_ACTIVATED') {
+          // Existing completed registration: ordinary self-service password change.
+          const { error } = await supabase.auth.updateUser({ password })
+          if (error) throw error
+        } else {
+          throw new Error(result.code === 'PASSWORD_UPDATED_ACTIVATION_REVIEW_REQUIRED'
+            ? 'Password saved, but ATOM activation needs staff review. Contact reception.'
+            : 'ATOM account activation could not finish. Contact reception before retrying.')
+        }
+      } else {
+        const { error } = await supabase.auth.updateUser({ password })
+        if (error) throw error
+      }
 
       setStage('done')
       setInfo('✅ Password updated. Redirecting…')
-      setTimeout(() => router.replace('/profile'), 900)
+      const destination = registrationDestination
+        ? `/auth/registration-consent?next=${encodeURIComponent(registrationDestination)}`
+        : '/profile'
+      setTimeout(() => router.replace(destination), 900)
     } catch (e: any) {
       setErr(e?.message || 'Unexpected error')
     } finally {

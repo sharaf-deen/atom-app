@@ -28,7 +28,7 @@ export default async function RegistrationDeskPage() {
 
   const admin = getSupabaseAdminClientCached()
   const result = await admin.from('atom_public_registration_requests')
-    .select('id,participant_first_name,participant_last_name,is_minor,status,submitted_at,expires_at,identity_verified_at,provisioning_claim_id,auth_provisioning_started_at,provisioned_auth_user_id,auth_provisioning_recorded_at,member_user_id,family_id,invitation_dispatch_started_at,invitation_dispatched_at,account_activated_at,last_error_code')
+    .select('id,participant_first_name,participant_last_name,is_minor,status,submitted_at,expires_at,identity_verified_at,provisioning_claim_id,auth_provisioning_started_at,provisioned_auth_user_id,auth_provisioning_recorded_at,member_user_id,family_id,invitation_dispatch_started_at,invitation_dispatched_at,password_setup_reported_at,account_activated_at,last_error_code')
     .order('submitted_at', { ascending: false }).limit(30)
   const rows = (result.data || []) as RegistrationRow[]
   const isSuperAdmin = normalizeRole(me.role) === 'super_admin'
