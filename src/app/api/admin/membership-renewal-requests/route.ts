@@ -26,6 +26,20 @@ async function eligibleRenewalSubscriptions(admin:ReturnType<typeof createSupaba
   .select('completed_subscription_id').in('completed_subscription_id',ids):{data:[],error:null}
  if(linkedError)throw linkedError
  const used=new Set((linked||[]).map(x=>x.completed_subscription_id))
+ const {data:ledger,error:ledgerError}=ids.length
+  ? await admin.from('subscription_payments').select('subscription_id,amount,member_id').in('subscription_id',ids)
+  : {data:[],error:null}
+ if(ledgerError)throw ledgerError
+ // A verified upload or a typed reference is NOT an accounting entry.
+ // Require the existing subscription payment ledger to agree with the new subscription.
+ const ledgerAmounts=new Map<string,number>()
+ const ledgerCounts=new Map<string,number>()
+ for(const payment of ledger||[]){
+  if(payment.member_id!==r.member_id)continue
+  ledgerAmounts.set(payment.subscription_id,(ledgerAmounts.get(payment.subscription_id)||0)+Number(payment.amount||0))
+  ledgerCounts.set(payment.subscription_id,(ledgerCounts.get(payment.subscription_id)||0)+1)
+ }
+
  const {data:source}=r.source_subscription_id
   ? await admin.from('subscriptions').select('end_date,status').eq('id',r.source_subscription_id).maybeSingle()
   : {data:null}
@@ -33,6 +47,13 @@ async function eligibleRenewalSubscriptions(admin:ReturnType<typeof createSupaba
    x.id!==r.source_subscription_id && !used.has(x.id) &&
    ['active','expired'].includes(x.status) &&
    Math.abs(Number(x.amount??0)+Number(x.amount_due??0)-Number(r.approved_price_egp))<=0.01 &&
+   // A ready-to-renew request is fully paid: outstanding dues cannot masquerade as a settled renewal.
+   Number(x.amount_due??0)<=0.01 &&
+   Math.abs(Number(x.amount??0)-Number(r.payment_verified_amount_egp??0))<=0.01 &&
+   // Do not complete a renewal if its financial ledger is absent or inconsistent.
+   (Number(x.amount??0)===0 ||
+     ((ledgerCounts.get(x.id)||0)>0 &&
+      Math.abs((ledgerAmounts.get(x.id)||0)-Number(x.amount??0))<=0.01)) &&
    (!source || source.status!=='active' || !source.end_date || !x.start_date || x.start_date>source.end_date)
  ).map(x=>({id:x.id,plan:x.plan,start_date:x.start_date,end_date:x.end_date,
    amount:x.amount,amount_due:x.amount_due,created_at:x.created_at,status:x.status}))

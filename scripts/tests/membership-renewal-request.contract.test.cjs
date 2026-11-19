@@ -60,3 +60,12 @@ test('manual fulfillment is selected from server-verified eligible subscriptions
  assert.match(uiAdmin,/Confirm manual renewal and complete/)
  assert.doesNotMatch(uiAdmin,/Renewed subscription UUID/)
 })
+
+test('financial fulfillment checks ledger totals and zero outstanding dues without posting payments',()=>{
+ assert.match(admin,/from\('subscription_payments'\)\.select\('subscription_id,amount,member_id'\)/)
+ assert.match(admin,/ledgerCounts\.get\(x\.id\)/)
+ assert.match(admin,/ledgerAmounts\.get\(x\.id\)/)
+ assert.match(admin,/Number\(x\.amount_due\?\?0\)<=0\.01/)
+ assert.match(admin,/Number\(r\.payment_verified_amount_egp\?\?0\)/)
+ assert.doesNotMatch(admin,/from\('subscription_payments'\)\.insert/)
+})
