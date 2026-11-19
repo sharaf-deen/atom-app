@@ -22,6 +22,17 @@ export default function AdminMembershipRenewals(){
   setVerificationReference(candidate?.payment_verification_reference||'')
   setSubscriptionId(candidate?.completed_subscription_id||'')
  }
+ async function reviewProof(proof:any,outcome:'verified'|'rejected'){
+  if(!row)return;let amount=0;let explanation=''
+  if(outcome==='verified'){const entered=prompt('Verified received amount (EGP)',String(proof.declared_amount_egp||''));if(entered===null)return;amount=Number(entered);if(!Number.isFinite(amount)||amount<=0){setError('Invalid amount');return}}
+  else{const entered=prompt('Why was this proof rejected?');if(!entered)return;explanation=entered}
+  setBusy(true);setError('')
+  try{
+   const res=await fetch('/api/membership-renewal-requests/proofs',{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({proof_id:proof.id,outcome,verified_amount_egp:amount,reason:explanation})})
+   const j=await res.json();if(!res.ok)throw Error(j.error||'Review failed')
+   await choose(row.id);setNotice('Receipt '+outcome+'. Payment confirmation remains a separate step.')
+  }catch(e:any){setError(e.message||'Review failed')}finally{setBusy(false)}
+ }
  async function act(action:string){
   if(!row)return;setBusy(true);setError('');setNotice('')
   try{
@@ -93,6 +104,7 @@ export default function AdminMembershipRenewals(){
       {proofs.length?proofs.map(p=><div key={p.id} className="rounded-lg border p-2 text-sm">
        <span>{p.original_filename} · {p.review_status} · {p.declared_amount_egp??'—'} EGP</span>
        {p.url?<a className="ml-2 underline" target="_blank" rel="noopener noreferrer" href={p.url}>View file</a>:null}
+       {p.review_status==='pending'?<div className="mt-2 flex gap-2"><button className="rounded-lg border px-2 py-1" disabled={busy} onClick={()=>void reviewProof(p,'verified')}>Verify receipt</button><button className="rounded-lg border px-2 py-1 text-red-700" disabled={busy} onClick={()=>void reviewProof(p,'rejected')}>Reject receipt</button></div>:null}
       </div>):<p className="text-sm text-gray-600">No uploaded receipts.</p>}
      </div>
     </>}
