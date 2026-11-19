@@ -11,6 +11,7 @@ export default function MembershipRenewalRequestsClient(){
  const [plan,setPlan]=useState('6m'),[method,setMethod]=useState('instapay'),[comment,setComment]=useState('')
  const [quote,setQuote]=useState<Quote|null>(null),[requests,setRequests]=useState<RequestRow[]>([])
  const [support,setSupport]=useState<string|null>(null),[events,setEvents]=useState<any[]>([])
+ const [receipt,setReceipt]=useState<File|null>(null),[declaredAmount,setDeclaredAmount]=useState(''),[paymentReference,setPaymentReference]=useState(''),[proofs,setProofs]=useState<any[]>([])
  const [activeId,setActiveId]=useState(''),[loading,setLoading]=useState(false),[error,setError]=useState(''),[notice,setNotice]=useState('')
  const openRequest=requests.find(r=>!['cancelled','rejected','completed'].includes(r.status))
  async function refresh(){
@@ -24,7 +25,7 @@ export default function MembershipRenewalRequestsClient(){
    .then(r=>r.json()).then(j=>{if(!cancelled)setQuote(j.ok?j.quote:null)}).catch(()=>{if(!cancelled)setQuote(null)})
   return()=>{cancelled=true}
  },[plan])
- async function openDetail(id:string){setActiveId(id);const r=await fetch('/api/membership-renewal-requests?id='+id,{cache:'no-store'});const j=await r.json();setEvents(r.ok?j.events||[]:[])}
+ async function openDetail(id:string){setActiveId(id);const [r,p]=await Promise.all([fetch('/api/membership-renewal-requests?id='+id,{cache:'no-store'}),fetch('/api/membership-renewal-requests/proofs?request_id='+id,{cache:'no-store'})]);const j=await r.json();const pj=await p.json();setEvents(r.ok?j.events||[]:[]);setProofs(p.ok?pj.proofs||[]:[])}
  async function submit(){
   setError('');setNotice('');setLoading(true)
   try{
@@ -46,6 +47,19 @@ export default function MembershipRenewalRequestsClient(){
    await refresh();await openDetail(r.id)
   }catch(e:any){setError(e?.message||'Unable to update')}
   finally{setLoading(false)}
+ }
+ async function uploadReceipt(id:string){
+  if(!receipt)return;setLoading(true);setError('');setNotice('')
+  try{
+   const form=new FormData();form.set('request_id',id);form.set('file',receipt)
+   if(declaredAmount.trim())form.set('declared_amount_egp',declaredAmount)
+   if(paymentReference.trim())form.set('reference',paymentReference)
+   const r=await fetch('/api/membership-renewal-requests/proofs',{method:'POST',body:form})
+   const j=await r.json();if(!r.ok)throw Error(j.error||'Upload failed')
+   setNotice('Receipt uploaded for manual verification; no payment has been recorded.')
+   setReceipt(null);setDeclaredAmount('');setPaymentReference('')
+   await openDetail(id)
+  }catch(e:any){setError(e.message||'Upload failed')}finally{setLoading(false)}
  }
  const viewed=requests.find(r=>r.id===activeId)??openRequest??requests[0]
  const wa=viewed&&support?('https://wa.me/'+support+'?text='+encodeURIComponent(
@@ -69,7 +83,7 @@ export default function MembershipRenewalRequestsClient(){
     <p className="mt-1 text-xs text-gray-600">Final price, discounts and payment are subject to Super Admin verification.</p>
    </div>
    <label className="block text-sm space-y-1"><span>Comment (optional)</span><textarea className="w-full rounded-lg border p-2" rows={2} maxLength={1000} value={comment} onChange={e=>setComment(e.target.value)}/></label>
-   {method==='instapay'||method==='bank_transfer'?<p className="text-sm text-gray-600">You can attach a payment receipt to your request after the evidence upload feature is enabled. A receipt is not proof of confirmed payment.</p>:<p className="text-sm text-gray-600">Card and cash payments are taken at the academy only.</p>}
+   {method==='instapay'||method==='bank_transfer'?<p className="text-sm text-gray-600">After submitting your request, you can upload your payment receipt immediately or later. Receipts must be verified by ATOM.</p>:<p className="text-sm text-gray-600">Card and cash payments are taken at the academy only.</p>}
    <button className="rounded-lg bg-slate-900 px-4 py-2 font-medium text-white disabled:opacity-50" disabled={loading||!quote||!!openRequest} onClick={submit}>Submit renewal request</button>
    {openRequest?<p className="text-sm text-amber-800">You already have an open request. You may update it before approval.</p>:null}
   </section>
@@ -92,6 +106,19 @@ export default function MembershipRenewalRequestsClient(){
   {viewed?<section className="rounded-2xl border p-4 space-y-3">
    <h2 className="font-semibold">Request progress — {viewed.status.replace(/_/g,' ')}</h2>
    {events.length&&activeId===viewed.id?<ol className="space-y-2 text-sm">{events.map(e=><li key={e.id}>{new Date(e.created_at).toLocaleString('en-GB')} · {e.member_summary||e.event_type}</li>)}</ol>:<p className="text-sm text-gray-600">Select View status for the history.</p>}
+   {['instapay','bank_transfer'].includes(viewed.preferred_payment_method)&&!['cancelled','rejected','completed'].includes(viewed.status)?<div className="rounded-lg border p-3 space-y-2">
+    <h3 className="font-semibold text-sm">Submit payment receipt (optional)</h3>
+    <input aria-label="Payment receipt" type="file" accept="image/jpeg,image/png,application/pdf" onChange={e=>setReceipt(e.target.files?.[0]||null)} className="block w-full text-sm"/>
+    <label className="block text-sm">Amount sent (EGP)
+     <input value={declaredAmount} onChange={e=>setDeclaredAmount(e.target.value)} type="number" step="0.01" min="0" className="mt-1 w-full rounded-lg border p-2"/></label>
+    <label className="block text-sm">Transfer reference (optional)
+     <input value={paymentReference} onChange={e=>setPaymentReference(e.target.value)} className="mt-1 w-full rounded-lg border p-2"/></label>
+    <button disabled={!receipt||loading} className="rounded-lg border px-3 py-2 text-sm disabled:opacity-50" onClick={()=>void uploadReceipt(viewed.id)}>Upload receipt</button>
+    <p className="text-xs text-gray-600">Accepted: JPG, PNG, PDF (max 10 MB). No payment is confirmed by this upload.</p>
+   </div>:null}
+   {proofs.length&&activeId===viewed.id?<div className="space-y-2"><h3 className="font-semibold text-sm">Uploaded receipts</h3>{proofs.map(p=><div key={p.id} className="rounded-lg border p-2 text-sm">
+    {p.original_filename} · {p.review_status} {p.url?<a href={p.url} target="_blank" rel="noopener noreferrer" className="underline ml-2">View</a>:null}
+   </div>)}</div>:null}
    {wa?<a href={wa} target="_blank" rel="noopener noreferrer" className="inline-block rounded-lg border border-green-700 px-4 py-2 text-sm font-semibold text-green-800">Contact Super Admin on WhatsApp</a>:<p className="text-sm text-gray-600">WhatsApp contact will become available when the academy support number is configured.</p>}
   </section>:null}
  </main>
