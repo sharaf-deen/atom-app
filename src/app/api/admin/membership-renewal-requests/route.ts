@@ -60,7 +60,7 @@ export async function PATCH(req:Request){
   if(!reference||!Number.isFinite(amount)||amount<0||amount>100000000)return json(400,{ok:false,error:'VERIFICATION_REFERENCE_REQUIRED'})
   // Evidence is checked manually against Banking / InstaPay / CIB or a recorded academy cash receipt.
   // This operation creates no subscription, invoice, or payment transaction.
-  Object.assign(patch,{status:amount>=Number(r.approved_price_egp)?'ready_to_renew':'payment_verification',
+  Object.assign(patch,{status:Math.abs(amount-Number(r.approved_price_egp))<=0.01?'ready_to_renew':'payment_verification',
    payment_verified_at:new Date().toISOString(),payment_verified_by:actor,
    payment_verification_reference:reference,payment_verified_amount_egp:amount})
  }else if(action==='complete'){
