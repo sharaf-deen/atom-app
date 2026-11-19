@@ -132,3 +132,20 @@ end; $$;
 drop trigger if exists renewal_log_change on public.membership_renewal_requests;
 create trigger renewal_log_change after insert or update on public.membership_renewal_requests
   for each row execute function public.atom_renewal_log_change();
+
+-- Proof decisions are journaled independently from request status changes.
+create or replace function public.atom_renewal_proof_review_audit()
+returns trigger language plpgsql set search_path = '' as $$
+begin
+  if new.review_status <> old.review_status then
+    insert into public.membership_renewal_events
+      (request_id,actor_id,event_type,member_summary,admin_details)
+    values (new.request_id,new.verified_by,'proof_' || new.review_status,
+      'Payment receipt ' || new.review_status,
+      jsonb_build_object('proof_id',new.id,'amount',new.verified_amount_egp));
+  end if;
+  return new;
+end; $$;
+drop trigger if exists renewal_proof_audit on public.membership_renewal_proofs;
+create trigger renewal_proof_audit after update on public.membership_renewal_proofs
+  for each row execute function public.atom_renewal_proof_review_audit();
