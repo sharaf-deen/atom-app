@@ -286,6 +286,8 @@ export default async function ProfilePage() {
       <PageHeader title="Profile" subtitle="Your identity, access, QR and membership details." />
 
       <Section className="space-y-5">
+        {!lifetimeAccess ? <Link href="/membership-renewal-requests" className="flex items-center justify-between rounded-2xl border border-emerald-300 bg-emerald-50 p-4 font-semibold text-emerald-900">Request membership renewal <span aria-hidden="true">→</span></Link> : null}
+
         {hasFamilyAccount ? (
           <Link
             href="/family"
