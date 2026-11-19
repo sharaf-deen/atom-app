@@ -1,3 +1,8 @@
+-- The current Promotions system remains the canonical campaign source.
+-- Existing offers do not silently become renewal offers; Super Admin opts them in.
+alter table public.promotions add column if not exists renewal_eligible boolean not null default false;
+alter table public.promotions add column if not exists renewal_payment_deadline date;
+
 -- ATOM Membership Renewal Requests V1 - additive, no data migration.
 -- All mutations must be authorized by the server API. RLS permits only owner SELECT.
 create table if not exists public.membership_renewal_requests (
