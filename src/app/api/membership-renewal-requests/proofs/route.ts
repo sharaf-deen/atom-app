@@ -73,3 +73,30 @@ export async function GET(req:Request){
  }))
  return json(200,{ok:true,proofs:items})
 }
+
+export async function PATCH(req:Request){
+ const supa=createSupabaseServerActionClient()
+ const {data:{user}}=await supa.auth.getUser()
+ if(!user)return json(401,{ok:false,error:'NOT_AUTHENTICATED'})
+ const {data:profile}=await supa.from('profiles').select('role').eq('user_id',user.id).maybeSingle()
+ if(profile?.role!=='super_admin')return json(403,{ok:false,error:'FORBIDDEN'})
+ const body=await req.json().catch(()=>null)
+ const id=String(body?.proof_id||'')
+ const outcome=body?.outcome
+ const reason=String(body?.reason||'').trim().slice(0,400)
+ if(!UUID.test(id)||!['verified','rejected'].includes(outcome))
+   return json(400,{ok:false,error:'INVALID_REVIEW'})
+ if(outcome==='rejected'&&!reason)return json(400,{ok:false,error:'REJECTION_REASON_REQUIRED'})
+ const amount=Number(body?.verified_amount_egp)
+ if(outcome==='verified'&&(!Number.isFinite(amount)||amount<=0||amount>100000000))
+   return json(400,{ok:false,error:'VERIFIED_AMOUNT_REQUIRED'})
+ const admin=createSupabaseAdminClient()
+ const {data:proof,error}=await admin.from('membership_renewal_proofs').update({
+   review_status:outcome,verified_by:user.id,
+   verified_at:outcome==='verified'?new Date().toISOString():null,
+   verified_amount_egp:outcome==='verified'?amount:null,admin_review_note:reason||null
+ }).eq('id',id).eq('review_status','pending').select('id,request_id,review_status').maybeSingle()
+ if(error)return json(500,{ok:false,error:'REVIEW_FAILED'})
+ if(!proof)return json(409,{ok:false,error:'PROOF_ALREADY_REVIEWED'})
+ return json(200,{ok:true,proof})
+}
