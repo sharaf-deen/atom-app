@@ -29,6 +29,7 @@ export const SUPER_ADMIN_PAGE_GROUPS = [
     { href: '/admin/membership-activity', label: 'Membership Activity' },
     { href: '/admin/freeze-requests', label: 'Freeze Requests' },
     { href: '/admin/membership-refunds', label: 'Membership Refunds' },
+    { href: '/admin/membership-renewal-requests', label: 'Membership Renewals' },
     { href: '/admin/expiring-soon', label: 'Expiring Soon' },
     { href: '/admin/outstanding-dues', label: 'Outstanding Dues' },
   ] },
