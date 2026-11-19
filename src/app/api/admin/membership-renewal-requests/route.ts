@@ -49,7 +49,7 @@ async function eligibleRenewalSubscriptions(admin:ReturnType<typeof createSupaba
      candidate:x, request:r, source, alreadyLinked:used.has(x.id),
      ledgerAmount:ledgerAmounts.get(x.id)||0, ledgerCount:ledgerCounts.get(x.id)||0
    })
-.map(x=>({id:x.id,plan:x.plan,start_date:x.start_date,end_date:x.end_date,
+ ).map(x=>({id:x.id,plan:x.plan,start_date:x.start_date,end_date:x.end_date,
    amount:x.amount,amount_due:x.amount_due,created_at:x.created_at,status:x.status}))
 }
 export async function GET(req:Request){
