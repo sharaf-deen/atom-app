@@ -9,6 +9,8 @@ export default function AdminMembershipRenewals(){
  const [selected,setSelected]=useState<string>(''),[reason,setReason]=useState(''),[approvedPrice,setApprovedPrice]=useState(''),[verifiedAmount,setVerifiedAmount]=useState(''),[verificationReference,setVerificationReference]=useState(''),[subscriptionId,setSubscriptionId]=useState('')
  const [candidates,setCandidates]=useState<Array<{id:string;start_date:string|null;end_date:string|null;amount:number|null;amount_due:number|null;created_at:string}>>([])
  const [candidateLoading,setCandidateLoading]=useState(false)
+ const [bankReconciliationConfirmed,setBankReconciliationConfirmed]=useState(false)
+ const [bankReconciliationReference,setBankReconciliationReference]=useState('')
  const [dryRun,setDryRun]=useState<{passed:boolean;checks:{name:string;pass:boolean}[];simulated_amount_egp:number;note:string}|null>(null)
  const [dryRunLoading,setDryRunLoading]=useState(false)
  const [proofs,setProofs]=useState<any[]>([]),[error,setError]=useState(''),[notice,setNotice]=useState(''),[busy,setBusy]=useState(false)
@@ -29,6 +31,7 @@ export default function AdminMembershipRenewals(){
   finally{setCandidateLoading(false)}
  }
  async function choose(id:string){
+  setBankReconciliationConfirmed(false);setBankReconciliationReference('')
   setDryRun(null)
   setSelected(id);setError('');setNotice('');setProofs([])
   const res=await fetch('/api/membership-renewal-requests/proofs?request_id='+encodeURIComponent(id),{cache:'no-store'})
@@ -67,7 +70,8 @@ export default function AdminMembershipRenewals(){
    const res=await fetch('/api/admin/membership-renewal-requests',{method:'PATCH',
     headers:{'Content-Type':'application/json'},body:JSON.stringify({id:row.id,version:row.version,action,
      reason,approved_price_egp:Number(approvedPrice),verified_amount_egp:Number(verifiedAmount),
-     payment_verification_reference:verificationReference,subscription_id:subscriptionId})})
+     payment_verification_reference:verificationReference,subscription_id:subscriptionId,
+     bank_reconciliation_confirmed:bankReconciliationConfirmed,bank_reconciliation_reference:bankReconciliationReference})})
    const j=await res.json();if(!res.ok)throw Error(j.error||'Action failed')
    setNotice('Action saved: '+j.request.status);setReason('');await reload()
    if(j.request.status==='ready_to_renew')await loadCandidates(row.id)
@@ -146,7 +150,18 @@ export default function AdminMembershipRenewals(){
          <option value="">Choose matching renewal</option>
          {candidates.map(c=><option value={c.id} key={c.id}>{c.start_date||'—'} → {c.end_date||'—'} · {money(Number(c.amount||0))} received · {money(Number(c.amount_due||0))} due</option>)}
         </select></label>:null}
-       <button disabled={busy||candidateLoading||!subscriptionId} className="rounded-lg border px-3 py-2 text-sm disabled:opacity-50" onClick={()=>{if(window.confirm('Confirm that the selected subscription was manually renewed and its payment accounted for correctly?'))void act('complete')}}>Confirm manual renewal and complete</button>
+              {['instapay','bank_transfer'].includes(row.preferred_payment_method)?<div className="rounded-lg border bg-slate-50 p-3 space-y-2">
+         <p className="font-semibold text-sm">Mandatory bank reconciliation review</p>
+         <p className="text-xs text-gray-600">Check the bank/InstaPay entry against the existing Banking reconciliation, Subscription Payments and External Income. Confirm that this receipt was not allocated or counted twice.</p>
+         <label className="block text-sm">Verified bank or InstaPay transaction reference
+           <input className="mt-1 w-full rounded-lg border p-2" value={bankReconciliationReference} maxLength={300}
+            onChange={e=>setBankReconciliationReference(e.target.value)} placeholder="Verified bank transaction reference" /></label>
+         <label className="flex items-start gap-2 text-sm">
+           <input type="checkbox" checked={bankReconciliationConfirmed} onChange={e=>setBankReconciliationConfirmed(e.target.checked)} />
+           I checked the bank/InstaPay source and confirmed this payment was not duplicated or allocated elsewhere.
+         </label>
+        </div>:null}
+<button disabled={busy||candidateLoading||!subscriptionId||(['instapay','bank_transfer'].includes(row.preferred_payment_method)&&(!bankReconciliationConfirmed||!bankReconciliationReference.trim()))} className="rounded-lg border px-3 py-2 text-sm disabled:opacity-50" onClick={()=>{if(window.confirm('Confirm that the selected subscription was manually renewed and its payment accounted for correctly?'))void act('complete')}}>Confirm manual renewal and complete</button>
       </>:null}
      </div>
      <div className="border-t pt-3 space-y-2"><h3 className="font-semibold">Payment receipts</h3>
