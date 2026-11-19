@@ -67,8 +67,8 @@ export async function PATCH(req:Request){
   if(r.status!=='ready_to_renew')return json(409,{ok:false,error:'NOT_READY'})
   const subscriptionId=String(body?.subscription_id||'')
   if(!UUID.test(subscriptionId)||subscriptionId===r.source_subscription_id)return json(400,{ok:false,error:'INVALID_FULFILLMENT_SUBSCRIPTION'})
-  const {data:sub}=await admin.from('subscriptions').select('id,member_id,plan,amount,amount_due').eq('id',subscriptionId).maybeSingle()
-  if(!sub||sub.member_id!==r.member_id||sub.plan!==r.plan)return json(409,{ok:false,error:'SUBSCRIPTION_MISMATCH'})
+  const {data:sub}=await admin.from('subscriptions').select('id,member_id,plan,amount,amount_due,created_at').eq('id',subscriptionId).maybeSingle()
+  if(!sub||sub.member_id!==r.member_id||sub.plan!==r.plan||!sub.created_at||new Date(sub.created_at).getTime()<new Date(r.created_at).getTime())return json(409,{ok:false,error:'SUBSCRIPTION_MISMATCH'})
   if(Math.abs(Number(sub.amount??0)+Number(sub.amount_due??0)-Number(r.approved_price_egp))>0.01)
    return json(409,{ok:false,error:'SUBSCRIPTION_PRICE_MISMATCH'})
   Object.assign(patch,{status:'completed',completed_subscription_id:subscriptionId,
