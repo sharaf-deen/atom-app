@@ -32,10 +32,10 @@ export async function renewalQuote(plan: string) {
     .select('id,title,discount_type,discount_value,applies_to,min_months,start_date,end_date,renewal_eligible,renewal_payment_deadline')
     .contains('applies_to',['membership'])
     .eq('renewal_eligible',true)
-    .or(`start_date.is.null,start_date.lte.${today}`)
-    .or(`end_date.is.null,end_date.gte.${today}`)
   if (promoErr) throw promoErr
   const candidates = (promos||[]).filter((p:any) =>
+    (!p.start_date || p.start_date<=today) && (!p.end_date || p.end_date>=today) &&
+    (!p.renewal_payment_deadline || p.renewal_payment_deadline>=today) &&
     (!p.min_months || (key.unit==='month' && key.qty>=Number(p.min_months)))
   ).map((p:any) => {
     const value = Number(p.discount_value)
