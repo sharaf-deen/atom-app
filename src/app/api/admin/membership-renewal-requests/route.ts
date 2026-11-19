@@ -47,6 +47,9 @@ async function eligibleRenewalSubscriptions(admin:ReturnType<typeof createSupaba
    x.id!==r.source_subscription_id && !used.has(x.id) &&
    ['active','expired'].includes(x.status) &&
    Math.abs(Number(x.amount??0)+Number(x.amount_due??0)-Number(r.approved_price_egp))<=0.01 &&
+   // A ready-to-renew request is fully paid: outstanding dues cannot masquerade as a settled renewal.
+   Number(x.amount_due??0)<=0.01 &&
+   Math.abs(Number(x.amount??0)-Number(r.payment_verified_amount_egp??0))<=0.01 &&
    // Do not complete a renewal if its financial ledger is absent or inconsistent.
    (Number(x.amount??0)===0 ||
      ((ledgerCounts.get(x.id)||0)>0 &&
