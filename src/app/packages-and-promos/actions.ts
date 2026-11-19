@@ -28,6 +28,8 @@ export async function createPromo(formData: FormData) {
   const min_months = formData.get('min_months') ? Number(formData.get('min_months')) : null
   const start_date = formData.get('start_date') ? String(formData.get('start_date')) : null
   const end_date = formData.get('end_date') ? String(formData.get('end_date')) : null
+  const renewal_eligible = formData.get('renewal_eligible') === 'on'
+  const renewal_payment_deadline = formData.get('renewal_payment_deadline') ? String(formData.get('renewal_payment_deadline')) : null
 
   if (!title) throw new Error('Title is required')
   if (!discount_value || discount_value <= 0) throw new Error('Discount value must be > 0')
@@ -42,6 +44,8 @@ export async function createPromo(formData: FormData) {
     min_months,
     start_date,
     end_date,
+    renewal_eligible,
+    renewal_payment_deadline,
     created_by: user?.id ?? null,
   })
   if (error) throw error
@@ -62,6 +66,8 @@ export async function updatePromo(id: string, formData: FormData) {
   const min_months = formData.get('min_months') ? Number(formData.get('min_months')) : null
   const start_date = formData.get('start_date') ? String(formData.get('start_date')) : null
   const end_date = formData.get('end_date') ? String(formData.get('end_date')) : null
+  const renewal_eligible = formData.get('renewal_eligible') === 'on'
+  const renewal_payment_deadline = formData.get('renewal_payment_deadline') ? String(formData.get('renewal_payment_deadline')) : null
 
   if (!title) throw new Error('Title is required')
   if (!discount_value || discount_value <= 0) throw new Error('Discount value must be > 0')
@@ -78,6 +84,8 @@ export async function updatePromo(id: string, formData: FormData) {
       min_months,
       start_date,
       end_date,
+    renewal_eligible,
+    renewal_payment_deadline,
     })
     .eq('id', id)
 
