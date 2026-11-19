@@ -98,3 +98,16 @@ test('fulfillment eligibility: paid, due, source dates, reuse, member and pricin
  assert.equal(eligible({...base,request:{...base.request,payment_verified_amount_egp:null}}),false,'payment not verified')
  assert.equal(eligible({...base,candidate:{...base.candidate,amount:0},request:{...base.request,approved_price_egp:0,payment_verified_amount_egp:0},ledgerAmount:0,ledgerCount:0}),true,'fully discounted approved renewal')
 })
+
+test('staging-only dry-run refuses production and only reads requests',()=>{
+ const dry=read('src/app/api/admin/membership-renewal-requests/dry-run/route.ts')
+ const uiAdmin=read('src/components/admin/AdminMembershipRenewals.tsx')
+ assert.match(dry,/target!=='staging'/)
+ assert.match(dry,/profile\?\.role!=='super_admin'/)
+ assert.match(dry,/eligibleForRenewalFulfillment/)
+ assert.match(dry,/persisted_changes:0/)
+ assert.doesNotMatch(dry,/\.insert\(|\.update\(|\.upsert\(|\.delete\(|\.rpc\(/)
+ assert.match(uiAdmin,/Run safe completion simulation/)
+ assert.match(uiAdmin,/This is not a real completion/)
+ assert.match(uiAdmin,/Staging only/)
+})
