@@ -111,3 +111,18 @@ test('staging-only dry-run refuses production and only reads requests',()=>{
  assert.match(uiAdmin,/This is not a real completion/)
  assert.match(uiAdmin,/Staging only/)
 })
+
+test('bank transfer and InstaPay completion require server-side reconciliation attestation',()=>{
+ const adminUI=read('src/components/admin/AdminMembershipRenewals.tsx')
+ assert.match(admin,/BANK_RECONCILIATION_CONFIRMATION_REQUIRED/)
+ assert.match(admin,/bank_reconciliation_confirmed===true/)
+ assert.match(admin,/bank_reconciliation_reference/)
+ assert.match(admin,/patch\.admin_note=/)
+ assert.match(admin,/TEST_REFERENCE_NOT_ALLOWED_FOR_COMPLETION/)
+ assert.match(adminUI,/Mandatory bank reconciliation review/)
+ assert.match(adminUI,/bank_reconciliation_confirmed:bankReconciliationConfirmed/)
+ assert.match(adminUI,/bank_reconciliation_reference:bankReconciliationReference/)
+ assert.match(adminUI,/!bankReconciliationConfirmed/)
+ assert.doesNotMatch(admin,/from\('bank_transactions'\)\.insert/)
+ assert.doesNotMatch(admin,/from\('subscription_payments'\)\.insert/)
+})
