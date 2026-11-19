@@ -7,11 +7,25 @@ const STATUSES=['all','pending_review','changes_requested','awaiting_payment','p
 export default function AdminMembershipRenewals(){
  const [rows,setRows]=useState<Request[]>([]),[names,setNames]=useState<Record<string,string>>({}),[status,setStatus]=useState('all')
  const [selected,setSelected]=useState<string>(''),[reason,setReason]=useState(''),[approvedPrice,setApprovedPrice]=useState(''),[verifiedAmount,setVerifiedAmount]=useState(''),[verificationReference,setVerificationReference]=useState(''),[subscriptionId,setSubscriptionId]=useState('')
+ const [candidates,setCandidates]=useState<Array<{id:string;start_date:string|null;end_date:string|null;amount:number|null;amount_due:number|null;created_at:string}>>([])
+ const [candidateLoading,setCandidateLoading]=useState(false)
  const [proofs,setProofs]=useState<any[]>([]),[error,setError]=useState(''),[notice,setNotice]=useState(''),[busy,setBusy]=useState(false)
  const row=rows.find(r=>r.id===selected)||null
  const totals=useMemo(()=>rows.reduce((o,r)=>{o[r.status]=(o[r.status]||0)+1;return o},{} as Record<string,number>),[rows])
  async function reload(){const res=await fetch('/api/admin/membership-renewal-requests',{cache:'no-store'});const j=await res.json();if(!res.ok)throw Error(j.error||'Unable to load');setRows(j.requests||[]);setNames(j.names||{})}
  useEffect(()=>{void reload().catch(e=>setError(e.message))},[])
+ async function loadCandidates(id:string){
+  setCandidateLoading(true);setCandidates([])
+  try{
+   const res=await fetch('/api/admin/membership-renewal-requests?request_id='+encodeURIComponent(id),{cache:'no-store'})
+   const j=await res.json()
+   if(!res.ok)throw Error(j.error||'Unable to load renewals')
+   const list=j.candidates||[]
+   setCandidates(list)
+   setSubscriptionId(list.length===1?list[0].id:'')
+  }catch(e:any){setError(e.message||'Unable to load eligible subscriptions')}
+  finally{setCandidateLoading(false)}
+ }
  async function choose(id:string){
   setSelected(id);setError('');setNotice('');setProofs([])
   const res=await fetch('/api/membership-renewal-requests/proofs?request_id='+encodeURIComponent(id),{cache:'no-store'})
@@ -21,6 +35,8 @@ export default function AdminMembershipRenewals(){
   setVerifiedAmount(String(candidate?.payment_verified_amount_egp??''))
   setVerificationReference(candidate?.payment_verification_reference||'')
   setSubscriptionId(candidate?.completed_subscription_id||'')
+  if(candidate?.status==='ready_to_renew')await loadCandidates(id)
+  else setCandidates([])
  }
  async function reviewProof(proof:any,outcome:'verified'|'rejected'){
   if(!row)return;let amount=0;let explanation=''
@@ -42,6 +58,8 @@ export default function AdminMembershipRenewals(){
      payment_verification_reference:verificationReference,subscription_id:subscriptionId})})
    const j=await res.json();if(!res.ok)throw Error(j.error||'Action failed')
    setNotice('Action saved: '+j.request.status);setReason('');await reload()
+   if(j.request.status==='ready_to_renew')await loadCandidates(row.id)
+   if(j.request.status==='completed')setCandidates([])
   }catch(e:any){setError(e.message||'Action failed')}
   finally{setBusy(false)}
  }
@@ -95,10 +113,16 @@ export default function AdminMembershipRenewals(){
        <button disabled={busy} className="rounded-lg border px-3 py-2 text-sm" onClick={()=>void act('verify_payment')}>Confirm verified payment</button>
       </>:null}
       {row.status==='ready_to_renew'?<>
-       <p className="text-sm">Use the existing subscription renewal process first, then enter the newly created subscription UUID.</p>
-       <label className="block text-sm">Renewed subscription UUID
-        <input className="mt-1 w-full rounded-lg border p-2" value={subscriptionId} onChange={e=>setSubscriptionId(e.target.value)}/></label>
-       <button disabled={busy} className="rounded-lg border px-3 py-2 text-sm" onClick={()=>void act('complete')}>Link renewal and complete</button>
+       <p className="text-sm">First, renew the membership manually using the existing member profile. Then select the newly created subscription below. This step does not create a subscription or record payment.</p>
+       <button className="rounded-lg border px-3 py-2 text-sm" disabled={busy||candidateLoading} onClick={()=>void loadCandidates(row.id)}>Refresh eligible renewals</button>
+       {candidateLoading?<p className="text-sm">Checking subscriptions...</p>:null}
+       {candidates.length===0&&!candidateLoading?<p className="rounded-lg bg-amber-50 p-3 text-sm text-amber-900">No matching new subscription found. Do not create a fictitious payment to complete this test.</p>:null}
+       {candidates.length>0?<label className="block text-sm">Newly created subscription
+        <select className="mt-1 w-full rounded-lg border p-2" value={subscriptionId} onChange={e=>setSubscriptionId(e.target.value)}>
+         <option value="">Choose matching renewal</option>
+         {candidates.map(c=><option value={c.id} key={c.id}>{c.start_date||'—'} → {c.end_date||'—'} · {money(Number(c.amount||0))} received · {money(Number(c.amount_due||0))} due</option>)}
+        </select></label>:null}
+       <button disabled={busy||candidateLoading||!subscriptionId} className="rounded-lg border px-3 py-2 text-sm disabled:opacity-50" onClick={()=>{if(window.confirm('Confirm that the selected subscription was manually renewed and its payment accounted for correctly?'))void act('complete')}}>Confirm manual renewal and complete</button>
       </>:null}
      </div>
      <div className="border-t pt-3 space-y-2"><h3 className="font-semibold">Payment receipts</h3>

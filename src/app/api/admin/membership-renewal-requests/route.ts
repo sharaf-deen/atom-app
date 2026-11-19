@@ -14,10 +14,46 @@ async function adminActor(){
  if(profile?.role!=='super_admin')return {error:json(403,{ok:false,error:'FORBIDDEN'})}
  return {actor:user.id}
 }
+type Candidate={id:string;plan:string;start_date:string|null;end_date:string|null;amount:number|null;amount_due:number|null;created_at:string;status:string}
+async function eligibleRenewalSubscriptions(admin:ReturnType<typeof createSupabaseAdminClient>,r:any):Promise<Candidate[]>{
+ const {data,error}=await admin.from('subscriptions')
+  .select('id,member_id,plan,start_date,end_date,status,amount,amount_due,created_at')
+  .eq('member_id',r.member_id).eq('plan',r.plan)
+  .gte('created_at',r.created_at).order('created_at',{ascending:false}).limit(30)
+ if(error)throw error
+ const ids=(data||[]).map(x=>x.id)
+ const {data:linked,error:linkedError}=ids.length?await admin.from('membership_renewal_requests')
+  .select('completed_subscription_id').in('completed_subscription_id',ids):{data:[],error:null}
+ if(linkedError)throw linkedError
+ const used=new Set((linked||[]).map(x=>x.completed_subscription_id))
+ const {data:source}=r.source_subscription_id
+  ? await admin.from('subscriptions').select('end_date,status').eq('id',r.source_subscription_id).maybeSingle()
+  : {data:null}
+ return (data||[]).filter(x=>
+   x.id!==r.source_subscription_id && !used.has(x.id) &&
+   ['active','expired'].includes(x.status) &&
+   Math.abs(Number(x.amount??0)+Number(x.amount_due??0)-Number(r.approved_price_egp))<=0.01 &&
+   (!source || source.status!=='active' || !source.end_date || !x.start_date || x.start_date>source.end_date)
+ ).map(x=>({id:x.id,plan:x.plan,start_date:x.start_date,end_date:x.end_date,
+   amount:x.amount,amount_due:x.amount_due,created_at:x.created_at,status:x.status}))
+}
 export async function GET(req:Request){
  const auth=await adminActor();if(auth.error)return auth.error
  const admin=createSupabaseAdminClient()
- const status=new URL(req.url).searchParams.get('status')
+ const url=new URL(req.url)
+ const requestId=url.searchParams.get('request_id')
+ if(requestId){
+  if(!UUID.test(requestId))return json(400,{ok:false,error:'INVALID_REQUEST_ID'})
+  const {data:r,error}=await admin.from('membership_renewal_requests').select('*').eq('id',requestId).maybeSingle()
+  if(error)return json(500,{ok:false,error:'READ_FAILED'})
+  if(!r)return json(404,{ok:false,error:'NOT_FOUND'})
+  if(r.status!=='ready_to_renew')return json(409,{ok:false,error:'NOT_READY'})
+  try{
+   const candidates=await eligibleRenewalSubscriptions(admin,r)
+   return json(200,{ok:true,candidates})
+  }catch{return json(500,{ok:false,error:'CANDIDATE_LOOKUP_FAILED'})}
+ }
+ const status=url.searchParams.get('status')
  let q=admin.from('membership_renewal_requests').select('*').order('created_at',{ascending:false}).limit(200)
  if(status&&status!=='all')q=q.eq('status',status)
  const {data,error}=await q
@@ -65,12 +101,14 @@ export async function PATCH(req:Request){
    payment_verification_reference:reference,payment_verified_amount_egp:amount})
  }else if(action==='complete'){
   if(r.status!=='ready_to_renew')return json(409,{ok:false,error:'NOT_READY'})
-  const subscriptionId=String(body?.subscription_id||'')
-  if(!UUID.test(subscriptionId)||subscriptionId===r.source_subscription_id)return json(400,{ok:false,error:'INVALID_FULFILLMENT_SUBSCRIPTION'})
-  const {data:sub}=await admin.from('subscriptions').select('id,member_id,plan,amount,amount_due,created_at').eq('id',subscriptionId).maybeSingle()
-  if(!sub||sub.member_id!==r.member_id||sub.plan!==r.plan||!sub.created_at||new Date(sub.created_at).getTime()<new Date(r.created_at).getTime())return json(409,{ok:false,error:'SUBSCRIPTION_MISMATCH'})
-  if(Math.abs(Number(sub.amount??0)+Number(sub.amount_due??0)-Number(r.approved_price_egp))>0.01)
-   return json(409,{ok:false,error:'SUBSCRIPTION_PRICE_MISMATCH'})
+  // Discover eligible subscriptions on the server; the client never types a UUID.
+  let candidates:Candidate[]
+  try{candidates=await eligibleRenewalSubscriptions(admin,r)}
+  catch{return json(500,{ok:false,error:'CANDIDATE_LOOKUP_FAILED'})}
+  const selectedId=String(body?.subscription_id||'')
+  if(!UUID.test(selectedId)||!candidates.some(c=>c.id===selectedId))
+   return json(409,{ok:false,error:'NO_ELIGIBLE_SUBSCRIPTION'})
+  const subscriptionId=selectedId
   Object.assign(patch,{status:'completed',completed_subscription_id:subscriptionId,
    completed_by:actor,completed_at:new Date().toISOString()})
  }else{return json(400,{ok:false,error:'INVALID_ACTION'})}
