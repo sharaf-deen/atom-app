@@ -25,7 +25,8 @@ test('only Super Admin can approve and completion links an existing verified mem
  assert.match(admin,/role!=='super_admin'/)
  assert.match(admin,/status!=='ready_to_renew'/)
  assert.match(admin,/completed_subscription_id:subscriptionId/)
- assert.match(admin,/SUBSCRIPTION_PRICE_MISMATCH/)
+ assert.match(admin,/Math\.abs\(Number\(x\.amount\?\?0\)\+Number\(x\.amount_due\?\?0\)-Number\(r\.approved_price_egp\)\)\<=0\.01/)
+ assert.match(admin,/NO_ELIGIBLE_SUBSCRIPTION/)
  assert.doesNotMatch(admin,/from\('subscriptions'\)\.insert/)
 })
 test('receipts are private, ownership checked and never count as posted payments',()=>{
@@ -47,4 +48,15 @@ test('member status view has WhatsApp support and attached receipt',()=>{
  assert.match(ui,/https:\/\/wa.me\//)
  assert.match(ui,/Upload receipt/)
  assert.match(ui,/Receipt uploaded for manual verification/)
+})
+
+test('manual fulfillment is selected from server-verified eligible subscriptions, not a typed UUID',()=>{
+ assert.match(admin,/eligibleRenewalSubscriptions/)
+ assert.match(admin,/NO_ELIGIBLE_SUBSCRIPTION/)
+ assert.match(admin,/completed_subscription_id:subscriptionId/)
+ const uiAdmin=read('src/components/admin/AdminMembershipRenewals.tsx')
+ assert.match(uiAdmin,/Refresh eligible renewals/)
+ assert.match(uiAdmin,/Newly created subscription/)
+ assert.match(uiAdmin,/Confirm manual renewal and complete/)
+ assert.doesNotMatch(uiAdmin,/Renewed subscription UUID/)
 })
