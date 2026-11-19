@@ -48,3 +48,14 @@ test('member status view has WhatsApp support and attached receipt',()=>{
  assert.match(ui,/Upload receipt/)
  assert.match(ui,/Receipt uploaded for manual verification/)
 })
+
+test('manual fulfillment is selected from server-verified eligible subscriptions, not a typed UUID',()=>{
+ assert.match(admin,/eligibleRenewalSubscriptions/)
+ assert.match(admin,/NO_ELIGIBLE_SUBSCRIPTION/)
+ assert.match(admin,/completed_subscription_id:subscriptionId/)
+ const uiAdmin=read('src/components/admin/AdminMembershipRenewals.tsx')
+ assert.match(uiAdmin,/Refresh eligible renewals/)
+ assert.match(uiAdmin,/Newly created subscription/)
+ assert.match(uiAdmin,/Confirm manual renewal and complete/)
+ assert.doesNotMatch(uiAdmin,/Renewed subscription UUID/)
+})
