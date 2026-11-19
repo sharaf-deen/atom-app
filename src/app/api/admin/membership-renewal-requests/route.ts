@@ -130,7 +130,7 @@ export async function PATCH(req:Request){
   const reconciliationConfirmed=body?.bank_reconciliation_confirmed===true
   const reconciliationReference=typeof body?.bank_reconciliation_reference==='string'
    ? body.bank_reconciliation_reference.trim().slice(0,300):''
-  if(['instapay','bank_transfer'].includes(r.preferred_payment_method)){
+  if(Number(r.approved_price_egp)>0 && ['instapay','bank_transfer'].includes(r.preferred_payment_method)){
    if(!reconciliationConfirmed||!reconciliationReference)
     return json(409,{ok:false,error:'BANK_RECONCILIATION_CONFIRMATION_REQUIRED'})
    if(reconciliationReference.toLowerCase().startsWith('staging-test')||
