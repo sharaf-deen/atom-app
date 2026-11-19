@@ -20,6 +20,11 @@ export async function GET(req:Request){
   if(!actor)return respond(401,{ok:false,error:'NOT_AUTHENTICATED'})
   const admin=createSupabaseAdminClient()
   const url=new URL(req.url)
+  const quotePlan=url.searchParams.get('quote')
+  if(quotePlan){
+    try{return respond(200,{ok:true,quote:await renewalQuote(quotePlan)})}
+    catch{return respond(400,{ok:false,error:'PRICE_UNAVAILABLE'})}
+  }
   const id=url.searchParams.get('id')
   if(id && !UUID.test(id))return respond(400,{ok:false,error:'INVALID_ID'})
   let query=admin.from('membership_renewal_requests').select(publicFields).eq('member_id',actor).order('created_at',{ascending:false}).limit(40)
@@ -27,7 +32,16 @@ export async function GET(req:Request){
   const {data,error}=await query
   if(error)return respond(500,{ok:false,error:'QUERY_FAILED'})
   if(id && !(data||[]).length)return respond(404,{ok:false,error:'NOT_FOUND'})
-  return respond(200,{ok:true,requests:data??[]})
+  let events:any[]=[]
+  if(id){
+    const {data:history}=await admin.from('membership_renewal_events')
+      .select('id,event_type,previous_status,next_status,member_summary,created_at')
+      .eq('request_id',id).order('created_at',{ascending:true})
+    events=history??[]
+  }
+  const configured=process.env.ATOM_SUPER_ADMIN_WHATSAPP||''
+  const supportWhatsApp=/^[1-9][0-9]{7,14}$/.test(configured)?configured:null
+  return respond(200,{ok:true,requests:data??[],events,supportWhatsApp})
 }
 
 export async function POST(req:Request){
