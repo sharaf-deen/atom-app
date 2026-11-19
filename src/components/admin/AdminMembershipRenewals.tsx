@@ -150,7 +150,7 @@ export default function AdminMembershipRenewals(){
          <option value="">Choose matching renewal</option>
          {candidates.map(c=><option value={c.id} key={c.id}>{c.start_date||'—'} → {c.end_date||'—'} · {money(Number(c.amount||0))} received · {money(Number(c.amount_due||0))} due</option>)}
         </select></label>:null}
-              {['instapay','bank_transfer'].includes(row.preferred_payment_method)?<div className="rounded-lg border bg-slate-50 p-3 space-y-2">
+              {(row.approved_price_egp??0)>0&&['instapay','bank_transfer'].includes(row.preferred_payment_method)?<div className="rounded-lg border bg-slate-50 p-3 space-y-2">
          <p className="font-semibold text-sm">Mandatory bank reconciliation review</p>
          <p className="text-xs text-gray-600">Check the bank/InstaPay entry against the existing Banking reconciliation, Subscription Payments and External Income. Confirm that this receipt was not allocated or counted twice.</p>
          <label className="block text-sm">Verified bank or InstaPay transaction reference
@@ -161,7 +161,7 @@ export default function AdminMembershipRenewals(){
            I checked the bank/InstaPay source and confirmed this payment was not duplicated or allocated elsewhere.
          </label>
         </div>:null}
-<button disabled={busy||candidateLoading||!subscriptionId||(['instapay','bank_transfer'].includes(row.preferred_payment_method)&&(!bankReconciliationConfirmed||!bankReconciliationReference.trim()))} className="rounded-lg border px-3 py-2 text-sm disabled:opacity-50" onClick={()=>{if(window.confirm('Confirm that the selected subscription was manually renewed and its payment accounted for correctly?'))void act('complete')}}>Confirm manual renewal and complete</button>
+<button disabled={busy||candidateLoading||!subscriptionId||((row.approved_price_egp??0)>0&&['instapay','bank_transfer'].includes(row.preferred_payment_method)&&(!bankReconciliationConfirmed||!bankReconciliationReference.trim()))} className="rounded-lg border px-3 py-2 text-sm disabled:opacity-50" onClick={()=>{if(window.confirm('Confirm that the selected subscription was manually renewed and its payment accounted for correctly?'))void act('complete')}}>Confirm manual renewal and complete</button>
       </>:null}
      </div>
      <div className="border-t pt-3 space-y-2"><h3 className="font-semibold">Payment receipts</h3>
