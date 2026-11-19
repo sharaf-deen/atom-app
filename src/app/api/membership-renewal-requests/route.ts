@@ -6,6 +6,7 @@ import { createSupabaseServerActionClient } from '@/lib/supabaseServer'
 import { createSupabaseAdminClient } from '@/lib/supabaseAdmin'
 import { renewalQuote, RENEWAL_METHODS } from '@/lib/membershipRenewalQuote'
 import { sendRenewalNotice } from '@/lib/membershipRenewalNotifications'
+import { hasLifetimeGymAccess } from '@/lib/rbac'
 
 function respond(code:number,body:unknown){const r=NextResponse.json(body,{status:code});r.headers.set('Cache-Control','no-store');return r}
 const UUID=/^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i
@@ -56,7 +57,7 @@ export async function POST(req:Request){
   try{
     const admin=createSupabaseAdminClient()
     const {data:profile}=await admin.from('profiles').select('user_id,archived_at,role').eq('user_id',actor).maybeSingle()
-    if(!profile||profile.archived_at)return respond(403,{ok:false,error:'PROFILE_NOT_ELIGIBLE'})
+    if(!profile||profile.archived_at||hasLifetimeGymAccess(profile.role as any))return respond(403,{ok:false,error:'PROFILE_NOT_ELIGIBLE'})
     // Avoid creating new financial records here. The user is requesting a renewal, not paying.
     const quote=await renewalQuote(plan)
     const {data:latest}=await admin.from('subscriptions')
