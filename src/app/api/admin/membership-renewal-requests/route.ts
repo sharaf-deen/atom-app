@@ -3,6 +3,7 @@ export const dynamic='force-dynamic'
 import { NextResponse } from 'next/server'
 import { createSupabaseServerActionClient } from '@/lib/supabaseServer'
 import { createSupabaseAdminClient } from '@/lib/supabaseAdmin'
+import { sendRenewalNotice } from '@/lib/membershipRenewalNotifications'
 const UUID=/^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i
 function json(status:number,body:unknown){const r=NextResponse.json(body,{status});r.headers.set('Cache-Control','no-store');return r}
 async function adminActor(){
@@ -78,5 +79,6 @@ export async function PATCH(req:Request){
  if(error?.code==='23505')return json(409,{ok:false,error:'ALREADY_LINKED'})
  if(error)return json(500,{ok:false,error:'UPDATE_FAILED'})
  if(!updated)return json(409,{ok:false,error:'STALE_REQUEST'})
+ try{await sendRenewalNotice({memberId:r.member_id,actorId:actor,requestId:r.id,status:updated.status})}catch(e){console.error('renewal notification failed',e)}
  return json(200,{ok:true,request:updated})
 }
