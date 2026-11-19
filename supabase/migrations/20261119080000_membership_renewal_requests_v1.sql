@@ -4,6 +4,7 @@ create table if not exists public.membership_renewal_requests (
   id uuid primary key default gen_random_uuid(),
   member_id uuid not null references public.profiles(user_id),
   requested_by uuid not null references auth.users(id),
+  last_actor_id uuid references auth.users(id),
   source_subscription_id uuid references public.subscriptions(id) on delete set null,
   completed_subscription_id uuid unique references public.subscriptions(id) on delete set null,
   package_id uuid references public.packages_pricing(id) on delete set null,
@@ -91,3 +92,33 @@ end; $$;
 drop trigger if exists renewal_event_immutable on public.membership_renewal_events;
 create trigger renewal_event_immutable before update or delete
   on public.membership_renewal_events for each row execute function public.atom_renewal_event_immutable();
+
+-- Transactional status/version audit: an event is always inserted with its request write.
+create or replace function public.atom_renewal_audit_change()
+returns trigger language plpgsql set search_path = '' as $$
+begin
+  if tg_op = 'UPDATE' then
+    if new.version <> old.version + 1 then raise exception 'Renewal version must increment by one'; end if;
+    new.updated_at = now();
+  end if;
+  return new;
+end; $$;
+drop trigger if exists renewal_before_change on public.membership_renewal_requests;
+create trigger renewal_before_change before update on public.membership_renewal_requests
+  for each row execute function public.atom_renewal_audit_change();
+
+create or replace function public.atom_renewal_log_change()
+returns trigger language plpgsql set search_path = '' as $$
+begin
+  insert into public.membership_renewal_events
+    (request_id,actor_id,event_type,previous_status,next_status,member_summary,admin_details)
+  values (new.id, coalesce(new.last_actor_id,new.requested_by),
+    case when tg_op = 'INSERT' then 'submitted' when new.status <> old.status then 'status_changed' else 'edited' end,
+    case when tg_op = 'INSERT' then null else old.status end,
+    new.status, replace(new.status,'_',' '),
+    jsonb_build_object('version',new.version,'plan',new.plan,'approved_price_egp',new.approved_price_egp));
+  return new;
+end; $$;
+drop trigger if exists renewal_log_change on public.membership_renewal_requests;
+create trigger renewal_log_change after insert or update on public.membership_renewal_requests
+  for each row execute function public.atom_renewal_log_change();
