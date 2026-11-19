@@ -71,6 +71,7 @@ export default function AdminMembershipRenewals(){
      <p className="break-all text-xs text-gray-500">ID: {row.id}</p>
      <div className="text-sm space-y-1">
       <p>Member: {names[row.member_id]||row.member_id}</p>
+      <Link href={'/members/'+encodeURIComponent(row.member_id)} className="underline text-blue-700">Open member profile for manual renewal</Link>
       <p>Plan: {row.plan} / Payment: {row.preferred_payment_method}</p>
       <p>Catalog: {money(row.catalog_price_egp)} · Quoted: {money(row.quoted_price_egp)}</p>
       <p>Approved: {row.approved_price_egp!==null?money(row.approved_price_egp):'Not approved'}</p>
