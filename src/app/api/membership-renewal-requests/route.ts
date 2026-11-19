@@ -5,6 +5,7 @@ import { NextResponse } from 'next/server'
 import { createSupabaseServerActionClient } from '@/lib/supabaseServer'
 import { createSupabaseAdminClient } from '@/lib/supabaseAdmin'
 import { renewalQuote, RENEWAL_METHODS } from '@/lib/membershipRenewalQuote'
+import { sendRenewalNotice } from '@/lib/membershipRenewalNotifications'
 
 function respond(code:number,body:unknown){const r=NextResponse.json(body,{status:code});r.headers.set('Cache-Control','no-store');return r}
 const UUID=/^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i
@@ -69,6 +70,7 @@ export async function POST(req:Request){
     }).select('id,status,quoted_price_egp').single()
     if(error?.code==='23505')return respond(409,{ok:false,error:'OPEN_REQUEST_EXISTS'})
     if(error)return respond(500,{ok:false,error:'SAVE_FAILED'})
+    try{await sendRenewalNotice({memberId:actor,actorId:actor,requestId:data.id,status:'pending_review',toAdmin:true})}catch(e){console.error('renewal notification failed',e)}
     return respond(201,{ok:true,request:data})
   }catch(e:any){
     if(e?.message==='INVALID_PLAN'||e?.message==='PACKAGE_PRICE_UNAVAILABLE'||e?.message==='INVALID_CATALOG_PRICE')
@@ -110,5 +112,6 @@ export async function PATCH(req:Request){
     .select('id,status,version').maybeSingle()
   if(error)return respond(500,{ok:false,error:'UPDATE_FAILED'})
   if(!data)return respond(409,{ok:false,error:'STALE_REQUEST'})
+  try{await sendRenewalNotice({memberId:actor,actorId:actor,requestId:id,status:data.status,toAdmin:true})}catch(e){console.error('renewal notification failed',e)}
   return respond(200,{ok:true,request:data})
 }
