@@ -29,8 +29,9 @@ export async function renewalQuote(plan: string) {
   if (!Number.isFinite(catalog) || catalog < 0) throw new Error('INVALID_CATALOG_PRICE')
   const today = cairoToday()
   const {data:promos,error:promoErr} = await admin.from('promotions')
-    .select('id,title,discount_type,discount_value,applies_to,min_months,start_date,end_date')
+    .select('id,title,discount_type,discount_value,applies_to,min_months,start_date,end_date,renewal_eligible,renewal_payment_deadline')
     .contains('applies_to',['membership'])
+    .eq('renewal_eligible',true)
     .or(`start_date.is.null,start_date.lte.${today}`)
     .or(`end_date.is.null,end_date.gte.${today}`)
   if (promoErr) throw promoErr
@@ -40,8 +41,8 @@ export async function renewalQuote(plan: string) {
     const value = Number(p.discount_value)
     if (!Number.isFinite(value) || value<=0 || (p.discount_type==='percent' && value>100)) return null
     const discount = p.discount_type==='percent' ? catalog*value/100 : value
-    return {id:p.id,title:p.title,discount_egp:money(Math.min(catalog,discount)),type:p.discount_type,value}
-  }).filter(Boolean) as Array<{id:string;title:string;discount_egp:number;type:string;value:number}>
+    return {id:p.id,title:p.title,discount_egp:money(Math.min(catalog,discount)),type:p.discount_type,value,payment_deadline:p.renewal_payment_deadline||null}
+  }).filter(Boolean) as Array<{id:string;title:string;discount_egp:number;type:string;value:number;payment_deadline:string|null}>
   candidates.sort((a,b)=>b.discount_egp-a.discount_egp)
   const best = candidates[0] ?? null
   const quote = money(Math.max(0,catalog-(best?.discount_egp||0)))
