@@ -87,7 +87,16 @@ create table if not exists public.membership_renewal_proofs (
 create index if not exists membership_renewal_proofs_request_idx
   on public.membership_renewal_proofs(request_id,created_at);
 
--- All request data includes confidential administrative fields; no client-side table access.\n-- Server routes must authenticate and authorize before using the service-role client.\nalter table public.membership_renewal_requests enable row level security;\nalter table public.membership_renewal_events enable row level security;\nalter table public.membership_renewal_proofs enable row level security;\nrevoke all on public.membership_renewal_requests from anon, authenticated;\nrevoke all on public.membership_renewal_events from anon, authenticated;\nrevoke all on public.membership_renewal_proofs from anon, authenticated;\n\n-- Only authenticated server routes can access objects through a short-lived signed URL.
+-- All request data includes confidential administrative fields; no client-side table access.
+-- Server routes must authenticate and authorize before using the service-role client.
+alter table public.membership_renewal_requests enable row level security;
+alter table public.membership_renewal_events enable row level security;
+alter table public.membership_renewal_proofs enable row level security;
+revoke all on public.membership_renewal_requests from anon, authenticated;
+revoke all on public.membership_renewal_events from anon, authenticated;
+revoke all on public.membership_renewal_proofs from anon, authenticated;
+
+-- Only authenticated server routes can access objects through a short-lived signed URL.
 insert into storage.buckets (id,name,public,file_size_limit,allowed_mime_types)
 values ('membership-renewal-proofs','membership-renewal-proofs',false,10485760,
   array['image/jpeg','image/png','application/pdf'])
