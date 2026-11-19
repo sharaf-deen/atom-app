@@ -20,6 +20,10 @@ create table if not exists public.membership_renewal_requests (
   admin_note text,
   decision_reason text,
   approved_by uuid references auth.users(id),
+  payment_verified_at timestamptz,
+  payment_verified_by uuid references auth.users(id),
+  payment_verification_reference text,
+  payment_verified_amount_egp numeric(12,2) check (payment_verified_amount_egp >= 0),
   approved_at timestamptz,
   completed_by uuid references auth.users(id),
   completed_at timestamptz,
@@ -28,6 +32,7 @@ create table if not exists public.membership_renewal_requests (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   constraint renewal_completed_link check (status <> 'completed' or (completed_subscription_id is not null and completed_at is not null)),
+  constraint renewal_verified_before_ready check (status not in ('ready_to_renew','completed') or (payment_verified_at is not null and payment_verified_amount_egp >= approved_price_egp)),
   constraint renewal_approval_price check (status not in ('awaiting_payment','payment_verification','ready_to_renew','completed') or approved_price_egp is not null)
 );
 create unique index if not exists membership_renewal_one_open_per_member
