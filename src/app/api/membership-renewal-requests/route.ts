@@ -89,7 +89,7 @@ export async function PATCH(req:Request){
   if(!UUID.test(id)||!Number.isInteger(version)||version<1)return respond(400,{ok:false,error:'INVALID_REQUEST'})
   const admin=createSupabaseAdminClient()
   const {data:existing}=await admin.from('membership_renewal_requests')
-    .select('id,plan,status,member_id,version,pricing_snapshot').eq('id',id).eq('member_id',actor).maybeSingle()
+    .select('id,plan,status,member_id,version,pricing_snapshot,preferred_payment_method').eq('id',id).eq('member_id',actor).maybeSingle()
   if(!existing)return respond(404,{ok:false,error:'NOT_FOUND'})
   if(!['pending_review','changes_requested'].includes(existing.status))
     return respond(409,{ok:false,error:'ALREADY_REVIEWED'})
@@ -99,6 +99,8 @@ export async function PATCH(req:Request){
   }else if(body?.action==='edit'){
     const method=String(body?.payment_method??'')
     if(!RENEWAL_METHODS.includes(method as any))return respond(400,{ok:false,error:'INVALID_PAYMENT_METHOD'})
+    const {count:proofCount}=await admin.from('membership_renewal_proofs').select('id',{count:'exact',head:true}).eq('request_id',id)
+    if((proofCount??0)>0 && method!==existing.preferred_payment_method)return respond(409,{ok:false,error:'PAYMENT_METHOD_CHANGE_REQUIRES_ADMIN'})
     let quote
     try{quote=await renewalQuote(String(body?.plan??''))}catch{return respond(400,{ok:false,error:'PRICE_UNAVAILABLE'})}
     patch={...patch,status:'pending_review',plan:quote.plan,
