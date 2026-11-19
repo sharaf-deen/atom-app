@@ -33,7 +33,7 @@ export default function MembershipRenewalRequestsClient(){
    const j=await r.json()
    if(!r.ok)throw Error(j.error||'Submission failed')
    setNotice('Request submitted. No membership has been renewed or payment recorded.')
-   await refresh();if(j.request?.id)await openDetail(j.request.id)
+   await refresh();if(j.request?.id){await openDetail(j.request.id);if(receipt)await uploadReceipt(j.request.id)}
   }catch(e:any){setError(e?.message||'Could not submit request')}
   finally{setLoading(false)}
  }
@@ -83,7 +83,7 @@ export default function MembershipRenewalRequestsClient(){
     <p className="mt-1 text-xs text-gray-600">Final price, discounts and payment are subject to Super Admin verification.</p>
    </div>
    <label className="block text-sm space-y-1"><span>Comment (optional)</span><textarea className="w-full rounded-lg border p-2" rows={2} maxLength={1000} value={comment} onChange={e=>setComment(e.target.value)}/></label>
-   {method==='instapay'||method==='bank_transfer'?<p className="text-sm text-gray-600">After submitting your request, you can upload your payment receipt immediately or later. Receipts must be verified by ATOM.</p>:<p className="text-sm text-gray-600">Card and cash payments are taken at the academy only.</p>}
+   {method==='instapay'||method==='bank_transfer'?<div className="space-y-2"><p className="text-sm text-gray-600">If you already paid, attach your receipt now (optional). It will be uploaded right after the request is created.</p><input type="file" accept="image/jpeg,image/png,application/pdf" aria-label="Optional receipt with renewal request" className="block w-full text-sm" onChange={e=>setReceipt(e.target.files?.[0]||null)}/></div>:<p className="text-sm text-gray-600">Card and cash payments are taken at the academy only.</p>}
    <button className="rounded-lg bg-slate-900 px-4 py-2 font-medium text-white disabled:opacity-50" disabled={loading||!quote||!!openRequest} onClick={submit}>Submit renewal request</button>
    {openRequest?<p className="text-sm text-amber-800">You already have an open request. You may update it before approval.</p>:null}
   </section>
