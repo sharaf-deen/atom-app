@@ -9,6 +9,8 @@ export default function AdminMembershipRenewals(){
  const [selected,setSelected]=useState<string>(''),[reason,setReason]=useState(''),[approvedPrice,setApprovedPrice]=useState(''),[verifiedAmount,setVerifiedAmount]=useState(''),[verificationReference,setVerificationReference]=useState(''),[subscriptionId,setSubscriptionId]=useState('')
  const [candidates,setCandidates]=useState<Array<{id:string;start_date:string|null;end_date:string|null;amount:number|null;amount_due:number|null;created_at:string}>>([])
  const [candidateLoading,setCandidateLoading]=useState(false)
+ const [dryRun,setDryRun]=useState<{passed:boolean;checks:{name:string;pass:boolean}[];simulated_amount_egp:number;note:string}|null>(null)
+ const [dryRunLoading,setDryRunLoading]=useState(false)
  const [proofs,setProofs]=useState<any[]>([]),[error,setError]=useState(''),[notice,setNotice]=useState(''),[busy,setBusy]=useState(false)
  const row=rows.find(r=>r.id===selected)||null
  const totals=useMemo(()=>rows.reduce((o,r)=>{o[r.status]=(o[r.status]||0)+1;return o},{} as Record<string,number>),[rows])
@@ -27,6 +29,7 @@ export default function AdminMembershipRenewals(){
   finally{setCandidateLoading(false)}
  }
  async function choose(id:string){
+  setDryRun(null)
   setSelected(id);setError('');setNotice('');setProofs([])
   const res=await fetch('/api/membership-renewal-requests/proofs?request_id='+encodeURIComponent(id),{cache:'no-store'})
   const j=await res.json();if(res.ok)setProofs(j.proofs||[])
@@ -37,6 +40,15 @@ export default function AdminMembershipRenewals(){
   setSubscriptionId(candidate?.completed_subscription_id||'')
   if(candidate?.status==='ready_to_renew')await loadCandidates(id)
   else setCandidates([])
+ }
+ async function runDryTest(id:string){
+  setDryRunLoading(true);setDryRun(null);setError('')
+  try{
+   const r=await fetch('/api/admin/membership-renewal-requests/dry-run?request_id='+encodeURIComponent(id),{cache:'no-store'})
+   const j=await r.json();if(!r.ok)throw Error(j.error||'Test unavailable')
+   setDryRun(j)
+  }catch(e:any){setError(e.message||'Simulation failed')}
+  finally{setDryRunLoading(false)}
  }
  async function reviewProof(proof:any,outcome:'verified'|'rejected'){
   if(!row)return;let amount=0;let explanation=''
@@ -113,6 +125,18 @@ export default function AdminMembershipRenewals(){
        <button disabled={busy} className="rounded-lg border px-3 py-2 text-sm" onClick={()=>void act('verify_payment')}>Confirm verified payment</button>
       </>:null}
       {row.status==='ready_to_renew'?<>
+       <div className="rounded-xl border border-dashed p-3 space-y-2">
+        <h3 className="font-semibold text-sm">Staging only — read-only dry run</h3>
+        <p className="text-xs text-gray-600">Simulate financial eligibility rules without creating a subscription, receiving payment or changing this request. This is not a real completion.</p>
+        <button disabled={busy||dryRunLoading} className="rounded-lg border px-3 py-2 text-sm disabled:opacity-50" onClick={()=>void runDryTest(row.id)}>
+         {dryRunLoading?'Running checks...':'Run safe completion simulation'}
+        </button>
+        {dryRun?<div role="status" className="text-sm space-y-1">
+         <p className="font-semibold">{dryRun.passed?'All simulated checks passed':'Simulation found failing checks'} — {money(dryRun.simulated_amount_egp)} (hypothetical)</p>
+         <ul className="list-disc pl-5">{dryRun.checks.map(c=><li key={c.name}>{c.pass?'PASS':'FAIL'} — {c.name}</li>)}</ul>
+         <p className="text-xs text-gray-600">{dryRun.note}</p>
+        </div>:null}
+       </div>
        <p className="text-sm">First, renew the membership manually using the existing member profile. Then select the newly created subscription below. This step does not create a subscription or record payment.</p>
        <button className="rounded-lg border px-3 py-2 text-sm" disabled={busy||candidateLoading} onClick={()=>void loadCandidates(row.id)}>Refresh eligible renewals</button>
        {candidateLoading?<p className="text-sm">Checking subscriptions...</p>:null}
