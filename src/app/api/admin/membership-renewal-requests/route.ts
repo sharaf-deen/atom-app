@@ -4,6 +4,7 @@ import { NextResponse } from 'next/server'
 import { createSupabaseServerActionClient } from '@/lib/supabaseServer'
 import { createSupabaseAdminClient } from '@/lib/supabaseAdmin'
 import { sendRenewalNotice } from '@/lib/membershipRenewalNotifications'
+import { eligibleForRenewalFulfillment } from '@/lib/renewalFulfillmentEligibility'
 const UUID=/^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i
 function json(status:number,body:unknown){const r=NextResponse.json(body,{status});r.headers.set('Cache-Control','no-store');return r}
 async function adminActor(){
@@ -44,18 +45,11 @@ async function eligibleRenewalSubscriptions(admin:ReturnType<typeof createSupaba
   ? await admin.from('subscriptions').select('end_date,status').eq('id',r.source_subscription_id).maybeSingle()
   : {data:null}
  return (data||[]).filter(x=>
-   x.id!==r.source_subscription_id && !used.has(x.id) &&
-   ['active','expired'].includes(x.status) &&
-   Math.abs(Number(x.amount??0)+Number(x.amount_due??0)-Number(r.approved_price_egp))<=0.01 &&
-   // A ready-to-renew request is fully paid: outstanding dues cannot masquerade as a settled renewal.
-   Number(x.amount_due??0)<=0.01 &&
-   Math.abs(Number(x.amount??0)-Number(r.payment_verified_amount_egp??0))<=0.01 &&
-   // Do not complete a renewal if its financial ledger is absent or inconsistent.
-   (Number(x.amount??0)===0 ||
-     ((ledgerCounts.get(x.id)||0)>0 &&
-      Math.abs((ledgerAmounts.get(x.id)||0)-Number(x.amount??0))<=0.01)) &&
-   (!source || source.status!=='active' || !source.end_date || !x.start_date || x.start_date>source.end_date)
- ).map(x=>({id:x.id,plan:x.plan,start_date:x.start_date,end_date:x.end_date,
+   eligibleForRenewalFulfillment({
+     candidate:x, request:r, source, alreadyLinked:used.has(x.id),
+     ledgerAmount:ledgerAmounts.get(x.id)||0, ledgerCount:ledgerCounts.get(x.id)||0
+   })
+.map(x=>({id:x.id,plan:x.plan,start_date:x.start_date,end_date:x.end_date,
    amount:x.amount,amount_due:x.amount_due,created_at:x.created_at,status:x.status}))
 }
 export async function GET(req:Request){
