@@ -124,6 +124,24 @@ export async function PATCH(req:Request){
   if(!UUID.test(selectedId)||!candidates.some(c=>c.id===selectedId))
    return json(409,{ok:false,error:'NO_ELIGIBLE_SUBSCRIPTION'})
   const subscriptionId=selectedId
+  // Bank/InstaPay receipt evidence and subscription ledger entries do not establish
+  // that the originating bank transaction has been reconciled without duplication.
+  // Require explicit audited Super Admin attestation before manual completion.
+  const reconciliationConfirmed=body?.bank_reconciliation_confirmed===true
+  const reconciliationReference=typeof body?.bank_reconciliation_reference==='string'
+   ? body.bank_reconciliation_reference.trim().slice(0,300):''
+  if(['instapay','bank_transfer'].includes(r.preferred_payment_method)){
+   if(!reconciliationConfirmed||!reconciliationReference)
+    return json(409,{ok:false,error:'BANK_RECONCILIATION_CONFIRMATION_REQUIRED'})
+   if(reconciliationReference.toLowerCase().startsWith('staging-test')||
+      reconciliationReference.toLowerCase().startsWith('test-'))
+    return json(409,{ok:false,error:'TEST_REFERENCE_NOT_ALLOWED_FOR_COMPLETION'})
+   patch.admin_note=[
+    String(r.admin_note||'').trim(),
+    '[Renewal finance check] Super Admin confirmed bank/InstaPay source reviewed and no duplicate allocation. '+
+     'Payment reference: '+reconciliationReference
+   ].filter(Boolean).join('\n').slice(0,3000)
+  }
   Object.assign(patch,{status:'completed',completed_subscription_id:subscriptionId,
    completed_by:actor,completed_at:new Date().toISOString()})
  }else{return json(400,{ok:false,error:'INVALID_ACTION'})}
