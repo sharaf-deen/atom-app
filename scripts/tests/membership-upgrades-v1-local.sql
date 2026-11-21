@@ -184,17 +184,20 @@ BEGIN
  DELETE FROM public.subscription_freezes WHERE subscription_id=v_old;
 
  -- Member's pending renewal must be resolved before the upgrade.
- INSERT INTO public.membership_renewal_requests(member_id,requested_by,source_subscription_id,
-   plan,preferred_payment_method,catalog_price_egp,quoted_price_egp,pricing_snapshot)
- VALUES(v_other,v_other,v_old,'3m','cash',5250,5250,'{}');
  v_blocked:=false;
  BEGIN
+  -- A failed approval rolls back the test renewal event from this subtransaction.
+  INSERT INTO public.membership_renewal_requests(member_id,requested_by,source_subscription_id,
+    plan,preferred_payment_method,catalog_price_egp,quoted_price_egp,pricing_snapshot)
+  VALUES(v_other,v_other,v_old,'3m','cash',5250,5250,'{}');
   PERFORM public.apply_membership_upgrade_v1(v_old,'3m',v_day-1,'cash',v_actor,gen_random_uuid(),
     733.33,4516.67,true,null,'open renewal');
  EXCEPTION WHEN SQLSTATE '23514' THEN v_blocked:=true;
  END;
- IF NOT v_blocked THEN raise exception 'OPEN_RENEWAL_GUARD_FAILED'; end if;
- DELETE FROM public.membership_renewal_requests WHERE member_id=v_other AND source_subscription_id=v_old;
+ IF NOT v_blocked OR EXISTS (
+    SELECT 1 FROM public.membership_renewal_requests
+    WHERE member_id=v_other AND source_subscription_id=v_old
+   ) THEN raise exception 'OPEN_RENEWAL_GUARD_FAILED'; end if;
 
  -- Validation of historical payment date cannot accept future dates.
  v_blocked:=false;
