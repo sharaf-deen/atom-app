@@ -56,7 +56,14 @@ export async function POST(request:Request) {
   if(!data?.ok)return reply(500,{ok:false,error:'INVALID_UPGRADE_RESULT'})
   revalidatePath('/members')
   revalidatePath('/admin/membership-upgrades')
-  if(data.subscription_id)revalidatePath('/members/'+data.subscription_id)
+  if(data.subscription_id){
+   const {data:updatedSubscription}=await admin.from('subscriptions').select('member_id').eq('id',data.subscription_id).maybeSingle()
+   if(updatedSubscription?.member_id){
+    revalidatePath('/members/'+updatedSubscription.member_id)
+    revalidatePath('/members/'+updatedSubscription.member_id+'/subscriptions')
+   }
+  }
+  revalidatePath('/profile')
   return reply(200,{ok:true,result:data})
  }catch(e:any){return reply(500,{ok:false,error:e?.message||'UPGRADE_ERROR'})}
 }
