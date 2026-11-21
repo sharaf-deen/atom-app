@@ -240,6 +240,7 @@ function sectionFor(item: MenuItem, role?: Role): SectionKey {
       href.startsWith('/admin/expiring-soon') ||
       href.startsWith('/admin/membership-activity') ||
       href.startsWith('/admin/membership-renewal-requests') ||
+      href.startsWith('/admin/membership-upgrades') ||
       href.startsWith('/schedule/operations') ||
       href.startsWith('/coach-operations/') ||
       href.startsWith('/admin/private-coaching') ||

@@ -56,6 +56,9 @@ jobs:
       - name: Banking 2J.2 triage worklist regression
         run: node --test scripts/tests/banking-2j2-triage.test.cjs
 
+      - name: Membership Upgrade V1 executable math and authorization contracts
+        run: node --test scripts/tests/membership-upgrade-math.test.cjs
+
       - name: Subscription payment method integrity contracts
         run: |
           node --test scripts/tests/subscription-payment-integrity.contract.test.cjs
