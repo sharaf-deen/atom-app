@@ -3,6 +3,7 @@
 
 import { useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
+import Link from 'next/link'
 import { toast } from 'sonner'
 import Button from '@/components/ui/Button'
 import Input from '@/components/ui/Input'
@@ -704,6 +705,13 @@ export default function SubscriptionManageRowActions({
 
       {canManageFinancials ? (
         <SubscriptionPaymentMethodCorrection subscriptionId={sub.id} />
+      ) : null}
+
+      {canManageFinancials && isTime && sub.status === 'active' && sub.plan !== '12m' ? (
+        <Link href={'/admin/membership-upgrades?subscription_id='+encodeURIComponent(sub.id)}
+          className="inline-flex items-center rounded-xl border px-3 py-1.5 text-sm font-medium hover:bg-gray-50">
+          Upgrade
+        </Link>
       ) : null}
 
       {Number(sub.amount_due ?? 0) > 0 ? (
