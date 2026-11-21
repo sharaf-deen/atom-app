@@ -26,6 +26,33 @@
 - A stale quote was rejected without side effects; **rollback confirmed** 0 fictional subscriptions, 0 fictional payments, 0 upgrade records.
 - CI / DB Reset + Smoke / Vercel PR checks are separate release gates. No real HTTP/browser end-to-end approval has yet been accepted as verified.
 
+
+## Comprehensive security and staging functional audit — 2026-11-21
+
+**Database/financial acceptance: PASS (rollback-only, Staging).**
+- Executed `scripts/tests/membership-upgrades-v1-local.sql` against Staging. It uses fictional identities and runs entirely inside `BEGIN/ROLLBACK` with post-test 0 fake users/subscriptions/receipts/upgrades.
+- Actual 1-month -> 3-month approval, unused credit EGP 733.33, additional payment EGP 4,516.67; historical `paid_at` five days earlier while coverage starts today.
+- Original receipt and contractual history retained. One new supplemental payment in `subscription_payments`; `admin_income_events_v1` sees exactly two real receipts on their respective Cairo business dates, no phantom credit payment.
+- Repeated upgrade chain carries previously transferred credit once, without cloning historical receipt rows.
+- Actor not Super Admin rejected; DB grants deny `anon`/`authenticated` calling RPC or reading audit table; RLS enabled and no public table policies, intentionally service-role only.
+- Sequential idempotent retry and changed-payload rejection; duplicate bank reference rejected; stale quote rejected without side effects.
+- Pending refund, active freeze, outstanding dues, open renewal, overlapping active coverage rejected.
+- Future payment date and receipt without Super Admin attestation rejected.
+- Backdated receipt in *already validated daily batch* and *cash-period batch* rejected without changing historical reconciliation. The finance operator must address already-validated periods separately.
+- Upgrade history immutability trigger enforced.
+- Production remains untouched.
+
+**CI:** Executable TypeScript math cases include plan ordering, 10/30 prorata, leap-year/inclusive date, invalid date and over-credit. The GitHub `CI` job and isolated `DB Reset + Smoke` job now run these tests on every PR push; rely on the **latest** commit's check status, not older green runs.
+
+**Staging web deployment:** Custom Staging Vercel environment was deployed from the feature branch, with Staging-specific environment variables. Protected deployment URLs currently require interactive Vercel authentication; automated GET requests were blocked at the Vercel protection layer. Thus no claim of a completed authenticated in-browser positive approval, forbidden-role HTTP 403, or actual manual bank reconciliation.
+
+**Remaining release blockers:**
+1. Successful latest-com-mit CI/DB Reset + Smoke/Vercel, then authenticated Staging UI approval with a fictional member and a verified accounting inspection.
+2. Actual Staging bank reconciliation on the chosen historical business date. No actual bank statement may be imported for a fake receipt.
+3. End-to-end invoice and refund-after-upgrade policy: current refund workflows can see only new supplemental receipt on the replacement subscription; transferred credit needs an explicit refund calculation policy and audit before releasing financial refunds on upgraded contracts.
+4. Concurrency with two truly simultaneous HTTP approvals has not been load-tested (Postgres old-subscription row lock, unique index and idempotency provide structural protection).
+5. Obtain explicit Production migration approval and separate Production smoke. Do not merge PR #1425 on CI status alone.
+
 ## Release boundaries / remaining gates
 1. Confirm CI, DB Reset + Smoke and Vercel build on the **final commit**.
 2. Execute a fictional Staging **actual UI/API** upgrade end-to-end with approved financial verification and inspect ledger, dates and notifications; test denied roles and payment-date boundary cases. Never use a real bank statement for fake payments.
