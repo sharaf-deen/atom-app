@@ -107,6 +107,14 @@ BEGIN
    THEN raise exception 'TRANSFERRED_CREDIT_WRONG'; end if;
  SELECT sum(amount) INTO v_amount FROM public.subscription_payments WHERE subscription_id IN(v_old,v_new);
  IF v_amount<>6716.67 THEN raise exception 'DUPLICATED_CREDIT_AS_CASH %',v_amount; end if;
+ -- Accounting income view must include exactly the two actual receipts; never the credit transfer.
+ IF (SELECT count(*) FROM public.admin_income_events_v1 e
+      WHERE e.source_kind='subscription_payment' AND e.subscription_id IN(v_old,v_new))<>2
+    OR (SELECT amount FROM public.admin_income_events_v1 e
+      WHERE e.source_kind='subscription_payment' AND e.source_id=v_payment)<>4516.67
+    OR (SELECT business_date FROM public.admin_income_events_v1 e
+      WHERE e.source_kind='subscription_payment' AND e.source_id=v_payment)<>v_day-5
+   THEN raise exception 'INCOME_RECONCILIATION_DOUBLE_COUNT_OR_DATE_MISMATCH'; end if;
 
  -- Same idempotency key must return same result without a second entry.
  v_repeat:=public.apply_membership_upgrade_v1(v_old,'3m',v_day-5,'instapay',v_actor,v_key,
