@@ -113,7 +113,7 @@ BEGIN
  IF NOT v_blocked THEN raise exception 'IDEMPOTENCY_PAYLOAD_DRIFT_ALLOWED'; end if;
 
  -- A second upgrade of the same membership must carry forward old credit exactly once.
- SELECT (2200+4516.67)*( ((SELECT end_date FROM public.subscriptions WHERE id=v_new)-v_day+1)::numeric /
+ SELECT (733.33+4516.67)*( ((SELECT end_date FROM public.subscriptions WHERE id=v_new)-v_day+1)::numeric /
     ((SELECT end_date FROM public.subscriptions WHERE id=v_new)-
      (SELECT start_date FROM public.subscriptions WHERE id=v_new)+1)::numeric)
  INTO v_credit;
