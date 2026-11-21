@@ -37,3 +37,14 @@ test('Super Admin keeps separate non-admin quick actions; other roles untouched'
   assert.match(home, /if \(user.role === 'reception'\)/)
   assert.match(home, /\(user.role === 'admin' \|\| user.role === 'super_admin'\)/)
 })
+
+test('Membership Renewals is searchable in Super Admin menu and grouped with members', () => {
+ const rbac = fs.readFileSync('src/lib/rbac.ts', 'utf8')
+ const roleMenu = fs.readFileSync('src/components/RoleMenu.tsx', 'utf8')
+ const superAdmin = rbac.slice(rbac.indexOf('  super_admin: ['), rbac.indexOf('\n  ],', rbac.indexOf('  super_admin: [')) + 5)
+ assert.match(superAdmin, /label: 'Membership Renewals', href: '\/admin\/membership-renewal-requests'/)
+ assert.equal((superAdmin.match(/href: '\/admin\/membership-renewal-requests'/g) || []).length, 1)
+ assert.match(roleMenu, /href\.startsWith\('\/admin\/membership-renewal-requests'\)/)
+ assert.match(roleMenu, /menuItems\.filter\(\(item\) =>/)
+ assert.match(roleMenu, /item\.label} \$\{item\.href}/)
+})
