@@ -146,8 +146,8 @@ BEGIN
 
  -- Backdated receipt on an already reconciled daily date must not silently change closed totals.
  INSERT INTO public.payment_validation_batches(payment_method,validation_mode,business_date,
-   expected_amount,counted_amount,difference_amount,validated_at,validated_by,created_by)
- VALUES('instapay','daily',v_day-5,0,0,0,now(),v_actor,v_actor)
+   period_from,period_to,expected_amount,counted_amount,difference_amount,validated_at,validated_by,created_by)
+ VALUES('instapay','daily',v_day-5,(v_day-5)::timestamptz,(v_day-4)::timestamptz,0,0,0,now(),v_actor,v_actor)
  RETURNING id INTO v_batch;
  v_blocked:=false;
  BEGIN
