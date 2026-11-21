@@ -159,6 +159,22 @@ BEGIN
    THEN raise exception 'VALIDATED_HISTORICAL_DAY_GUARD_FAILED'; end if;
  DELETE FROM public.payment_validation_batches WHERE id=v_batch;
 
+ -- Cash-period reconciliation is distinct from daily validation, and must block backdating too.
+ INSERT INTO public.payment_validation_batches(payment_method,validation_mode,business_date,
+    period_from,period_to,expected_amount,counted_amount,difference_amount,validated_at,validated_by,created_by)
+ VALUES('cash','cash_period',null,(v_day-7)::timestamptz,(v_day-2)::timestamptz,
+    0,0,0,now(),v_actor,v_actor)
+ RETURNING id INTO v_batch;
+ v_blocked:=false;
+ BEGIN
+  PERFORM public.apply_membership_upgrade_v1(v_old,'3m',v_day-5,'cash',v_actor,gen_random_uuid(),
+    733.33,4516.67,true,null,'validated cash period guard');
+ EXCEPTION WHEN SQLSTATE '23514' THEN v_blocked:=true;
+ END;
+ IF NOT v_blocked OR (SELECT status FROM public.subscriptions WHERE id=v_old)<>'active'
+  THEN raise exception 'VALIDATED_CASH_PERIOD_GUARD_FAILED'; end if;
+ DELETE FROM public.payment_validation_batches WHERE id=v_batch;
+
  -- Existing pending refund must block the transfer.
  INSERT INTO public.membership_refunds(member_id,subscription_id,amount,refund_method,reason,status)
  VALUES(v_other,v_old,100,'bank_transfer','rollback-only refund guard','pending_review');
@@ -249,7 +265,7 @@ BEGIN
  END;
  IF NOT v_blocked THEN raise exception 'IMMUTABLE_HISTORY_GUARD_FAILED'; end if;
 
- RAISE NOTICE 'PASS: permissions, approval, prorata, backdated paid_at, original ledger, idempotency, credit chaining, bank reference, validated backdate, refund/freeze/renewal, attestation, future dates, dues, overlapping coverage, immutable audit';
+ RAISE NOTICE 'PASS: permissions, approval, prorata, backdated paid_at, original ledger, idempotency, credit chaining, bank reference, validated backdate/cash period, refund/freeze/renewal, attestation, future dates, dues, overlapping coverage, immutable audit';
 END
 $tests$;
 ROLLBACK;
