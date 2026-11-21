@@ -1,27 +1,36 @@
-# ATOM Membership Upgrades — V1 (design and safety gates)
+# ATOM Membership Upgrades — V1
 
-**Current branch status:** Read-only quoting foundation; NOT a complete upgrade workflow. No Production changes.
+## Business policy
+- No arbitrary elapsed-time limit. A Super Admin authorizes each upgrade.
+- Upgrade must be to a higher time-based membership plan; no automatic downgrade.
+- Prorated unused value = (previous cash collected **plus prior carried upgrade credit**) × inclusive remaining days ÷ inclusive original coverage days.
+- Current open dues, pending refunds, unresolved freezes, or open renewal requests trigger a finance-review block. No silent write-off or double-credit.
+- A Super Admin may select **Payment Date**, including an actual date before today in Cairo. It is stored as the new payment's `subscription_payments.paid_at`. **Upgrade effective date** always uses Cairo's current date; it is never backdated merely because the payment was received earlier.
+- Only the new supplemental cash/transfer is posted to the accounting ledger; transferred credit is separately recorded, **never** booked as a second payment.
+- The Super Admin explicitly attests receipt, chooses payment method and provides an InstaPay/bank reference when appropriate. A reused bank reference is prevented at database level.
+- Original membership/payment history remains, original subscription is marked cancelled, the new plan starts today and continues for the selected full duration.
+- Exact selected payment date and immutable financial snapshots retained in `membership_upgrades`. Idempotency prevents duplicate approval.
 
-## Authorized operating policy
-- No fixed time-window limitation. Super Admin explicitly authorizes each upgrade.
-- Determine unused credit from actual historical payments and days of unconsumed coverage (Cairo dates, inclusive).
-- Previously received money is **credit**, NOT an additional bank/cash receipt. No copying original subscription payments into a second payment entry.
-- New plan begins on *upgrade effective date*, independent of when the new payment was received.
-- **Historical Payment Date** is selectable by the Super Admin, including dates before today's Cairo date; never auto-backdate effective membership dates.
-- Actual payment history, refunds, outstanding dues, bank matches and freeze history must be reconciled before mutation.
-- Upon any final transaction, preserve old subscription/payment ledger and an immutable audit with old/new plan, start/end dates, credit calculation, Super Admin, actual payment amount, payment method and payment date.
+## Implementation in branch
+- Pure math `membershipUpgradeMath.ts` with inclusive date calculation.
+- Read-only preview API `GET /api/admin/membership-upgrades/quote` and apply API `POST /api/admin/membership-upgrades/apply`, both Super Admin restricted.
+- Admin page `/admin/membership-upgrades`, entry in navigation, and a contextual **Upgrade** link from current member subscription.
+- Atomic Postgres function `apply_membership_upgrade_v1` (security definer, service-role-only) checks actor, eligibility, ledger consistency, refreshed quote, price uniqueness, dates, due and pending workflows inside one transaction.
+- History table with RLS enabled, no client writes and immutable records.
+- Backdated payment is saved as paid_at on both the new subscription's additional payment and subscription header. Existing receipts are unchanged.
+- Receipt verification is **manual attestation** and does not mean the transfer was automatically matched to an imported bank statement.
 
-## Draft functionality in this PR
-1. Pure inclusive-day, monetary upgrade quote helper; rejects non-higher plans and over-credit.
-2. Read-only Super Admin quote route with package pricing from database and payment ledger from actual records.
-3. Preview screen with editable historical payment date.
-4. Blocks a quote when old dues, a refund, an unresolved freeze, mismatched ledger, inactive plan or ambiguous package price is detected.
+## Staging verification
+- Migration and bank-reference index were successfully applied on Supabase Staging only.
+- A fictional payment on a Staging test member was simulated in a PostgreSQL transaction and **rolled back**. Confirmed original payment preserved, prorated credit 733.33 EGP, new supplemental payment 4516.67 EGP dated five days earlier, no duplicate booking, previous subscription cancelled, new active, and idempotent retry.
+- A stale quote was rejected without side effects; **rollback confirmed** 0 fictional subscriptions, 0 fictional payments, 0 upgrade records.
+- CI / DB Reset + Smoke / Vercel PR checks are separate release gates. No real HTTP/browser end-to-end approval has yet been accepted as verified.
 
-## Release gates still pending
-1. Approve/reject request state and record immutable old/new financial snapshots.
-2. Create atomic, idempotent Postgres transaction to replace active coverage and record **only the real additional received money**, never the transferred credit.
-3. Save historical `paid_at` on the additional ledger payment and use same accounting date in reconciliation/invoice workflow; explicit Super Admin permission for backdating.
-4. Protect active refunds, allocations/bank matches, historical validated batches, freezes, concurrent renewal/upgrade operations, partial payments, overpayments, and accounting report integrity.
-5. Build positive end-to-end functional UI and tests using fictional Staging member and post-transaction invariants, then Production sign-off separately.
+## Release boundaries / remaining gates
+1. Confirm CI, DB Reset + Smoke and Vercel build on the **final commit**.
+2. Execute a fictional Staging **actual UI/API** upgrade end-to-end with approved financial verification and inspect ledger, dates and notifications; test denied roles and payment-date boundary cases. Never use a real bank statement for fake payments.
+3. Validate manual Payment Reconciliation for an intentionally historical paid_at date. If the date falls in an already validated daily period, investigate/revalidate explicitly; this module does **not** silently adjust an old validated batch.
+4. Review refund-after-upgrade handling, credit transfer across repeated upgrades, and invoice issuance with current accounting workflows.
+5. Validate backup/rollback for schema migration, confirm Production has not applied the migration, obtain explicit Production approval, apply migration before PR merge, and run Production smoke.
 
-**DO NOT MERGE this quote-foundation branch as a finished V1 or apply any migration to Production.**
+**Do not merge or deploy to Production before gates 1–5 and explicit Production approval.**
