@@ -196,6 +196,7 @@ const APP_NAV_BY_ROLE: MenuByRole = {
     { label: 'Banking', href: '/admin/banking', icon: 'wallet' },
     { label: 'Staff Payroll', href: '/admin/staff-payroll', icon: 'wallet' },
     { label: 'Membership Refunds', href: '/admin/membership-refunds', icon: 'wallet' },
+    { label: 'Membership Renewals', href: '/admin/membership-renewal-requests', icon: 'calendar' },
     { label: 'Freeze Requests', href: '/admin/freeze-requests', icon: 'calendar' },
     { label: 'Cash Report', href: '/admin/cash-report', icon: 'wallet' },
     { label: 'Outstanding Dues', href: '/admin/outstanding-dues', icon: 'wallet' },
