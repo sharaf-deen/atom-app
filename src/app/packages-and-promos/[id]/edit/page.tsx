@@ -26,6 +26,8 @@ type Promo = {
   min_months: number | null
   start_date: string | null
   end_date: string | null
+  renewal_eligible: boolean | null
+  renewal_payment_deadline: string | null
   created_at: string
   updated_at: string
 }
@@ -157,6 +159,16 @@ export default async function EditPromoPage({ params }: { params: { id: string }
                 </div>
               </div>
 
+              <div className="rounded-xl border p-4 space-y-3">
+                <label className="flex items-center gap-2 text-sm">
+                  <input type="checkbox" name="renewal_eligible" defaultChecked={promo.renewal_eligible === true}/>
+                  Eligible for membership renewals
+                </label>
+                <label className="block text-sm">Optional renewal payment deadline
+                  <input name="renewal_payment_deadline" type="date" defaultValue={parseDate(promo.renewal_payment_deadline)}
+                    className="mt-1 block rounded-lg border px-3 py-2"/>
+                </label>
+              </div>
               <div className="mt-2 flex items-center gap-2">
                 <Button type="submit">Save changes</Button>
                 <Button asChild variant="outline" href="/packages-and-promos">Cancel</Button>

@@ -17,6 +17,8 @@ export type PromoFormValues = {
   min_months?: number | null
   start_date?: string | null
   end_date?: string | null
+  renewal_eligible?: boolean
+  renewal_payment_deadline?: string | null
 }
 
 export default function PromoForm({
@@ -93,6 +95,17 @@ export default function PromoForm({
               <label htmlFor="end_date" className="text-sm font-medium">End date</label>
               <Input id="end_date" name="end_date" type="date" defaultValue={d.end_date || ''} />
             </div>
+          </div>
+
+          <div className="rounded-xl border p-4 space-y-3">
+            <label className="flex items-center gap-2 text-sm">
+              <input type="checkbox" name="renewal_eligible" defaultChecked={d.renewal_eligible ?? false} />
+              Eligible for membership renewals
+            </label>
+            <label className="block text-sm">Optional renewal payment deadline
+              <Input name="renewal_payment_deadline" type="date" defaultValue={d.renewal_payment_deadline || ''} />
+            </label>
+            <p className="text-xs text-gray-600">Existing promotions remain excluded from renewals unless explicitly enabled.</p>
           </div>
 
           <fieldset className="space-y-3">

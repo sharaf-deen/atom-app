@@ -286,6 +286,8 @@ export default async function ProfilePage() {
       <PageHeader title="Profile" subtitle="Your identity, access, QR and membership details." />
 
       <Section className="space-y-5">
+        {!lifetimeAccess ? <Link href="/membership-renewal-requests" className="flex items-center justify-between rounded-2xl border border-emerald-300 bg-emerald-50 p-4 font-semibold text-emerald-900">Request membership renewal <span aria-hidden="true">→</span></Link> : null}
+
         <Link href={`/members/${encodeURIComponent(me.id)}/subscriptions`}
           className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4 shadow-soft transition hover:bg-[hsl(var(--bg))]">
           <div>
