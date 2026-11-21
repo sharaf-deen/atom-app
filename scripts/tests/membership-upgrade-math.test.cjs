@@ -48,7 +48,7 @@ test('preview math cannot directly mutate finance ledgers',()=>{
 test('historical payment date is separate from effective date and quote route is Super Admin only',()=>{
  const api=fs.readFileSync('src/app/api/admin/membership-upgrades/quote/route.ts','utf8')
  assert.match(api,/payment_date/)
- assert.match(api,/effective_date/)
+ assert.match(api,/effectiveDate=cairoToday\(\)/)
  assert.match(api,/quoteUpgrade\(/)
  assert.match(api,/actor\?\.role !== 'super_admin'/)
  assert.doesNotMatch(api,/\.insert\(|\.update\(|\.delete\(/)
