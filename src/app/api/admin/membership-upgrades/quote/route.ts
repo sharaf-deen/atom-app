@@ -44,15 +44,20 @@ export async function GET(request:Request) {
     return reply(409,{ok:false,error:'SUBSCRIPTION_NOT_ACTIVE'})
   if(sub.frozen_until&&sub.frozen_until>=effectiveDate)
     return reply(409,{ok:false,error:'FROZEN_SUBSCRIPTION_REQUIRES_REVIEW'})
-  const [{data:payments,error:paymentsError},{data:refunds,error:refundError},{data:freezes,error:freezeError}]=await Promise.all([
+  const [{data:payments,error:paymentsError},{data:refunds,error:refundError},{data:freezes,error:freezeError},
+    {data:priorUpgrade,error:priorError},{data:openRenewals,error:renewalsError}]=await Promise.all([
     db.from('subscription_payments').select('id,amount').eq('subscription_id',subscriptionId),
     db.from('membership_refunds').select('id,status').eq('subscription_id',subscriptionId),
     db.from('subscription_freezes').select('id').eq('subscription_id',subscriptionId).is('cleared_at',null).limit(1),
+    db.from('membership_upgrades').select('transferred_credit_egp').eq('to_subscription_id',subscriptionId).maybeSingle(),
+    db.from('membership_renewal_requests').select('id').eq('member_id',sub.member_id)
+     .not('status','in','(completed,rejected,cancelled)').limit(1),
   ])
-  if(paymentsError||refundError||freezeError)return reply(500,{ok:false,error:'FINANCIAL_HISTORY_LOOKUP_FAILED'})
+  if(paymentsError||refundError||freezeError||priorError||renewalsError)return reply(500,{ok:false,error:'FINANCIAL_HISTORY_LOOKUP_FAILED'})
   // Any linked refund/freeze requires a separate Super Admin reconciliation, rather than silently overcrediting.
   if((refunds||[]).some(r=>r.status!=='rejected'&&r.status!=='cancelled')||(freezes||[]).length)
     return reply(409,{ok:false,error:'EXISTING_REFUND_OR_FREEZE_REQUIRES_REVIEW'})
+  if((openRenewals||[]).length)return reply(409,{ok:false,error:'OPEN_RENEWAL_REQUEST_REQUIRES_REVIEW'})
   if(Number(sub.amount_due||0)>0)return reply(409,{ok:false,error:'OLD_SUBSCRIPTION_HAS_OUTSTANDING_DUES'})
   const ledgerTotal=(payments||[]).reduce((sum,p)=>sum+Number(p.amount),0)
   const paidTotal=Number(sub.amount||0)
@@ -62,11 +67,14 @@ export async function GET(request:Request) {
   const {data:prices,error:priceError}=await db.from('packages_pricing')
      .select('id,name,price_egp').eq('type','membership').eq('unit',key.unit).eq('qty',key.qty).eq('is_active',true).limit(2)
   if(priceError||!prices||prices.length!==1)return reply(409,{ok:false,error:'TARGET_PRICE_UNAVAILABLE'})
+  const carriedCredit=Number(priorUpgrade?.transferred_credit_egp||0)
+  if(!Number.isFinite(carriedCredit)||carriedCredit<0)return reply(409,{ok:false,error:'INVALID_CARRIED_CREDIT'})
   const quote=quoteUpgrade({startDate:sub.start_date,endDate:sub.end_date,effectiveDate,
-    capturedPaidEGP:ledgerTotal,targetPriceEGP:Number(prices[0].price_egp)})
+    capturedPaidEGP:ledgerTotal+carriedCredit,targetPriceEGP:Number(prices[0].price_egp)})
   return reply(200,{ok:true,preview_only:true,subscription_id:subscriptionId,member_id:sub.member_id,
     from_plan:sub.plan,to_plan:targetPlan,package_id:prices[0].id,package_name:prices[0].name,
     payment_date:paymentDate,quoted_at:new Date().toISOString(),quote,
+    financial_sources:{cash_received_on_current_subscription_egp:ledgerTotal,carried_credit_from_previous_upgrade_egp:carriedCredit},
     note:'Preview only. No payment recorded, no membership upgraded. The final approval must re-check all amounts and dates atomically.'})
  }catch(e:any){return reply(500,{ok:false,error:e?.message||'QUOTE_FAILED'})}
 }
