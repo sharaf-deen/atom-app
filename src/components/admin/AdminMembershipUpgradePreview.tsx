@@ -1,7 +1,7 @@
 'use client'
 import { useRef, useState } from 'react'
 import Link from 'next/link'
-const PLANS=[{id:'1w',name:'1 week'},{id:'1m',name:'1 month'},{id:'3m',name:'3 months'},{id:'6m',name:'6 months'},{id:'12m',name:'12 months'}]
+const PLANS=[{id:'1m',name:'1 month'},{id:'3m',name:'3 months'},{id:'6m',name:'6 months'},{id:'12m',name:'12 months'}]
 type Quote={
   ok:boolean;error?:string; preview_only?:boolean;
   from_plan:string;to_plan:string;member_id:string;payment_date:string;quoted_at:string;
