@@ -36,7 +36,8 @@ BEGIN
  VALUES
   (v_actor,'upgrade_test_admin@example.invalid','super_admin'),
   (v_member,'upgrade_test_member@example.invalid','member'),
-  (v_other,'upgrade_test_other@example.invalid','member');
+  (v_other,'upgrade_test_other@example.invalid','member')
+ ON CONFLICT (user_id) DO UPDATE SET role=excluded.role;
  IF to_regclass('public.membership_upgrades') is null then raise exception 'UPGRADES_TABLE_MISSING'; end if;
  IF not (SELECT relrowsecurity FROM pg_class WHERE oid='public.membership_upgrades'::regclass)
    THEN raise exception 'UPGRADE_RLS_DISABLED'; end if;
