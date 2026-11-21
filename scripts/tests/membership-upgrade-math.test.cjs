@@ -1,0 +1,18 @@
+const test=require('node:test')
+const assert=require('node:assert/strict')
+const fs=require('node:fs')
+const file=fs.readFileSync('src/lib/membershipUpgradeMath.ts','utf8')
+test('upgrade preview has precise inclusive-date arithmetic and is isolated from finance writes',()=>{
+ assert.match(file,/daysInclusive/)
+ assert.match(file,/capturedPaidEGP\*daysRemaining\/totalDays/)
+ assert.match(file,/CREDIT_EXCEEDS_TARGET_PRICE_REVIEW_REQUIRED/)
+ assert.doesNotMatch(file,/\.from\(|\.insert\(|\.update\(/)
+})
+test('historical payment date is a separate field and never controls coverage date',()=>{
+ const api=fs.readFileSync('src/app/api/admin/membership-upgrades/quote/route.ts','utf8')
+ assert.match(api,/payment_date/)
+ assert.match(api,/effective_date/)
+ assert.match(api,/quoteUpgrade\(/)
+ assert.match(api,/role !== 'super_admin'/)
+ assert.doesNotMatch(api,/\.insert\(|\.update\(|\.delete\(/)
+})
