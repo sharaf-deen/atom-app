@@ -38,6 +38,18 @@ BEGIN
   (v_member,'upgrade_test_member@example.invalid','member'),
   (v_other,'upgrade_test_other@example.invalid','member')
  ON CONFLICT (user_id) DO UPDATE SET role=excluded.role;
+ -- Isolated DB Reset contains schema but not the production membership price catalog.
+ -- Seed only absent price rows, inside this outer transaction (all rolled back).
+ IF NOT EXISTS(SELECT 1 FROM public.packages_pricing
+    WHERE type='membership' and unit='month' and qty=3 and is_active=true) THEN
+   INSERT INTO public.packages_pricing(name,type,unit,qty,price_egp,is_active)
+     VALUES('Fictional test 3 months','membership','month',3,5250,true);
+ END IF;
+ IF NOT EXISTS(SELECT 1 FROM public.packages_pricing
+    WHERE type='membership' and unit='month' and qty=6 and is_active=true) THEN
+   INSERT INTO public.packages_pricing(name,type,unit,qty,price_egp,is_active)
+     VALUES('Fictional test 6 months','membership','month',6,8100,true);
+ END IF;
  IF to_regclass('public.membership_upgrades') is null then raise exception 'UPGRADES_TABLE_MISSING'; end if;
  IF not (SELECT relrowsecurity FROM pg_class WHERE oid='public.membership_upgrades'::regclass)
    THEN raise exception 'UPGRADE_RLS_DISABLED'; end if;
