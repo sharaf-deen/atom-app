@@ -385,7 +385,8 @@ export async function POST(req: Request) {
   const originalFields: Record<string, unknown> = {
     plan: current.plan, start_date: current.start_date, end_date: current.end_date,
     status: current.status, amount: current.amount, amount_due: current.amount_due,
-    payment_method: current.payment_method,
+    payment_method: current.payment_method, sessions_total: current.sessions_total,
+    sessions_used: current.sessions_used, frozen_until: current.frozen_until,
   }
   for (const [field, value] of Object.entries(originalFields)) {
     guardedUpdate = value === null
