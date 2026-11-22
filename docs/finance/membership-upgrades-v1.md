@@ -53,7 +53,34 @@
 4. Concurrency with two truly simultaneous HTTP approvals has not been load-tested (Postgres old-subscription row lock, unique index and idempotency provide structural protection).
 5. Obtain explicit Production migration approval and separate Production smoke. Do not merge PR #1425 on CI status alone.
 
+## Final Production readiness audit — 2026-11-22
+
+### Observed successful Staging UI transaction
+- Dedicated fictional STAGING member ATOM-000102; 1m subscription (2026-11-02 to 2026-12-01), initial synthetic cash 2,200 EGP.
+- Authenticated Super Admin clicked Upgrade -> preview -> approve on 2026-11-22.
+- Supabase Staging confirmed old subscription cancelled, new 3m subscription active (2026-11-22 to 2027-02-22), carry credit 733.33 EGP, one new cash payment 4,516.67 EGP, outstanding due 0.
+- New receipt appears precisely once in `admin_income_events_v1`. Both original and new test payment notes are explicitly tagged `STAGING ONLY / FICTIONAL MONEY / DO NOT RECONCILE`.
+- This positive UI test predates newly added invoice issuance; invoice-specific authenticated UI test is still required.
+
+### Audit improvements
+- Upgrades now generate a **supplemental payment invoice** through the existing invoices table, private storage bucket and pdf-lib PDF generator. Invoice snapshot explicitly records target plan price, transferred credit and **only** the actual new cash as received. Correct cents are printed.
+- Invoice creation is separate from committed upgrade and safely retryable using the same idempotency key. An invoice failure does not produce another subscription/payment; the Super Admin receives a retry action.
+- Real PDF and idempotent retry/malformed ledger tests execute in GitHub CI (`membership-upgrade-invoice.test.cjs`).
+- Existing refunds may not safely infer carried credits. A database trigger blocks `paid` refund transitions/direct inserts on old/new upgraded subscriptions, plus unlinked refunds for members with upgrades. Regular non-upgraded refund workflows were tested on Staging and remain enabled. **Limitation:** upgraded-member refund payout requires a future controlled manual credit reconciliation workflow; do not circumvent the guard.
+- Transactional tests verify historical payment dates, daily validation and cash-period conflicts, refund guards, duplicate bank refs, idempotency, proper finances income view, no fictitious residual records.
+- Staging receipt note on the actual UI test was explicitly tagged fictitious without changing amount/date. Real bank imports must not be matched to these fictitious receipts.
+
+### Production gates
+1. CI, DB Reset + Smoke and Vercel must be green for final head commit.
+2. Authenticated Staging UI final test must demonstrate invoice PDF downloading correctly after an upgrade, on a fictional Staging-only transaction.
+3. Verify no false reconciliation is attempted with the fictional receipts; test SQL proves backdated receipts on validated periods are blocked.
+4. Confirm user accepts the conservative refund-payout pause for upgraded members until a dedicated credit-aware refund workflow exists.
+5. Review migrations/backup and obtain explicit permission before applying to Supabase Production. Deploy code only after migration succeeds.
+
+Do not merge this PR before these gates.
+
 ## Release boundaries / remaining gates
+
 1. Confirm CI, DB Reset + Smoke and Vercel build on the **final commit**.
 2. Execute a fictional Staging **actual UI/API** upgrade end-to-end with approved financial verification and inspect ledger, dates and notifications; test denied roles and payment-date boundary cases. Never use a real bank statement for fake payments.
 3. Validate manual Payment Reconciliation for an intentionally historical paid_at date. If the date falls in an already validated daily period, investigate/revalidate explicitly; this module does **not** silently adjust an old validated batch.
