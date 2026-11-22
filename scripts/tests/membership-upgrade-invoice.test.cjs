@@ -1,18 +1,23 @@
 const test=require('node:test')
 const assert=require('node:assert/strict')
 const fs=require('node:fs')
-const vm=require('node:vm')
+const Module=require('node:module')
+const pathLib=require('node:path')
 const ts=require('typescript')
 const pdfLib=require('pdf-lib')
 function loadTs(path,modules) {
  const source=fs.readFileSync(path,'utf8')
  const code=ts.transpileModule(source,{compilerOptions:{target:ts.ScriptTarget.ES2020,module:ts.ModuleKind.CommonJS}}).outputText
- const out={exports:{}}
- vm.runInNewContext(code,{module:out,exports:out.exports,require:(key)=>{
+ const filename=pathLib.resolve(path)
+ const loaded=new Module(filename,module)
+ loaded.filename=filename
+ loaded.paths=Module._nodeModulePaths(pathLib.dirname(filename))
+ loaded.require=(key)=>{
   if(key in modules)return modules[key]
   throw new Error('UNEXPECTED_REQUIRE '+key)
- },crypto:require('node:crypto').webcrypto,Buffer,console})
- return out.exports
+ }
+ loaded._compile(code,filename)
+ return loaded.exports
 }
 const inv=loadTs('src/lib/invoices.ts',{'pdf-lib':pdfLib})
 const helper=loadTs('src/lib/membershipUpgradeInvoice.ts',{'@/lib/invoices':inv})
