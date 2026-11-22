@@ -13,7 +13,7 @@ returns jsonb
 language plpgsql
 security definer
 set search_path = public, auth
-as $
+as $$
 declare
   v_actor uuid := coalesce(p_actor, auth.uid());
   v_session_series text;
@@ -198,7 +198,7 @@ begin
     'source', 'schedule_default'
   );
 end;
-$;
+$$;
 
 
 
