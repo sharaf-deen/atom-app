@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
-import { revalidatePath } from 'next/cache'
+import { revalidatePath,revalidateTag } from 'next/cache'
+import { ensureMembershipUpgradeInvoice } from '@/lib/membershipUpgradeInvoice'
 import { createSupabaseServerActionClient } from '@/lib/supabaseServer'
 import { createSupabaseAdminClient } from '@/lib/supabaseAdmin'
 export const runtime='nodejs'
@@ -64,6 +65,21 @@ export async function POST(request:Request) {
    }
   }
   revalidatePath('/profile')
-  return reply(200,{ok:true,result:data})
+  let invoice_ok=false
+  let invoice_error:string|null=null
+  let invoice:{id:string;invoice_number:string}|null=null
+  try{
+    invoice=await ensureMembershipUpgradeInvoice(admin,data.upgrade_id,auth.user.id)
+    invoice_ok=true
+    revalidateTag('invoices')
+    revalidatePath('/invoices')
+  }catch(invoiceErr:any){
+    // Membership operation is already committed. Never roll back/retry the cash transaction
+    // to fix a PDF/storage failure; retry this same idempotency key to issue the invoice.
+    invoice_error=invoiceErr?.message||'INVOICE_GENERATION_FAILED'
+  }
+  return reply(200,{ok:true,result:data,invoice_ok,invoice,
+    ...(invoice_error?{invoice_error}:{}),
+    invoice_retryable:!invoice_ok})
  }catch(e:any){return reply(500,{ok:false,error:e?.message||'UPGRADE_ERROR'})}
 }
