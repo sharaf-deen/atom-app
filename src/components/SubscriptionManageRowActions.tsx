@@ -593,9 +593,6 @@ export default function SubscriptionManageRowActions({
         { label: 'Reason for correction', value: correctionReason.trim() },
         { label: 'Impact', value: 'Administrative correction only; payment ledger and invoices are unchanged.' },
       ]
-          : []),
-        { label: 'Impact', value: canManageFinancials ? 'Updates subscription/access and permitted financial fields.' : 'Updates member access/subscription details only.' },
-      ]
     }
 
     if (pendingConfirmation.kind === 'subscription-delete') {
