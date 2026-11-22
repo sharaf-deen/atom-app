@@ -157,9 +157,7 @@ export default function SubscriptionManageRowActions({
   const [busy, setBusy] = useState(false)
   const [pendingConfirmation, setPendingConfirmation] = useState<PendingConfirmation | null>(null)
 
-  const [amount, setAmount] = useState<string>(String(sub.amount ?? 0))
-  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>(() => normalizePaymentMethod(sub.payment_method))
-  const [startDate, setStartDate] = useState<string>(sub.start_date ?? '')
+   const [startDate, setStartDate] = useState<string>(sub.start_date ?? '')
   const [plan, setPlan] = useState<Plan>(() => {
     const p = String(sub.plan ?? '') as Plan
     const allowed: Plan[] = ['1w', '1m', '3m', '6m', '12m', 'sessions']
@@ -168,10 +166,7 @@ export default function SubscriptionManageRowActions({
 
   const [sessionsTotal, setSessionsTotal] = useState<string>(String(sub.sessions_total ?? 10))
 
-  // Optional invoice re-issue on edit (controlled by admin)
-  const [reissueInvoice, setReissueInvoice] = useState(false)
   const [correctionReason, setCorrectionReason] = useState('')
-  const [emailInvoice, setEmailInvoice] = useState(true)
 
   const initialFreezeFrom = useMemo(() => {
     const t = todayDateOnlyCairo()
@@ -268,7 +263,7 @@ export default function SubscriptionManageRowActions({
   }, [freezeFrom, freezeTo])
 
   const financiallyCommitted = Number(sub.amount ?? 0)>0 || Number(sub.amount_due ?? 0)>0
-  const contractReadOnly = financiallyCommitted || sub.status === 'cancelled'
+  const contractReadOnly = financiallyCommitted || sub.status === 'cancelled' || !canManageFinancials
   const canEdit = !busy
 
 
@@ -281,15 +276,6 @@ export default function SubscriptionManageRowActions({
       setStatus({kind:'error',msg:'Explain the administrative correction (at least 12 characters).'})
       return false
     }
-    if (canManageFinancials) {
-      const amountNum = Number(amount)
-      if (!Number.isFinite(amountNum) || amountNum < 0) {
-        setStatus({ kind: 'error', msg: 'Amount must be a valid number.' })
-        toast.error('Save failed')
-        return false
-      }
-    }
-
     if (isTime) {
       if (!isISODateOnly(startDate)) {
         setStatus({ kind: 'error', msg: 'Start date must be YYYY-MM-DD.' })
@@ -386,9 +372,7 @@ export default function SubscriptionManageRowActions({
         patch.sessions_total = Math.floor(st)
       }
 
-      const invoice = null
-
-      const r = await fetch('/api/subscriptions/update', {
+       const r = await fetch('/api/subscriptions/update', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id: sub.id, patch, correction_reason:correctionReason.trim() }),
@@ -401,18 +385,7 @@ export default function SubscriptionManageRowActions({
         return
       }
 
-      // Controlled: re-issue invoice only if requested
-      let msg = 'Updated.'
-      if (reissueInvoice) {
-        if (j?.invoice_ok) {
-          msg += ` Invoice ${j?.invoice?.invoice_number ? `(${j.invoice.invoice_number}) ` : ''}generated.`
-          if (j?.email_sent) msg += ' Email sent.'
-          else if (j?.email_error) msg += ` Email not sent: ${j.email_error}`
-        } else {
-          msg += ` Invoice not generated: ${j?.invoice_error || 'unknown error'}`
-        }
-      }
-
+      const msg = 'Administrative correction saved.'
       setCorrectionReason('')
       setStatus({ kind: 'success', msg })
       toast.success('Updated')
@@ -617,12 +590,9 @@ export default function SubscriptionManageRowActions({
         { label: 'New start date', value: isTime ? startDate || '—' : sub.start_date ?? '—' },
         { label: 'New end preview', value: isTime ? previewEnd ?? '—' : sub.end_date ?? '—' },
         { label: 'Sessions total', value: isTime ? '—' : sessionsTotal || '—' },
-        ...(canManageFinancials
-          ? [
-              { label: 'Amount', value: formatEGP(amount) },
-              { label: 'Payment method', value: humanPaymentMethod(paymentMethod) },
-              { label: 'Invoice', value: reissueInvoice ? (emailInvoice ? 'Generate + send by email' : 'Generate PDF') : 'No new invoice' },
-            ]
+        { label: 'Reason for correction', value: correctionReason.trim() },
+        { label: 'Impact', value: 'Administrative correction only; payment ledger and invoices are unchanged.' },
+      ]
           : []),
         { label: 'Impact', value: canManageFinancials ? 'Updates subscription/access and permitted financial fields.' : 'Updates member access/subscription details only.' },
       ]
