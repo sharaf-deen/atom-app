@@ -3,6 +3,7 @@ export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
 import { NextResponse } from 'next/server'
+import { changedSubscriptionFields, classifySubscriptionEdit, subscriptionEditConflict } from '@/lib/subscriptionEditIntegrity'
 import { revalidateTag, revalidatePath } from 'next/cache'
 import { createSupabaseServerActionClient } from '@/lib/supabaseServer'
 import { createSupabaseAdminClient } from '@/lib/supabaseAdmin'
@@ -176,6 +177,17 @@ export async function POST(req: Request) {
   if (curErr) return json(500, { ok: false, error: curErr.message })
   if (!current) return json(404, { ok: false, error: 'Subscription not found' })
 
+  // This legacy Edit endpoint cannot safely replace issued invoices. Invoice
+  // corrections belong to a dedicated audited flow, never silent PDF overwrites.
+  if (invoiceRequested || invoiceEmailRequested) {
+    return json(409, {
+      ok: false,
+      error: 'INVOICE_REISSUE_REQUIRES_DEDICATED_WORKFLOW',
+      details: 'Re-issuing a financial invoice from Edit is disabled. Review the invoice and use the designated correction workflow.',
+    })
+  }
+
+
   // Functional 1B.4: subscription coverage cannot be silently recalculated while
   // consumptive freeze history exists. This also prevents changing plans to 1w/1m.
   if (patch.plan !== undefined || patch.start_date !== undefined || patch.end_date !== undefined) {
@@ -287,24 +299,54 @@ export async function POST(req: Request) {
     delete update.plan
   }
 
-  // Guard: financial corrections must target ledger payments, not only the subscription header.
-  const financialHeaderChange =
-    (update.amount !== undefined && Number(update.amount) !== Number(current.amount)) ||
-    (update.amount_due !== undefined && Number(update.amount_due) !== Number(current.amount_due)) ||
-    (update.payment_method !== undefined && update.payment_method !== current.payment_method)
+  const changed = changedSubscriptionFields(current, update)
+  if (!changed.length) {
+    return json(400, { ok: false, error: 'NO_SUBSCRIPTION_CHANGES', details: 'No changes to save.' })
+  }
+  const editCategory = classifySubscriptionEdit(changed)
 
-  if (financialHeaderChange) {
-    const { data: entries, error: checkError } = await admin
-      .from('subscription_payments')
-      .select('id')
-      .eq('subscription_id', id)
-      .limit(1)
-    if (checkError) return json(500, { ok: false, error: 'PAYMENT_LEDGER_CHECK_FAILED' })
-    if (entries?.length) return json(409, {
+  // Payments and due balances must never be fabricated or rewritten through the
+  // subscription header, even on legacy records without a ledger entry.
+  if (editCategory.financial) {
+    return json(409, {
       ok: false,
-      error: 'PAYMENT_LEDGER_CORRECTION_REQUIRED',
-      details: 'Use a specific payment correction workflow to preserve payment validation and bank reconciliation.',
+      error: 'FINANCIAL_EDIT_REQUIRES_DEDICATED_WORKFLOW',
+      details: 'Use Payments or Correct payment method. Edit cannot alter amounts, dues or payment methods.',
     })
+  }
+  if (editCategory.contract && current.status === 'cancelled') {
+    return json(409, { ok: false, error: 'CANCELLED_SUBSCRIPTION_IMMUTABLE',
+      details: 'A cancelled contract cannot be edited; review its history.' })
+  }
+  if (editCategory.contract) {
+    // Fail closed when linked operations exist. Historical payment/invoice/upgrades
+    // must retain the exact coverage that existed when money was recorded.
+    const [payments, invoices, upgradesFrom, upgradesTo, refunds, freezes, renewals] = await Promise.all([
+      admin.from('subscription_payments').select('id').eq('subscription_id',id).limit(1),
+      admin.from('invoices').select('id').eq('subscription_id',id).limit(1),
+      admin.from('membership_upgrades').select('id').eq('from_subscription_id',id).limit(1),
+      admin.from('membership_upgrades').select('id').eq('to_subscription_id',id).limit(1),
+      admin.from('membership_refunds').select('id').eq('subscription_id',id).limit(1),
+      admin.from('subscription_freezes').select('id').eq('subscription_id',id).limit(1),
+      admin.from('membership_renewal_requests').select('id')
+       .eq('member_id',current.member_id).not('status','in','(completed,rejected,cancelled)').limit(1),
+    ])
+    if ([payments,invoices,upgradesFrom,upgradesTo,refunds,freezes,renewals].some(result=>result.error)) {
+      return json(500, { ok:false, error:'SUBSCRIPTION_EDIT_INTEGRITY_CHECK_FAILED' })
+    }
+    const conflict=subscriptionEditConflict({
+      changes:changed,
+      hasPayments:!!payments.data?.length,
+      hasInvoices:!!invoices.data?.length,
+      hasUpgrades:!!upgradesFrom.data?.length || !!upgradesTo.data?.length,
+      hasRefunds:!!refunds.data?.length,
+      hasFreezes:!!freezes.data?.length,
+      hasOpenRenewals:!!renewals.data?.length,
+    })
+    if (conflict) {
+      return json(409, {ok:false,error:conflict,details:
+        'This subscription has linked financial or contract history. Use the dedicated workflow, not Edit.'})
+    }
   }
 
   if (Object.keys(update).length === 0) {
