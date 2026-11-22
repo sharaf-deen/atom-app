@@ -314,11 +314,20 @@ export async function POST(req: Request) {
       details: 'Use Payments or Correct payment method. Edit cannot alter amounts, dues or payment methods.',
     })
   }
+  if (editCategory.contract && (Number(current.amount ?? 0)>0 || Number(current.amount_due ?? 0)>0)) {
+    return json(409, { ok:false, error:'FINANCIALLY_COMMITTED_CONTRACT_LOCKED',
+      details:'This subscription has a financial commitment. Use a dedicated audited correction or upgrade workflow.' })
+  }
   if (editCategory.contract && current.status === 'cancelled') {
     return json(409, { ok: false, error: 'CANCELLED_SUBSCRIPTION_IMMUTABLE',
       details: 'A cancelled contract cannot be edited; review its history.' })
   }
   if (editCategory.contract) {
+    const correctionReason = String(body?.correction_reason ?? '').trim()
+    if (correctionReason.length < 12 || correctionReason.length > 1000) {
+      return json(400, {ok:false,error:'CORRECTION_REASON_REQUIRED',
+        details:'Explain the administrative correction (12–1000 characters).'})
+    }
     // Fail closed when linked operations exist. Historical payment/invoice/upgrades
     // must retain the exact coverage that existed when money was recorded.
     const [payments, invoices, upgradesFrom, upgradesTo, refunds, freezes, renewals] = await Promise.all([
@@ -353,6 +362,20 @@ export async function POST(req: Request) {
     return json(400, { ok: false, error: 'Nothing to update' })
   }
 
+  // A correction must have a persisted reason before any edit takes effect.
+  // This is an attempted-correction record; the existing post-save audit logs the result.
+  if (editCategory.contract) {
+    const {error:recordError}=await admin.from('audit_logs').insert({
+      actor_user_id:actorId,target_user_id:current.member_id,
+      action:'subscription_contract_edit_requested',
+      action_details:{subscription_id:id,correction_reason:String(body.correction_reason).trim(),
+        before:{plan:current.plan,start_date:current.start_date,end_date:current.end_date,
+          status:current.status,sessions_total:current.sessions_total},
+        requested_update:update},
+    })
+    if(recordError)return json(500,{ok:false,error:'CORRECTION_AUDIT_NOT_RECORDED'})
+  }
+
   const { data: updated, error: updErr } = await admin
     .from('subscriptions')
     .update(update)
@@ -375,6 +398,7 @@ await safeAudit(admin, {
     update: update ?? null,
     invoice_requested: invoiceRequested,
     invoice_email_requested: invoiceEmailRequested,
+    correction_reason: editCategory.contract ? String(body?.correction_reason || '').trim() : null,
   },
 })
 
