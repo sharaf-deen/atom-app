@@ -34,6 +34,14 @@ export type InvoiceSnapshot = {
     currency: string
     paid_at: string
   }
+  // Optional upgrade breakdown: transferred credit is NOT an additional cash receipt.
+  upgrade?: {
+    from_subscription_id: string
+    from_plan: string
+    target_price_egp: number
+    transferred_credit_egp: number
+    additional_payment_egp: number
+  }
 }
 
 function humanSubscriptionPlan(plan?: string | null) {
@@ -85,7 +93,8 @@ function money(amount: number, currency: string) {
     return new Intl.NumberFormat('en-GB', {
       style: 'currency',
       currency,
-      maximumFractionDigits: 0,
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
     }).format(safe)
   } catch {
     return `${safe} ${currency}`
@@ -173,7 +182,7 @@ export async function generateInvoicePdfBytes(snapshot: InvoiceSnapshot) {
 
   const paid = Number.isFinite(paidRaw) && paidRaw > 0 ? paidRaw : 0
   const safeDue = Number.isFinite(dueRaw) && dueRaw > 0 ? dueRaw : 0
-  const total = paid + safeDue
+  const total = snapshot.upgrade ? Number(snapshot.upgrade.target_price_egp) : paid + safeDue
 
   row('Total:', money(total, snapshot.transaction.currency), 'right')
 
@@ -192,6 +201,16 @@ export async function generateInvoicePdfBytes(snapshot: InvoiceSnapshot) {
   row('Due:', money(safeDue, snapshot.transaction.currency), 'right')
 
   y -= 16
+  if (snapshot.upgrade) {
+    y -= 18
+    row('Previous plan:', humanSubscriptionPlan(snapshot.upgrade.from_plan), 'left')
+    row('Credit applied:', money(snapshot.upgrade.transferred_credit_egp, snapshot.transaction.currency), 'right')
+    y -= 16
+    row('New cash paid:', money(snapshot.upgrade.additional_payment_egp, snapshot.transaction.currency), 'left')
+    y -= 16
+    drawText('Credit is not a cash receipt.', margin, y, 9)
+  }
+  y -= 18
   row('Subscription ID:', snapshot.transaction.subscription_id, 'left')
 
   // Footer
