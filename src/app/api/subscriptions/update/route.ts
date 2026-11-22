@@ -304,6 +304,9 @@ export async function POST(req: Request) {
     return json(400, { ok: false, error: 'NO_SUBSCRIPTION_CHANGES', details: 'No changes to save.' })
   }
   const editCategory = classifySubscriptionEdit(changed)
+  if (editCategory.contract && role !== 'super_admin') {
+    return json(403,{ok:false,error:'SUPER_ADMIN_CORRECTION_REQUIRED'})
+  }
 
   // Payments and due balances must never be fabricated or rewritten through the
   // subscription header, even on legacy records without a ledger entry.
