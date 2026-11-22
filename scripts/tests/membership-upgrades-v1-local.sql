@@ -25,6 +25,7 @@ DECLARE
   v_credit numeric;
   v_newprice numeric;
   v_nextdue numeric;
+  v_refund uuid;
 BEGIN
  INSERT INTO auth.users
   (instance_id,id,aud,role,email,encrypted_password,email_confirmed_at,created_at,updated_at)
@@ -148,6 +149,39 @@ BEGIN
    OR (SELECT count(*) FROM public.subscription_payments WHERE subscription_id=v_new)<>1
    OR (SELECT count(*) FROM public.subscription_payments WHERE subscription_id=v_newest)<>1
    THEN raise exception 'CHAINED_UPGRADE_CREDIT_OR_LEDGER_FAILED'; end if;
+
+ -- Refund payout is fail-closed for new, previous and unlinked subscription records
+ -- until carried-value reconciliation has a purpose-built audited workflow.
+ INSERT INTO public.membership_refunds(member_id,subscription_id,amount,refund_method,reason,status)
+ VALUES(v_member,v_newest,100,'cash','rollback-only upgrade refund','approved')
+ RETURNING id INTO v_refund;
+ v_blocked:=false;
+ BEGIN
+  UPDATE public.membership_refunds SET status='paid' WHERE id=v_refund;
+ EXCEPTION WHEN SQLSTATE '23514' THEN v_blocked:=true;
+ END;
+ IF NOT v_blocked OR (SELECT status FROM public.membership_refunds WHERE id=v_refund)<>'approved'
+  THEN raise exception 'UPGRADE_REFUND_PAYOUT_GUARD_FAILED'; end if;
+
+ INSERT INTO public.membership_refunds(member_id,subscription_id,amount,refund_method,reason,status)
+ VALUES(v_member,v_old,50,'cash','rollback-only previous subscription refund','approved')
+ RETURNING id INTO v_refund;
+ v_blocked:=false;
+ BEGIN
+  UPDATE public.membership_refunds SET status='paid' WHERE id=v_refund;
+ EXCEPTION WHEN SQLSTATE '23514' THEN v_blocked:=true;
+ END;
+ IF NOT v_blocked THEN raise exception 'PREVIOUS_SUB_REFUND_PAYOUT_GUARD_FAILED'; end if;
+
+ INSERT INTO public.membership_refunds(member_id,subscription_id,amount,refund_method,reason,status)
+ VALUES(v_member,null,25,'cash','rollback-only unlinked refund','approved')
+ RETURNING id INTO v_refund;
+ v_blocked:=false;
+ BEGIN
+  UPDATE public.membership_refunds SET status='paid' WHERE id=v_refund;
+ EXCEPTION WHEN SQLSTATE '23514' THEN v_blocked:=true;
+ END;
+ IF NOT v_blocked THEN raise exception 'UNLINKED_REFUND_PAYOUT_GUARD_FAILED'; end if;
 
  -- Re-using a real-world bank reference across another upgrade is blocked by index.
  INSERT INTO public.subscriptions(member_id,subscription_type,plan,status,start_date,end_date,amount,amount_due,payment_method)
@@ -285,7 +319,7 @@ BEGIN
  END;
  IF NOT v_blocked THEN raise exception 'IMMUTABLE_HISTORY_GUARD_FAILED'; end if;
 
- RAISE NOTICE 'PASS: permissions, approval, prorata, backdated paid_at, original ledger, idempotency, credit chaining, bank reference, validated backdate/cash period, refund/freeze/renewal, attestation, future dates, dues, overlapping coverage, immutable audit';
+ RAISE NOTICE 'PASS: permissions, approval, prorata, backdated paid_at, original ledger, idempotency, credit chaining, bank reference, validated backdate/cash period, refund/freeze/renewal, attestation, future dates, dues, overlapping coverage, immutable audit, refund payout fail-closed';
 END
 $tests$;
 ROLLBACK;
