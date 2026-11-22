@@ -22,11 +22,16 @@ export async function ensureMembershipUpgradeInvoice(
  if(!upgrade.additional_payment_id)throw new Error('UPGRADE_INVOICE_PAYMENT_LINK_MISSING')
 
  const {data:existing,error:existingErr}=await admin.from('invoices')
-  .select('id,invoice_number,subscription_id').eq('subscription_id',upgrade.to_subscription_id).limit(2)
+  .select('id,invoice_number,subscription_id,member_id,amount,snapshot').eq('subscription_id',upgrade.to_subscription_id).limit(2)
  if(existingErr)throw existingErr
  if(existing?.length){
    if(existing.length!==1)throw new Error('MULTIPLE_INVOICES_FOR_UPGRADE')
-   return {id:existing[0].id,invoice_number:existing[0].invoice_number}
+   const previous=existing[0]
+   if(previous.member_id!==upgrade.member_id
+       || Math.abs(Number(previous.amount)-supplement)>0.01
+       || previous.snapshot?.upgrade?.from_subscription_id!==upgrade.from_subscription_id)
+     throw new Error('EXISTING_INVOICE_DOES_NOT_MATCH_UPGRADE')
+   return {id:previous.id,invoice_number:previous.invoice_number}
  }
 
  const [p,s,paid]=await Promise.all([
@@ -76,8 +81,11 @@ export async function ensureMembershipUpgradeInvoice(
  if(!insertErr&&created)return created
  if(insertErr?.code==='23505'){
   const {data:reused,error:readErr}=await admin.from('invoices')
-    .select('id,invoice_number,subscription_id').eq('invoice_number',number).maybeSingle()
-  if(!readErr&&reused?.subscription_id===upgrade.to_subscription_id)
+    .select('id,invoice_number,subscription_id,member_id,amount,snapshot').eq('invoice_number',number).maybeSingle()
+  if(!readErr&&reused?.subscription_id===upgrade.to_subscription_id
+       &&reused?.member_id===upgrade.member_id
+       &&Math.abs(Number(reused?.amount)-supplement)<=0.01
+       &&reused?.snapshot?.upgrade?.from_subscription_id===upgrade.from_subscription_id)
    return {id:reused.id,invoice_number:reused.invoice_number}
  }
  throw insertErr||new Error('UPGRADE_INVOICE_SAVE_FAILED')
