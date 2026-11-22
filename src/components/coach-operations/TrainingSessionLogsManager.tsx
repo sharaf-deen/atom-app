@@ -647,7 +647,7 @@ export default function TrainingSessionLogsManager({
               <div className="mb-2">
                 <h4 className="text-sm font-semibold text-black">What was actually worked?</h4>
                 <p className="text-xs text-[hsl(var(--muted))]">
-                  Choose the blocks and techniques actually taught from the full active Curriculum Library. The Head Coach's Program selections remain recommendations, not restrictions. Program level and audience limits still apply.
+                  Choose the blocks and techniques actually taught from the full active Curriculum Library. The Head Coach&apos;s Program selections remain recommendations, not restrictions. Program level and audience limits still apply.
                 </p>
               </div>
               <div className="space-y-3">
