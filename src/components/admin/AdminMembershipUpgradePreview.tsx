@@ -21,9 +21,12 @@ export default function AdminMembershipUpgradePreview({subscriptionId,today}:{su
  const [approvalNote,setApprovalNote]=useState('')
  const [receiptAttested,setReceiptAttested]=useState(false)
  const [applied,setApplied]=useState<{subscription_id:string;upgrade_id:string;payment_id:string|null}|null>(null)
+ const [invoiceOk,setInvoiceOk]=useState<boolean|null>(null)
+ const [invoice,setInvoice]=useState<{id:string;invoice_number:string}|null>(null)
+ const [invoiceError,setInvoiceError]=useState('')
  const requestKey=useRef<string|null>(null)
  async function calculate() {
-  setLoading(true);setError('');setQuote(null);setApplied(null);requestKey.current=null;setReceiptAttested(false)
+  setLoading(true);setError('');setQuote(null);setApplied(null);setInvoiceOk(null);setInvoice(null);setInvoiceError('');requestKey.current=null;setReceiptAttested(false)
   try{
    const args=new URLSearchParams({subscription_id:id.trim(),target_plan:target,payment_date:paymentDate})
    const res=await fetch('/api/admin/membership-upgrades/quote?'+args.toString(),{cache:'no-store'})
@@ -33,9 +36,9 @@ export default function AdminMembershipUpgradePreview({subscriptionId,today}:{su
   }catch(e:any){setError(e.message||'Preview failed')}
   finally{setLoading(false)}
  }
- async function approveAndApply() {
+ async function approveAndApply(retryInvoice=false) {
   if(!quote)return
-  if(!window.confirm('Approve upgrade and record the actual payment on '+quote.payment_date+'? This replaces the active membership and cannot be undone automatically.'))return
+  if(!retryInvoice && !window.confirm('Approve upgrade and record the actual payment on '+quote.payment_date+'? This replaces the active membership and cannot be undone automatically.'))return
   setApplying(true);setError('')
   try {
    if(!requestKey.current)requestKey.current=crypto.randomUUID()
@@ -47,6 +50,9 @@ export default function AdminMembershipUpgradePreview({subscriptionId,today}:{su
    const data=await res.json()
    if(!res.ok||!data.ok)throw new Error(data.error||'Upgrade not applied')
    setApplied(data.result)
+   setInvoiceOk(data.invoice_ok===true)
+   setInvoice(data.invoice||null)
+   setInvoiceError(data.invoice_error||'')
   }catch(e:any){setError(e.message||'Upgrade failed; check status before trying again')}
   finally{setApplying(false)}
  }
@@ -105,6 +111,12 @@ export default function AdminMembershipUpgradePreview({subscriptionId,today}:{su
     <p className="font-semibold text-green-900">Upgrade applied successfully</p>
     <p className="text-sm text-green-900">New subscription: {applied.subscription_id}</p>
     <p className="text-sm text-green-900">Additional payment record: {applied.payment_id||'No additional payment required'}</p>
+    {invoiceOk===true&&invoice&&<a className="block text-sm underline" href={'/api/invoices/'+encodeURIComponent(invoice.id)+'/download'}>Download supplementary payment invoice — {invoice.invoice_number}</a>}
+    {invoiceOk===true&&!invoice&&<p className="text-sm">No cash supplement received; no new payment invoice required.</p>}
+    {invoiceOk===false&&<div className="space-y-2 rounded-lg border border-amber-400 bg-amber-50 p-3 text-sm text-amber-950">
+      <p>Membership and payment were applied, but invoice generation failed: {invoiceError||'Please retry'}.</p>
+      <button type="button" disabled={applying} onClick={()=>void approveAndApply(true)} className="rounded-lg bg-black px-3 py-2 text-white disabled:opacity-40">{applying?'Retrying…':'Retry invoice only (do not record another payment)'}</button>
+    </div>}
    </div>}
    <Link href={'/members/'+encodeURIComponent(quote.member_id)} className="text-sm underline">Back to member profile</Link>
   </section>}
