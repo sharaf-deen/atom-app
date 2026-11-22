@@ -183,6 +183,22 @@ BEGIN
  END;
  IF NOT v_blocked THEN raise exception 'UNLINKED_REFUND_PAYOUT_GUARD_FAILED'; end if;
 
+ -- Privileged direct payout inserts must not bypass the carried-credit refund guard.
+ v_blocked:=false;
+ BEGIN
+  INSERT INTO public.membership_refunds(member_id,subscription_id,amount,refund_method,reason,status)
+  VALUES(v_member,v_newest,100,'cash','rollback-only direct insert refund','paid');
+ EXCEPTION WHEN SQLSTATE '23514' THEN v_blocked:=true;
+ END;
+ IF NOT v_blocked THEN raise exception 'DIRECT_PAID_REFUND_INSERT_ALLOWED'; end if;
+ v_blocked:=false;
+ BEGIN
+  INSERT INTO public.membership_refunds(member_id,subscription_id,amount,refund_method,reason,status)
+  VALUES(v_member,null,100,'cash','rollback-only unlinked direct insert','paid');
+ EXCEPTION WHEN SQLSTATE '23514' THEN v_blocked:=true;
+ END;
+ IF NOT v_blocked THEN raise exception 'DIRECT_UNLINKED_REFUND_INSERT_ALLOWED'; end if;
+
  -- Re-using a real-world bank reference across another upgrade is blocked by index.
  INSERT INTO public.subscriptions(member_id,subscription_type,plan,status,start_date,end_date,amount,amount_due,payment_method)
  VALUES(v_other,'time','1m','active',v_day-20,v_day+9,2200,0,'cash')
