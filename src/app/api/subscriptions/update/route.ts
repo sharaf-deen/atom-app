@@ -379,16 +379,28 @@ export async function POST(req: Request) {
     if(recordError)return json(500,{ok:false,error:'CORRECTION_AUDIT_NOT_RECORDED'})
   }
 
-  const { data: updated, error: updErr } = await admin
-    .from('subscriptions')
-    .update(update)
-    .eq('id', id)
+  // Optimistic compare-and-swap: if an upgrade, payment or other editor changed
+  // the subscription since we read it, do not overwrite that newer contract.
+  let guardedUpdate = admin.from('subscriptions').update(update).eq('id', id)
+  const originalFields: Record<string, unknown> = {
+    plan: current.plan, start_date: current.start_date, end_date: current.end_date,
+    status: current.status, amount: current.amount, amount_due: current.amount_due,
+    payment_method: current.payment_method,
+  }
+  for (const [field, value] of Object.entries(originalFields)) {
+    guardedUpdate = value === null
+      ? guardedUpdate.is(field, null)
+      : guardedUpdate.eq(field, value)
+  }
+  const { data: updated, error: updErr } = await guardedUpdate
     .select(
       'id, member_id, subscription_type, plan, status, start_date, end_date, frozen_until, sessions_total, sessions_used, amount, amount_due, payment_method, paid_at'
     )
     .maybeSingle()
 
   if (updErr) return json(500, { ok: false, error: updErr.message })
+  if (!updated) return json(409, {ok:false,error:'SUBSCRIPTION_CHANGED_RELOAD_REQUIRED',
+    details:'The subscription changed while you were editing. Reload and review before correcting.'})
 
 
 // Audit log (best-effort)
