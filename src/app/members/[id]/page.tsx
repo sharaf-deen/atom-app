@@ -1603,7 +1603,9 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
                 const paid = Math.max(Number(s.amount ?? 0), 0)
                 const total = paid + due
 
-                const statusNow = isSessions
+                const statusNow = s.status === 'cancelled'
+                  ? 'Cancelled — no active coverage'
+                  : isSessions
                   ? remaining > 0
                     ? `${remaining} session(s) left`
                     : 'No sessions left'
@@ -1636,7 +1638,7 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
                     <div className="flex flex-wrap items-center gap-2">
                       <TinyBadge>{humanPlan(s.plan)}</TinyBadge>
                       <TinyBadge tone={state.statusTone}>{state.displayStatus}</TinyBadge>
-                      {left !== null && left >= 0 && !isSessions && !frozen ? (
+                      {s.status !== 'cancelled' && left !== null && left >= 0 && !isSessions && !frozen ? (
                         <TinyBadge tone={left <= 7 ? 'warning' : 'success'}>{left} day(s) left</TinyBadge>
                       ) : null}
                       {frozen ? <TinyBadge tone="warning">Frozen until {fmtDate(s.frozen_until)}</TinyBadge> : null}
