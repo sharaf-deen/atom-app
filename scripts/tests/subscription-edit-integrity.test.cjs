@@ -52,6 +52,8 @@ test('the server rejects all financial edits and linked contract changes even fr
  assert.match(route,/CORRECTION_REASON_REQUIRED/)
  assert.match(route,/CORRECTION_AUDIT_NOT_RECORDED/)
  assert.match(route,/INVOICE_REISSUE_REQUIRES_DEDICATED_WORKFLOW/)
+ assert.match(route,/SUBSCRIPTION_CHANGED_RELOAD_REQUIRED/)
+ assert.match(route,/guardedUpdate\.eq\(field, value\)/)
  for(const table of ['subscription_payments','invoices','membership_upgrades','membership_refunds',
   'subscription_freezes','membership_renewal_requests'])assert.ok(route.includes(table),table)
 })
