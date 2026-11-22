@@ -13,10 +13,11 @@ const route = read('src/app/api/subscriptions/update/route.ts')
 const correction = read('src/app/api/subscriptions/payments/correct-method/route.ts')
 const sql = read('supabase/migrations/20261106160000_subscription_payment_method_correction.sql')
 
-test('subscription header finance edits are rejected when ledger payments exist', () => {
-  assert.match(route, /financialHeaderChange/)
+test('subscription header finance edits are rejected even without ledger payments', () => {
+  assert.match(route, /FINANCIAL_EDIT_REQUIRES_DEDICATED_WORKFLOW/)
+  assert.match(route, /classifySubscriptionEdit\(changed\)/)
   assert.match(route, /\.from\('subscription_payments'\)/)
-  assert.match(route, /PAYMENT_LEDGER_CORRECTION_REQUIRED/)
+  assert.match(route, /subscriptionEditConflict/)
   assert.match(route, /return json\(409,/)
 })
 
