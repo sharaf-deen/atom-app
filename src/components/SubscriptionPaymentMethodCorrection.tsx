@@ -227,7 +227,7 @@ export default function SubscriptionPaymentMethodCorrection({ subscriptionId }: 
                 <div>
                   <label htmlFor={`payment-correction-date-${subscriptionId}`} className="mb-1 block text-sm font-medium">Actual payment date (Egypt)</label>
                   <input id={`payment-correction-date-${subscriptionId}`} type="date"
-                    value={newPaymentDate} disabled={!selected || saving}
+                    value={newPaymentDate} max={new Intl.DateTimeFormat('en-CA', { timeZone: 'Africa/Cairo', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date())} disabled={!selected || saving)
                     onChange={(e) => { setNewPaymentDate(e.target.value); setConfirm(false) }}
                     className="w-full rounded-lg border p-2 text-sm" />
                 </div>
@@ -246,7 +246,6 @@ export default function SubscriptionPaymentMethodCorrection({ subscriptionId }: 
                     <option key={method.value} value={method.value}>{method.label}</option>
                   ))}
                 </select>
-              </div>
               </div> : null}
               <div>
                 <label htmlFor={`payment-correction-reason-${subscriptionId}`}
@@ -255,7 +254,7 @@ export default function SubscriptionPaymentMethodCorrection({ subscriptionId }: 
                   value={reason} maxLength={500} rows={3} disabled={!selected || saving}
                   onChange={(e) => { setReason(e.target.value); setConfirm(false) }}
                   className="w-full rounded-lg border p-2 text-sm"
-                  placeholder="E.g. Bank statement confirms InstaPay; originally recorded as Card." />
+                  placeholder="Explain the correction using the bank statement or payment evidence." />
               </div>
               <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950">
                 Reconciled payments, active refunds and protected financial periods may block corrections. No validation or bank match is released automatically.
