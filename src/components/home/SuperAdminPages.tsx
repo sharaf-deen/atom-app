@@ -16,6 +16,7 @@ export const SUPER_ADMIN_PAGE_GROUPS = [
     { href: '/admin/legal-consent-remediation', label: 'Legal Consent Remediation' },
   ] },
   { title: 'Members & Attendance', pages: [
+    { href: '/reception/registrations', label: 'Reception Registrations' },
     { href: '/admin/members', label: 'Members' },
     { href: '/admin/members/families', label: 'Family Accounts' },
     { href: '/admin/members/families/recover', label: 'Family Recovery' },

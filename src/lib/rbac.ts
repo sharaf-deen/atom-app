@@ -117,6 +117,7 @@ const APP_NAV_BY_ROLE: MenuByRole = {
   ],
   reception: [
     { label: 'Front Desk', href: '/reception', icon: 'dashboard' },
+    { label: 'Registrations', href: '/reception/registrations', icon: 'id' },
     { label: 'Schedule', href: '/schedule', icon: 'calendar' },
     { label: 'Create Member', href: '/kiosk', icon: 'id' },
     { label: 'My Profile', href: '/profile', icon: 'id' },
@@ -135,6 +136,7 @@ const APP_NAV_BY_ROLE: MenuByRole = {
   admin: [
     { label: 'Dashboard', href: '/admin', icon: 'dashboard' },
     { label: 'Front Desk', href: '/reception', icon: 'dashboard' },
+    { label: 'Registrations', href: '/reception/registrations', icon: 'id' },
     { label: 'Notifications', href: '/notifications', icon: 'bell' },
     { label: 'My Profile', href: '/profile', icon: 'id' },
     { label: 'Schedule', href: '/schedule', icon: 'calendar' },
@@ -167,6 +169,7 @@ const APP_NAV_BY_ROLE: MenuByRole = {
     { label: 'Home', href: '/', icon: 'home' },
     { label: 'Dashboard', href: '/admin', icon: 'dashboard' },
     { label: 'Front Desk', href: '/reception', icon: 'dashboard' },
+    { label: 'Registrations', href: '/reception/registrations', icon: 'id' },
     { label: 'Notifications', href: '/notifications', icon: 'bell' },
     { label: 'My Profile', href: '/profile', icon: 'id' },
     { label: 'Schedule', href: '/schedule', icon: 'calendar' },
