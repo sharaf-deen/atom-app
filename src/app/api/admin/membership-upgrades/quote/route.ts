@@ -69,6 +69,9 @@ export async function GET(request:Request) {
   if(priceError||!prices||prices.length!==1)return reply(409,{ok:false,error:'TARGET_PRICE_UNAVAILABLE'})
   const carriedCredit=Number(priorUpgrade?.transferred_credit_egp||0)
   if(!Number.isFinite(carriedCredit)||carriedCredit<0)return reply(409,{ok:false,error:'INVALID_CARRIED_CREDIT'})
+  // Complimentary-only access carries zero paid days; never issue extra prorated credit.
+  if(sub.paid_end_date&&sub.paid_end_date<effectiveDate)
+    return reply(409,{ok:false,error:'PAID_COVERAGE_EXPIRED_NO_UPGRADE_CREDIT'})
   const quote=quoteUpgrade({startDate:sub.start_date,endDate:sub.paid_end_date||sub.end_date,effectiveDate,
     capturedPaidEGP:ledgerTotal+carriedCredit,targetPriceEGP:Number(prices[0].price_egp)})
   return reply(200,{ok:true,preview_only:true,subscription_id:subscriptionId,member_id:sub.member_id,
