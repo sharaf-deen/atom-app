@@ -225,6 +225,42 @@ export async function POST(request: Request) {
   }
 
   if (id) {
+    // A template is a recurring class identity, not a reusable empty slot.
+    // Retyping a linked class (e.g. Adults Beginners -> Wrestling) without a
+    // new template silently creates contradictory dated sessions and programs.
+    const { data: previous, error: previousError } = await supabase
+      .from('schedule_class_templates')
+      .select('name,audience,level,activity_type,uniform')
+      .eq('id', id)
+      .single()
+    if (previousError || !previous) return dbFailure(previousError, 'LOAD_ORIGINAL_TEMPLATE_FAILED')
+    const identityChanged =
+      previous.name !== payload.name ||
+      previous.audience !== payload.audience ||
+      previous.level !== payload.level ||
+      previous.activity_type !== payload.activity_type ||
+      previous.uniform !== payload.uniform
+
+    if (identityChanged) {
+      const cairoToday = new Intl.DateTimeFormat('en-CA', {
+        timeZone: 'Africa/Cairo', year: 'numeric', month: '2-digit', day: '2-digit',
+      }).format(new Date())
+      const { data: upcoming, error: upcomingError } = await supabase
+        .from('schedule_training_sessions')
+        .select('id')
+        .eq('class_template_id', id)
+        .gte('session_date', cairoToday)
+        .limit(1)
+      if (upcomingError) return dbFailure(upcomingError, 'CHECK_TEMPLATE_LINKS_FAILED')
+      if ((upcoming ?? []).length) {
+        return json({
+          ok: false,
+          error: 'TEMPLATE_IDENTITY_LOCKED',
+          details: 'This recurring class has dated sessions. Create a new Class Template for a different class identity; archive the old one and review existing dated sessions in Schedule Consistency. This preserves session, program and staff history.',
+        }, 409)
+      }
+    }
+
     const { data, error } = await supabase
       .from('schedule_class_templates')
       .update(payload)
