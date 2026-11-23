@@ -60,3 +60,15 @@ test('audit corrections are append-only and cannot be edited or deleted', () => 
   assert.match(guard, /before update or delete on public\.subscription_payment_date_corrections/)
   assert.match(guard, /PAYMENT_DATE_AUDIT_APPEND_ONLY/)
 })
+
+test('closed daily and cash validation periods block moving a payment in or out', () => {
+  const guard = read('supabase/migrations/20261123194834_subscription_payment_date_validated_period_guard.sql')
+  assert.match(guard, /PAYMENT_DATE_VALIDATED_PERIOD_LOCKED/)
+  assert.match(guard, /b\.validation_mode = 'daily'/)
+  assert.match(guard, /b\.validation_mode = 'cash_period'/)
+  assert.match(guard, /b\.business_date in/)
+  assert.match(guard, /b\.period_from/)
+  assert.match(guard, /b\.period_to/)
+  assert.match(guard, /b\.deleted_at is null/)
+  assert.match(guard, /b\.payment_method = public\.normalize_payment_method\(v_payment\.payment_method\)/)
+})
