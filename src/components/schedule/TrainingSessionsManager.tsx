@@ -768,7 +768,7 @@ export default function TrainingSessionsManager({
       {canManageSessions ? (
         <div className="space-y-4 rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4 shadow-soft sm:p-5">
           <div>
-            <h2 className="font-semibold">Generate / sync dated sessions</h2>
+            <h2 id="sync-dated-sessions" className="font-semibold">Generate / sync dated sessions</h2>
             <p className="mt-1 text-sm text-[hsl(var(--muted))]">
               Default range is the next 90 days. Sessions with active staff, QR attendance, a planned Training Program or a linked Training Log are protected from automatic refresh/removal.
             </p>
