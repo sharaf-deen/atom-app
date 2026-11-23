@@ -28,6 +28,17 @@ test('every privileged transition checks feature flag, session, server-side Supe
   assert.match(r, /ATOM_REGISTRATION_MEMBER_FAMILY_PROVISIONING_ENABLED/)
 })
 
+test('server diagnosis audits identity before advertising Super Admin approval', () => {
+  const r = read('src/app/api/admin/public-registration/provisioning/plan/route.ts')
+  assert.match(r, /auditRegistrationIdentity/)
+  assert.match(r, /plan\.step === 'REVIEW_IDENTITY_AND_CLAIM'/)
+  assert.match(r, /BLOCKED_REQUIRES_REVIEW/)
+  assert.match(r, /reason: audit\.reason/)
+  const ui = read('src/app/reception/registrations/RegistrationAdminActions.tsx')
+  assert.match(ui, /Existing account detected/)
+  assert.match(ui, /authenticated Family Account linking flow/)
+})
+
 test('no automatic chaining and rejection is limited to unprovisioned requests', () => {
   const r = read('src/app/api/admin/public-registration/provisioning/advance/route.ts')
   assert.match(r, /record\.provisioning_claim_id \|\| record\.provisioned_auth_user_id/)
