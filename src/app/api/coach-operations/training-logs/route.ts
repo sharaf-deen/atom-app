@@ -267,9 +267,9 @@ export async function POST(request: Request) {
   )
 
   if (!programBlockIds.size) return json({ ok: false, error: 'PROGRAM_EMPTY' }, 400)
-  if (blockIds.some((blockId) => !programBlockIds.has(blockId))) {
-    return json({ ok: false, error: 'BLOCK_NOT_IN_PROGRAM' }, 400)
-  }
+  // Program blocks are recommendations, not the only curriculum a coach may log.
+  // All chosen blocks must be active, or already recommended by the Program
+  // (legacy archived-block compatibility). Level/audience checks remain strict.
 
   const [blocksResult, techniquesResult, situationsResult] = await Promise.all([
     blockIds.length
@@ -305,6 +305,9 @@ export async function POST(request: Request) {
   }
 
   const blockMap = new Map(blocks.map((row) => [row.id, row]))
+  if (blocks.some((block) => !block.is_active && !programBlockIds.has(block.id))) {
+    return json({ ok: false, error: 'ARCHIVED_BLOCK_NOT_IN_PROGRAM' }, 400)
+  }
   const techniqueMap = new Map(techniques.map((row) => [row.id, row]))
 
   for (const technique of techniques) {

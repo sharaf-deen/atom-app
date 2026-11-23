@@ -196,8 +196,11 @@ export default function TrainingSessionLogsManager({
   }
 
   function allowedBlocks(id: string) {
-    const allowed = programBlockIds(id)
-    return blocks.filter((block) => allowed.has(block.id))
+    // The Head Coach's selected blocks are recommendations, not an exhaustive
+    // list of what the coach may actually record. Archived blocks remain visible
+    // only if they are already in the Program (for legacy selections).
+    const recommended = programBlockIds(id)
+    return blocks.filter((block) => block.is_active || recommended.has(block.id))
   }
 
   function recommendedTechniqueIds(id: string, blockId: string) {
@@ -644,7 +647,7 @@ export default function TrainingSessionLogsManager({
               <div className="mb-2">
                 <h4 className="text-sm font-semibold text-black">What was actually worked?</h4>
                 <p className="text-xs text-[hsl(var(--muted))]">
-                  Select the block first. Head Coach choices are recommendations only. You may choose any active technique compatible with the Program level and audience inside the selected Program blocks.
+                  Choose the blocks and techniques actually taught from the full active Curriculum Library. The Head Coach&apos;s Program selections remain recommendations, not restrictions. Program level and audience limits still apply.
                 </p>
               </div>
               <div className="space-y-3">
@@ -666,7 +669,9 @@ export default function TrainingSessionLogsManager({
                           <div key={block.id} className="rounded-2xl border border-[hsl(var(--border))] bg-white p-3">
                             <label className="flex cursor-pointer items-center gap-3 text-sm font-semibold">
                               <input type="checkbox" className="h-4 w-4" checked={blockSelected} onChange={(event) => toggleBlock(block.id, event.target.checked)} />
-                              {block.name}{!block.is_active ? ' (Archived)' : ''}
+                              {block.name}{!block.is_active ? ' (Archived)' : ''}{programBlockIds(currentProgram.id).has(block.id) ? (
+                                <span className="ml-2 rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-[10px] font-semibold text-blue-800">Recommended</span>
+                              ) : null}
                             </label>
                             {blockSelected && childTechniques.length ? (
                               <div className="mt-3 space-y-2 border-l border-[hsl(var(--border))] pl-4">
