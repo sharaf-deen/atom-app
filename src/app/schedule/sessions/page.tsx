@@ -7,6 +7,7 @@ import AccessDeniedPage from '@/components/AccessDeniedPage'
 import PageHeader from '@/components/layout/PageHeader'
 import Section from '@/components/layout/Section'
 import TrainingSessionsManager from '@/components/schedule/TrainingSessionsManager'
+import ScheduleConsistencyAudit, { type AuditClassTemplate } from '@/components/schedule/ScheduleConsistencyAudit'
 import {
   canAccessScheduleTrainingSessions,
   canManageScheduleSessionCoachAssignments,
@@ -178,8 +179,7 @@ export default async function ScheduleTrainingSessionsPage() {
       .order('title', { ascending: true }),
     supabase
       .from('schedule_class_templates')
-      .select('id,series_key,name,level,audience,day_of_week,start_time,mat')
-      .eq('is_active', true)
+      .select('id,series_key,name,level,audience,day_of_week,start_time,end_time,activity_type,uniform,mat,is_active,effective_from,effective_until')
       .order('name', { ascending: true })
       .order('day_of_week', { ascending: true })
       .order('start_time', { ascending: true }),
@@ -193,6 +193,7 @@ export default async function ScheduleTrainingSessionsPage() {
   ])
 
   let sessions = (sessionResult.data ?? []) as ScheduleTrainingSession[]
+  const auditSessions = sessions
   let assignments: ScheduleSessionCoachAssignment[] = []
   let programAssignments: ScheduleSessionTrainingProgramAssignment[] = []
   let exceptionEvents: ScheduleSessionExceptionEvent[] = []
@@ -326,6 +327,15 @@ export default async function ScheduleTrainingSessionsPage() {
           </>
         )}
 
+        {canManageSessions && !sessionResult.error && !recurringTemplatesResult.error ? (
+          <ScheduleConsistencyAudit
+            sessions={auditSessions}
+            templates={(recurringTemplatesResult.data ?? []) as AuditClassTemplate[]}
+            fromDate={today}
+            throughDate={previewUntil}
+          />
+        ) : null}
+
         {loadError ? (
           <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">
             Failed to load scheduled sessions: {loadError}
@@ -341,7 +351,7 @@ export default async function ScheduleTrainingSessionsPage() {
             programs={(programsResult.data ?? []) as PublishedTrainingProgram[]}
             programAssignments={programAssignments}
             exceptionEvents={exceptionEvents}
-            recurringTemplates={(recurringTemplatesResult.data ?? []) as ScheduleRecurringClassTemplate[]}
+            recurringTemplates={(recurringTemplatesResult.data ?? []).filter((row: any) => row.is_active) as ScheduleRecurringClassTemplate[]}
             seriesCoachingTeams={(seriesTeamsResult.data ?? []) as ScheduleSeriesCoachingTeam[]}
             today={today}
             previewUntil={previewUntil}
