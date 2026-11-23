@@ -5,6 +5,7 @@ import { NextResponse } from 'next/server'
 import { createSupabaseServerActionClient } from '@/lib/supabaseServer'
 import { createSupabaseAdminClient } from '@/lib/supabaseAdmin'
 import { normalizeRole } from '@/lib/rbac'
+import { auditRegistrationIdentity } from '@/lib/publicRegistrationIdentityAudit'
 import { planRegistrationProvisioning, type RegistrationOrchestrationRow } from '@/lib/publicRegistrationOrchestrationPlan'
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
@@ -33,8 +34,30 @@ export async function POST(req: Request) {
       .select(FIELDS).eq('id', body.request_id).maybeSingle()
     if (error) return reply({ ok: false, code: 'PLAN_UNAVAILABLE' }, 503)
     if (!data) return reply({ ok: false, code: 'NOT_FOUND' }, 404)
+
+    const plan = planRegistrationProvisioning(data as RegistrationOrchestrationRow)
+
+    // The orchestration row alone cannot detect duplicate/existing identities.
+    // Run the same read-only identity audit used by the mutation endpoint before
+    // we ever advertise APPROVE. This keeps the UI and server transition aligned
+    // and prevents a misleading approval button for existing-account cases.
+    if (plan.step === 'REVIEW_IDENTITY_AND_CLAIM') {
+      const audit = await auditRegistrationIdentity(admin, body.request_id)
+      if (!audit.safeForNewAuth) {
+        return reply({
+          ok: true,
+          plan: {
+            step: 'BLOCKED_REQUIRES_REVIEW',
+            reason: audit.reason,
+            reviewRequired: true,
+            readyForAutomaticExecution: false,
+          },
+        }, 200)
+      }
+    }
+
     // Never expose email, Auth IDs, claim IDs or other personal/sensitive record fields.
-    return reply({ ok: true, plan: planRegistrationProvisioning(data as RegistrationOrchestrationRow) }, 200)
+    return reply({ ok: true, plan }, 200)
   } catch {
     return reply({ ok: false, code: 'PLAN_UNAVAILABLE' }, 503)
   }
