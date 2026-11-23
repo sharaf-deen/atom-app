@@ -65,6 +65,9 @@ jobs:
       - name: Subscription Edit — financial and contract integrity tests
         run: node --test scripts/tests/subscription-edit-integrity.test.cjs
 
+      - name: Subscription payment date financial integrity contracts
+        run: node --test scripts/tests/payment-date-correction.integrity.test.cjs
+
       - name: Subscription payment method integrity contracts
         run: |
           node --test scripts/tests/subscription-payment-integrity.contract.test.cjs

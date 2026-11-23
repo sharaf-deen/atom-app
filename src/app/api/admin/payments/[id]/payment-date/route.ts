@@ -3,225 +3,93 @@ export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
 import { NextResponse } from 'next/server'
-import { cairoLocalToUTC, CAIRO_TZ, isISODateOnly } from '@/lib/cairoTime'
+import { CAIRO_TZ, cairoLocalToUTC, cairoTodayDateOnly } from '@/lib/cairoTime'
 import { createSupabaseAdminClient } from '@/lib/supabaseAdmin'
 import { createSupabaseServerActionClient } from '@/lib/supabaseServer'
+import { normalizeRole } from '@/lib/rbac'
 
-function noStore(res: NextResponse) {
-  res.headers.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate')
-  return res
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+
+function json(status: number, payload: Record<string, unknown>) {
+  const result = NextResponse.json(payload, { status })
+  result.headers.set('Cache-Control', 'no-store')
+  return result
 }
 
-function isUuid(v: string) {
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(v)
+function validDateOnly(value: string) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false
+  const dt = new Date(value + 'T00:00:00Z')
+  return !Number.isNaN(dt.getTime()) && dt.toISOString().slice(0, 10) === value
 }
 
-function cairoClockParts(iso?: string | null) {
-  const raw = String(iso ?? '').trim()
-  const dt = raw ? new Date(raw) : null
-  if (!dt || Number.isNaN(dt.getTime())) {
-    return { hour: 12, minute: 0, second: 0 }
-  }
-
-  const fmt = new Intl.DateTimeFormat('en-GB', {
-    timeZone: CAIRO_TZ,
-    hour12: false,
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-  })
-  const parts = fmt.formatToParts(dt)
-  const map: Record<string, string> = {}
-  for (const p of parts) {
-    if (p.type !== 'literal') map[p.type] = p.value
-  }
-
-  const hour = Number(map.hour ?? '12')
-  const minute = Number(map.minute ?? '0')
-  const second = Number(map.second ?? '0')
-
-  return {
-    hour: Number.isFinite(hour) ? hour : 12,
-    minute: Number.isFinite(minute) ? minute : 0,
-    second: Number.isFinite(second) ? second : 0,
-  }
-}
-
-async function insertAuditLog(admin: any, payload: {
-  actor_user_id: string
-  target_user_id: string
-  action: string
-  action_details: Record<string, unknown>
-}) {
-  try {
-    await admin.from('audit_logs').insert(payload)
-  } catch {
-    // best effort only
-  }
+function cairoTimeOfDay(iso: string) {
+  const dt = new Date(iso)
+  if (Number.isNaN(dt.getTime())) throw new Error('INVALID_EXISTING_DATE')
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: CAIRO_TZ, hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit',
+  }).formatToParts(dt)
+  const map = Object.fromEntries(parts.filter(p => p.type !== 'literal').map(p => [p.type, p.value]))
+  return { hour: Number(map.hour) % 24, minute: Number(map.minute), second: Number(map.second) }
 }
 
 export async function POST(req: Request, { params }: { params: { id: string } }) {
-  try {
-    const paymentId = String(params?.id ?? '').trim()
-    if (!isUuid(paymentId)) {
-      return noStore(NextResponse.json({ ok: false, error: 'INVALID_PAYMENT_ID' }, { status: 400 }))
-    }
+  const paymentId = String(params?.id ?? '')
+  if (!UUID.test(paymentId)) return json(400, { ok: false, error: 'INVALID_PAYMENT_ID' })
 
-    const body = await req.json().catch(() => ({} as any))
-    const paymentDate = String(body?.payment_date ?? '').trim()
-    if (!isISODateOnly(paymentDate)) {
-      return noStore(
-        NextResponse.json(
-          { ok: false, error: 'INVALID_PAYMENT_DATE', details: 'payment_date must be YYYY-MM-DD.' },
-          { status: 400 },
-        ),
-      )
-    }
-
-    const supa = createSupabaseServerActionClient()
-    const { data: authData, error: authErr } = await supa.auth.getUser()
-    if (authErr || !authData.user) {
-      return noStore(NextResponse.json({ ok: false, error: 'NOT_AUTHENTICATED' }, { status: 401 }))
-    }
-
-    const actorId = authData.user.id
-    const { data: actorProfile, error: actorProfileErr } = await supa
-      .from('profiles')
-      .select('user_id, role')
-      .eq('user_id', actorId)
-      .maybeSingle<{ user_id: string; role: string | null }>()
-
-    if (actorProfileErr) {
-      return noStore(NextResponse.json({ ok: false, error: 'ACTOR_PROFILE_ERROR', details: actorProfileErr.message }, { status: 500 }))
-    }
-
-    const actorRole = String(actorProfile?.role ?? '')
-    if (actorRole !== 'super_admin') {
-      return noStore(NextResponse.json({ ok: false, error: 'FORBIDDEN' }, { status: 403 }))
-    }
-
-    const admin = createSupabaseAdminClient()
-
-    const { data: payment, error: paymentErr } = await admin
-      .from('subscription_payments')
-      .select('id, subscription_id, member_id, amount, payment_method, note, paid_at, created_at')
-      .eq('id', paymentId)
-      .maybeSingle<{
-        id: string
-        subscription_id: string | null
-        member_id: string
-        amount: number
-        payment_method: string | null
-        note: string | null
-        paid_at: string | null
-        created_at: string | null
-      }>()
-
-    if (paymentErr) {
-      return noStore(NextResponse.json({ ok: false, error: 'PAYMENT_LOOKUP_ERROR', details: paymentErr.message }, { status: 500 }))
-    }
-
-    if (!payment) {
-      return noStore(NextResponse.json({ ok: false, error: 'PAYMENT_NOT_FOUND' }, { status: 404 }))
-    }
-
-    const { data: lockRow, error: lockErr } = await admin
-      .from('payment_validation_active_source_locks_v1')
-      .select('batch_id, validated_at')
-      .eq('source_kind', 'subscription_payment')
-      .eq('source_id', paymentId)
-      .maybeSingle<{ batch_id: string; validated_at: string }>()
-
-    if (lockErr) {
-      return noStore(
-        NextResponse.json({ ok: false, error: 'PAYMENT_LOCK_LOOKUP_ERROR', details: lockErr.message }, { status: 500 }),
-      )
-    }
-
-    if (lockRow?.batch_id) {
-      return noStore(
-        NextResponse.json(
-          {
-            ok: false,
-            error: 'PAYMENT_RECONCILED_LOCKED',
-            details: `This payment is already reconciled in batch ${String(lockRow.batch_id).slice(0, 8)}. Delete that validation batch first, then edit the payment date.`,
-          },
-          { status: 409 },
-        ),
-      )
-    }
-
-    const currentBase = payment.paid_at || payment.created_at || null
-    const clock = cairoClockParts(currentBase)
-    const newPaidAt = cairoLocalToUTC({
-      dateOnly: paymentDate,
-      hour: clock.hour,
-      minute: clock.minute,
-      second: clock.second,
-    }).toISOString()
-
-    const { error: updatePaymentErr } = await admin
-      .from('subscription_payments')
-      .update({ paid_at: newPaidAt })
-      .eq('id', paymentId)
-
-    if (updatePaymentErr) {
-      return noStore(
-        NextResponse.json({ ok: false, error: 'UPDATE_PAYMENT_FAILED', details: updatePaymentErr.message }, { status: 400 }),
-      )
-    }
-
-    let latestPaidAt: string | null = null
-
-    if (payment.subscription_id) {
-      const { data: latestPayment, error: latestErr } = await admin
-        .from('subscription_payments')
-        .select('id, paid_at, created_at')
-        .eq('subscription_id', payment.subscription_id)
-        .order('paid_at', { ascending: false })
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .maybeSingle<{ id: string; paid_at: string | null; created_at: string | null }>()
-
-      if (!latestErr && latestPayment) {
-        latestPaidAt = latestPayment.paid_at || latestPayment.created_at || null
-        if (latestPaidAt) {
-          await admin.from('subscriptions').update({ paid_at: latestPaidAt }).eq('id', payment.subscription_id)
-        }
-      }
-    }
-
-    await insertAuditLog(admin, {
-      actor_user_id: actorId,
-      target_user_id: payment.member_id,
-      action: 'update_payment_date',
-      action_details: {
-        payment_id: payment.id,
-        subscription_id: payment.subscription_id,
-        old_paid_at: payment.paid_at,
-        new_paid_at: newPaidAt,
-        payment_date: paymentDate,
-      },
-    })
-
-    return noStore(
-      NextResponse.json({
-        ok: true,
-        payment_id: payment.id,
-        paid_at: newPaidAt,
-        subscription_latest_paid_at: latestPaidAt,
-      }),
-    )
-  } catch (e: any) {
-    return noStore(
-      NextResponse.json(
-        {
-          ok: false,
-          error: 'SERVER_ERROR',
-          details: e?.message ?? 'Unexpected error',
-        },
-        { status: 500 },
-      ),
-    )
+  const supa = createSupabaseServerActionClient()
+  const { data: auth, error: authError } = await supa.auth.getUser()
+  if (authError || !auth.user) return json(401, { ok: false, error: 'NOT_AUTHENTICATED' })
+  const { data: profile, error: profileError } = await supa
+    .from('profiles').select('role').eq('user_id', auth.user.id).maybeSingle()
+  if (profileError) return json(500, { ok: false, error: 'PROFILE_LOOKUP_FAILED' })
+  if (normalizeRole(profile?.role) !== 'super_admin') {
+    return json(403, { ok: false, error: 'SUPER_ADMIN_REQUIRED' })
   }
+
+  const body = await req.json().catch(() => null)
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    return json(400, { ok: false, error: 'INVALID_BODY' })
+  }
+  const date = String(body.payment_date ?? '').trim()
+  const expected = String(body.expected_paid_at ?? '').trim()
+  const reason = String(body.reason ?? '').trim()
+  if (!validDateOnly(date) || !expected || Number.isNaN(new Date(expected).getTime()) ||
+      reason.length < 5 || reason.length > 500) {
+    return json(400, { ok: false, error: 'INVALID_CORRECTION_REQUEST' })
+  }
+  if (date > cairoTodayDateOnly()) return json(400, { ok: false, error: 'FUTURE_PAYMENT_DATE' })
+
+  const admin = createSupabaseAdminClient()
+  const { data: payment, error: readError } = await admin
+    .from('subscription_payments').select('id, paid_at')
+    .eq('id', paymentId).maybeSingle()
+  if (readError) return json(500, { ok: false, error: 'PAYMENT_LOOKUP_FAILED' })
+  if (!payment) return json(404, { ok: false, error: 'PAYMENT_NOT_FOUND' })
+  if (payment.paid_at !== expected && new Date(String(payment.paid_at)).getTime() !== new Date(expected).getTime()) {
+    return json(409, { ok: false, error: 'STALE_PAYMENT_DATE' })
+  }
+  if (!payment.paid_at) return json(409, { ok: false, error: 'PAYMENT_WITHOUT_DATE' })
+
+  const clock = cairoTimeOfDay(payment.paid_at)
+  const newPaidAt = cairoLocalToUTC({ dateOnly: date, ...clock }).toISOString()
+  const checkDate = new Intl.DateTimeFormat('en-CA', {
+    timeZone: CAIRO_TZ, year: 'numeric', month: '2-digit', day: '2-digit',
+  }).format(new Date(newPaidAt))
+  if (checkDate !== date) return json(400, { ok: false, error: 'INVALID_CAIRO_DATE' })
+
+  const { data, error } = await admin.rpc('correct_subscription_payment_date_v1', {
+    p_payment_id: paymentId,
+    p_expected_paid_at: expected,
+    p_new_paid_at: newPaidAt,
+    p_reason: reason,
+    p_actor: auth.user.id,
+  })
+  if (error) {
+    // Never expose raw SQL diagnostics or underlying member data.
+    const unavailable = error.code === 'PGRST202' || error.code === '42883'
+    return json(unavailable ? 503 : 409, {
+      ok: false, error: unavailable ? 'PAYMENT_DATE_MIGRATION_NOT_DEPLOYED' : 'PAYMENT_DATE_CORRECTION_REJECTED',
+    })
+  }
+  return json(200, { ok: true, result: data })
 }

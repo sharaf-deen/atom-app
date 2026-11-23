@@ -34,6 +34,8 @@ function dateLabel(value: string | null) {
 export default function SubscriptionPaymentMethodCorrection({ subscriptionId }: { subscriptionId: string }) {
   const router = useRouter()
   const [open, setOpen] = useState(false)
+  const [correctionType, setCorrectionType] = useState<'method' | 'date'>('date')
+  const [newPaymentDate, setNewPaymentDate] = useState('')
   const [payments, setPayments] = useState<LedgerPayment[]>([])
   const [selectedPaymentId, setSelectedPaymentId] = useState('')
   const [newMethod, setNewMethod] = useState<Method>('instapay')
@@ -47,7 +49,7 @@ export default function SubscriptionPaymentMethodCorrection({ subscriptionId }: 
   const selected = payments.find((row) => row.id === selectedPaymentId) ?? null
   const oldMethod = selected?.payment_method ?? ''
   const canSubmit = !!selected && methods.some((row) => row.value === oldMethod)
-    && newMethod !== oldMethod && reason.trim().length >= 5
+    && correctionType === 'method' && newMethod !== oldMethod && reason.trim().length >= 5
     && reason.trim().length <= 500 && confirm && !saving && !loading
 
   async function loadPayments() {
@@ -66,12 +68,44 @@ export default function SubscriptionPaymentMethodCorrection({ subscriptionId }: 
       const rows = body.payments as LedgerPayment[]
       setPayments(rows)
       setSelectedPaymentId('')
+      setNewPaymentDate('')
       setReason('')
       setConfirm(false)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Unable to load payment ledger')
     } finally {
       setLoading(false)
+    }
+  }
+
+  async function saveDateCorrection() {
+    if (!selected || !selected.paid_at || !newPaymentDate ||
+        reason.trim().length < 5 || reason.trim().length > 500 || !confirm || saving) return
+    setSaving(true)
+    setError('')
+    setMessage('')
+    try {
+      const response = await fetch('/api/admin/payments/' + encodeURIComponent(selected.id) + '/payment-date', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          payment_date: newPaymentDate,
+          expected_paid_at: selected.paid_at,
+          reason: reason.trim(),
+        }),
+      })
+      const body = await response.json()
+      if (!response.ok || !body.ok) throw new Error(body.error ?? 'Payment date correction failed')
+      setConfirm(false)
+      setReason('')
+      await loadPayments()
+      setMessage('Payment date corrected. The recorded-at timestamp and subscription coverage are unchanged.')
+      router.refresh()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Payment date correction failed')
+    } finally {
+      setSaving(false)
     }
   }
 
@@ -125,15 +159,15 @@ export default function SubscriptionPaymentMethodCorrection({ subscriptionId }: 
           void loadPayments()
         }}
       >
-        Correct payment method
+        Correct payment
       </button>
       {open ? (
         <div className="fixed inset-0 z-[1001] flex items-center justify-center bg-black/50 p-4" role="presentation">
-          <div role="dialog" aria-modal="true" aria-label="Correct subscription payment method"
+          <div role="dialog" aria-modal="true" aria-label="Correct subscription payment"
             className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl bg-white p-5 shadow-xl">
             <div className="flex items-start justify-between gap-3">
               <div>
-                <h3 className="text-lg font-semibold">Correct payment method</h3>
+                <h3 className="text-lg font-semibold">Correct payment</h3>
                 <p className="mt-1 text-sm text-gray-600">
                   Super Admin only · Correct a specific payment, not the subscription header.
                 </p>
@@ -144,6 +178,12 @@ export default function SubscriptionPaymentMethodCorrection({ subscriptionId }: 
             {error ? <p role="alert" className="mt-3 rounded-lg bg-red-50 p-3 text-sm text-red-800">{error}</p> : null}
             {message ? <p role="status" className="mt-3 rounded-lg bg-green-50 p-3 text-sm text-green-800">{message}</p> : null}
             <div className="mt-4 space-y-4">
+              <div className="flex gap-2" role="group" aria-label="Correction type">
+                <button type="button" className={`rounded-lg border px-3 py-2 text-sm ${correctionType === 'date' ? 'bg-gray-900 text-white' : ''}`}
+                  onClick={() => { setCorrectionType('date'); setReason(''); setConfirm(false); setError('') }}>Payment date</button>
+                <button type="button" className={`rounded-lg border px-3 py-2 text-sm ${correctionType === 'method' ? 'bg-gray-900 text-white' : ''}`}
+                  onClick={() => { setCorrectionType('method'); setReason(''); setConfirm(false); setError('') }}>Payment method</button>
+              </div>
               <div>
                 <label htmlFor={`payment-correction-source-${subscriptionId}`}
                   className="mb-1 block text-sm font-medium">Payment to correct</label>
@@ -157,6 +197,7 @@ export default function SubscriptionPaymentMethodCorrection({ subscriptionId }: 
                     const next = payments.find((row) => row.id === id)
                     const fallback = methods.find((row) => row.value !== next?.payment_method)
                     setNewMethod(fallback?.value ?? 'instapay')
+                    setNewPaymentDate(next?.paid_at ? new Intl.DateTimeFormat('en-CA', { timeZone: 'Africa/Cairo', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(next.paid_at)) : '')
                     setReason('')
                     setConfirm(false)
                     setError('')
@@ -182,7 +223,16 @@ export default function SubscriptionPaymentMethodCorrection({ subscriptionId }: 
                   </p>
                 </div>
               ) : null}
-              <div>
+              {correctionType === 'date' ? (
+                <div>
+                  <label htmlFor={`payment-correction-date-${subscriptionId}`} className="mb-1 block text-sm font-medium">Actual payment date (Egypt)</label>
+                  <input id={`payment-correction-date-${subscriptionId}`} type="date"
+                    value={newPaymentDate} max={new Intl.DateTimeFormat('en-CA', { timeZone: 'Africa/Cairo', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date())} disabled={!selected || saving}
+                    onChange={(e) => { setNewPaymentDate(e.target.value); setConfirm(false) }}
+                    className="w-full rounded-lg border p-2 text-sm" />
+                </div>
+              ) : null}
+              {correctionType === 'method' ? <div>
                 <label htmlFor={`payment-correction-new-${subscriptionId}`}
                   className="mb-1 block text-sm font-medium">Correct method</label>
                 <select id={`payment-correction-new-${subscriptionId}`}
@@ -196,7 +246,7 @@ export default function SubscriptionPaymentMethodCorrection({ subscriptionId }: 
                     <option key={method.value} value={method.value}>{method.label}</option>
                   ))}
                 </select>
-              </div>
+              </div> : null}
               <div>
                 <label htmlFor={`payment-correction-reason-${subscriptionId}`}
                   className="mb-1 block text-sm font-medium">Reason (required, 5–500 characters)</label>
@@ -204,20 +254,19 @@ export default function SubscriptionPaymentMethodCorrection({ subscriptionId }: 
                   value={reason} maxLength={500} rows={3} disabled={!selected || saving}
                   onChange={(e) => { setReason(e.target.value); setConfirm(false) }}
                   className="w-full rounded-lg border p-2 text-sm"
-                  placeholder="E.g. Bank statement confirms InstaPay; originally recorded as Card." />
+                  placeholder="Explain the correction using the bank statement or payment evidence." />
               </div>
               <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950">
-                Existing bank matches, refunds and multi-payment validation batches may block correction.
-                A corrected validated payment must be validated again under its new method.
+                Reconciled payments, active refunds and protected financial periods may block corrections. No validation or bank match is released automatically.
               </div>
               <label className="flex items-start gap-2 text-sm">
                 <input type="checkbox" checked={confirm} disabled={!selected || saving}
                   onChange={(e) => setConfirm(e.target.checked)} className="mt-1" />
-                <span>I verified the bank evidence and confirm that only this payment method should change.</span>
+                <span>I have verified the original payment evidence and confirm this correction.</span>
               </label>
-              <button type="button" disabled={!canSubmit} onClick={() => void saveCorrection()}
+              <button type="button" disabled={correctionType === 'method' ? !canSubmit : (!selected?.paid_at || !newPaymentDate || reason.trim().length < 5 || reason.trim().length > 500 || !confirm || saving || loading)} onClick={() => void (correctionType === 'method' ? saveCorrection() : saveDateCorrection())}
                 className="w-full rounded-lg bg-gray-900 px-4 py-2.5 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50">
-                {saving ? 'Saving correction…' : 'Confirm payment method correction'}
+                {saving ? 'Saving correction…' : 'Confirm payment correction'}
               </button>
             </div>
           </div>
