@@ -227,7 +227,7 @@ export default function SubscriptionPaymentMethodCorrection({ subscriptionId }: 
                 <div>
                   <label htmlFor={`payment-correction-date-${subscriptionId}`} className="mb-1 block text-sm font-medium">Actual payment date (Egypt)</label>
                   <input id={`payment-correction-date-${subscriptionId}`} type="date"
-                    value={newPaymentDate} max={new Intl.DateTimeFormat('en-CA', { timeZone: 'Africa/Cairo', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date())} disabled={!selected || saving)
+                    value={newPaymentDate} max={new Intl.DateTimeFormat('en-CA', { timeZone: 'Africa/Cairo', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date())} disabled={!selected || saving}
                     onChange={(e) => { setNewPaymentDate(e.target.value); setConfirm(false) }}
                     className="w-full rounded-lg border p-2 text-sm" />
                 </div>
