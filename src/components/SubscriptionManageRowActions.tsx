@@ -1,6 +1,8 @@
 // src/components/SubscriptionManageRowActions.tsx
 'use client'
 
+import SubscriptionComplimentaryExtension from '@/components/SubscriptionComplimentaryExtension'
+
 import { useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
@@ -670,6 +672,10 @@ export default function SubscriptionManageRowActions({
       <Button size="sm" variant="outline" onClick={() => setOpenEdit(true)} disabled={!canEdit}>
         Edit
       </Button>
+
+      {canManageFinancials && isTime && sub.status === 'active' ? (
+        <SubscriptionComplimentaryExtension subscriptionId={sub.id} />
+      ) : null}
 
       {canManageFinancials ? (
         <SubscriptionPaymentMethodCorrection subscriptionId={sub.id} />
