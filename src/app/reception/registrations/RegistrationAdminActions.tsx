@@ -37,6 +37,14 @@ const actionLabel: Record<Action, string> = {
   SEND_INVITATION: 'Send activation invitation',
   RECONCILE_AUTH: 'Reconcile interrupted Auth creation',
 }
+const reasonHelp: Record<string, string> = {
+  EXISTING_PROFILE_REQUIRES_AUTHENTICATED_LINKING:
+    'Existing account detected. Do not create a duplicate Auth account. Use the authenticated Family Account linking flow for this registration.',
+  EXISTING_GUARDIAN_REQUIRES_AUTHENTICATED_LINKING:
+    'Existing parent / guardian account detected. Use the authenticated Family Account linking flow instead of creating another account.',
+  EXISTING_AUTH_REQUIRES_AUTHENTICATED_LINKING:
+    'Existing Auth account detected. The account holder must use the authenticated linking flow; a duplicate account must not be created.',
+}
 
 /** Read-only diagnosis first; every mutation has a new affirmative Super Admin confirmation. */
 export default function RegistrationAdminActions({ requestId }: { requestId: string }) {
@@ -93,6 +101,7 @@ export default function RegistrationAdminActions({ requestId }: { requestId: str
   const canReject = plan?.step === 'WAIT_FOR_VERIFICATION' || plan?.step === 'REVIEW_IDENTITY_AND_CLAIM'
   const permittedAction = plan ? nextAction[plan.step] : null
   const requiringReason = chosenAction === 'REJECT' || chosenAction === 'RECONCILE_AUTH'
+  const diagnosticHelp = plan ? reasonHelp[plan.reason] : ''
 
   return <div className="mt-2 w-full border-t border-[hsl(var(--border))] pt-2 text-sm">
     <button type="button" aria-expanded={expanded} onClick={() => {
@@ -111,6 +120,9 @@ export default function RegistrationAdminActions({ requestId }: { requestId: str
       {plan && <div className="space-y-3" aria-live="polite">
         <p className="font-semibold">{labels[plan.step]}</p>
         <p className="break-words text-xs text-slate-700">Diagnostic: {plan.reason}</p>
+        {diagnosticHelp && <p className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs text-amber-950">
+          {diagnosticHelp}
+        </p>}
         {permittedAction && <button type="button" onClick={() => {
           setChosenAction(permittedAction); setConfirmed(false); setReason('')
         }} className="min-h-[44px] rounded-lg bg-black px-4 py-2 font-medium text-white">
