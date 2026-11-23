@@ -1,6 +1,7 @@
-import SubscriptionComplimentaryExtension from '@/components/SubscriptionComplimentaryExtension'
 // src/components/SubscriptionManageRowActions.tsx
 'use client'
+
+import SubscriptionComplimentaryExtension from '@/components/SubscriptionComplimentaryExtension'
 
 import { useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
