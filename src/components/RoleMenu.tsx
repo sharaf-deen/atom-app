@@ -219,6 +219,7 @@ function sectionFor(item: MenuItem, role?: Role): SectionKey {
       href === '/' ||
       href === '/admin' ||
       href === '/reception' ||
+      href === '/reception/registrations' ||
       href === '/notifications' ||
       href === '/profile' ||
       href === '/schedule' ||
@@ -279,6 +280,7 @@ function sectionFor(item: MenuItem, role?: Role): SectionKey {
     if (
       href === '/admin' ||
       href === '/reception' ||
+      href === '/reception/registrations' ||
       href === '/notifications' ||
       href === '/profile' ||
       href === '/schedule' ||
@@ -327,6 +329,7 @@ function sectionFor(item: MenuItem, role?: Role): SectionKey {
     href === '/' ||
     href === '/admin' ||
     href === '/reception' ||
+      href === '/reception/registrations' ||
     href === '/notifications' ||
     href === '/profile'
   ) {
