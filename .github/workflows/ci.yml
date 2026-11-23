@@ -62,6 +62,9 @@ jobs:
       - name: Membership Upgrade V1 invoice PDF and idempotency tests
         run: node --test scripts/tests/membership-upgrade-invoice.test.cjs
 
+      - name: Subscription Edit — financial and contract integrity tests
+        run: node --test scripts/tests/subscription-edit-integrity.test.cjs
+
       - name: Subscription payment method integrity contracts
         run: |
           node --test scripts/tests/subscription-payment-integrity.contract.test.cjs

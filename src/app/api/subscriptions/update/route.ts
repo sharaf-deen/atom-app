@@ -3,6 +3,7 @@ export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
 import { NextResponse } from 'next/server'
+import { changedSubscriptionFields, classifySubscriptionEdit, subscriptionEditConflict } from '@/lib/subscriptionEditIntegrity'
 import { revalidateTag, revalidatePath } from 'next/cache'
 import { createSupabaseServerActionClient } from '@/lib/supabaseServer'
 import { createSupabaseAdminClient } from '@/lib/supabaseAdmin'
@@ -176,6 +177,17 @@ export async function POST(req: Request) {
   if (curErr) return json(500, { ok: false, error: curErr.message })
   if (!current) return json(404, { ok: false, error: 'Subscription not found' })
 
+  // This legacy Edit endpoint cannot safely replace issued invoices. Invoice
+  // corrections belong to a dedicated audited flow, never silent PDF overwrites.
+  if (invoiceRequested || invoiceEmailRequested) {
+    return json(409, {
+      ok: false,
+      error: 'INVOICE_REISSUE_REQUIRES_DEDICATED_WORKFLOW',
+      details: 'Re-issuing a financial invoice from Edit is disabled. Review the invoice and use the designated correction workflow.',
+    })
+  }
+
+
   // Functional 1B.4: subscription coverage cannot be silently recalculated while
   // consumptive freeze history exists. This also prevents changing plans to 1w/1m.
   if (patch.plan !== undefined || patch.start_date !== undefined || patch.end_date !== undefined) {
@@ -287,40 +299,109 @@ export async function POST(req: Request) {
     delete update.plan
   }
 
-  // Guard: financial corrections must target ledger payments, not only the subscription header.
-  const financialHeaderChange =
-    (update.amount !== undefined && Number(update.amount) !== Number(current.amount)) ||
-    (update.amount_due !== undefined && Number(update.amount_due) !== Number(current.amount_due)) ||
-    (update.payment_method !== undefined && update.payment_method !== current.payment_method)
+  const changed = changedSubscriptionFields(current, update)
+  if (!changed.length) {
+    return json(400, { ok: false, error: 'NO_SUBSCRIPTION_CHANGES', details: 'No changes to save.' })
+  }
+  const editCategory = classifySubscriptionEdit(changed)
+  if (editCategory.contract && role !== 'super_admin') {
+    return json(403,{ok:false,error:'SUPER_ADMIN_CORRECTION_REQUIRED'})
+  }
 
-  if (financialHeaderChange) {
-    const { data: entries, error: checkError } = await admin
-      .from('subscription_payments')
-      .select('id')
-      .eq('subscription_id', id)
-      .limit(1)
-    if (checkError) return json(500, { ok: false, error: 'PAYMENT_LEDGER_CHECK_FAILED' })
-    if (entries?.length) return json(409, {
+  // Payments and due balances must never be fabricated or rewritten through the
+  // subscription header, even on legacy records without a ledger entry.
+  if (editCategory.financial) {
+    return json(409, {
       ok: false,
-      error: 'PAYMENT_LEDGER_CORRECTION_REQUIRED',
-      details: 'Use a specific payment correction workflow to preserve payment validation and bank reconciliation.',
+      error: 'FINANCIAL_EDIT_REQUIRES_DEDICATED_WORKFLOW',
+      details: 'Use Payments or Correct payment method. Edit cannot alter amounts, dues or payment methods.',
     })
+  }
+  if (editCategory.contract && (Number(current.amount ?? 0)>0 || Number(current.amount_due ?? 0)>0)) {
+    return json(409, { ok:false, error:'FINANCIALLY_COMMITTED_CONTRACT_LOCKED',
+      details:'This subscription has a financial commitment. Use a dedicated audited correction or upgrade workflow.' })
+  }
+  if (editCategory.contract && current.status === 'cancelled') {
+    return json(409, { ok: false, error: 'CANCELLED_SUBSCRIPTION_IMMUTABLE',
+      details: 'A cancelled contract cannot be edited; review its history.' })
+  }
+  if (editCategory.contract) {
+    const correctionReason = String(body?.correction_reason ?? '').trim()
+    if (correctionReason.length < 12 || correctionReason.length > 1000) {
+      return json(400, {ok:false,error:'CORRECTION_REASON_REQUIRED',
+        details:'Explain the administrative correction (12–1000 characters).'})
+    }
+    // Fail closed when linked operations exist. Historical payment/invoice/upgrades
+    // must retain the exact coverage that existed when money was recorded.
+    const [payments, invoices, upgradesFrom, upgradesTo, refunds, freezes, renewals] = await Promise.all([
+      admin.from('subscription_payments').select('id').eq('subscription_id',id).limit(1),
+      admin.from('invoices').select('id').eq('subscription_id',id).limit(1),
+      admin.from('membership_upgrades').select('id').eq('from_subscription_id',id).limit(1),
+      admin.from('membership_upgrades').select('id').eq('to_subscription_id',id).limit(1),
+      admin.from('membership_refunds').select('id').eq('subscription_id',id).limit(1),
+      admin.from('subscription_freezes').select('id').eq('subscription_id',id).limit(1),
+      admin.from('membership_renewal_requests').select('id')
+       .eq('member_id',current.member_id).not('status','in','(completed,rejected,cancelled)').limit(1),
+    ])
+    if ([payments,invoices,upgradesFrom,upgradesTo,refunds,freezes,renewals].some(result=>result.error)) {
+      return json(500, { ok:false, error:'SUBSCRIPTION_EDIT_INTEGRITY_CHECK_FAILED' })
+    }
+    const conflict=subscriptionEditConflict({
+      changes:changed,
+      hasPayments:!!payments.data?.length,
+      hasInvoices:!!invoices.data?.length,
+      hasUpgrades:!!upgradesFrom.data?.length || !!upgradesTo.data?.length,
+      hasRefunds:!!refunds.data?.length,
+      hasFreezes:!!freezes.data?.length,
+      hasOpenRenewals:!!renewals.data?.length,
+    })
+    if (conflict) {
+      return json(409, {ok:false,error:conflict,details:
+        'This subscription has linked financial or contract history. Use the dedicated workflow, not Edit.'})
+    }
   }
 
   if (Object.keys(update).length === 0) {
     return json(400, { ok: false, error: 'Nothing to update' })
   }
 
-  const { data: updated, error: updErr } = await admin
-    .from('subscriptions')
-    .update(update)
-    .eq('id', id)
+  // A correction must have a persisted reason before any edit takes effect.
+  // This is an attempted-correction record; the existing post-save audit logs the result.
+  if (editCategory.contract) {
+    const {error:recordError}=await admin.from('audit_logs').insert({
+      actor_user_id:actorId,target_user_id:current.member_id,
+      action:'subscription_contract_edit_requested',
+      action_details:{subscription_id:id,correction_reason:String(body.correction_reason).trim(),
+        before:{plan:current.plan,start_date:current.start_date,end_date:current.end_date,
+          status:current.status,sessions_total:current.sessions_total},
+        requested_update:update},
+    })
+    if(recordError)return json(500,{ok:false,error:'CORRECTION_AUDIT_NOT_RECORDED'})
+  }
+
+  // Optimistic compare-and-swap: if an upgrade, payment or other editor changed
+  // the subscription since we read it, do not overwrite that newer contract.
+  let guardedUpdate = admin.from('subscriptions').update(update).eq('id', id)
+  const originalFields: Record<string, unknown> = {
+    plan: current.plan, start_date: current.start_date, end_date: current.end_date,
+    status: current.status, amount: current.amount, amount_due: current.amount_due,
+    payment_method: current.payment_method, sessions_total: current.sessions_total,
+    sessions_used: current.sessions_used, frozen_until: current.frozen_until,
+  }
+  for (const [field, value] of Object.entries(originalFields)) {
+    guardedUpdate = value === null
+      ? guardedUpdate.is(field, null)
+      : guardedUpdate.eq(field, value)
+  }
+  const { data: updated, error: updErr } = await guardedUpdate
     .select(
       'id, member_id, subscription_type, plan, status, start_date, end_date, frozen_until, sessions_total, sessions_used, amount, amount_due, payment_method, paid_at'
     )
     .maybeSingle()
 
   if (updErr) return json(500, { ok: false, error: updErr.message })
+  if (!updated) return json(409, {ok:false,error:'SUBSCRIPTION_CHANGED_RELOAD_REQUIRED',
+    details:'The subscription changed while you were editing. Reload and review before correcting.'})
 
 
 // Audit log (best-effort)
@@ -333,6 +414,7 @@ await safeAudit(admin, {
     update: update ?? null,
     invoice_requested: invoiceRequested,
     invoice_email_requested: invoiceEmailRequested,
+    correction_reason: editCategory.contract ? String(body?.correction_reason || '').trim() : null,
   },
 })
 

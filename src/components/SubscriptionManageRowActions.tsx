@@ -157,9 +157,7 @@ export default function SubscriptionManageRowActions({
   const [busy, setBusy] = useState(false)
   const [pendingConfirmation, setPendingConfirmation] = useState<PendingConfirmation | null>(null)
 
-  const [amount, setAmount] = useState<string>(String(sub.amount ?? 0))
-  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>(() => normalizePaymentMethod(sub.payment_method))
-  const [startDate, setStartDate] = useState<string>(sub.start_date ?? '')
+   const [startDate, setStartDate] = useState<string>(sub.start_date ?? '')
   const [plan, setPlan] = useState<Plan>(() => {
     const p = String(sub.plan ?? '') as Plan
     const allowed: Plan[] = ['1w', '1m', '3m', '6m', '12m', 'sessions']
@@ -168,9 +166,7 @@ export default function SubscriptionManageRowActions({
 
   const [sessionsTotal, setSessionsTotal] = useState<string>(String(sub.sessions_total ?? 10))
 
-  // Optional invoice re-issue on edit (controlled by admin)
-  const [reissueInvoice, setReissueInvoice] = useState(false)
-  const [emailInvoice, setEmailInvoice] = useState(true)
+  const [correctionReason, setCorrectionReason] = useState('')
 
   const initialFreezeFrom = useMemo(() => {
     const t = todayDateOnlyCairo()
@@ -266,19 +262,20 @@ export default function SubscriptionManageRowActions({
     return Math.max(0, daysBetweenUTC(freezeFrom, untilExclusive))
   }, [freezeFrom, freezeTo])
 
+  const financiallyCommitted = Number(sub.amount ?? 0)>0 || Number(sub.amount_due ?? 0)>0
+  const contractReadOnly = financiallyCommitted || sub.status === 'cancelled' || !canManageFinancials
   const canEdit = !busy
 
 
   function validateSubscriptionUpdateForConfirmation() {
-    if (canManageFinancials) {
-      const amountNum = Number(amount)
-      if (!Number.isFinite(amountNum) || amountNum < 0) {
-        setStatus({ kind: 'error', msg: 'Amount must be a valid number.' })
-        toast.error('Save failed')
-        return false
-      }
+    if (contractReadOnly) {
+      setStatus({kind:'error',msg:'Financially committed contracts require Payments, Upgrade or an audited correction workflow.'})
+      return false
     }
-
+    if (correctionReason.trim().length < 12) {
+      setStatus({kind:'error',msg:'Explain the administrative correction (at least 12 characters).'})
+      return false
+    }
     if (isTime) {
       if (!isISODateOnly(startDate)) {
         setStatus({ kind: 'error', msg: 'Start date must be YYYY-MM-DD.' })
@@ -356,17 +353,6 @@ export default function SubscriptionManageRowActions({
     try {
       const patch: any = {}
 
-      if (canManageFinancials) {
-        const amountNum = Number(amount)
-        if (!Number.isFinite(amountNum) || amountNum < 0) {
-          setStatus({ kind: 'error', msg: 'Amount must be a valid number.' })
-          toast.error('Save failed')
-          return
-        }
-        patch.amount = amountNum
-        patch.payment_method = paymentMethod
-      }
-
       if (isTime) {
         if (!isISODateOnly(startDate)) {
           setStatus({ kind: 'error', msg: 'Start date must be YYYY-MM-DD.' })
@@ -386,12 +372,10 @@ export default function SubscriptionManageRowActions({
         patch.sessions_total = Math.floor(st)
       }
 
-      const invoice = canManageFinancials && reissueInvoice ? { generate: true, email: !!emailInvoice } : null
-
-      const r = await fetch('/api/subscriptions/update', {
+       const r = await fetch('/api/subscriptions/update', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: sub.id, patch, ...(invoice ? { invoice } : {}) }),
+        body: JSON.stringify({ id: sub.id, patch, correction_reason:correctionReason.trim() }),
       })
 
       const j = await r.json().catch(() => ({}))
@@ -401,18 +385,8 @@ export default function SubscriptionManageRowActions({
         return
       }
 
-      // Controlled: re-issue invoice only if requested
-      let msg = 'Updated.'
-      if (reissueInvoice) {
-        if (j?.invoice_ok) {
-          msg += ` Invoice ${j?.invoice?.invoice_number ? `(${j.invoice.invoice_number}) ` : ''}generated.`
-          if (j?.email_sent) msg += ' Email sent.'
-          else if (j?.email_error) msg += ` Email not sent: ${j.email_error}`
-        } else {
-          msg += ` Invoice not generated: ${j?.invoice_error || 'unknown error'}`
-        }
-      }
-
+      const msg = 'Administrative correction saved.'
+      setCorrectionReason('')
       setStatus({ kind: 'success', msg })
       toast.success('Updated')
       setTimeout(() => {
@@ -616,14 +590,8 @@ export default function SubscriptionManageRowActions({
         { label: 'New start date', value: isTime ? startDate || '—' : sub.start_date ?? '—' },
         { label: 'New end preview', value: isTime ? previewEnd ?? '—' : sub.end_date ?? '—' },
         { label: 'Sessions total', value: isTime ? '—' : sessionsTotal || '—' },
-        ...(canManageFinancials
-          ? [
-              { label: 'Amount', value: formatEGP(amount) },
-              { label: 'Payment method', value: humanPaymentMethod(paymentMethod) },
-              { label: 'Invoice', value: reissueInvoice ? (emailInvoice ? 'Generate + send by email' : 'Generate PDF') : 'No new invoice' },
-            ]
-          : []),
-        { label: 'Impact', value: canManageFinancials ? 'Updates subscription/access and permitted financial fields.' : 'Updates member access/subscription details only.' },
+        { label: 'Reason for correction', value: correctionReason.trim() },
+        { label: 'Impact', value: 'Administrative correction only; payment ledger and invoices are unchanged.' },
       ]
     }
 
@@ -767,13 +735,15 @@ export default function SubscriptionManageRowActions({
             </div>
 
             {statusBox}
+            <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-950">Edit is only for administrative corrections on uncommitted subscriptions. Use Payments for dues, Upgrade for higher plans, and Correct payment method for financial corrections.</div>
+            {contractReadOnly ? <div className="mt-3 rounded-xl border p-3 text-sm">Contract locked: financial commitment or cancellation exists. Dates and plan cannot be changed here.</div> : null}
 
             <div className="mt-4 grid gap-4">
               <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                 {isTime ? (
                   <div>
                     <div className="text-sm font-medium mb-1">Plan</div>
-                    <Select value={plan} onChange={(e) => setPlan(e.target.value as Plan)} disabled={busy}>
+                    <Select value={plan} onChange={(e) => setPlan(e.target.value as Plan)} disabled={busy || contractReadOnly}>
                       {planOptions.map((o) => (
                         <option key={o.value} value={o.value}>
                           {o.label}
@@ -784,27 +754,12 @@ export default function SubscriptionManageRowActions({
                 ) : null}
 
                 {canManageFinancials ? (
-                  <>
-                    <div>
-                      <div className="text-sm font-medium mb-1">Amount</div>
-                      <Input value={amount} onChange={(e) => setAmount(e.target.value)} disabled={busy} />
-                    </div>
-
-                    <div>
-                      <div className="text-sm font-medium mb-1">Payment method</div>
-                      <Select
-                        value={paymentMethod}
-                        onChange={(e) => setPaymentMethod(e.target.value as PaymentMethod)}
-                        disabled={busy}
-                      >
-                        {paymentMethodOptions.map((o) => (
-                          <option key={o.value} value={o.value}>
-                            {o.label}
-                          </option>
-                        ))}
-                      </Select>
-                    </div>
-                  </>
+                  <div className="rounded-xl border bg-gray-50 p-3 text-sm text-gray-600">
+                    <div>Paid: {formatEGP(sub.amount)}</div>
+                    <div>Outstanding: {formatEGP(sub.amount_due)}</div>
+                    <div>Payment method: {humanPaymentMethod(sub.payment_method)}</div>
+                    <p className="mt-1">Financial corrections belong to dedicated payment workflows.</p>
+                  </div>
                 ) : null}
               </div>
 
@@ -815,7 +770,7 @@ export default function SubscriptionManageRowActions({
                     <Input
                       value={startDate}
                       onChange={(e) => setStartDate(e.target.value)}
-                      disabled={busy}
+                      disabled={busy || contractReadOnly}
                       placeholder="YYYY-MM-DD"
                     />
                     <div className="mt-1 text-xs text-[hsl(var(--muted))]">YYYY-MM-DD</div>
@@ -831,52 +786,27 @@ export default function SubscriptionManageRowActions({
                 <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                   <div>
                     <div className="text-sm font-medium mb-1">Sessions total</div>
-                    <Input value={sessionsTotal} onChange={(e) => setSessionsTotal(e.target.value)} disabled={busy} />
+                    <Input value={sessionsTotal} onChange={(e) => setSessionsTotal(e.target.value)} disabled={busy || contractReadOnly} />
                   </div>
                 </div>
               )}
 
-              {/* Invoice re-issue is finance-sensitive and Super Admin only. */}
-              {canManageFinancials ? (
-              <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--bg))]/40 p-4">
-                <label className="flex items-start gap-3">
-                  <input
-                    type="checkbox"
-                    checked={reissueInvoice}
-                    onChange={(e) => setReissueInvoice(e.target.checked)}
-                    disabled={busy}
-                    className="mt-1 h-4 w-4"
-                    aria-label="Re-issue invoice"
-                  />
-                  <div>
-                    <div className="text-sm font-medium">Re-issue invoice</div>
-                    <div className="text-xs text-[hsl(var(--muted))] mt-0.5">
-                      Generates a new PDF invoice after saving the changes.
-                    </div>
-                  </div>
+              {!contractReadOnly ? (
+                <label className="block text-sm">
+                  <span className="font-medium">Reason for correction</span>
+                  <textarea className="mt-1 w-full rounded-xl border p-3" rows={3}
+                    value={correctionReason} maxLength={1000}
+                    onChange={(e)=>setCorrectionReason(e.target.value)}
+                    placeholder="Explain the original error and the correction (required, 12+ characters)"
+                    disabled={busy} />
                 </label>
-
-                <div className="mt-3 pl-7">
-                  <label className={`flex items-center gap-2 text-sm ${!reissueInvoice ? 'opacity-50' : ''}`}>
-                    <input
-                      type="checkbox"
-                      checked={emailInvoice}
-                      onChange={(e) => setEmailInvoice(e.target.checked)}
-                      disabled={busy || !reissueInvoice}
-                      className="h-4 w-4"
-                      aria-label="Send invoice by email"
-                    />
-                    <span>Send by email (signed download link valid 7 days)</span>
-                  </label>
-                </div>
-              </div>
               ) : null}
 
               <div className="flex justify-end gap-2 pt-2">
                 <Button variant="outline" onClick={() => setOpenEdit(false)} disabled={busy}>
                   Cancel
                 </Button>
-                <SaveButton onClick={requestSubscriptionUpdateConfirmation} type="button" loading={busy} disabled={busy} idleLabel="Save" pendingLabel="Saving..." />
+                <SaveButton onClick={requestSubscriptionUpdateConfirmation} type="button" loading={busy} disabled={busy || contractReadOnly} idleLabel="Save" pendingLabel="Saving..." />
               </div>
             </div>
           </div>
