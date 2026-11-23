@@ -54,3 +54,9 @@ test('both user interfaces use the guarded date route and ask for evidence', () 
   assert.match(oldUi, /reason: reason\.trim\(\)/)
   assert.doesNotMatch(route, /\.update\(\{ paid_at:/)
 })
+
+test('audit corrections are append-only and cannot be edited or deleted', () => {
+  const guard = read('supabase/migrations/20261123194038_subscription_payment_date_audit_append_only.sql')
+  assert.match(guard, /before update or delete on public\.subscription_payment_date_corrections/)
+  assert.match(guard, /PAYMENT_DATE_AUDIT_APPEND_ONLY/)
+})
