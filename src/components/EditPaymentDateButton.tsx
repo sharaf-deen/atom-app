@@ -40,6 +40,7 @@ export default function EditPaymentDateButton({
   const [open, setOpen] = useState(false)
   const [busy, setBusy] = useState(false)
   const [paymentDate, setPaymentDate] = useState(() => toCairoDateOnly(currentPaidAt))
+  const [reason, setReason] = useState('')
 
   const safeLabel = useMemo(() => {
     const s = String(memberLabel ?? '').trim()
@@ -48,6 +49,10 @@ export default function EditPaymentDateButton({
 
   async function onSave() {
     if (busy || disabled) return
+    if (reason.trim().length < 5 || reason.trim().length > 500) {
+      toast.error('Enter a correction reason (5–500 characters)')
+      return
+    }
     if (!paymentDate) {
       toast.error('Missing payment date')
       return
@@ -61,7 +66,7 @@ export default function EditPaymentDateButton({
           'Content-Type': 'application/json',
           'Cache-Control': 'no-store',
         },
-        body: JSON.stringify({ payment_date: paymentDate }),
+        body: JSON.stringify({ payment_date: paymentDate, expected_paid_at: currentPaidAt, reason: reason.trim() }),
       })
 
       const j = await r.json().catch(() => ({} as any))
@@ -77,6 +82,7 @@ export default function EditPaymentDateButton({
       })
 
       setOpen(false)
+      setReason('')
       router.refresh()
     } catch (e: any) {
       toast.error('Network error', {
@@ -126,6 +132,14 @@ export default function EditPaymentDateButton({
         />
       </div>
 
+      <div className="mt-3 space-y-2">
+        <label className="block text-[11px] font-medium uppercase tracking-wide text-[hsl(var(--muted))]">
+          Reason for correction (required)
+        </label>
+        <textarea value={reason} onChange={(e) => setReason(e.target.value)} maxLength={500}
+          rows={2} className="w-full rounded-xl border border-black/10 p-2 text-sm"
+          placeholder="State the evidence for the actual payment date" />
+      </div>
       <div className="mt-3 flex flex-wrap items-center justify-end gap-2">
         <button
           type="button"
@@ -133,6 +147,7 @@ export default function EditPaymentDateButton({
             if (busy) return
             setOpen(false)
             setPaymentDate(toCairoDateOnly(currentPaidAt))
+            setReason('')
           }}
           disabled={busy}
           className="rounded-xl border border-[hsl(var(--border))] bg-white px-3 py-2 text-sm font-semibold hover:bg-black/[0.03] disabled:opacity-60"
@@ -142,7 +157,7 @@ export default function EditPaymentDateButton({
         <button
           type="button"
           onClick={onSave}
-          disabled={!paymentDate || busy || disabled}
+          disabled={!paymentDate || busy || disabled || reason.trim().length < 5}
           className="rounded-xl bg-black px-4 py-2 text-sm font-semibold text-white hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
         >
           {busy ? 'Saving…' : 'Save date'}
