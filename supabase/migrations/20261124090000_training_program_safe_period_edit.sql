@@ -20,6 +20,7 @@ declare
  v_add integer := 0;
  v_remove integer := 0;
  v_protected integer := 0;
+ v_protected_add integer := 0;
  v_preserved integer := 0;
  v_result jsonb;
 begin
@@ -64,7 +65,26 @@ begin
    and not exists(select 1 from public.schedule_session_training_program_assignments spa
      where spa.training_session_id=s.id and spa.is_active)
    and not exists(select 1 from public.staff_payroll_coaching_import_items pi
-     where pi.training_session_id=s.id and pi.status='active');
+     where pi.training_session_id=s.id)
+   and not exists(select 1 from public.staff_payroll_coaching_confirmations pc
+     where pc.training_session_id=s.id)
+   and not exists(select 1 from public.coach_staff_attendance ca
+     where ca.training_session_id=s.id);
+
+ -- Evidence-bearing new sessions may not be pulled into an edited program.
+ select count(*) into v_protected_add
+ from public.schedule_training_sessions s
+ join public.coach_training_program_class_templates m on m.class_template_id=s.class_template_id
+   and m.program_id=p_program_id and m.is_active
+ where s.status='scheduled' and s.session_date between greatest(v_today,p_new_start) and p_new_end
+   and not exists(select 1 from public.schedule_session_training_program_assignments spa
+     where spa.training_session_id=s.id and spa.is_active)
+   and (
+     exists(select 1 from public.coach_staff_attendance ca where ca.training_session_id=s.id)
+     or exists(select 1 from public.coach_training_session_logs l where l.training_session_id=s.id)
+     or exists(select 1 from public.staff_payroll_coaching_import_items pi where pi.training_session_id=s.id)
+     or exists(select 1 from public.staff_payroll_coaching_confirmations pc where pc.training_session_id=s.id)
+   );
 
  -- Out-of-period future links that can safely be detached.
  select
@@ -106,15 +126,16 @@ begin
    'updatedAt',v_program.updated_at,
    'toLink',v_add,'toUnlink',v_remove,
    'protectedFutureLinks',v_protected,
+   'protectedNewSessions',v_protected_add,
    'historicalLinksPreserved',v_preserved,
    'conflictingPrograms',v_conflicts,
    'curriculumUnchanged',true,'coachAssignmentOverridesPreserved',true,
-   'canApply',(v_conflicts=0 and v_protected=0),
+   'canApply',(v_conflicts=0 and v_protected=0 and v_protected_add=0),
    'unchanged',(v_program.start_date=p_new_start and v_program.end_date=p_new_end)
  );
  if p_mode='preview' then return jsonb_build_object('ok',true,'preview',v_preview); end if;
  if v_conflicts>0 then raise exception 'PROGRAM_TEMPLATE_PERIOD_CONFLICT'; end if;
- if v_protected>0 then raise exception 'PROGRAM_PERIOD_HAS_PROTECTED_FUTURE_LINKS'; end if;
+ if v_protected>0 or v_protected_add>0 then raise exception 'PROGRAM_PERIOD_HAS_PROTECTED_FUTURE_LINKS'; end if;
  if v_program.start_date=p_new_start and v_program.end_date=p_new_end then
     return jsonb_build_object('ok',true,'changed',false,'preview',v_preview);
  end if;
