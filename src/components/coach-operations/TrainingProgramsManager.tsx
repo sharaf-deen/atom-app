@@ -294,6 +294,18 @@ export default function TrainingProgramsManager({
   const [deleteTarget, setDeleteTarget] = React.useState<DeleteTarget | null>(null)
   const [deleteImpact, setDeleteImpact] = React.useState<DeleteImpact | null>(null)
   const [deleteImpactLoading, setDeleteImpactLoading] = React.useState(false)
+  const [periodProgram, setPeriodProgram] = React.useState<Program | null>(null)
+  const [periodStart, setPeriodStart] = React.useState('')
+  const [periodEnd, setPeriodEnd] = React.useState('')
+  const [periodPreview, setPeriodPreview] = React.useState<null | {
+    oldStartDate: string; oldEndDate: string; newStartDate: string; newEndDate: string;
+    updatedAt: string; toLink: number; toUnlink: number; protectedFutureLinks: number;
+    historicalLinksPreserved: number; conflictingPrograms: number;
+    canApply: boolean; unchanged: boolean
+  }>(null)
+  const [periodLoading, setPeriodLoading] = React.useState(false)
+  const [periodError, setPeriodError] = React.useState<string | null>(null)
+
 
   const activeTypes = types.filter((row) => row.is_active)
   const activeBlocks = blocks.filter((row) => row.is_active)
@@ -396,6 +408,51 @@ export default function TrainingProgramsManager({
     setSelectedClassTemplateIds(new Set())
     void loadStaff()
     setFormOpen(true)
+  }
+
+  function openPeriodEdit(program: Program) {
+    resetFeedback()
+    setPeriodProgram(program)
+    setPeriodStart(program.start_date)
+    setPeriodEnd(program.end_date)
+    setPeriodPreview(null)
+    setPeriodError(null)
+  }
+
+  async function requestPeriodChange(operation: 'preview' | 'apply') {
+    if (!periodProgram || periodLoading) return
+    setPeriodLoading(true)
+    setPeriodError(null)
+    try {
+      const response = await fetch('/api/coach-operations/programs/period', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          operation,
+          programId: periodProgram.id,
+          startDate: periodStart,
+          endDate: periodEnd,
+          expectedUpdatedAt: operation === 'apply' ? periodPreview?.updatedAt : undefined,
+        }),
+      })
+      const data = await readJson(response)
+      if (!response.ok || data.ok !== true) {
+        throw new Error(String(data.details || data.error || 'Unable to change program dates.'))
+      }
+      if (operation === 'preview') {
+        setPeriodPreview(data.preview)
+      } else {
+        setPeriodProgram(null)
+        setPeriodPreview(null)
+        setMessage('Program dates updated safely. Curriculum and coach settings were not edited.')
+        router.refresh()
+      }
+    } catch (cause: any) {
+      setPeriodPreview(null)
+      setPeriodError(String(cause?.message || cause))
+    } finally {
+      setPeriodLoading(false)
+    }
   }
 
   function openEdit(program: Program) {
@@ -1166,6 +1223,11 @@ export default function TrainingProgramsManager({
                     </Button>
                     {canManage ? (
                       <>
+                        {program.status === 'published' ? (
+                          <Button type="button" variant="outline" size="sm" onClick={() => openPeriodEdit(program)}>
+                            <CalendarDays className="h-4 w-4" /> Edit period
+                          </Button>
+                        ) : null}
                         <Button type="button" variant="outline" size="sm" onClick={() => openEdit(program)}><Pencil className="h-4 w-4" /> Edit</Button>
                         {program.status !== 'published' ? (
                           <Button type="button" size="sm" onClick={() => setStatusTarget({ id: program.id, title: program.title, nextStatus: 'published' })}><Send className="h-4 w-4" /> Publish</Button>
@@ -1214,6 +1276,56 @@ export default function TrainingProgramsManager({
           })}
         </div>
       )}
+
+      {periodProgram ? (
+        <div role="dialog" aria-modal="true" aria-label="Edit program period" className="rounded-3xl border border-[hsl(var(--border))] bg-white p-5 shadow-soft">
+          <div className="text-base font-semibold text-black">Edit program period · {periodProgram.title}</div>
+          <p className="mt-1 text-sm text-[hsl(var(--muted))]">
+            {periodProgram.target_group} · Change dates only. Curriculum, class templates and coaching staff remain unchanged.
+          </p>
+          <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <label className="text-sm font-semibold">
+              Start date
+              <input aria-label="Period start date" type="date" value={periodStart}
+                onChange={(event) => { setPeriodStart(event.target.value); setPeriodPreview(null); setPeriodError(null) }}
+                className="mt-1 block w-full rounded-xl border border-[hsl(var(--border))] px-3 py-2" />
+            </label>
+            <label className="text-sm font-semibold">
+              End date
+              <input aria-label="Period end date" type="date" value={periodEnd}
+                onChange={(event) => { setPeriodEnd(event.target.value); setPeriodPreview(null); setPeriodError(null) }}
+                className="mt-1 block w-full rounded-xl border border-[hsl(var(--border))] px-3 py-2" />
+            </label>
+          </div>
+          {periodError ? <div role="alert" className="mt-3 text-sm text-rose-700">{periodError}</div> : null}
+          {periodPreview ? (
+            <div className="mt-4 rounded-xl border border-blue-100 bg-blue-50/50 p-4 text-sm">
+              <div className="font-semibold">Impact preview</div>
+              <p className="mt-2">New dated sessions linked: <strong>{periodPreview.toLink}</strong></p>
+              <p>Future program links removed: <strong>{periodPreview.toUnlink}</strong></p>
+              <p>Historical links preserved: <strong>{periodPreview.historicalLinksPreserved}</strong></p>
+              <p>Protected future links: <strong>{periodPreview.protectedFutureLinks}</strong></p>
+              <p>Conflicting published programs: <strong>{periodPreview.conflictingPrograms}</strong></p>
+              {!periodPreview.canApply ? (
+                <p className="mt-2 font-semibold text-rose-700">Cannot apply: resolve protected links or overlapping programs first.</p>
+              ) : null}
+              {periodPreview.unchanged ? <p className="mt-2">The dates are unchanged.</p> : null}
+            </div>
+          ) : null}
+          <div className="mt-4 flex flex-wrap justify-end gap-2">
+            <Button type="button" variant="outline" disabled={periodLoading}
+              onClick={() => { setPeriodProgram(null); setPeriodPreview(null) }}>Cancel</Button>
+            <Button type="button" variant="outline" disabled={periodLoading || !periodStart || !periodEnd || periodEnd < periodStart}
+              onClick={() => void requestPeriodChange('preview')}>
+              {periodLoading ? 'Checking…' : 'Preview impact'}
+            </Button>
+            <Button type="button" disabled={periodLoading || !periodPreview?.canApply || Boolean(periodPreview?.unchanged)}
+              onClick={() => void requestPeriodChange('apply')}>
+              Confirm date change
+            </Button>
+          </div>
+        </div>
+      ) : null}
 
       <ConfirmActionModal
         open={Boolean(statusTarget)}
