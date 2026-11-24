@@ -1278,7 +1278,8 @@ export default function TrainingProgramsManager({
       )}
 
       {periodProgram ? (
-        <div role="dialog" aria-modal="true" aria-label="Edit program period" className="rounded-3xl border border-[hsl(var(--border))] bg-white p-5 shadow-soft">
+        <div role="dialog" aria-modal="true" aria-label="Edit program period" className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-black/50 p-4">
+          <div className="w-full max-w-xl rounded-3xl border border-[hsl(var(--border))] bg-white p-5 shadow-xl">
           <div className="text-base font-semibold text-black">Edit program period · {periodProgram.title}</div>
           <p className="mt-1 text-sm text-[hsl(var(--muted))]">
             {periodProgram.target_group} · Change dates only. Curriculum, class templates and coaching staff remain unchanged.
@@ -1323,6 +1324,7 @@ export default function TrainingProgramsManager({
               onClick={() => void requestPeriodChange('apply')}>
               Confirm date change
             </Button>
+          </div>
           </div>
         </div>
       ) : null}
