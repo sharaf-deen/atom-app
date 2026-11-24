@@ -322,11 +322,20 @@ export async function POST(request: Request) {
   if (id) {
     const { data: currentProgram, error: currentProgramError } = await supabase
       .from('coach_training_programs')
-      .select('status')
+      .select('status,start_date,end_date')
       .eq('id', id)
       .maybeSingle()
     if (currentProgramError) return json({ ok: false, error: 'PROGRAM_LOOKUP_FAILED', details: currentProgramError.message }, 500)
     if (!currentProgram) return json({ ok: false, error: 'NOT_FOUND' }, 404)
+
+    if (currentProgram.status === 'published'
+        && (currentProgram.start_date !== startDate || currentProgram.end_date !== endDate)) {
+      return json({
+        ok: false,
+        error: 'PERIOD_EDIT_REQUIRED',
+        details: 'Use Edit period to preview and safely update the dates of a published program.',
+      }, 409)
+    }
 
     if (currentProgram.status === 'published') {
       const { data: competingMappings, error: competingMappingsError } = await supabase
