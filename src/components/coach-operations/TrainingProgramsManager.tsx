@@ -299,7 +299,7 @@ export default function TrainingProgramsManager({
   const [periodEnd, setPeriodEnd] = React.useState('')
   const [periodPreview, setPeriodPreview] = React.useState<null | {
     oldStartDate: string; oldEndDate: string; newStartDate: string; newEndDate: string;
-    updatedAt: string; toLink: number; toUnlink: number; protectedFutureLinks: number;
+    updatedAt: string; toLink: number; toUnlink: number; protectedFutureLinks: number; protectedNewSessions: number;
     historicalLinksPreserved: number; conflictingPrograms: number;
     canApply: boolean; unchanged: boolean
   }>(null)
@@ -1306,6 +1306,7 @@ export default function TrainingProgramsManager({
               <p>Future program links removed: <strong>{periodPreview.toUnlink}</strong></p>
               <p>Historical links preserved: <strong>{periodPreview.historicalLinksPreserved}</strong></p>
               <p>Protected future links: <strong>{periodPreview.protectedFutureLinks}</strong></p>
+              <p>Protected new sessions: <strong>{periodPreview.protectedNewSessions}</strong></p>
               <p>Conflicting published programs: <strong>{periodPreview.conflictingPrograms}</strong></p>
               {!periodPreview.canApply ? (
                 <p className="mt-2 font-semibold text-rose-700">Cannot apply: resolve protected links or overlapping programs first.</p>
