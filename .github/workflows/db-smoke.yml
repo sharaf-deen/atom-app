@@ -79,6 +79,7 @@ jobs:
             exit 1
           fi
           docker exec -i "$DB_CONTAINER" psql -U postgres -d postgres -v ON_ERROR_STOP=1 < scripts/tests/membership-upgrade-promotions-local.sql
+          docker exec -i "$DB_CONTAINER" psql -U postgres -d postgres -v ON_ERROR_STOP=1 < scripts/tests/membership-upgrade-active-promo-transaction-local.sql
 
       - name: Banking 2H.2 isolated atomicity and permissions regression
         shell: bash
