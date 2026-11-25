@@ -24,6 +24,12 @@ BEGIN
  ('d7d3fca9-5f4f-491f-951f-fdecf318195d','cb461683-0263-4f58-8079-8c41897ffd2a',v_member,2200,'cash','2026-11-02 12:00:00+00',v_actor),
  ('c670b8df-a1da-4f28-99f5-ea837aa03724','c3b74b46-11ff-4d67-a150-b0053598d2af',v_member,2600,'cash','2026-11-23 12:00:00+00',v_actor),
  ('83bcb8c2-fb96-4c95-8e95-9a65e79f7116','c3b74b46-11ff-4d67-a150-b0053598d2af',v_member,400,'cash','2026-11-24 12:00:00+00',v_actor);
+ -- Three legitimate kiosk attendances on the original one-month subscription.
+ INSERT INTO public.attendance(member_id,subscription_id,date,source,valid)
+ VALUES
+ (v_member,'cb461683-0263-4f58-8079-8c41897ffd2a','2026-11-14','kiosk',true),
+ (v_member,'cb461683-0263-4f58-8079-8c41897ffd2a','2026-11-16','kiosk',true),
+ (v_member,'cb461683-0263-4f58-8079-8c41897ffd2a','2026-11-23','kiosk',true);
  INSERT INTO public.invoices(id,member_id,subscription_id,invoice_number,amount,paid_at,pdf_path)
  VALUES
  ('8471e07e-a590-42f0-a0f6-8f51a9a7a38b',v_member,'c3b74b46-11ff-4d67-a150-b0053598d2af','INV-20261124-053598D2AF',3000,'2026-11-24 12:00:00+00','test/recovery-full.pdf'),
@@ -48,6 +54,8 @@ BEGIN
    OR (SELECT end_date from public.subscriptions where id='c3b74b46-11ff-4d67-a150-b0053598d2af')<>'2027-02-25'::date
    OR (SELECT count(*) from public.atom_payment_voids where payment_id='83bcb8c2-fb96-4c95-8e95-9a65e79f7116')<>1
    OR (SELECT count(*) from public.atom_invoice_corrections where recovery_id=(v_applied->>'recoveryId')::uuid)<>2
+   OR (SELECT count(*) from public.attendance where member_id=v_member
+        and subscription_id='cb461683-0263-4f58-8079-8c41897ffd2a')<>3
    OR (SELECT count(*) from public.membership_upgrades where member_id=v_member)<>1
    OR (SELECT count(*) from public.subscription_payments where member_id=v_member)<>3
    OR (SELECT sum(amount) from public.admin_income_events_v1 where source_kind='subscription_payment' and member_id=v_member)<>4800
