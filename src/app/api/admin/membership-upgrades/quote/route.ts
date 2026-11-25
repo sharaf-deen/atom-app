@@ -72,9 +72,23 @@ export async function GET(request:Request) {
   // Complimentary-only access carries zero paid days; never issue extra prorated credit.
   if(sub.paid_end_date&&sub.paid_end_date<effectiveDate)
     return reply(409,{ok:false,error:'PAID_COVERAGE_EXPIRED_NO_UPGRADE_CREDIT'})
+  const {data:promotionPrice,error:promotionPriceError}=await db.rpc('membership_upgrade_promotion_price_v1',{
+    p_target_plan:targetPlan,p_effective_date:effectiveDate,p_list_price:Number(prices[0].price_egp),
+  })
+  if(promotionPriceError||!promotionPrice||typeof promotionPrice!=='object')
+    return reply(500,{ok:false,error:'PROMOTION_PRICE_LOOKUP_FAILED'})
+  const targetPriceEGP=Number(promotionPrice.finalPriceEGP)
+  const basePriceEGP=Number(promotionPrice.listPriceEGP)
+  const discountEGP=Number(promotionPrice.discountEGP)
+  if(![targetPriceEGP,basePriceEGP,discountEGP].every(n=>Number.isFinite(n)&&n>=0)
+     ||Math.abs(basePriceEGP-discountEGP-targetPriceEGP)>.01)
+    return reply(500,{ok:false,error:'PROMOTION_PRICE_INTEGRITY_FAILED'})
   const quote=quoteUpgrade({startDate:sub.start_date,endDate:sub.paid_end_date||sub.end_date,effectiveDate,
-    capturedPaidEGP:ledgerTotal+carriedCredit,targetPriceEGP:Number(prices[0].price_egp)})
+    capturedPaidEGP:ledgerTotal+carriedCredit,targetPriceEGP})
   return reply(200,{ok:true,preview_only:true,subscription_id:subscriptionId,member_id:sub.member_id,
+    promotion:{id:promotionPrice.promotionId||null,title:promotionPrice.promotionTitle||null,
+      discount_type:promotionPrice.discountType||null,discount_value:promotionPrice.discountValue??null,
+      original_price_egp:basePriceEGP,discount_egp:discountEGP,discounted_price_egp:targetPriceEGP},
     from_plan:sub.plan,to_plan:targetPlan,package_id:prices[0].id,package_name:prices[0].name,
     payment_date:paymentDate,quoted_at:new Date().toISOString(),quote,
     financial_sources:{cash_received_on_current_subscription_egp:ledgerTotal,carried_credit_from_previous_upgrade_egp:carriedCredit},
