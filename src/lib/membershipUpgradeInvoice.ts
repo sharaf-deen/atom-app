@@ -9,7 +9,7 @@ export async function ensureMembershipUpgradeInvoice(
  actorId: string,
 ): Promise<{id:string;invoice_number:string}|null> {
  const {data:upgrade,error:uErr}=await admin.from('membership_upgrades')
-  .select('id,member_id,from_subscription_id,to_subscription_id,from_plan,to_plan,transferred_credit_egp,target_price_egp,additional_payment_egp,additional_payment_id')
+  .select('id,member_id,from_subscription_id,to_subscription_id,from_plan,to_plan,transferred_credit_egp,target_price_egp,target_list_price_egp,promotion_id,promotion_title_snapshot,promotion_discount_type_snapshot,promotion_discount_value_snapshot,promotion_discount_egp,additional_payment_egp,additional_payment_id')
   .eq('id',upgradeId).maybeSingle()
  if(uErr||!upgrade)throw new Error('UPGRADE_INVOICE_SOURCE_MISSING')
  const supplement=Number(upgrade.additional_payment_egp)
@@ -63,6 +63,12 @@ export async function ensureMembershipUpgradeInvoice(
   upgrade:{
     from_subscription_id:upgrade.from_subscription_id,
     from_plan:upgrade.from_plan,target_price_egp:price,
+    target_list_price_egp:Number(upgrade.target_list_price_egp??price),
+    promotion_id:upgrade.promotion_id||null,
+    promotion_title:upgrade.promotion_title_snapshot||null,
+    promotion_discount_type:upgrade.promotion_discount_type_snapshot||null,
+    promotion_discount_value:upgrade.promotion_discount_value_snapshot===null?null:Number(upgrade.promotion_discount_value_snapshot),
+    promotion_discount_egp:Number(upgrade.promotion_discount_egp||0),
     transferred_credit_egp:credit,additional_payment_egp:supplement,
   },
  }

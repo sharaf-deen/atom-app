@@ -5,7 +5,9 @@ const PLANS=[{id:'1m',name:'1 month'},{id:'3m',name:'3 months'},{id:'6m',name:'6
 type Quote={
   ok:boolean;error?:string; preview_only?:boolean;
   from_plan:string;to_plan:string;member_id:string;payment_date:string;quoted_at:string;
-  quote:{totalDays:number;daysRemaining:number;capturedPaidEGP:number;creditEGP:number;targetPriceEGP:number;paymentDueEGP:number;effectiveDate:string}
+  quote:{totalDays:number;daysRemaining:number;capturedPaidEGP:number;creditEGP:number;targetPriceEGP:number;paymentDueEGP:number;effectiveDate:string};
+  promotion?:{id:string|null;title:string|null;discount_type:string|null;discount_value:number|null;
+    original_price_egp:number;discount_egp:number;discounted_price_egp:number};
 }
 const money=(n:number)=>new Intl.NumberFormat('en-EG',{style:'currency',currency:'EGP'}).format(n)
 export default function AdminMembershipUpgradePreview({subscriptionId,today}:{subscriptionId:string;today:string}) {
@@ -82,7 +84,11 @@ export default function AdminMembershipUpgradePreview({subscriptionId,today}:{su
     <div><dt className="text-sm text-gray-500">Current coverage remaining</dt><dd className="font-medium">{quote.quote.daysRemaining} / {quote.quote.totalDays} days</dd></div>
     <div><dt className="text-sm text-gray-500">Cash received + existing carried credit</dt><dd>{money(quote.quote.capturedPaidEGP)}</dd></div>
     <div><dt className="text-sm text-gray-500">Unused credit</dt><dd>{money(quote.quote.creditEGP)}</dd></div>
-    <div><dt className="text-sm text-gray-500">New plan price</dt><dd>{money(quote.quote.targetPriceEGP)}</dd></div>
+    <div><dt className="text-sm text-gray-500">New plan list price</dt><dd>{money(quote.promotion?.original_price_egp ?? quote.quote.targetPriceEGP)}</dd></div>
+    <div><dt className="text-sm text-gray-500">Active promotion</dt>
+      <dd>{quote.promotion?.id ? `${quote.promotion.title} (−${money(quote.promotion.discount_egp)})` : 'None applicable on the upgrade effective date'}</dd>
+    </div>
+    <div><dt className="text-sm text-gray-500">New plan price after promotion</dt><dd className="font-semibold">{money(quote.quote.targetPriceEGP)}</dd></div>
     <div><dt className="text-sm text-gray-500">Payment Date</dt><dd>{quote.payment_date}</dd></div>
     <div><dt className="text-sm text-gray-500">Upgrade effective date</dt><dd>{quote.quote.effectiveDate}</dd></div>
     <div><dt className="text-sm text-gray-500">Additional payment required</dt><dd className="text-xl font-bold">{money(quote.quote.paymentDueEGP)}</dd></div>
