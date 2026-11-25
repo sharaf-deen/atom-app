@@ -41,6 +41,7 @@ export const SUPER_ADMIN_PAGE_GROUPS = [
     { href: '/admin/prospects/whatsapp', label: 'Whatsapp' },
   ] },
   { title: 'Finance & Banking', pages: [
+    { href: '/admin/financial-recovery/1440', label: 'Yasin — Financial Recovery #1440' },
     { href: '/admin/payments', label: 'Payments' },
     { href: '/admin/payments/reconciliation', label: 'Reconciliation' },
     { href: '/admin/payments/reconciliation/bank-matching', label: 'Bank Matching' },
