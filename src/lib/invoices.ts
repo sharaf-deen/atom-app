@@ -208,6 +208,12 @@ export async function generateInvoicePdfBytes(snapshot: InvoiceSnapshot) {
 
   y -= 16
   if (snapshot.upgrade) {
+    const promotionDiscount = Number(snapshot.upgrade.promotion_discount_egp ?? 0)
+    if (promotionDiscount > 0) {
+      y -= 16
+      row('Plan list price:', money(Number(snapshot.upgrade.target_list_price_egp ?? total), snapshot.transaction.currency), 'left')
+      row('Promotion:', '-' + money(promotionDiscount, snapshot.transaction.currency), 'right')
+    }
     y -= 18
     row('Previous plan:', humanSubscriptionPlan(snapshot.upgrade.from_plan), 'left')
     row('Credit applied:', money(snapshot.upgrade.transferred_credit_egp, snapshot.transaction.currency), 'right')
