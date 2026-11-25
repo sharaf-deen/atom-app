@@ -1,87 +1,12 @@
-'use client'
-import React from 'react'
+import { notFound } from 'next/navigation'
+import { getSessionUser } from '@/lib/session'
+import Yasin1440RecoveryClient from '@/components/admin/Yasin1440RecoveryClient'
 
-type Preview = {
-  ok:boolean;mode:'preview';member:string;effectiveDate:string;endDate:string;
-  listPriceEGP:number;discountEGP:number;creditEGP:number;supplementDueEGP:number;
-  depositReceivedEGP:number;falseReceiptToVoidEGP:number;outstandingEGP:number;
-  realReceiptCashBusinessDate:string;validatedCashBatchPreserved:boolean
-}
-type Result = {ok:boolean;result?:{alreadyApplied?:boolean;recoveryId?:string;outstandingEGP?:number};
- invoice?:{invoice_number:string};invoice_ok?:boolean;invoice_error?:string;invoice_retryable?:boolean;error?:string}
+export const dynamic='force-dynamic'
+export const revalidate=0
 
-export default function FinancialRecovery1440Page(){
-  const [preview,setPreview]=React.useState<Preview|null>(null)
-  const [result,setResult]=React.useState<Result|null>(null)
-  const [working,setWorking]=React.useState(false)
-  const [confirmed,setConfirmed]=React.useState(false)
-  const [error,setError]=React.useState('')
-  async function run(operation:'preview'|'apply'|'retry_invoice'){
-    if(working)return
-    setWorking(true);setError('')
-    try{
-      const response=await fetch('/api/admin/financial-recovery/1440',{
-        method:'POST',headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({operation,memberId:'ATOM-000150',confirmOutstandingEGP:1294.76})
-      })
-      const data=await response.json() as Result & Preview
-      if(!response.ok||!data.ok)throw new Error(data.error||'Financial recovery failed')
-      if(operation==='preview'){setPreview(data);setResult(null)}
-      else{setResult(data);if(operation==='apply')setPreview(null)}
-    }catch(e:any){setError(String(e?.message||e))}
-    finally{setWorking(false)}
-  }
-  const money=(value:number)=>new Intl.NumberFormat('en-GB',{
-    style:'currency',currency:'EGP',minimumFractionDigits:2,maximumFractionDigits:2
-  }).format(value)
-  return <main className="mx-auto max-w-3xl p-6">
-    <h1 className="text-2xl font-bold">Financial Recovery — ATOM-000150</h1>
-    <p className="mt-2 text-sm text-gray-600">Yasin Mohamed · Correct erroneous advance renewal to partially paid 1m → 3m upgrade.</p>
-    <div className="mt-6 rounded-2xl border p-5">
-      <h2 className="text-lg font-semibold">Verified financial agreement</h2>
-      <p className="mt-2">2,600 EGP actually received on 23 November 2026; 400 EGP registered in error. Outstanding: <strong>1,294.76 EGP</strong>.</p>
-      <p className="mt-2 text-sm text-gray-600">The validated cash batch and old PDF documents will be preserved. This operation does not collect new money.</p>
-      <button type="button" disabled={working} onClick={()=>void run('preview')}
-        className="mt-4 rounded-xl bg-black px-5 py-3 font-semibold text-white disabled:opacity-50">
-        {working?'Checking…':'Preview exact impact'}
-      </button>
-    </div>
-    {preview?<section className="mt-5 rounded-2xl border border-blue-200 p-5">
-      <h2 className="text-lg font-semibold">Financial impact preview</h2>
-      <dl className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
-        <div>List price: <strong>{money(preview.listPriceEGP)}</strong></div>
-        <div>15% discount: <strong>−{money(preview.discountEGP)}</strong></div>
-        <div>Unused old credit: <strong>{money(preview.creditEGP)}</strong></div>
-        <div>Upgrade supplement: <strong>{money(preview.supplementDueEGP)}</strong></div>
-        <div>Actual deposit: <strong>{money(preview.depositReceivedEGP)}</strong></div>
-        <div>False payment to void: <strong>{money(preview.falseReceiptToVoidEGP)}</strong></div>
-        <div>New start: <strong>{preview.effectiveDate}</strong></div>
-        <div>New end: <strong>{preview.endDate}</strong></div>
-        <div className="sm:col-span-2 text-lg">Outstanding: <strong>{money(preview.outstandingEGP)}</strong></div>
-      </dl>
-      <p className="mt-3 text-sm">Validated 23 Nov cash batch preserved: {preview.validatedCashBatchPreserved?'Yes':'No'}</p>
-      <label className="mt-5 flex items-start gap-3 text-sm">
-        <input type="checkbox" checked={confirmed} onChange={e=>setConfirmed(e.target.checked)}
-          className="mt-1 h-4 w-4"/>
-        I confirm that 2,600 EGP was actually received, 400 EGP was not received,
-        and the member still owes 1,294.76 EGP. I authorize the audited correction.
-      </label>
-      <button type="button" disabled={working||!confirmed||!preview.validatedCashBatchPreserved}
-        onClick={()=>void run('apply')}
-        className="mt-4 rounded-xl bg-black px-5 py-3 font-semibold text-white disabled:opacity-40">
-        Confirm correction — no new payment
-      </button>
-    </section>:null}
-    {result?.ok?<section className="mt-5 rounded-2xl border border-green-200 p-5">
-      <h2 className="font-semibold">Recovery transaction accepted</h2>
-      <p className="mt-2">Outstanding debt remains 1,294.76 EGP. No cash receipt was generated by the correction.</p>
-      {result.invoice_ok&&result.invoice?<p className="mt-2">Corrective invoice: <strong>{result.invoice.invoice_number}</strong>.</p>:null}
-      {!result.invoice_ok?<div className="mt-3">
-        <p className="text-amber-700">Invoice issuance needs retry: {result.invoice_error||'Not generated'}. Do not reapply the financial correction.</p>
-        <button type="button" onClick={()=>void run('retry_invoice')} disabled={working}
-          className="mt-2 rounded-xl border px-4 py-2">Retry corrective invoice only</button>
-      </div>:null}
-    </section>:null}
-    {error?<p role="alert" className="mt-4 rounded-xl border border-red-200 p-3 text-red-700">{error}</p>:null}
-  </main>
+export default async function FinancialRecovery1440Page(){
+  const me=await getSessionUser()
+  if(me?.role!=='super_admin')notFound()
+  return <Yasin1440RecoveryClient/>
 }
