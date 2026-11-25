@@ -36,6 +36,11 @@ create table if not exists public.atom_payment_voids (
  created_by uuid not null references public.profiles(user_id),
  created_at timestamptz not null default now()
 );
+-- A corrective invoice is unique: retries cannot mint a second document.
+create unique index if not exists atom_recovery_1440_invoice_unique
+on public.invoices(invoice_number)
+where invoice_number='INV-CORR-1440-000150';
+
 create table if not exists public.atom_invoice_corrections (
  invoice_id uuid primary key references public.invoices(id),
  recovery_id uuid not null references public.atom_membership_recovery_1440(id),
