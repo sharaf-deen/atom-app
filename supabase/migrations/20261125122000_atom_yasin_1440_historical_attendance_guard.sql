@@ -14,7 +14,8 @@ begin
  if length(v_definition)-length(replace(v_definition,v_old,''))<>length(v_old) then
    raise exception 'EXPECTED_OLD_ATTENDANCE_GUARD_NOT_UNIQUE';
  end if;
- if position('and not exists(' in v_definition)=0 or position('RECEIPT' in upper(v_definition))=0 then
+ if position('REAL_PAYMENT_VALIDATED_BATCH_NOT_FOUND' in v_definition)=0
+   or position('FINANCIAL_CALCULATION_MISMATCH' in v_definition)=0 then
    raise exception 'RECOVERY_FUNCTION_PROTECTION_CHECK_FAILED';
  end if;
  execute replace(v_definition,v_old,v_new);
