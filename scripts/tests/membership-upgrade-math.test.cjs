@@ -53,3 +53,28 @@ test('historical payment date is separate from effective date and quote route is
  assert.match(api,/actor\?\.role !== 'super_admin'/)
  assert.doesNotMatch(api,/\.insert\(|\.update\(|\.delete\(/)
 })
+
+test('15% membership offer applies to target price without discounting the existing credit again',()=>{
+ const base=8100
+ const discounted=Number((base*0.85).toFixed(2))
+ const quote=quoteUpgrade({
+  startDate:'2026-11-07',endDate:'2027-02-07',effectiveDate:'2026-11-25',
+  capturedPaidEGP:5250,targetPriceEGP:discounted,
+ })
+ assert.equal(quote.totalDays,93)
+ assert.equal(quote.daysRemaining,75)
+ assert.equal(quote.creditEGP,4233.87)
+ assert.equal(quote.targetPriceEGP,6885)
+ assert.equal(quote.paymentDueEGP,2651.13)
+})
+
+test('upgrade quote and apply use the same authoritative promotion pricing rule',()=>{
+ const quoteRoute=fs.readFileSync('src/app/api/admin/membership-upgrades/quote/route.ts','utf8')
+ const migration=fs.readFileSync('supabase/migrations/20261125074500_membership_upgrade_active_promotions.sql','utf8')
+ const invoice=fs.readFileSync('src/lib/membershipUpgradeInvoice.ts','utf8')
+ assert.match(quoteRoute,/rpc\('membership_upgrade_promotion_price_v1'/)
+ assert.match(migration,/membership_upgrade_promotion_price_v1\(p_to_plan,v_today,v_base_price\)/)
+ assert.match(migration,/target_list_price_egp,promotion_id,promotion_discount_egp/)
+ assert.match(migration,/QUOTE_STALE_RECALCULATE/)
+ assert.match(invoice,/promotion_discount_egp/)
+})
