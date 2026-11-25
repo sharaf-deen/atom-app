@@ -39,6 +39,12 @@ export type InvoiceSnapshot = {
     from_subscription_id: string
     from_plan: string
     target_price_egp: number
+    target_list_price_egp?: number
+    promotion_id?: string | null
+    promotion_title?: string | null
+    promotion_discount_type?: string | null
+    promotion_discount_value?: number | null
+    promotion_discount_egp?: number
     transferred_credit_egp: number
     additional_payment_egp: number
   }
