@@ -45,6 +45,17 @@ type MemberRow = {
   date_of_birth: string | null
 }
 
+type GuardianContact = {
+  first_name: string | null
+  last_name: string | null
+  phone: string | null
+  email: string | null
+}
+
+function guardianName(guardian: GuardianContact) {
+  return `${guardian.first_name ?? ''} ${guardian.last_name ?? ''}`.trim() || 'Guardian'
+}
+
 type SubscriptionRow = {
   id: string
   member_id: string | null
@@ -474,7 +485,10 @@ export default async function AdminInactiveMembersPage({
 
   const { data: guardianLinks } = await admin
     .from('family_guardians')
-    .select('family_id,auth_user_id')
+    .select('family_id,auth_user_id,first_name,last_name,phone,email')
+    .order('is_primary', { ascending: false })
+    .order('created_at', { ascending: true })
+    .order('auth_user_id', { ascending: true })
 
   const { data: familiesData } = await admin
     .from('families')
@@ -510,12 +524,16 @@ export default async function AdminInactiveMembersPage({
     if (familyId) familyNameById.set(familyId, String((family as any)?.name ?? '').trim() || 'Family')
   }
 
-  const guardianFamilyIds = new Set<string>()
+  const guardiansByFamily = new Map<string, GuardianContact[]>()
   const guardianMemberIds = new Set<string>()
   for (const guardian of guardianLinks ?? []) {
     const familyId = String((guardian as any)?.family_id ?? '')
     const authUserId = String((guardian as any)?.auth_user_id ?? '')
-    if (familyId) guardianFamilyIds.add(familyId)
+    if (familyId) {
+      const guardians = guardiansByFamily.get(familyId) ?? []
+      guardians.push(guardian)
+      guardiansByFamily.set(familyId, guardians)
+    }
     if (authUserId) guardianMemberIds.add(authUserId)
   }
 
@@ -543,7 +561,7 @@ export default async function AdminInactiveMembersPage({
     })
     .map((member) => {
       const familyId = familyIdByMember.get(member.user_id) ?? null
-      const isFamilyManaged = !String(member.email ?? '').trim() && !!familyId && guardianFamilyIds.has(familyId)
+      const isFamilyManaged = !String(member.email ?? '').trim() && !!familyId && guardiansByFamily.has(familyId)
       return buildInactiveMember(
         member,
         latestSubscriptionFor(member.user_id, subsByMember),
@@ -778,6 +796,23 @@ export default async function AdminInactiveMembersPage({
       <section className="space-y-3">
         {rows.map((item) => {
           const member = item.member
+            const familyId = familyIdByMember.get(member.user_id)
+            const guardians = familyId ? guardiansByFamily.get(familyId) ?? [] : []
+            const dob = member.date_of_birth
+            const adulthoodDate = isISODateOnly(dob) && dob
+              ? `${Number(dob.slice(0, 4)) + 18}${dob.slice(4)}`
+              : null
+            const useGuardianContact = adulthoodDate
+              ? today < adulthoodDate
+              : !!familyId && !guardianMemberIds.has(member.user_id)
+            const phoneGuardian = useGuardianContact
+              ? guardians.find((guardian) => guardian.phone?.trim())
+              : undefined
+            const emailGuardian = useGuardianContact
+              ? guardians.find((guardian) => guardian.email?.trim())
+              : undefined
+            const contactPhone = useGuardianContact ? phoneGuardian?.phone?.trim() : member.phone
+            const contactEmail = useGuardianContact ? emailGuardian?.email?.trim() : member.email
           const latest = item.latestSub
           return (
             <article key={member.user_id} className="rounded-3xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4 shadow-soft">
@@ -837,12 +872,18 @@ export default async function AdminInactiveMembersPage({
                 {item.followup?.note ? (
                   <p className="mt-2 whitespace-pre-wrap text-sm text-[hsl(var(--muted))]">{item.followup.note}</p>
                 ) : null}
+                {useGuardianContact ? (
+                  <div className="mt-2 break-words text-sm text-[hsl(var(--muted))]">
+                    <p>Guardian phone: {phoneGuardian ? `${guardianName(phoneGuardian)} · ${contactPhone}` : 'Unavailable'}</p>
+                    <p>Guardian email: {emailGuardian ? `${guardianName(emailGuardian)} · ${contactEmail}` : 'Unavailable'}</p>
+                  </div>
+                ) : null}
                 <InactiveFollowupActions
                   memberId={member.user_id}
                   memberName={memberName(member)}
                   atomId={member.member_id}
-                  email={member.email}
-                  phone={member.phone}
+                  email={contactEmail}
+                  phone={contactPhone}
                   reasonLabel={item.reasonLabel}
                   reasonDetail={item.reasonDetail}
                   suggestedAction={item.suggestedAction}
