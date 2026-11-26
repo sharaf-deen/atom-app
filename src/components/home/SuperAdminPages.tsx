@@ -42,6 +42,7 @@ export const SUPER_ADMIN_PAGE_GROUPS = [
   ] },
   { title: 'Finance & Banking', pages: [
     { href: '/admin/financial-recovery/1440', label: 'Yasin — Financial Recovery #1440' },
+    { href: '/admin/financial-recovery/amin-weekly', label: 'Amin — Subscription Correction' },
     { href: '/admin/payments', label: 'Payments' },
     { href: '/admin/payments/reconciliation', label: 'Reconciliation' },
     { href: '/admin/payments/reconciliation/bank-matching', label: 'Bank Matching' },
