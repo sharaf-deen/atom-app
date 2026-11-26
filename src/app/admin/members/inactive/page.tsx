@@ -39,6 +39,7 @@ type MemberRow = {
   first_name: string | null
   last_name: string | null
   phone: string | null
+  qr_code: string | null
   role: Role | null
   created_at: string | null
   date_of_birth: string | null
@@ -421,7 +422,7 @@ export default async function AdminInactiveMembersPage({
 
   const { data: profilesData, error: profilesError } = await admin
     .from('profiles')
-    .select('user_id,member_id,email,first_name,last_name,phone,role,created_at,date_of_birth')
+    .select('user_id,member_id,email,first_name,last_name,phone,qr_code,role,created_at,date_of_birth')
     .in('role', [...MEMBER_LIKE_ROLES])
     .order('created_at', { ascending: false })
 
@@ -533,6 +534,13 @@ export default async function AdminInactiveMembersPage({
 
   const inactiveAll = profiles
     .filter((member) => !activeIds.has(member.user_id) && !frozenIds.has(member.user_id))
+    .filter((member) => {
+      const isGuardianOnly =
+        guardianMemberIds.has(member.user_id) &&
+        !member.qr_code?.trim() &&
+        !subsByMember.has(member.user_id)
+      return !isGuardianOnly
+    })
     .map((member) => {
       const familyId = familyIdByMember.get(member.user_id) ?? null
       const isFamilyManaged = !String(member.email ?? '').trim() && !!familyId && guardianFamilyIds.has(familyId)
