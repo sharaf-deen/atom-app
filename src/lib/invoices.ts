@@ -235,9 +235,13 @@ export async function generateInvoicePdfBytes(snapshot: InvoiceSnapshot) {
 
   if (snapshot.recovery) {
     y -= 34
-    drawText('CORRECTIVE INVOICE - NO ADDITIONAL CASH COLLECTED',margin,y,11,true)
+    drawText('CORRECTIVE INVOICE - NO ADDITIONAL PAYMENT COLLECTED',margin,y,11,true)
     y -= 18
-    drawText('Actual deposit: 23 Nov 2026; correction excludes the erroneous EGP 400 entry.',margin,y,9)
+    if (snapshot.recovery.false_payment_voided_egp > 0) {
+      drawText('Actual deposit: 23 Nov 2026; correction excludes the erroneous EGP 400 entry.',margin,y,9)
+    } else {
+      drawText(snapshot.recovery.reason,margin,y,9)
+    }
     y -= 16
     drawText('Outstanding payment due: '+money(snapshot.recovery.outstanding_egp,snapshot.transaction.currency),margin,y,9,true)
     y -= 16
