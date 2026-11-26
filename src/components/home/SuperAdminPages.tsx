@@ -90,6 +90,17 @@ export const SUPER_ADMIN_PAGE_GROUPS = [
   ] },
 ] as const
 
+function AdminPageLink({ page }: { page: { href: string; label: string } }) {
+  return (
+    <Link
+      href={page.href}
+      className="block rounded-xl border border-[hsl(var(--border))] px-3 py-3 text-sm font-medium transition hover:bg-[hsl(var(--surface-2))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black"
+    >
+      {page.label}
+    </Link>
+  )
+}
+
 export default function SuperAdminPages() {
   const total = SUPER_ADMIN_PAGE_GROUPS.reduce((sum, group) => sum + group.pages.length, 0)
   return (
@@ -105,25 +116,32 @@ export default function SuperAdminPages() {
         <span className="rounded-full border px-3 py-1 text-xs font-medium text-[hsl(var(--muted))]">{total} pages</span>
       </div>
       <div className="space-y-2">
-        {SUPER_ADMIN_PAGE_GROUPS.map((group, index) => (
-          <details key={group.title} className="group rounded-2xl border border-[hsl(var(--border))]" open={index === 0}>
-            <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-4 font-semibold marker:hidden [&::-webkit-details-marker]:hidden">
-              <span>{group.title}<span className="ml-2 text-xs font-normal text-[hsl(var(--muted))]">({group.pages.length})</span></span>
-              <ChevronDown size={19} className="shrink-0 transition-transform group-open:rotate-180" aria-hidden="true" />
-            </summary>
-            <nav aria-label={group.title} className="grid gap-2 border-t border-[hsl(var(--border))] p-3 sm:grid-cols-2 lg:grid-cols-3">
-              {group.pages.map(page => (
-                <Link
-                  key={page.href}
-                  href={page.href}
-                  className="rounded-xl border border-[hsl(var(--border))] px-3 py-3 text-sm font-medium transition hover:bg-[hsl(var(--surface-2))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black"
-                >
-                  {page.label}
-                </Link>
-              ))}
-            </nav>
-          </details>
-        ))}
+        {SUPER_ADMIN_PAGE_GROUPS.map((group, index) => {
+          const corrections = group.pages.filter(page => page.href.startsWith('/admin/financial-recovery/'))
+          const pages = group.pages.filter(page => !page.href.startsWith('/admin/financial-recovery/'))
+          return (
+            <details key={group.title} className="group rounded-2xl border border-[hsl(var(--border))]" open={index === 0}>
+              <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-4 font-semibold marker:hidden [&::-webkit-details-marker]:hidden">
+                <span>{group.title}<span className="ml-2 text-xs font-normal text-[hsl(var(--muted))]">({group.pages.length})</span></span>
+                <ChevronDown size={19} className="shrink-0 transition-transform group-open:rotate-180" aria-hidden="true" />
+              </summary>
+              <nav aria-label={group.title} className="grid gap-2 border-t border-[hsl(var(--border))] p-3 sm:grid-cols-2 lg:grid-cols-3">
+                {corrections.length > 0 && (
+                  <details className="group/corrections rounded-xl border border-[hsl(var(--border))] sm:col-span-2 lg:col-span-3">
+                    <summary className="flex cursor-pointer list-none items-center justify-between gap-3 rounded-xl px-3 py-3 text-sm font-medium marker:hidden hover:bg-[hsl(var(--surface-2))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black [&::-webkit-details-marker]:hidden">
+                      Corrections
+                      <ChevronDown size={17} className="shrink-0 transition-transform group-open/corrections:rotate-180" aria-hidden="true" />
+                    </summary>
+                    <div className="grid gap-2 border-t border-[hsl(var(--border))] p-2 sm:grid-cols-2 lg:grid-cols-3">
+                      {corrections.map(page => <AdminPageLink key={page.href} page={page} />)}
+                    </div>
+                  </details>
+                )}
+                {pages.map(page => <AdminPageLink key={page.href} page={page} />)}
+              </nav>
+            </details>
+          )
+        })}
       </div>
     </section>
   )
