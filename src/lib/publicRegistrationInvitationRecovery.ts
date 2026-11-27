@@ -58,7 +58,7 @@ export async function resendRegistrationInvitation(admin: any, requestId: string
   // Reservation is durable. From here, any error requires manual inspection, never a blind resend.
   const redirectTo = `${origin}/auth/complete-invite?next=${encodeURIComponent(row.is_minor ? '/family' : '/')}`
   const { data: linkData, error: linkError } = await admin.auth.admin.generateLink({
-    type: 'recovery',email: row.account_email,redirectTo,
+    type: 'recovery',email: row.account_email,options: { redirectTo },
   })
   if (linkError || linkData?.user?.id !== row.auth_user_id) return { ok: false, code: 'LINK_REVIEW_REQUIRED' }
   const actionLink = extractActionLink(linkData)

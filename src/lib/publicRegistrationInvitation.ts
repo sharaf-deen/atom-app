@@ -26,7 +26,7 @@ export async function dispatchProvisionedRegistrationInvitation(admin: any, requ
   // The durable reservation is committed before any external call: ambiguous failures are review-only.
   const redirectTo = `${origin}/auth/complete-invite?next=${encodeURIComponent(row.is_minor ? '/family' : '/')}`
   const { data: linkData, error: linkError } = await admin.auth.admin.generateLink({
-    type: 'recovery', email: row.account_email, redirectTo,
+    type: 'recovery', email: row.account_email, options: { redirectTo },
   })
   if (linkError) return { ok: false, code: 'LINK_GENERATION_REQUIRES_REVIEW' }
   const actionLink = extractActionLink(linkData)

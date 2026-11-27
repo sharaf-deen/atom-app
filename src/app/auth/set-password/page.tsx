@@ -4,6 +4,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { createSupabaseBrowserClient } from '@/lib/supabaseBrowser'
+import Link from 'next/link'
 import PasswordInput from '@/components/ui/PasswordInput'
 
 function sanitizeNext(next: string | null) {
@@ -34,20 +35,27 @@ export default function SetPasswordPage() {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
-  const [checking, setChecking] = useState(true)
+  const [sessionState, setSessionState] = useState<'checking' | 'missing' | 'ready'>('checking')
 
-  // Require a session to set password (invite flow)
   useEffect(() => {
-    ;(async () => {
-      setChecking(true)
-      const { data } = await supabase.auth.getSession()
-      if (!data.session) {
-        router.replace(loginUrl(nextUrl))
-        return
+    let cancelled = false
+    async function checkSession() {
+      const url = new URL(window.location.href)
+      const fragment = new URLSearchParams(url.hash.slice(1))
+      const hasLinkError = [url.searchParams, fragment].some(params =>
+        params.has('error') || params.has('error_code') || params.has('error_description'),
+      )
+
+      try {
+        const { data, error } = await supabase.auth.getSession()
+        if (!cancelled) setSessionState(!hasLinkError && !error && data.session ? 'ready' : 'missing')
+      } catch {
+        if (!cancelled) setSessionState('missing')
       }
-      setChecking(false)
-    })()
-  }, [supabase, router, nextUrl])
+    }
+    void checkSession()
+    return () => { cancelled = true }
+  }, [supabase])
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -137,11 +145,27 @@ export default function SetPasswordPage() {
     }, 900)
   }
 
-  if (checking) {
+  if (sessionState === 'checking') {
     return (
       <main className="flex min-h-[70vh] items-center justify-center px-4">
         <div className="w-full max-w-md rounded-2xl border bg-white p-6 shadow-sm text-sm text-gray-600">
           Checking session…
+        </div>
+      </main>
+    )
+  }
+
+  if (sessionState === 'missing') {
+    return (
+      <main className="flex min-h-[70vh] items-center justify-center px-4">
+        <div className="w-full max-w-md space-y-4 rounded-2xl border bg-white p-6 shadow-sm">
+          <h1 className="text-xl font-semibold">Password link unavailable</h1>
+          <p className="text-sm text-gray-600">
+            This link may have expired or already been used. Open your latest ATOM email or request a new password link.
+          </p>
+          <Link href="/reset" className="block rounded-lg bg-black px-3 py-2 text-center text-sm text-white">
+            Request a new password link
+          </Link>
         </div>
       </main>
     )
