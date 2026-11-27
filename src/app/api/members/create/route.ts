@@ -350,8 +350,7 @@ export async function POST(req: Request) {
       const { data: linkData, error: linkErr } = await (admin.auth.admin as any).generateLink({
         type: 'invite',
         email,
-        redirectTo,
-        data: { first_name, last_name, phone, role: 'member' },
+        options: { redirectTo, data: { first_name, last_name, phone, role: 'member' } },
       })
 
       if (!linkErr) {

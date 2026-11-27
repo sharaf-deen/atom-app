@@ -311,8 +311,7 @@ export async function POST(req: Request) {
           const { data: linkData, error: linkError } = await (admin.auth.admin as any).generateLink({
             type: 'invite',
             email: guardianEmail,
-            redirectTo,
-            data: metadata,
+            options: { redirectTo, data: metadata },
           })
           if (!linkError && linkData?.user?.id) {
             const actionLink = extractActionLink(linkData)

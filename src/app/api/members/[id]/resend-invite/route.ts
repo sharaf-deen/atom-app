@@ -450,7 +450,7 @@ export async function POST(req: Request, ctx: { params: { id: string } }) {
       const { data: linkData, error: linkErr } = await (admin.auth.admin as any).generateLink({
         type: 'recovery',
         email: targetEmail,
-        redirectTo,
+        options: { redirectTo },
       })
 
       const actionLink = !linkErr ? extractActionLink(linkData) : ''
